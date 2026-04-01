@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>有給管理アプリ - Step Up</title>
+<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --primary: #6264A7;
+  --primary-dark: #4b4d8a;
+  --primary-light: #8b8dd4;
+  --bg: #f4f4f8;
+  --card-bg: #ffffff;
+  --text: #333333;
+  --text-light: #666666;
+  --border: #e0e0e0;
+  --danger: #d32f2f;
+  --success: #388e3c;
+  --warning: #f57c00;
+  --weekend-bg: #fff3f0;
+  --selected-bg: #e8e8f5;
+  --disabled-bg: #e0e0e0;
+  --tab-height: 56px;
+  --header-height: 56px;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  max-width: 500px;
+  margin: 0 auto;
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff;
+  padding: 0 16px;
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.app-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.header-btn {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.header-btn:active { background: rgba(255,255,255,0.3); }
+
+/* Main Content */
+.main-content {
+  flex: 1;
+  padding: 12px 12px calc(var(--tab-height) + 12px);
+  overflow-y: auto;
+}
+
+/* Bottom Tab Navigation */
+.tab-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 500px;
+  height: var(--tab-height);
+  background: #fff;
+  display: flex;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.08);
+  z-index: 100;
+}
+
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--text-light);
+  font-size: 11px;
+  cursor: pointer;
+  gap: 2px;
+  transition: color 0.2s;
+}
+
+.tab-item.active { color: var(--primary); }
+.tab-item svg { width: 24px; height: 24px; }
+
+/* Screens */
+.screen { display: none; }
+.screen.active { display: block; }
+
+/* Cards */
+.card {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  border: 1px solid var(--border);
+}
+
+.card-clickable { cursor: pointer; transition: box-shadow 0.2s; }
+.card-clickable:active { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+
+/* Search */
+.search-box {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.search-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-input:focus { border-color: var(--primary); }
+
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn:active { opacity: 0.8; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff;
+}
+
+.btn-success { background: var(--success); color: #fff; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-block { width: 100%; }
+.btn-lg { padding: 14px 24px; font-size: 16px; }
+
+/* Employee Card */
+.emp-card-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+.emp-card-num { font-size: 14px; color: var(--text-light); }
+.emp-card-date { font-size: 13px; color: var(--text-light); margin-top: 4px; }
+.emp-card-arrow { float: right; color: var(--primary); font-size: 20px; margin-top: 8px; }
+
+/* Detail Header */
+.detail-header {
+  background: linear-gradient(135deg, var(--primary-light), var(--primary));
+  color: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.detail-header .name { font-size: 20px; font-weight: 700; }
+.detail-header .sub { font-size: 13px; opacity: 0.9; margin-top: 4px; }
+
+/* Balance Summary */
+.balance-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.balance-box {
+  flex: 1;
+  text-align: center;
+  padding: 12px 8px;
+  border-radius: 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+}
+
+.balance-box .label { font-size: 11px; color: var(--text-light); margin-bottom: 4px; }
+.balance-box .value { font-size: 22px; font-weight: 700; color: var(--primary); }
+.balance-box .unit { font-size: 12px; color: var(--text-light); }
+.balance-box.highlight { border-color: var(--primary); background: var(--selected-bg); }
+
+/* Grant Table */
+.grant-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.grant-table th {
+  background: var(--primary);
+  color: #fff;
+  padding: 8px 4px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.grant-table td {
+  padding: 8px 4px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.grant-table tr:nth-child(even) { background: #fafafa; }
+.grant-table .expired { color: #999; text-decoration: line-through; }
+.grant-table .active-row { background: #f0f0ff; }
+
+/* Leave History */
+.history-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.history-item:last-child { border-bottom: none; }
+.history-date { font-weight: 600; min-width: 100px; }
+.history-type {
+  background: var(--selected-bg);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+/* Calendar */
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.calendar-nav button {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.calendar-nav button:active { background: #eee; }
+.calendar-nav .month-label { font-size: 16px; font-weight: 700; }
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 16px;
+}
+
+.calendar-grid .day-header {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 0;
+  color: var(--text-light);
+}
+
+.calendar-grid .day-header:first-child { color: var(--danger); }
+.calendar-grid .day-header:last-child { color: #1976d2; }
+
+.calendar-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+
+.calendar-cell:empty { cursor: default; }
+.calendar-cell.weekend { background: var(--weekend-bg); }
+.calendar-cell.sunday { color: var(--danger); }
+.calendar-cell.saturday { color: #1976d2; }
+.calendar-cell.selected { background: var(--primary); color: #fff !important; font-weight: 700; }
+.calendar-cell.applied {
+  background: var(--disabled-bg);
+  color: #999;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+.calendar-cell.today {
+  border: 2px solid var(--primary);
+  font-weight: 700;
+}
+.calendar-cell.other-month { opacity: 0.3; cursor: default; }
+.calendar-cell:not(.applied):not(.other-month):not(:empty):active {
+  transform: scale(0.9);
+}
+
+/* Form */
+.form-group { margin-bottom: 16px; }
+.form-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-light); }
+
+.form-select, .form-input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  font-size: 15px;
+  background: #fff;
+  outline: none;
+}
+
+.form-select:focus, .form-input:focus { border-color: var(--primary); }
+
+.selected-dates-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.date-chip {
+  background: var(--selected-bg);
+  color: var(--primary);
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.date-chip .remove {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.calc-summary {
+  background: #f9f9ff;
+  border: 1px solid var(--primary-light);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.calc-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.calc-row .label { color: var(--text-light); }
+.calc-row .value { font-weight: 600; }
+
+.warning-msg {
+  background: #fff3e0;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--warning);
+  margin-bottom: 12px;
+  display: none;
+}
+
+.warning-msg.show { display: block; }
+
+/* Application Type Selector */
+.type-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.type-option {
+  padding: 12px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.type-option.active {
+  border-color: var(--primary);
+  background: var(--selected-bg);
+  color: var(--primary);
+}
+
+.type-option:active { transform: scale(0.97); }
+
+/* Toast */
+.toast-container {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  width: calc(100% - 32px);
+  max-width: 468px;
+}
+
+.toast {
+  padding: 12px 16px;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 14px;
+  margin-bottom: 8px;
+  animation: slideIn 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+.toast.info { background: var(--primary); }
+
+@keyframes slideIn {
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Loading Spinner */
+.spinner-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+.spinner-overlay.show { display: flex; }
+
+.spinner {
+  width: 44px;
+  height: 44px;
+  border: 4px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Login screen */
+.login-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 80vh;
+  padding: 24px;
+  text-align: center;
+}
+
+.login-screen h2 { font-size: 24px; margin-bottom: 8px; color: var(--primary); }
+.login-screen p { color: var(--text-light); margin-bottom: 24px; }
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-title::before {
+  content: '';
+  width: 4px;
+  height: 16px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+/* Kutikomi selector */
+.kutikomi-selector {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.kutikomi-option {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.kutikomi-option.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-light);
+}
+
+.empty-state svg { width: 64px; height: 64px; opacity: 0.3; margin-bottom: 12px; }
+.empty-state p { font-size: 14px; }
+
+/* Resigned badge */
+.resigned-badge {
+  display: inline-block;
+  background: var(--danger);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  margin-left: 8px;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+  <h1 id="headerTitle">有給管理</h1>
+  <button class="header-btn" id="authBtn" onclick="handleAuth()">ログイン</button>
+</header>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Spinner -->
+<div class="spinner-overlay" id="spinner">
+  <div class="spinner"></div>
+</div>
+
+<!-- Main Content -->
+<div class="main-content" id="mainContent">
+
+  <!-- Login Screen -->
+  <div class="screen active" id="loginScreen">
+    <div class="login-screen">
+      <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#6264A7" stroke-width="1.5">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+        <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
+      </svg>
+      <h2>有給管理アプリ</h2>
+      <p>SharePointにログインして開始します</p>
+      <button class="btn btn-primary btn-lg" onclick="handleAuth()">Microsoft でログイン</button>
+    </div>
+  </div>
+
+  <!-- Screen 1: Employee Search -->
+  <div class="screen" id="searchScreen">
+    <div class="search-box">
+      <input class="search-input" id="searchInput" type="number" placeholder="社員番号を入力" inputmode="numeric">
+      <button class="btn btn-primary" onclick="searchEmployee()">検索</button>
+    </div>
+    <div id="searchResults"></div>
+  </div>
+
+  <!-- Screen 2: Leave Details -->
+  <div class="screen" id="detailScreen">
+    <div id="detailContent"></div>
+  </div>
+
+  <!-- Screen 3: Leave Application -->
+  <div class="screen" id="applyScreen">
+    <div id="applyContent"></div>
+  </div>
+
+</div>
+
+<!-- Bottom Tab Navigation -->
+<nav class="tab-nav" id="tabNav" style="display:none;">
+  <button class="tab-item active" data-screen="searchScreen" onclick="switchScreen('searchScreen')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <span>検索</span>
+  </button>
+  <button class="tab-item" data-screen="detailScreen" onclick="switchScreen('detailScreen')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+    </svg>
+    <span>詳細</span>
+  </button>
+  <button class="tab-item" data-screen="applyScreen" onclick="switchScreen('applyScreen')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+      <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
+      <line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/>
+    </svg>
+    <span>申請</span>
+  </button>
+</nav>
+
+<script>
+// ============================================================
+// MSAL Configuration
+// ============================================================
+const MSAL_CONFIG = {
+  auth: {
+    clientId: '2d1e240b-2899-4875-9003-61de04f81517',
+    authority: 'https://login.microsoftonline.com/8c92d82c-2f2c-417a-9ead-76021688bc9d',
+    redirectUri: window.location.origin,
+  },
+  cache: {
+    cacheLocation: 'localStorage',
+    storeAuthStateInCookie: true,
+  }
+};
+
+const SP_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/PowerApps';
+const SP_SCOPES = ['https://teamstepupcom774.sharepoint.com/.default'];
+const LIST_EMPLOYEES = '社員データsyain';
+const LIST_LEAVE = 'ゆうきゅうしんせい';
+const LIST_ITEM_ENTITY = 'SP.Data.List10ListItem';
+
+let msalInstance = null;
+let accessToken = null;
+let currentEmployee = null;
+let currentGrantData = null;
+let selectedDates = [];
+let calendarYear = new Date().getFullYear();
+let calendarMonth = new Date().getMonth();
+let appliedDatesCache = [];
+
+// ============================================================
+// Initialize MSAL
+// ============================================================
+function initMsal() {
+  try {
+    msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+    msalInstance.initialize().then(() => {
+      msalInstance.handleRedirectPromise().then(resp => {
+        if (resp) { onLoginSuccess(resp); }
+        else {
+          const accounts = msalInstance.getAllAccounts();
+          if (accounts.length > 0) { acquireToken(); }
+        }
+      }).catch(err => console.error('Redirect error:', err));
+    });
+  } catch (e) {
+    console.error('MSAL init error:', e);
+  }
+}
+
+async function handleAuth() {
+  if (accessToken) {
+    msalInstance.logoutPopup();
+    accessToken = null;
+    currentEmployee = null;
+    document.getElementById('authBtn').textContent = 'ログイン';
+    document.getElementById('tabNav').style.display = 'none';
+    showScreen('loginScreen');
+    return;
+  }
+  try {
+    showSpinner();
+    const resp = await msalInstance.loginPopup({ scopes: SP_SCOPES });
+    onLoginSuccess(resp);
+  } catch (e) {
+    console.error('Login error:', e);
+    showToast('ログインに失敗しました', 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function onLoginSuccess(resp) {
+  accessToken = resp.accessToken;
+  document.getElementById('authBtn').textContent = 'ログアウト';
+  document.getElementById('tabNav').style.display = 'flex';
+  switchScreen('searchScreen');
+  showToast('ログインしました', 'success');
+}
+
+async function acquireToken() {
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) return null;
+  try {
+    const resp = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0] });
+    accessToken = resp.accessToken;
+    document.getElementById('authBtn').textContent = 'ログアウト';
+    document.getElementById('tabNav').style.display = 'flex';
+    switchScreen('searchScreen');
+    return resp.accessToken;
+  } catch (e) {
+    try {
+      const resp = await msalInstance.acquireTokenPopup({ scopes: SP_SCOPES, account: accounts[0] });
+      accessToken = resp.accessToken;
+      return resp.accessToken;
+    } catch (e2) {
+      console.error('Token error:', e2);
+      return null;
+    }
+  }
+}
+
+async function getToken() {
+  if (accessToken) return accessToken;
+  return await acquireToken();
+}
+
+// ============================================================
+// SharePoint API Helpers
+// ============================================================
+async function spGet(listName, query) {
+  const token = await getToken();
+  if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return null; }
+  const url = SP_SITE_URL + "/_api/web/lists/getbytitle('" + encodeURIComponent(listName) + "')/items" + (query ? '?' + query : '');
+  const resp = await fetch(url, {
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+    },
+    credentials: 'include',
+  });
+  if (!resp.ok) throw new Error('SP API Error: ' + resp.status);
+  const data = await resp.json();
+  return data.d.results;
+}
+
+async function spPost(listName, body) {
+  const token = await getToken();
+  if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return null; }
+  const url = SP_SITE_URL + "/_api/web/lists/getbytitle('" + encodeURIComponent(listName) + "')/items";
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+    },
+    credentials: 'include',
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error('SP POST Error:', errText);
+    throw new Error('SP POST Error: ' + resp.status);
+  }
+  return await resp.json();
+}
+
+// ============================================================
+// Screen Navigation
+// ============================================================
+function switchScreen(screenId) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(screenId).classList.add('active');
+  document.querySelectorAll('.tab-item').forEach(t => t.classList.toggle('active', t.dataset.screen === screenId));
+
+  const titles = { searchScreen: '社員検索', detailScreen: '有給詳細', applyScreen: '有給申請' };
+  document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
+}
+
+function showScreen(screenId) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(screenId).classList.add('active');
+}
+
+// ============================================================
+// Toast & Spinner
+// ============================================================
+function showToast(msg, type) {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type || 'info');
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+function showSpinner() { document.getElementById('spinner').classList.add('show'); }
+function hideSpinner() { document.getElementById('spinner').classList.remove('show'); }
+
+// ============================================================
+// Screen 1: Employee Search
+// ============================================================
+async function searchEmployee() {
+  const num = document.getElementById('searchInput').value.trim();
+  const container = document.getElementById('searchResults');
+
+  if (!num) {
+    showToast('社員番号を入力してください', 'error');
+    return;
+  }
+
+  showSpinner();
+  try {
+    const filter = "$filter=_x793e__x54e1__x756a__x53f7_ eq " + num +
+      "&$select=Title,_x793e__x54e1__x756a__x53f7_,_x5165__x793e__x65e5_,_x30b9__x30c6__x30c3__x30d7__x30,_x6d3e__x9063__x5148__x9000__x79,_x9000__x8077__x5e74__x6708__x65,_x6709__x4f11__xff08__xff11__x65,_x6709__x4f11__xff08__x5348__x52,_x6709__x4f11__xff08__x5348__x5f";
+    const results = await spGet(LIST_EMPLOYEES, filter);
+
+    if (!results || results.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>該当する社員が見つかりません</p></div>';
+      return;
+    }
+
+    container.innerHTML = results.map(emp => {
+      const kisanDate = emp._x30b9__x30c6__x30c3__x30d7__x30 || emp._x5165__x793e__x65e5_;
+      const resigned = isResigned(emp);
+      return `
+        <div class="card card-clickable" onclick='selectEmployee(${JSON.stringify(emp).replace(/'/g, "&#39;")})'>
+          <div class="emp-card-arrow">&#8250;</div>
+          <div class="emp-card-name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
+          <div class="emp-card-num">社員番号: ${emp._x793e__x54e1__x756a__x53f7_ || ''}</div>
+          <div class="emp-card-date">起算日: ${formatDate(kisanDate)}</div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Search error:', e);
+    showToast('検索エラーが発生しました', 'error');
+    container.innerHTML = '<div class="empty-state"><p>エラーが発生しました</p></div>';
+  } finally {
+    hideSpinner();
+  }
+}
+
+function isResigned(emp) {
+  const retireDate = emp._x9000__x8077__x5e74__x6708__x65 || emp._x6d3e__x9063__x5148__x9000__x79;
+  if (!retireDate) return false;
+  return new Date(retireDate) < new Date();
+}
+
+async function selectEmployee(emp) {
+  currentEmployee = emp;
+  showSpinner();
+  try {
+    await loadLeaveDetails();
+    switchScreen('detailScreen');
+  } catch (e) {
+    console.error('Detail load error:', e);
+    showToast('詳細の読み込みに失敗しました', 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+// ============================================================
+// Paid Leave Calculation Logic
+// ============================================================
+const GRANT_TABLE = [
+  { months: 6, days: 10 },
+  { months: 18, days: 11 },
+  { months: 30, days: 12 },
+  { months: 42, days: 14 },
+  { months: 54, days: 16 },
+  { months: 66, days: 18 },
+  { months: 78, days: 20 },
+];
+
+function calculateGrants(kisanDateStr) {
+  if (!kisanDateStr) return [];
+  const kisanDate = new Date(kisanDateStr);
+  const today = new Date();
+  const grants = [];
+
+  for (let i = 0; i < 30; i++) {
+    let months;
+    if (i === 0) {
+      months = 6;
+    } else {
+      months = 6 + i * 12;
+    }
+
+    const grantDate = new Date(kisanDate);
+    grantDate.setMonth(grantDate.getMonth() + months);
+
+    if (grantDate > today) break;
+
+    const expiryDate = new Date(grantDate);
+    expiryDate.setFullYear(expiryDate.getFullYear() + 2);
+
+    let grantedDays;
+    const matchIdx = GRANT_TABLE.findIndex(g => g.months === months);
+    if (matchIdx >= 0) {
+      grantedDays = GRANT_TABLE[matchIdx].days;
+    } else if (months >= 78) {
+      grantedDays = 20;
+    } else {
+      continue;
+    }
+
+    grants.push({
+      grantDate: grantDate,
+      expiryDate: expiryDate,
+      grantedDays: grantedDays,
+      usedDays: 0,
+      expired: expiryDate < today,
+      isCurrentPeriod: false,
+    });
+  }
+
+  // Mark the last two non-expired (or most recent two) as current/carryover
+  const activeGrants = grants.filter(g => !g.expired);
+  if (activeGrants.length >= 1) activeGrants[activeGrants.length - 1].isCurrentPeriod = true;
+
+  return grants;
+}
+
+function applyUsageFIFO(grants, leaveRecords) {
+  // Sort grants by grant date ascending (FIFO)
+  const sortedGrants = [...grants].sort((a, b) => a.grantDate - b.grantDate);
+
+  // Sort leave records by date ascending
+  const sortedRecords = [...leaveRecords].sort((a, b) => {
+    const da = new Date(a._x6709__x7d66__x53d6__x5f97__x65);
+    const db = new Date(b._x6709__x7d66__x53d6__x5f97__x65);
+    return da - db;
+  });
+
+  for (const record of sortedRecords) {
+    let daysToConsume = getRecordDays(record);
+    const recordDate = new Date(record._x6709__x7d66__x53d6__x5f97__x65);
+
+    for (const grant of sortedGrants) {
+      if (daysToConsume <= 0) break;
+      // Record must fall within grant's validity period
+      if (recordDate < grant.grantDate || recordDate >= grant.expiryDate) continue;
+
+      const available = grant.grantedDays - grant.usedDays;
+      if (available <= 0) continue;
+
+      const consume = Math.min(available, daysToConsume);
+      grant.usedDays += consume;
+      daysToConsume -= consume;
+    }
+  }
+
+  // Calculate expired days for expired grants
+  for (const grant of sortedGrants) {
+    if (grant.expired) {
+      grant.expiredDays = Math.max(0, grant.grantedDays - grant.usedDays);
+    } else {
+      grant.expiredDays = 0;
+    }
+    grant.remainingDays = grant.expired ? 0 : Math.max(0, grant.grantedDays - grant.usedDays);
+  }
+
+  return sortedGrants;
+}
+
+function getRecordDays(record) {
+  const type = record._x53d6__x5f97__x65e5__x6570_;
+  if (!type) return 1;
+  if (type.indexOf('1日') >= 0 || type.indexOf('定時') >= 0) return 1;
+  if (type.indexOf('半日') >= 0 || type.indexOf('午前') >= 0 || type.indexOf('午後') >= 0) return 0.5;
+  if (type.indexOf('時間') >= 0) {
+    const hours = record._x3057__x3085__x3068__x304f__x30 || 0;
+    const fullDayHours = currentEmployee ? (currentEmployee._x6709__x4f11__xff08__xff11__x65 || 8) : 8;
+    return hours / fullDayHours;
+  }
+  return 1;
+}
+
+// ============================================================
+// Screen 2: Leave Details
+// ============================================================
+async function loadLeaveDetails() {
+  const emp = currentEmployee;
+  if (!emp) return;
+
+  const kisanDate = emp._x30b9__x30c6__x30c3__x30d7__x30 || emp._x5165__x793e__x65e5_;
+  const grants = calculateGrants(kisanDate);
+
+  // Load leave records from SharePoint
+  const filter = "$filter=_x793e__x54e1__x756a__x53f7_ eq " + emp._x793e__x54e1__x756a__x53f7_ +
+    "&$orderby=_x6709__x7d66__x53d6__x5f97__x65 desc&$top=500";
+  let leaveRecords = [];
+  try {
+    leaveRecords = await spGet(LIST_LEAVE, filter) || [];
+  } catch (e) {
+    console.error('Leave records fetch error:', e);
+  }
+
+  appliedDatesCache = leaveRecords;
+
+  const processedGrants = applyUsageFIFO(grants, leaveRecords);
+  currentGrantData = processedGrants;
+
+  // Calculate balances
+  const activeGrants = processedGrants.filter(g => !g.expired);
+  let currentRemain = 0;
+  let carryoverRemain = 0;
+
+  if (activeGrants.length >= 1) {
+    currentRemain = activeGrants[activeGrants.length - 1].remainingDays;
+  }
+  if (activeGrants.length >= 2) {
+    carryoverRemain = activeGrants[activeGrants.length - 2].remainingDays;
+  }
+  const totalRemain = currentRemain + carryoverRemain;
+
+  const resigned = isResigned(emp);
+
+  const container = document.getElementById('detailContent');
+  container.innerHTML = `
+    <div class="detail-header">
+      <div class="name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
+      <div class="sub">社員番号: ${emp._x793e__x54e1__x756a__x53f7_ || ''} | 起算日: ${formatDate(kisanDate)}</div>
+    </div>
+
+    <div class="balance-row">
+      <div class="balance-box">
+        <div class="label">今期残</div>
+        <div class="value">${currentRemain}</div>
+        <div class="unit">日</div>
+      </div>
+      <div class="balance-box">
+        <div class="label">繰越残</div>
+        <div class="value">${carryoverRemain}</div>
+        <div class="unit">日</div>
+      </div>
+      <div class="balance-box highlight">
+        <div class="label">合計残</div>
+        <div class="value">${totalRemain}</div>
+        <div class="unit">日</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">付与・使用履歴</div>
+      <div style="overflow-x:auto;">
+        <table class="grant-table">
+          <thead>
+            <tr>
+              <th>付与日</th>
+              <th>付与</th>
+              <th>使用</th>
+              <th>消滅</th>
+              <th>残日数</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${processedGrants.map(g => `
+              <tr class="${g.expired ? 'expired' : ''} ${g.isCurrentPeriod ? 'active-row' : ''}">
+                <td>${formatDateShort(g.grantDate)}</td>
+                <td>${g.grantedDays}</td>
+                <td>${g.usedDays}</td>
+                <td>${g.expiredDays || 0}</td>
+                <td><strong>${g.remainingDays}</strong></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    ${!resigned ? `<button class="btn btn-primary btn-block btn-lg" onclick="openApplyScreen()" style="margin-bottom:16px;">新規申請</button>` : ''}
+
+    <div class="card">
+      <div class="section-title">最近の有給申請</div>
+      ${leaveRecords.length === 0 ? '<div class="empty-state"><p>申請履歴がありません</p></div>' :
+        leaveRecords.slice(0, 20).map(r => `
+          <div class="history-item">
+            <div class="history-date">${formatDate(r._x6709__x7d66__x53d6__x5f97__x65)}</div>
+            <div>${escHtml(r._x6c0f__x540d_ || '')}</div>
+            <div class="history-type">${escHtml(r._x53d6__x5f97__x65e5__x6570_ || '')}</div>
+          </div>
+        `).join('')
+      }
+    </div>
+  `;
+}
+
+// ============================================================
+// Screen 3: Leave Application
+// ============================================================
+function openApplyScreen() {
+  selectedDates = [];
+  calendarYear = new Date().getFullYear();
+  calendarMonth = new Date().getMonth();
+  renderApplyScreen();
+  switchScreen('applyScreen');
+}
+
+function renderApplyScreen() {
+  const emp = currentEmployee;
+  if (!emp) {
+    document.getElementById('applyContent').innerHTML = '<div class="empty-state"><p>社員を選択してください</p></div>';
+    return;
+  }
+
+  const activeGrants = (currentGrantData || []).filter(g => !g.expired);
+  let totalRemain = 0;
+  activeGrants.forEach(g => totalRemain += g.remainingDays);
+
+  const fullDayHours = emp._x6709__x4f11__xff08__xff11__x65 || 8;
+  const amHours = emp._x6709__x4f11__xff08__x5348__x52 || 4;
+  const pmHours = emp._x6709__x4f11__xff08__x5348__x5f || 4;
+
+  document.getElementById('applyContent').innerHTML = `
+    <div class="detail-header">
+      <div class="name">${escHtml(emp.Title || '')}</div>
+      <div class="sub">残日数: ${totalRemain}日</div>
+    </div>
+
+    <div class="warning-msg" id="balanceWarning">残日数が不足しています。申請できません。</div>
+
+    <div class="card">
+      <div class="section-title">取得日を選択</div>
+      <div class="calendar-nav">
+        <button onclick="changeMonth(-1)">&lsaquo;</button>
+        <span class="month-label" id="calMonthLabel"></span>
+        <button onclick="changeMonth(1)">&rsaquo;</button>
+      </div>
+      <div class="calendar-grid" id="calendarGrid"></div>
+
+      <div class="section-title">選択中の日付</div>
+      <div class="selected-dates-list" id="selectedDatesList">
+        <span style="color:var(--text-light);font-size:13px;">日付をタップして選択</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">取得区分</div>
+      <div class="type-selector" id="leaveTypeSelector">
+        <div class="type-option active" data-type="1日（定時）" onclick="selectLeaveType(this)">1日（定時）</div>
+        <div class="type-option" data-type="半日（午前）" onclick="selectLeaveType(this)">半日（午前）</div>
+        <div class="type-option" data-type="半日（午後）" onclick="selectLeaveType(this)">半日（午後）</div>
+        <div class="type-option" data-type="時間有給" onclick="selectLeaveType(this)">時間有給</div>
+      </div>
+
+      <div id="hoursInputGroup" style="display:none;">
+        <div class="form-group">
+          <label class="form-label">取得時間（時間）</label>
+          <input class="form-input" id="hoursInput" type="number" min="1" max="${fullDayHours}" value="1" inputmode="numeric" onchange="updateCalcSummary()">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">申請区分</label>
+        <select class="form-select" id="applyCategory">
+          <option value="普通申請ふつうしんせい">普通申請</option>
+          <option value="特別申請とくべつしんせい">特別申請</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">給料計算の締日</label>
+        <select class="form-select" id="closingDay">
+          <option value="末日">末日</option>
+          <option value="20日">20日</option>
+          <option value="25日">25日</option>
+          <option value="15日">15日</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="calc-summary" id="calcSummary">
+      <div class="calc-row"><span class="label">選択日数</span><span class="value" id="calcDays">0日</span></div>
+      <div class="calc-row"><span class="label">取得区分</span><span class="value" id="calcType">1日（定時）</span></div>
+      <div class="calc-row"><span class="label">時給</span><span class="value" id="calcHourly">-</span></div>
+      <div class="calc-row"><span class="label">金額</span><span class="value" id="calcAmount">-</span></div>
+      <div class="calc-row" style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+        <span class="label">申請後残日数</span><span class="value" id="calcRemain">${totalRemain}日</span>
+      </div>
+    </div>
+
+    <button class="btn btn-success btn-block btn-lg" id="submitBtn" onclick="submitLeaveApplication()" ${totalRemain <= 0 ? 'disabled' : ''}>
+      申請する
+    </button>
+  `;
+
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const grid = document.getElementById('calendarGrid');
+  const label = document.getElementById('calMonthLabel');
+  if (!grid || !label) return;
+
+  label.textContent = calendarYear + '年' + (calendarMonth + 1) + '月';
+
+  const headers = ['日', '月', '火', '水', '木', '金', '土'];
+  let html = headers.map(h => '<div class="day-header">' + h + '</div>').join('');
+
+  const firstDay = new Date(calendarYear, calendarMonth, 1);
+  const lastDay = new Date(calendarYear, calendarMonth + 1, 0);
+  const startDow = firstDay.getDay();
+
+  // Get applied dates as Set for quick lookup
+  const appliedSet = new Set();
+  appliedDatesCache.forEach(r => {
+    const d = new Date(r._x6709__x7d66__x53d6__x5f97__x65);
+    appliedSet.add(formatDateISO(d));
+  });
+
+  const today = new Date();
+  const todayStr = formatDateISO(today);
+
+  // Empty cells before first day
+  for (let i = 0; i < startDow; i++) {
+    html += '<div class="calendar-cell"></div>';
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day++) {
+    const date = new Date(calendarYear, calendarMonth, day);
+    const dateStr = formatDateISO(date);
+    const dow = date.getDay();
+
+    const classes = ['calendar-cell'];
+    if (dow === 0) classes.push('sunday');
+    if (dow === 6) classes.push('saturday');
+    if (dow === 0 || dow === 6) classes.push('weekend');
+    if (dateStr === todayStr) classes.push('today');
+
+    const isApplied = appliedSet.has(dateStr);
+    if (isApplied) classes.push('applied');
+
+    const isSelected = selectedDates.includes(dateStr);
+    if (isSelected) classes.push('selected');
+
+    const onclick = isApplied ? '' : `onclick="toggleDate('${dateStr}')"`;
+
+    html += `<div class="${classes.join(' ')}" ${onclick}>${day}</div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+function changeMonth(delta) {
+  calendarMonth += delta;
+  if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+  if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+  renderCalendar();
+}
+
+function toggleDate(dateStr) {
+  const idx = selectedDates.indexOf(dateStr);
+  if (idx >= 0) {
+    selectedDates.splice(idx, 1);
+  } else {
+    selectedDates.push(dateStr);
+  }
+  selectedDates.sort();
+  renderCalendar();
+  renderSelectedDates();
+  updateCalcSummary();
+}
+
+function removeDate(dateStr) {
+  selectedDates = selectedDates.filter(d => d !== dateStr);
+  renderCalendar();
+  renderSelectedDates();
+  updateCalcSummary();
+}
+
+function renderSelectedDates() {
+  const container = document.getElementById('selectedDatesList');
+  if (!container) return;
+  if (selectedDates.length === 0) {
+    container.innerHTML = '<span style="color:var(--text-light);font-size:13px;">日付をタップして選択</span>';
+    return;
+  }
+  container.innerHTML = selectedDates.map(d => {
+    const parts = d.split('-');
+    return `<div class="date-chip">${parseInt(parts[1])}/${parseInt(parts[2])}<span class="remove" onclick="removeDate('${d}')">&times;</span></div>`;
+  }).join('');
+}
+
+function selectLeaveType(el) {
+  document.querySelectorAll('#leaveTypeSelector .type-option').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+
+  const hoursGroup = document.getElementById('hoursInputGroup');
+  if (el.dataset.type === '時間有給') {
+    hoursGroup.style.display = 'block';
+  } else {
+    hoursGroup.style.display = 'none';
+  }
+  updateCalcSummary();
+}
+
+function getSelectedLeaveType() {
+  const active = document.querySelector('#leaveTypeSelector .type-option.active');
+  return active ? active.dataset.type : '1日（定時）';
+}
+
+function updateCalcSummary() {
+  const leaveType = getSelectedLeaveType();
+  const emp = currentEmployee;
+  if (!emp) return;
+
+  const fullDayHours = emp._x6709__x4f11__xff08__xff11__x65 || 8;
+  const amHours = emp._x6709__x4f11__xff08__x5348__x52 || 4;
+  const pmHours = emp._x6709__x4f11__xff08__x5348__x5f || 4;
+
+  let daysPerDate = 1;
+  let hoursPerDate = fullDayHours;
+
+  if (leaveType === '半日（午前）') {
+    daysPerDate = 0.5;
+    hoursPerDate = amHours;
+  } else if (leaveType === '半日（午後）') {
+    daysPerDate = 0.5;
+    hoursPerDate = pmHours;
+  } else if (leaveType === '時間有給') {
+    const inputHours = parseFloat(document.getElementById('hoursInput').value) || 1;
+    hoursPerDate = inputHours;
+    daysPerDate = inputHours / fullDayHours;
+  }
+
+  const totalDays = selectedDates.length * daysPerDate;
+  const totalHours = selectedDates.length * hoursPerDate;
+
+  // Get hourly rate from leave records or use 0
+  let hourlyRate = 0;
+  if (appliedDatesCache.length > 0) {
+    for (const r of appliedDatesCache) {
+      if (r._x6642__x7d66__x30b8__x30ad__x30 && r._x6642__x7d66__x30b8__x30ad__x30 > 0) {
+        hourlyRate = r._x6642__x7d66__x30b8__x30ad__x30;
+        break;
+      }
+    }
+  }
+
+  const totalAmount = Math.round(hourlyRate * totalHours);
+
+  // Remaining balance
+  const activeGrants = (currentGrantData || []).filter(g => !g.expired);
+  let totalRemain = 0;
+  activeGrants.forEach(g => totalRemain += g.remainingDays);
+  const afterRemain = totalRemain - totalDays;
+
+  document.getElementById('calcDays').textContent = totalDays + '日';
+  document.getElementById('calcType').textContent = leaveType;
+  document.getElementById('calcHourly').textContent = hourlyRate > 0 ? hourlyRate.toLocaleString() + '円' : '-';
+  document.getElementById('calcAmount').textContent = totalAmount > 0 ? totalAmount.toLocaleString() + '円' : '-';
+  document.getElementById('calcRemain').textContent = afterRemain + '日';
+
+  // Warning
+  const warning = document.getElementById('balanceWarning');
+  const submitBtn = document.getElementById('submitBtn');
+  if (afterRemain < 0) {
+    warning.classList.add('show');
+    submitBtn.disabled = true;
+  } else {
+    warning.classList.remove('show');
+    submitBtn.disabled = selectedDates.length === 0;
+  }
+}
+
+// ============================================================
+// Submit Leave Application
+// ============================================================
+async function submitLeaveApplication() {
+  const emp = currentEmployee;
+  if (!emp || selectedDates.length === 0) {
+    showToast('日付を選択してください', 'error');
+    return;
+  }
+
+  const leaveType = getSelectedLeaveType();
+  const fullDayHours = emp._x6709__x4f11__xff08__xff11__x65 || 8;
+  const amHours = emp._x6709__x4f11__xff08__x5348__x52 || 4;
+  const pmHours = emp._x6709__x4f11__xff08__x5348__x5f || 4;
+
+  let hoursPerDate = fullDayHours;
+  if (leaveType === '半日（午前）') hoursPerDate = amHours;
+  else if (leaveType === '半日（午後）') hoursPerDate = pmHours;
+  else if (leaveType === '時間有給') hoursPerDate = parseFloat(document.getElementById('hoursInput').value) || 1;
+
+  let hourlyRate = 0;
+  if (appliedDatesCache.length > 0) {
+    for (const r of appliedDatesCache) {
+      if (r._x6642__x7d66__x30b8__x30ad__x30 && r._x6642__x7d66__x30b8__x30ad__x30 > 0) {
+        hourlyRate = r._x6642__x7d66__x30b8__x30ad__x30;
+        break;
+      }
+    }
+  }
+
+  const category = document.getElementById('applyCategory').value;
+  const closingDay = document.getElementById('closingDay').value;
+
+  // Duplicate check
+  const appliedSet = new Set();
+  appliedDatesCache.forEach(r => {
+    const d = new Date(r._x6709__x7d66__x53d6__x5f97__x65);
+    appliedSet.add(formatDateISO(d));
+  });
+
+  const duplicates = selectedDates.filter(d => appliedSet.has(d));
+  if (duplicates.length > 0) {
+    showToast('既に申請済みの日付があります: ' + duplicates.join(', '), 'error');
+    return;
+  }
+
+  // Balance check
+  const activeGrants = (currentGrantData || []).filter(g => !g.expired);
+  let totalRemain = 0;
+  activeGrants.forEach(g => totalRemain += g.remainingDays);
+  let daysPerDate = 1;
+  if (leaveType.indexOf('半日') >= 0) daysPerDate = 0.5;
+  else if (leaveType === '時間有給') daysPerDate = hoursPerDate / fullDayHours;
+  const totalDaysNeeded = selectedDates.length * daysPerDate;
+
+  if (totalDaysNeeded > totalRemain) {
+    showToast('残日数が不足しています', 'error');
+    return;
+  }
+
+  showSpinner();
+  let successCount = 0;
+  let errorCount = 0;
+
+  for (const dateStr of selectedDates) {
+    try {
+      const amount = Math.round(hourlyRate * hoursPerDate);
+      const body = {
+        __metadata: { type: LIST_ITEM_ENTITY },
+        _x793e__x54e1__x756a__x53f7_: emp._x793e__x54e1__x756a__x53f7_,
+        Title: emp.Title || '',
+        _x6c0f__x540d_: emp.Title || '',
+        _x6709__x7d66__x53d6__x5f97__x65: dateStr + 'T00:00:00Z',
+        _x53d6__x5f97__x65e5__x6570_: leaveType,
+        _x6642__x7d66__x30b8__x30ad__x30: hourlyRate,
+        _x91d1__x984d__x304d__x3093__x30: amount,
+        _x7533__x8acb__x533a__x5206__x30: category,
+        _x7d66__x6599__x8a08__x7b97__x30: closingDay,
+      };
+
+      if (leaveType === '時間有給') {
+        body._x3057__x3085__x3068__x304f__x30 = hoursPerDate;
+      }
+
+      await spPost(LIST_LEAVE, body);
+      successCount++;
+    } catch (e) {
+      console.error('Submit error for ' + dateStr, e);
+      errorCount++;
+    }
+  }
+
+  hideSpinner();
+
+  if (errorCount === 0) {
+    showToast(successCount + '件の申請が完了しました', 'success');
+    selectedDates = [];
+    // Reload details
+    showSpinner();
+    try {
+      await loadLeaveDetails();
+    } catch (e) { /* ignore */ }
+    hideSpinner();
+    switchScreen('detailScreen');
+  } else {
+    showToast(successCount + '件成功、' + errorCount + '件失敗', 'error');
+  }
+}
+
+// ============================================================
+// Utility Functions
+// ============================================================
+function formatDate(dateStr) {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '-';
+  return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+}
+
+function formatDateShort(date) {
+  if (!date) return '-';
+  return date.getFullYear() + '/' + String(date.getMonth() + 1).padStart(2, '0') + '/' + String(date.getDate()).padStart(2, '0');
+}
+
+function formatDateISO(date) {
+  return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+}
+
+function escHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Enter key search
+document.getElementById('searchInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') searchEmployee();
+});
+
+// Initialize
+initMsal();
+</script>
+</body>
+</html>
