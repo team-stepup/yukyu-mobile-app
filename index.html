@@ -696,7 +696,7 @@ function initMsal() {
 
 async function handleAuth() {
   if (accessToken) {
-    msalInstance.logoutPopup();
+    msalInstance.logoutRedirect();
     accessToken = null;
     currentEmployee = null;
     document.getElementById('authBtn').textContent = 'ログイン';
@@ -706,18 +706,21 @@ async function handleAuth() {
   }
   try {
     showSpinner();
-    const resp = await msalInstance.loginPopup({ scopes: SP_SCOPES });
-    onLoginSuccess(resp);
+    await msalInstance.loginRedirect({ scopes: SP_SCOPES });
   } catch (e) {
     console.error('Login error:', e);
     showToast('ログインに失敗しました', 'error');
-  } finally {
     hideSpinner();
   }
 }
 
-function onLoginSuccess(resp) {
-  accessToken = resp.accessToken;
+async function onLoginSuccess(resp) {
+  if (resp && resp.accessToken) {
+    accessToken = resp.accessToken;
+  } else {
+    const token = await acquireToken();
+    if (!token) { showToast('トークン取得に失敗しました', 'error'); return; }
+  }
   document.getElementById('authBtn').textContent = 'ログアウト';
   document.getElementById('tabNav').style.display = 'flex';
   switchScreen('searchScreen');
