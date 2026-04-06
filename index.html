@@ -917,6 +917,7 @@ async function searchEmployee() {
           <div class="emp-card-num">社員番号: ${emp[F.syainNo] || ''}</div>
           ${hakensaki ? '<div class="emp-card-hakensaki">派遣先: ' + escHtml(hakensaki) + '</div>' : ''}
           <div class="emp-card-date">起算日: ${formatDate(kisanDate)}</div>
+          ${resigned ? '<div class="emp-card-date" style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</div>' : ''}
         </div>
       `;
     }).join('');
@@ -1171,7 +1172,7 @@ async function loadLeaveDetails() {
   container.innerHTML = `
     <div class="detail-header">
       <div class="name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
-      <div class="sub">社員番号: ${emp[F.syainNo] || ''}${hakensaki ? ' | 派遣先: ' + escHtml(hakensaki) : ''} | 起算日: ${formatDate(kisanDate)}</div>
+      <div class="sub">社員番号: ${emp[F.syainNo] || ''}${hakensaki ? ' | 派遣先: ' + escHtml(hakensaki) : ''} | 起算日: ${formatDate(kisanDate)}${resigned ? ' | 退社日: ' + getRetireDateStr(emp) : ''}</div>
     </div>
 
     <div class="balance-row">
@@ -1699,7 +1700,16 @@ function getHakensaki(emp) {
   if (!val) return '';
   const colonIdx = val.indexOf(':');
   if (colonIdx < 0) return '';
-  return val.substring(colonIdx + 1);
+  let name = val.substring(colonIdx + 1);
+  // Remove trailing 3 digits
+  name = name.replace(/\d{3}$/, '');
+  return name;
+}
+
+function getRetireDateStr(emp) {
+  const d = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+  if (!d) return '';
+  return formatDate(d);
 }
 
 async function spDelete(itemId) {
