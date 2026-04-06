@@ -179,6 +179,7 @@ body {
 /* Employee Card */
 .emp-card-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
 .emp-card-num { font-size: 14px; color: var(--text-light); }
+.emp-card-hakensaki { font-size: 13px; color: var(--primary); margin-top: 2px; }
 .emp-card-date { font-size: 13px; color: var(--text-light); margin-top: 4px; }
 .emp-card-arrow { float: right; color: var(--primary); font-size: 20px; margin-top: 8px; }
 
@@ -239,8 +240,29 @@ body {
 }
 
 .grant-table tr:nth-child(even) { background: #fafafa; }
-.grant-table .expired { color: #999; text-decoration: line-through; }
+.grant-table .expired { color: #999; }
 .grant-table .active-row { background: #f0f0ff; }
+.grant-status { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.grant-status.active { background: #e8f5e9; color: var(--success); }
+.grant-status.expired-status { background: #fafafa; color: #999; }
+
+.history-delete-btn {
+  background: none;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  margin-left: 8px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.history-delete-btn:active { background: var(--danger); color: #fff; }
 
 /* Leave History */
 .history-item {
@@ -684,6 +706,7 @@ const F = {
   category: 'OData__x7533__x8acb__x533a__x5206__x30',
   closingDay: 'OData__x7d66__x6599__x8a08__x7b97__x30',
   shimei: 'OData__x6c0f__x540d_',
+  hakensaki: 'OData__xff7c__xff92__xff72_ID_xff8a__x',
 };
 
 let msalInstance = null;
@@ -874,11 +897,13 @@ async function searchEmployee() {
     container.innerHTML = results.map(emp => {
       const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
       const resigned = isResigned(emp);
+      const hakensaki = getHakensaki(emp);
       return `
         <div class="card card-clickable" onclick='selectEmployee(${JSON.stringify(emp).replace(/'/g, "&#39;")})'>
           <div class="emp-card-arrow">&#8250;</div>
           <div class="emp-card-name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
           <div class="emp-card-num">社員番号: ${emp[F.syainNo] || ''}</div>
+          ${hakensaki ? '<div class="emp-card-hakensaki">派遣先: ' + escHtml(hakensaki) + '</div>' : ''}
           <div class="emp-card-date">起算日: ${formatDate(kisanDate)}</div>
         </div>
       `;
@@ -1068,12 +1093,13 @@ async function loadLeaveDetails() {
   const totalRemain = currentRemain + carryoverRemain;
 
   const resigned = isResigned(emp);
+  const hakensaki = getHakensaki(emp);
 
   const container = document.getElementById('detailContent');
   container.innerHTML = `
     <div class="detail-header">
       <div class="name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
-      <div class="sub">社員番号: ${emp[F.syainNo] || ''} | 起算日: ${formatDate(kisanDate)}</div>
+      <div class="sub">社員番号: ${emp[F.syainNo] || ''}${hakensaki ? ' | 派遣先: ' + escHtml(hakensaki) : ''} | 起算日: ${formatDate(kisanDate)}</div>
     </div>
 
     <div class="balance-row">
@@ -1095,7 +1121,7 @@ async function loadLeaveDetails() {
     </div>
 
     <div class="card">
-      <div class="section-title">付与・使用履歴</div>
+      <div class="section-title">付与・消滅・残日数</div>
       <div style="overflow-x:auto;">
         <table class="grant-table">
           <thead>
@@ -1103,8 +1129,10 @@ async function loadLeaveDetails() {
               <th>付与日</th>
               <th>付与</th>
               <th>使用</th>
+              <th>消滅日</th>
               <th>消滅</th>
-              <th>残日数</th>
+              <th>残</th>
+              <th>状態</th>
             </tr>
           </thead>
           <tbody>
@@ -1113,8 +1141,10 @@ async function loadLeaveDetails() {
                 <td>${formatDateShort(g.grantDate)}</td>
                 <td>${g.grantedDays}</td>
                 <td>${g.usedDays}</td>
+                <td>${formatDateShort(g.expiryDate)}</td>
                 <td>${g.expiredDays || 0}</td>
                 <td><strong>${g.remainingDays}</strong></td>
+                <td>${g.expired ? '<span class="grant-status expired-status">消滅済</span>' : '<span class="grant-status active">有効</span>'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1125,13 +1155,13 @@ async function loadLeaveDetails() {
     ${!resigned ? `<button class="btn btn-primary btn-block btn-lg" onclick="openApplyScreen()" style="margin-bottom:16px;">新規申請</button>` : ''}
 
     <div class="card">
-      <div class="section-title">最近の有給申請</div>
-      ${leaveRecords.length === 0 ? '<div class="empty-state"><p>申請履歴がありません</p></div>' :
-        leaveRecords.slice(0, 20).map(r => `
+      <div class="section-title">有給取得履歴</div>
+      ${leaveRecords.length === 0 ? '<div class="empty-state"><p>取得履歴がありません</p></div>' :
+        leaveRecords.map(r => `
           <div class="history-item">
             <div class="history-date">${formatDate(r[F.leaveDate])}</div>
-            <div>${escHtml(r[F.shimei] || '')}</div>
             <div class="history-type">${escHtml(r[F.leaveType] || '')}</div>
+            <button class="history-delete-btn" onclick="deleteLeaveRecord(${r.Id}, '${formatDate(r[F.leaveDate])}')" title="削除">&times;</button>
           </div>
         `).join('')
       }
@@ -1165,10 +1195,12 @@ function renderApplyScreen() {
   const amHours = emp[F.amHours] || 4;
   const pmHours = emp[F.pmHours] || 4;
 
+  const hakensaki = getHakensaki(emp);
+
   document.getElementById('applyContent').innerHTML = `
     <div class="detail-header">
       <div class="name">${escHtml(emp.Title || '')}</div>
-      <div class="sub">残日数: ${totalRemain}日</div>
+      <div class="sub">${hakensaki ? '派遣先: ' + escHtml(hakensaki) + ' | ' : ''}残日数: ${totalRemain}日</div>
     </div>
 
     <div class="warning-msg" id="balanceWarning">残日数が不足しています。申請できません。</div>
@@ -1190,18 +1222,10 @@ function renderApplyScreen() {
 
     <div class="card">
       <div class="section-title">取得区分</div>
-      <div class="type-selector" id="leaveTypeSelector">
+      <div class="type-selector" id="leaveTypeSelector" style="grid-template-columns: 1fr 1fr 1fr;">
         <div class="type-option active" data-type="1日（定時）" onclick="selectLeaveType(this)">1日（定時）</div>
         <div class="type-option" data-type="半日（午前）" onclick="selectLeaveType(this)">半日（午前）</div>
         <div class="type-option" data-type="半日（午後）" onclick="selectLeaveType(this)">半日（午後）</div>
-        <div class="type-option" data-type="時間有給" onclick="selectLeaveType(this)">時間有給</div>
-      </div>
-
-      <div id="hoursInputGroup" style="display:none;">
-        <div class="form-group">
-          <label class="form-label">取得時間（時間）</label>
-          <input class="form-input" id="hoursInput" type="number" min="1" max="${fullDayHours}" value="1" inputmode="numeric" onchange="updateCalcSummary()">
-        </div>
       </div>
 
       <div class="form-group">
@@ -1338,13 +1362,6 @@ function renderSelectedDates() {
 function selectLeaveType(el) {
   document.querySelectorAll('#leaveTypeSelector .type-option').forEach(o => o.classList.remove('active'));
   el.classList.add('active');
-
-  const hoursGroup = document.getElementById('hoursInputGroup');
-  if (el.dataset.type === '時間有給') {
-    hoursGroup.style.display = 'block';
-  } else {
-    hoursGroup.style.display = 'none';
-  }
   updateCalcSummary();
 }
 
@@ -1371,10 +1388,6 @@ function updateCalcSummary() {
   } else if (leaveType === '半日（午後）') {
     daysPerDate = 0.5;
     hoursPerDate = pmHours;
-  } else if (leaveType === '時間有給') {
-    const inputHours = parseFloat(document.getElementById('hoursInput').value) || 1;
-    hoursPerDate = inputHours;
-    daysPerDate = inputHours / fullDayHours;
   }
 
   const totalDays = selectedDates.length * daysPerDate;
@@ -1435,7 +1448,6 @@ async function submitLeaveApplication() {
   let hoursPerDate = fullDayHours;
   if (leaveType === '半日（午前）') hoursPerDate = amHours;
   else if (leaveType === '半日（午後）') hoursPerDate = pmHours;
-  else if (leaveType === '時間有給') hoursPerDate = parseFloat(document.getElementById('hoursInput').value) || 1;
 
   let hourlyRate = 0;
   if (appliedDatesCache.length > 0) {
@@ -1469,7 +1481,6 @@ async function submitLeaveApplication() {
   activeGrants.forEach(g => totalRemain += g.remainingDays);
   let daysPerDate = 1;
   if (leaveType.indexOf('半日') >= 0) daysPerDate = 0.5;
-  else if (leaveType === '時間有給') daysPerDate = hoursPerDate / fullDayHours;
   const totalDaysNeeded = selectedDates.length * daysPerDate;
 
   if (totalDaysNeeded > totalRemain) {
@@ -1496,10 +1507,6 @@ async function submitLeaveApplication() {
         [F.category]: category,
         [F.closingDay]: closingDay,
       };
-
-      if (leaveType === '時間有給') {
-        body[F.leaveHours] = hoursPerDate;
-      }
 
       await spPost(LIST_LEAVE_GUID, body);
       successCount++;
@@ -1549,6 +1556,50 @@ function escHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function getHakensaki(emp) {
+  const val = emp[F.hakensaki];
+  if (!val) return '';
+  const colonIdx = val.indexOf(':');
+  if (colonIdx < 0) return '';
+  return val.substring(colonIdx + 1);
+}
+
+async function spDelete(itemId) {
+  const token = await getToken();
+  if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return null; }
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_LEAVE_GUID + "')/items(" + itemId + ")";
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'DELETE'
+    }
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error('SP DELETE Error:', errText);
+    throw new Error('SP DELETE Error: ' + resp.status);
+  }
+  return true;
+}
+
+async function deleteLeaveRecord(itemId, dateStr) {
+  if (!confirm('この有給取得記録を削除しますか？\n取得日: ' + dateStr)) return;
+  showSpinner();
+  try {
+    await spDelete(itemId);
+    showToast('削除しました', 'success');
+    await loadLeaveDetails();
+  } catch (e) {
+    console.error('Delete error:', e);
+    showToast('削除に失敗しました: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
 }
 
 // Enter key search
