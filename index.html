@@ -1120,52 +1120,81 @@ async function loadLeaveDetails() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="section-title">付与・消滅・残日数</div>
-      <div style="overflow-x:auto;">
-        <table class="grant-table">
-          <thead>
-            <tr>
-              <th>付与日</th>
-              <th>付与</th>
-              <th>使用</th>
-              <th>消滅日</th>
-              <th>消滅</th>
-              <th>残</th>
-              <th>状態</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${processedGrants.map(g => `
-              <tr class="${g.expired ? 'expired' : ''} ${g.isCurrentPeriod ? 'active-row' : ''}">
-                <td>${formatDateShort(g.grantDate)}</td>
-                <td>${g.grantedDays}</td>
-                <td>${g.usedDays}</td>
-                <td>${formatDateShort(g.expiryDate)}</td>
-                <td>${g.expiredDays || 0}</td>
-                <td><strong>${g.remainingDays}</strong></td>
-                <td>${g.expired ? '<span class="grant-status expired-status">消滅済</span>' : '<span class="grant-status active">有効</span>'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    ${processedGrants.slice().reverse().map((g, idx) => {
+      // Find leave records that were consumed from this grant
+      const gStart = g.grantDate;
+      const gEnd = g.expiryDate;
+      const grantRecords = leaveRecords.filter(r => {
+        const d = new Date(r[F.leaveDate]);
+        return d >= gStart && d < gEnd;
+      }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
+
+      const prevGrant = processedGrants[processedGrants.indexOf(g) - 1];
+      const carryIn = prevGrant && !prevGrant.expired ? prevGrant.remainingDays : (prevGrant ? 0 : 0);
+
+      return `
+      <div class="card" style="border-left:4px solid ${g.expired ? '#999' : 'var(--primary)'};">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div>
+            <div style="font-weight:700;font-size:15px;color:${g.expired ? '#999' : 'var(--primary)'};">
+              ${formatDateShort(g.grantDate)} 付与
+            </div>
+            <div style="font-size:12px;color:var(--text-light);">
+              有効期限: ${formatDateShort(g.expiryDate)}まで
+            </div>
+          </div>
+          <span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;
+            background:${g.expired ? '#eee' : '#e8f5e9'};color:${g.expired ? '#999' : '#2e7d32'};">
+            ${g.expired ? '消滅済' : '有効'}
+          </span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:10px;text-align:center;">
+          <div style="background:#f0f0ff;border-radius:8px;padding:8px 4px;">
+            <div style="font-size:10px;color:var(--text-light);">付与</div>
+            <div style="font-size:18px;font-weight:700;color:var(--primary);">${g.grantedDays}</div>
+            <div style="font-size:10px;color:var(--text-light);">日</div>
+          </div>
+          <div style="background:#fff3e0;border-radius:8px;padding:8px 4px;">
+            <div style="font-size:10px;color:var(--text-light);">使用</div>
+            <div style="font-size:18px;font-weight:700;color:#e65100;">${g.usedDays}</div>
+            <div style="font-size:10px;color:var(--text-light);">日</div>
+          </div>
+          <div style="background:${g.expiredDays > 0 ? '#ffebee' : '#f5f5f5'};border-radius:8px;padding:8px 4px;">
+            <div style="font-size:10px;color:var(--text-light);">消滅</div>
+            <div style="font-size:18px;font-weight:700;color:${g.expiredDays > 0 ? 'var(--danger)' : '#999'};">${g.expiredDays || 0}</div>
+            <div style="font-size:10px;color:var(--text-light);">日</div>
+          </div>
+          <div style="background:${g.remainingDays > 0 ? '#e8f5e9' : '#f5f5f5'};border-radius:8px;padding:8px 4px;">
+            <div style="font-size:10px;color:var(--text-light);">残</div>
+            <div style="font-size:18px;font-weight:700;color:${g.remainingDays > 0 ? '#2e7d32' : '#999'};">${g.remainingDays}</div>
+            <div style="font-size:10px;color:var(--text-light);">日</div>
+          </div>
+        </div>
+
+        ${g.expired && g.expiredDays > 0 ? `
+          <div style="background:#ffebee;border-radius:6px;padding:6px 10px;font-size:12px;color:var(--danger);margin-bottom:8px;">
+            ${formatDateShort(g.expiryDate)} に ${g.expiredDays}日が時効消滅しました
+          </div>
+        ` : ''}
+
+        ${grantRecords.length > 0 ? `
+          <div style="font-size:12px;font-weight:600;color:var(--text-light);margin-bottom:4px;">この期間の取得履歴（${grantRecords.length}件）</div>
+          ${grantRecords.map(r => `
+            <div style="display:flex;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px;">
+              <span style="min-width:90px;font-weight:500;">${formatDate(r[F.leaveDate])}</span>
+              <span style="background:#f0f0ff;color:var(--primary);padding:1px 8px;border-radius:10px;font-size:11px;">
+                ${escHtml((r[F.leaveType]||'').replace('（定時）','').replace('ふつうしんせい','').replace('とくべつしんせい',''))}
+              </span>
+              <button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
+                style="margin-left:auto;background:none;border:1px solid #ddd;border-radius:50%;width:24px;height:24px;font-size:14px;color:#999;cursor:pointer;line-height:1;">&times;</button>
+            </div>
+          `).join('')}
+        ` : `<div style="font-size:12px;color:#bbb;text-align:center;padding:4px;">取得なし</div>`}
+      </div>`;
+    }).join('')}
 
     ${!resigned ? `<button class="btn btn-primary btn-block btn-lg" onclick="openApplyScreen()" style="margin-bottom:16px;">新規申請</button>` : ''}
-
-    <div class="card">
-      <div class="section-title">有給取得履歴</div>
-      ${leaveRecords.length === 0 ? '<div class="empty-state"><p>取得履歴がありません</p></div>' :
-        leaveRecords.map(r => `
-          <div class="history-item">
-            <div class="history-date">${formatDate(r[F.leaveDate])}</div>
-            <div class="history-type">${escHtml(r[F.leaveType] || '')}</div>
-            <button class="history-delete-btn" onclick="deleteLeaveRecord(${r.Id}, '${formatDate(r[F.leaveDate])}')" title="削除">&times;</button>
-          </div>
-        `).join('')
-      }
-    </div>
   `;
 }
 
@@ -1223,9 +1252,9 @@ function renderApplyScreen() {
     <div class="card">
       <div class="section-title">取得区分</div>
       <div class="type-selector" id="leaveTypeSelector" style="grid-template-columns: 1fr 1fr 1fr;">
-        <div class="type-option active" data-type="1日（定時）" onclick="selectLeaveType(this)">1日（定時）</div>
-        <div class="type-option" data-type="半日（午前）" onclick="selectLeaveType(this)">半日（午前）</div>
-        <div class="type-option" data-type="半日（午後）" onclick="selectLeaveType(this)">半日（午後）</div>
+        <div class="type-option active" data-type="1日（定時）" onclick="selectLeaveType(this)">1日<br>（定時）</div>
+        <div class="type-option" data-type="半日（午前）" onclick="selectLeaveType(this)">AM<br>有給</div>
+        <div class="type-option" data-type="半日（午後）" onclick="selectLeaveType(this)">PM<br>有給</div>
       </div>
 
       <div class="form-group">
@@ -1233,16 +1262,6 @@ function renderApplyScreen() {
         <select class="form-select" id="applyCategory">
           <option value="普通申請ふつうしんせい">普通申請</option>
           <option value="特別申請とくべつしんせい">特別申請</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">給料計算の締日</label>
-        <select class="form-select" id="closingDay">
-          <option value="末日">末日</option>
-          <option value="20日">20日</option>
-          <option value="25日">25日</option>
-          <option value="15日">15日</option>
         </select>
       </div>
     </div>
@@ -1460,7 +1479,6 @@ async function submitLeaveApplication() {
   }
 
   const category = document.getElementById('applyCategory').value;
-  const closingDay = document.getElementById('closingDay').value;
 
   // Duplicate check
   const appliedSet = new Set();
@@ -1505,7 +1523,6 @@ async function submitLeaveApplication() {
         [F.hourlyRate]: hourlyRate,
         [F.amount]: amount,
         [F.category]: category,
-        [F.closingDay]: closingDay,
       };
 
       await spPost(LIST_LEAVE_GUID, body);
