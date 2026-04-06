@@ -1163,6 +1163,12 @@ async function loadLeaveDetails() {
 
     ${(() => {
       // Pre-calculate display values in chronological order (oldest first)
+      // Key insight: carryover = previous grant's "period remain" at the time THIS grant starts
+      // A grant's period remain = carryover + granted - period_used
+      // Expiration happens at expiryDate (2 years), NOT at next grant date
+      // So carryover to next grant = previous period remain, but capped:
+      //   if previous grant expired BEFORE this grant starts → carryover = 0
+      //   else → carryover = previous _displayRemain
       processedGrants.forEach((g, i) => {
         const nextG = processedGrants[i + 1];
         const pEndFilter = nextG ? nextG.grantDate : new Date(9999,0,1);
@@ -1173,14 +1179,43 @@ async function loadLeaveDetails() {
         let pUsed = 0;
         pRecords.forEach(r => { pUsed += getRecordDays(r); });
         g._periodUsed = pUsed;
+
+        // Carryover from previous grant
         const prevG = i > 0 ? processedGrants[i - 1] : null;
-        g._displayCarryover = prevG ? (prevG._displayRemain || 0) : 0;
+        if (!prevG) {
+          g._displayCarryover = 0;
+        } else if (prevG.expiryDate <= g.grantDate) {
+          // Previous grant expired before this one started → no carryover, but expired days
+          g._displayCarryover = 0;
+        } else {
+          // Previous grant still valid when this one starts → carry over the remain
+          g._displayCarryover = prevG._displayRemain || 0;
+        }
+
+        // Period remain (before considering expiry of THIS grant)
+        const periodRemain = Math.max(0, g._displayCarryover + g.grantedDays - pUsed);
+
+        // Check if the carryover portion expired during this period
+        // The carryover came from the previous grant, which expires at prevG.expiryDate
+        let expiredFromCarryover = 0;
+        if (prevG && prevG.expiryDate > g.grantDate && prevG.expiryDate <= (nextG ? nextG.grantDate : new Date(9999,0,1))) {
+          // Previous grant expires during THIS period
+          // Calculate how much of the carryover was used before expiry
+          const usedBeforeExpiry = leaveRecords.filter(r => {
+            const d = new Date(r[F.leaveDate]);
+            return d >= g.grantDate && d < prevG.expiryDate;
+          }).reduce((sum, r) => sum + getRecordDays(r), 0);
+          const carryoverRemainAtExpiry = Math.max(0, g._displayCarryover - usedBeforeExpiry);
+          expiredFromCarryover = carryoverRemainAtExpiry;
+        }
+
         if (g.expired) {
-          g._displayExpired = Math.max(0, g._displayCarryover + g.grantedDays - pUsed);
+          // This entire grant is expired
+          g._displayExpired = Math.max(0, periodRemain);
           g._displayRemain = 0;
         } else {
-          g._displayExpired = 0;
-          g._displayRemain = Math.max(0, g._displayCarryover + g.grantedDays - pUsed);
+          g._displayExpired = expiredFromCarryover;
+          g._displayRemain = Math.max(0, periodRemain - expiredFromCarryover);
         }
       });
       return '';
