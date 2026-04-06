@@ -622,7 +622,11 @@ body {
   <!-- Screen 1: Employee Search -->
   <div class="screen" id="searchScreen">
     <div class="search-box">
-      <input class="search-input" id="searchInput" type="text" placeholder="社員番号 または 名前で検索">
+      <div style="position:relative;flex:1;">
+        <input class="search-input" id="searchInput" type="text" placeholder="社員番号 または 名前で検索" style="width:100%;padding-right:32px;">
+        <button id="searchClearBtn" onclick="document.getElementById('searchInput').value='';document.getElementById('searchResults').innerHTML='';this.style.display='none';"
+          style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#999;cursor:pointer;padding:0;line-height:1;">&times;</button>
+      </div>
       <button class="btn btn-primary" onclick="searchEmployee()">検索</button>
     </div>
     <div id="searchResults"></div>
@@ -1114,18 +1118,48 @@ async function loadLeaveDetails() {
   const processedGrants = applyUsageFIFO(grants, leaveRecords);
   currentGrantData = processedGrants;
 
-  // Calculate balances
-  const activeGrants = processedGrants.filter(g => !g.expired);
-  let currentRemain = 0;
-  let carryoverRemain = 0;
+  // Pre-calculate display values (oldest first)
+  // Formula: 残 = 付与 + 繰越 - 消滅 - 使用
+  processedGrants.forEach((g, i) => {
+    const nextG = processedGrants[i + 1];
+    const pEndFilter = nextG ? nextG.grantDate : new Date(9999,0,1);
+    const pRecords = leaveRecords.filter(r => {
+      const d = new Date(r[F.leaveDate]);
+      return d >= g.grantDate && d < pEndFilter;
+    });
+    let pUsed = 0;
+    pRecords.forEach(r => { pUsed += getRecordDays(r); });
+    g._periodUsed = pUsed;
 
-  if (activeGrants.length >= 1) {
-    currentRemain = activeGrants[activeGrants.length - 1].remainingDays;
-  }
-  if (activeGrants.length >= 2) {
-    carryoverRemain = activeGrants[activeGrants.length - 2].remainingDays;
-  }
-  const totalRemain = currentRemain + carryoverRemain;
+    const prevG = i > 0 ? processedGrants[i - 1] : null;
+    g._displayCarryover = prevG ? Math.max(0, prevG._displayRemain || 0) : 0;
+
+    let expiredTotal = 0;
+    g._expiredDetails = [];
+    for (let j = 0; j < i; j++) {
+      const oldG = processedGrants[j];
+      if (oldG.expiryDate >= g.grantDate && oldG.expiryDate < pEndFilter) {
+        if (oldG.expiredDays > 0) {
+          expiredTotal += oldG.expiredDays;
+          g._expiredDetails.push({ date: oldG.expiryDate, days: oldG.expiredDays, grantNum: j + 1 });
+        }
+      }
+    }
+    if (!nextG && g.expired && g.expiredDays > 0) {
+      expiredTotal += g.expiredDays;
+      g._expiredDetails.push({ date: g.expiryDate, days: g.expiredDays, grantNum: i + 1 });
+    }
+
+    g._displayExpired = expiredTotal;
+    g._displayRemain = Math.max(0, g._displayCarryover + g.grantedDays - pUsed - expiredTotal);
+  });
+
+  // Calculate top summary from display values of the latest grant
+  const latestGrant = processedGrants[processedGrants.length - 1];
+  const currentRemain = latestGrant ? latestGrant._displayRemain : 0;
+  const currentCarryover = latestGrant ? latestGrant._displayCarryover : 0;
+  const currentGranted = latestGrant ? latestGrant.grantedDays : 0;
+  const totalRemain = currentRemain;
 
   const resigned = isResigned(emp);
   const hakensaki = getHakensaki(emp);
@@ -1139,13 +1173,13 @@ async function loadLeaveDetails() {
 
     <div class="balance-row">
       <div class="balance-box">
-        <div class="label">今期残</div>
-        <div class="value">${currentRemain}</div>
+        <div class="label">繰越</div>
+        <div class="value">${currentCarryover}</div>
         <div class="unit">日</div>
       </div>
       <div class="balance-box">
-        <div class="label">繰越残</div>
-        <div class="value">${carryoverRemain}</div>
+        <div class="label">今期付与</div>
+        <div class="value">${currentGranted}</div>
         <div class="unit">日</div>
       </div>
       <div class="balance-box highlight">
@@ -1161,63 +1195,6 @@ async function loadLeaveDetails() {
       </button>
     </div>
 
-    ${(() => {
-      // Pre-calculate display values in chronological order (oldest first)
-      // Formula: 残 = 付与 + 繰越 - 消滅 - 使用
-      // 繰越 = ALWAYS previous grant card's 残
-      // 消滅 = 消滅日(=付与日+2年)がこの付与期間に含まれる場合に表示
-      //        消滅日は次の付与日と一致するため >= grantDate で判定
-      //        消滅日数はFIFO計算のexpiredDaysを使用（正確な残日数）
-      processedGrants.forEach((g, i) => {
-        const nextG = processedGrants[i + 1];
-        const pEndFilter = nextG ? nextG.grantDate : new Date(9999,0,1);
-        const pRecords = leaveRecords.filter(r => {
-          const d = new Date(r[F.leaveDate]);
-          return d >= g.grantDate && d < pEndFilter;
-        });
-        let pUsed = 0;
-        pRecords.forEach(r => { pUsed += getRecordDays(r); });
-        g._periodUsed = pUsed;
-
-        // Carryover: ALWAYS = previous grant's display remain
-        const prevG = i > 0 ? processedGrants[i - 1] : null;
-        g._displayCarryover = prevG ? Math.max(0, prevG._displayRemain || 0) : 0;
-
-        // Check which older grants expire during this period
-        // 消滅日 >= this grantDate AND 消滅日 < next grantDate
-        // (消滅日 = 付与日+2年 = 2つ後の付与日 なので、その付与カードに表示)
-        let expiredTotal = 0;
-        g._expiredDetails = [];
-        for (let j = 0; j < i; j++) {
-          const oldG = processedGrants[j];
-          if (oldG.expiryDate >= g.grantDate && oldG.expiryDate < pEndFilter) {
-            // oldGの消滅日がこの付与期間内 → FIFO計算の消滅日数を使用
-            if (oldG.expiredDays > 0) {
-              expiredTotal += oldG.expiredDays;
-              g._expiredDetails.push({
-                date: oldG.expiryDate,
-                days: oldG.expiredDays,
-                grantNum: j + 1
-              });
-            }
-          }
-        }
-
-        // Self-expiry: last grant with no next grant, and it's expired
-        if (!nextG && g.expired && g.expiredDays > 0) {
-          expiredTotal += g.expiredDays;
-          g._expiredDetails.push({
-            date: g.expiryDate,
-            days: g.expiredDays,
-            grantNum: i + 1
-          });
-        }
-
-        g._displayExpired = expiredTotal;
-        g._displayRemain = Math.max(0, g._displayCarryover + g.grantedDays - pUsed - expiredTotal);
-      });
-      return '';
-    })()}
     ${processedGrants.slice().reverse().map((g, idx) => {
       const origIdx = processedGrants.indexOf(g);
       const gStart = g.grantDate;
@@ -1746,15 +1723,16 @@ function copyDetailToClipboard() {
   const hakensaki = getHakensaki(emp);
   const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
   const grants = currentGrantData;
-  const activeGrants = grants.filter(g => !g.expired);
-  let currentR = activeGrants.length >= 1 ? activeGrants[activeGrants.length - 1].remainingDays : 0;
-  let carryR = activeGrants.length >= 2 ? activeGrants[activeGrants.length - 2].remainingDays : 0;
+  const latestG = grants[grants.length - 1];
+  const dispRemain = latestG ? latestG._displayRemain : 0;
+  const dispCarry = latestG ? latestG._displayCarryover : 0;
+  const dispGranted = latestG ? latestG.grantedDays : 0;
 
   let text = '【有給休暇明細】\n';
   text += '氏名: ' + (emp.Title || '') + (hakensaki ? '（' + hakensaki + '）' : '') + '\n';
   text += '社員番号: ' + (emp[F.syainNo] || '') + '\n';
   text += '起算日: ' + formatDate(kisanDate) + '\n';
-  text += '現在残日数: 今期 ' + currentR + '日 + 繰越 ' + carryR + '日 = 合計 ' + (currentR + carryR) + '日\n';
+  text += '現在: 繰越 ' + dispCarry + '日 + 今期付与 ' + dispGranted + '日 → 合計残 ' + dispRemain + '日\n';
   text += '─────────────────\n';
 
   const records = appliedDatesCache || [];
@@ -1846,9 +1824,12 @@ async function deleteLeaveRecord(itemId, dateStr) {
   }
 }
 
-// Enter key search
+// Enter key search + clear button toggle
 document.getElementById('searchInput').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') searchEmployee();
+});
+document.getElementById('searchInput').addEventListener('input', function() {
+  document.getElementById('searchClearBtn').style.display = this.value ? 'block' : 'none';
 });
 
 // Initialize
