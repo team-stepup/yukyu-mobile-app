@@ -622,7 +622,7 @@ body {
   <!-- Screen 1: Employee Search -->
   <div class="screen" id="searchScreen">
     <div class="search-box">
-      <input class="search-input" id="searchInput" type="number" placeholder="社員番号を入力" inputmode="numeric">
+      <input class="search-input" id="searchInput" type="text" placeholder="社員番号 または 名前で検索">
       <button class="btn btn-primary" onclick="searchEmployee()">検索</button>
     </div>
     <div id="searchResults"></div>
@@ -877,17 +877,24 @@ function hideSpinner() { document.getElementById('spinner').classList.remove('sh
 // Screen 1: Employee Search
 // ============================================================
 async function searchEmployee() {
-  const num = document.getElementById('searchInput').value.trim();
+  const query = document.getElementById('searchInput').value.trim();
   const container = document.getElementById('searchResults');
 
-  if (!num) {
-    showToast('社員番号を入力してください', 'error');
+  if (!query) {
+    showToast('社員番号または名前を入力してください', 'error');
     return;
   }
 
   showSpinner();
   try {
-    const filter = "$filter=" + F.syainNo + " eq " + num + "&$top=10";
+    let filter;
+    if (/^\d+$/.test(query)) {
+      // Number only → search by employee number
+      filter = "$filter=" + F.syainNo + " eq " + query + "&$top=10";
+    } else {
+      // Text → search by name (Title contains query)
+      filter = "$filter=substringof('" + query.replace(/'/g, "''") + "',Title)&$top=20";
+    }
     const results = await spGet(LIST_EMPLOYEES_GUID, filter);
 
     if (!results || results.length === 0) {
@@ -1001,27 +1008,22 @@ function calculateGrants(kisanDateStr) {
 }
 
 function applyUsageFIFO(grants, leaveRecords) {
-  // Sort grants by grant date ascending (FIFO - oldest first)
   const sortedGrants = [...grants].sort((a, b) => a.grantDate - b.grantDate);
+  // Initialize consumed records list for each grant
+  sortedGrants.forEach(g => { g.consumedRecords = []; });
 
-  // Sort leave records by date ascending
   const sortedRecords = [...leaveRecords].sort((a, b) => {
-    const da = new Date(a[F.leaveDate]);
-    const db = new Date(b[F.leaveDate]);
-    return da - db;
+    return new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]);
   });
 
   for (const record of sortedRecords) {
     let daysToConsume = getRecordDays(record);
     const recordDate = new Date(record[F.leaveDate]);
 
-    // FIFO: consume from oldest grant first
-    // A grant can be consumed if: record date is before grant expiry AND grant was already granted
+    // FIFO: consume from oldest valid grant first
     for (const grant of sortedGrants) {
       if (daysToConsume <= 0) break;
-      // Grant must be already granted at the time of record
       if (recordDate < grant.grantDate) continue;
-      // Grant must not be expired at the time of record
       if (recordDate >= grant.expiryDate) continue;
 
       const available = grant.grantedDays - grant.usedDays;
@@ -1029,11 +1031,12 @@ function applyUsageFIFO(grants, leaveRecords) {
 
       const consume = Math.min(available, daysToConsume);
       grant.usedDays += consume;
+      grant.consumedRecords.push({ record: record, days: consume });
       daysToConsume -= consume;
     }
   }
 
-  // Calculate expired days and remaining days
+  // Calculate expired/remaining
   for (const grant of sortedGrants) {
     if (grant.expired) {
       grant.expiredDays = Math.max(0, grant.grantedDays - grant.usedDays);
@@ -1043,14 +1046,12 @@ function applyUsageFIFO(grants, leaveRecords) {
     grant.remainingDays = grant.expired ? 0 : Math.max(0, grant.grantedDays - grant.usedDays);
   }
 
-  // Calculate carryover for each grant (remaining from previous grant at time of this grant)
+  // Calculate carryover
   for (let i = 0; i < sortedGrants.length; i++) {
     if (i === 0) {
       sortedGrants[i].carryoverDays = 0;
     } else {
       const prev = sortedGrants[i - 1];
-      // Carryover = previous grant's remaining days at the time this grant was made
-      // If previous expired before this grant, carryover is 0
       if (prev.expiryDate <= sortedGrants[i].grantDate) {
         sortedGrants[i].carryoverDays = 0;
       } else {
@@ -1167,28 +1168,32 @@ async function loadLeaveDetails() {
 
       // Period: grant date ~ next grant date - 1 day
       const nextGrant = processedGrants[origIdx + 1];
-      const periodEnd = nextGrant ? new Date(nextGrant.grantDate.getTime() - 86400000) : new Date();
+      // If no next grant yet, calculate next grant date (current grant + 12 months) - 1 day
+      let periodEnd;
+      if (nextGrant) {
+        periodEnd = new Date(nextGrant.grantDate.getTime() - 86400000);
+      } else {
+        const nextDate = new Date(g.grantDate);
+        nextDate.setMonth(nextDate.getMonth() + 12);
+        periodEnd = new Date(nextDate.getTime() - 86400000);
+      }
 
       // Records used within this grant's validity (for display)
-      // Filter records within this grant PERIOD (grant date ~ next grant date - 1 day)
-      const periodEndDate = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
-      const grantRecords = leaveRecords.filter(r => {
-        const d = new Date(r[F.leaveDate]);
-        return d >= gStart && d < periodEndDate;
-      }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
-
-      let actualUsedDays = 0;
-      grantRecords.forEach(r => { actualUsedDays += getRecordDays(r); });
+      // Use FIFO-consumed records (which records were actually deducted from this grant)
+      const consumedItems = g.consumedRecords || [];
+      const grantRecords = consumedItems.map(c => c.record);
+      let actualUsedDays = g.usedDays;
 
       const grantNum = origIdx + 1;
       const carryover = g.carryoverDays || 0;
+      const isCurrent = g.isCurrentPeriod;
 
       return `
-      <div class="card" style="border-left:4px solid ${g.expired ? '#999' : 'var(--primary)'};" id="grant-card-${idx}">
+      <div class="card" style="border-left:4px solid ${g.expired ? '#999' : isCurrent ? 'var(--primary)' : 'var(--primary)'}; ${isCurrent ? 'box-shadow:0 2px 8px rgba(98,100,167,0.15);' : ''}" id="grant-card-${idx}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div>
             <div style="font-weight:700;font-size:15px;color:${g.expired ? '#999' : 'var(--primary)'};">
-              付与${grantNum}
+              付与${grantNum}${isCurrent ? '<span style="font-size:12px;color:#fff;background:var(--primary);padding:1px 8px;border-radius:10px;margin-left:6px;">現在</span>' : ''}
             </div>
             <div style="font-size:12px;color:var(--text-light);">
               ${formatDateShort(g.grantDate)} ～ ${formatDateShort(periodEnd)}
@@ -1255,10 +1260,10 @@ async function loadLeaveDetails() {
             }).join('')}
           </div>
         ` : `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px;">取得なし</div>`}
+
+        ${isCurrent && !resigned ? `<button class="btn btn-primary btn-block btn-lg" onclick="openApplyScreen()" style="margin-top:12px;">新規申請</button>` : ''}
       </div>`;
     }).join('')}
-
-    ${!resigned ? `<button class="btn btn-primary btn-block btn-lg" onclick="openApplyScreen()" style="margin-bottom:16px;">新規申請</button>` : ''}
   `;
 }
 
@@ -1692,13 +1697,18 @@ function copyDetailToClipboard() {
     const origIdx = grants.indexOf(g);
     const grantNum = origIdx + 1;
     const nextGrant = grants[origIdx + 1];
-    const periodEnd = nextGrant ? new Date(nextGrant.grantDate.getTime() - 86400000) : g.expiryDate;
+    let periodEnd;
+    if (nextGrant) {
+      periodEnd = new Date(nextGrant.grantDate.getTime() - 86400000);
+    } else {
+      const nd = new Date(g.grantDate);
+      nd.setMonth(nd.getMonth() + 12);
+      periodEnd = new Date(nd.getTime() - 86400000);
+    }
 
     const periodEndDate = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
-    const grantRecords = records.filter(r => {
-      const d = new Date(r[F.leaveDate]);
-      return d >= g.grantDate && d < periodEndDate;
-    }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
+    const consumedItems = g.consumedRecords || [];
+    const grantRecords = consumedItems.map(c => c.record);
 
     text += '\n■ 付与' + grantNum + '（' + formatDateShort(g.grantDate) + ' ～ ' + formatDateShort(periodEnd) + '）\n';
     text += '  付与 ' + g.grantedDays + '日 / 使用 ' + g.usedDays + '日 / 消滅 ' + (g.expiredDays||0) + '日 / 残 ' + g.remainingDays + '日';
