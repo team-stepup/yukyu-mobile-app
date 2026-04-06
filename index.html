@@ -1163,12 +1163,9 @@ async function loadLeaveDetails() {
 
     ${(() => {
       // Pre-calculate display values in chronological order (oldest first)
-      // Key insight: carryover = previous grant's "period remain" at the time THIS grant starts
-      // A grant's period remain = carryover + granted - period_used
-      // Expiration happens at expiryDate (2 years), NOT at next grant date
-      // So carryover to next grant = previous period remain, but capped:
-      //   if previous grant expired BEFORE this grant starts → carryover = 0
-      //   else → carryover = previous _displayRemain
+      // Formula: 残 = 付与 + 繰越 - 消滅 - 使用
+      // 繰越 = ALWAYS previous grant card's 残
+      // 消滅 = shown on the card whose period contains the old grant's 2-year expiryDate
       processedGrants.forEach((g, i) => {
         const nextG = processedGrants[i + 1];
         const pEndFilter = nextG ? nextG.grantDate : new Date(9999,0,1);
@@ -1180,43 +1177,44 @@ async function loadLeaveDetails() {
         pRecords.forEach(r => { pUsed += getRecordDays(r); });
         g._periodUsed = pUsed;
 
-        // Carryover from previous grant
+        // Carryover: ALWAYS = previous grant's display remain
         const prevG = i > 0 ? processedGrants[i - 1] : null;
-        if (!prevG) {
-          g._displayCarryover = 0;
-        } else if (prevG.expiryDate <= g.grantDate) {
-          // Previous grant expired before this one started → no carryover, but expired days
-          g._displayCarryover = 0;
-        } else {
-          // Previous grant still valid when this one starts → carry over the remain
-          g._displayCarryover = prevG._displayRemain || 0;
+        g._displayCarryover = prevG ? Math.max(0, prevG._displayRemain || 0) : 0;
+
+        // Check which older grants expire during this period
+        let expiredTotal = 0;
+        g._expiredDetails = []; // track for display message
+        for (let j = 0; j < i; j++) {
+          const oldG = processedGrants[j];
+          if (oldG.expiryDate > g.grantDate && oldG.expiryDate <= pEndFilter) {
+            // oldG expires during this period
+            if (j === i - 1) {
+              // Previous grant expires: carryover portion may expire
+              const usedBeforeExpiry = leaveRecords.filter(r => {
+                const d = new Date(r[F.leaveDate]);
+                return d >= g.grantDate && d < oldG.expiryDate;
+              }).reduce((sum, r) => sum + getRecordDays(r), 0);
+              const carryoverRemainAtExpiry = Math.max(0, g._displayCarryover - usedBeforeExpiry);
+              if (carryoverRemainAtExpiry > 0) {
+                expiredTotal += carryoverRemainAtExpiry;
+                g._expiredDetails.push({ date: oldG.expiryDate, days: carryoverRemainAtExpiry });
+              }
+            }
+            // For j < i-1: those grants' balances already expired in earlier periods
+          }
         }
 
-        // Period remain (before considering expiry of THIS grant)
-        const periodRemain = Math.max(0, g._displayCarryover + g.grantedDays - pUsed);
-
-        // Check if the carryover portion expired during this period
-        // The carryover came from the previous grant, which expires at prevG.expiryDate
-        let expiredFromCarryover = 0;
-        if (prevG && prevG.expiryDate > g.grantDate && prevG.expiryDate <= (nextG ? nextG.grantDate : new Date(9999,0,1))) {
-          // Previous grant expires during THIS period
-          // Calculate how much of the carryover was used before expiry
-          const usedBeforeExpiry = leaveRecords.filter(r => {
-            const d = new Date(r[F.leaveDate]);
-            return d >= g.grantDate && d < prevG.expiryDate;
-          }).reduce((sum, r) => sum + getRecordDays(r), 0);
-          const carryoverRemainAtExpiry = Math.max(0, g._displayCarryover - usedBeforeExpiry);
-          expiredFromCarryover = carryoverRemainAtExpiry;
+        // Self-expiry: if this is the last grant and it's expired
+        if (!nextG && g.expired) {
+          const remainBeforeSelfExpiry = Math.max(0, g._displayCarryover + g.grantedDays - pUsed - expiredTotal);
+          if (remainBeforeSelfExpiry > 0) {
+            expiredTotal += remainBeforeSelfExpiry;
+            g._expiredDetails.push({ date: g.expiryDate, days: remainBeforeSelfExpiry });
+          }
         }
 
-        if (g.expired) {
-          // This entire grant is expired
-          g._displayExpired = Math.max(0, periodRemain);
-          g._displayRemain = 0;
-        } else {
-          g._displayExpired = expiredFromCarryover;
-          g._displayRemain = Math.max(0, periodRemain - expiredFromCarryover);
-        }
+        g._displayExpired = expiredTotal;
+        g._displayRemain = Math.max(0, g._displayCarryover + g.grantedDays - pUsed - expiredTotal);
       });
       return '';
     })()}
@@ -1299,11 +1297,11 @@ async function loadLeaveDetails() {
           </div>
         </div>
 
-        ${g.expired && displayExpired > 0 ? `
+        ${displayExpired > 0 && g._expiredDetails && g._expiredDetails.length > 0 ? g._expiredDetails.map(ed => `
           <div style="background:#ffebee;border-radius:6px;padding:6px 10px;font-size:12px;color:var(--danger);margin-bottom:8px;">
-            ${formatDateShort(g.expiryDate)} に未使用 ${displayExpired}日 が時効消滅
+            ${formatDateShort(ed.date)} に未使用 ${ed.days}日 が時効消滅
           </div>
-        ` : ''}
+        `).join('') : ''}
 
         ${grantRecords.length > 0 ? `
           <div style="font-size:12px;font-weight:600;color:var(--text-light);margin-bottom:6px;">
