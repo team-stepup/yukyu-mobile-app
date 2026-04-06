@@ -1001,7 +1001,7 @@ function calculateGrants(kisanDateStr) {
 }
 
 function applyUsageFIFO(grants, leaveRecords) {
-  // Sort grants by grant date ascending (FIFO)
+  // Sort grants by grant date ascending (FIFO - oldest first)
   const sortedGrants = [...grants].sort((a, b) => a.grantDate - b.grantDate);
 
   // Sort leave records by date ascending
@@ -1015,10 +1015,14 @@ function applyUsageFIFO(grants, leaveRecords) {
     let daysToConsume = getRecordDays(record);
     const recordDate = new Date(record[F.leaveDate]);
 
+    // FIFO: consume from oldest grant first
+    // A grant can be consumed if: record date is before grant expiry AND grant was already granted
     for (const grant of sortedGrants) {
       if (daysToConsume <= 0) break;
-      // Record must fall within grant's validity period
-      if (recordDate < grant.grantDate || recordDate >= grant.expiryDate) continue;
+      // Grant must be already granted at the time of record
+      if (recordDate < grant.grantDate) continue;
+      // Grant must not be expired at the time of record
+      if (recordDate >= grant.expiryDate) continue;
 
       const available = grant.grantedDays - grant.usedDays;
       if (available <= 0) continue;
@@ -1029,7 +1033,7 @@ function applyUsageFIFO(grants, leaveRecords) {
     }
   }
 
-  // Calculate expired days for expired grants
+  // Calculate expired days and remaining days
   for (const grant of sortedGrants) {
     if (grant.expired) {
       grant.expiredDays = Math.max(0, grant.grantedDays - grant.usedDays);
@@ -1037,6 +1041,22 @@ function applyUsageFIFO(grants, leaveRecords) {
       grant.expiredDays = 0;
     }
     grant.remainingDays = grant.expired ? 0 : Math.max(0, grant.grantedDays - grant.usedDays);
+  }
+
+  // Calculate carryover for each grant (remaining from previous grant at time of this grant)
+  for (let i = 0; i < sortedGrants.length; i++) {
+    if (i === 0) {
+      sortedGrants[i].carryoverDays = 0;
+    } else {
+      const prev = sortedGrants[i - 1];
+      // Carryover = previous grant's remaining days at the time this grant was made
+      // If previous expired before this grant, carryover is 0
+      if (prev.expiryDate <= sortedGrants[i].grantDate) {
+        sortedGrants[i].carryoverDays = 0;
+      } else {
+        sortedGrants[i].carryoverDays = prev.remainingDays;
+      }
+    }
   }
 
   return sortedGrants;
@@ -1145,19 +1165,23 @@ async function loadLeaveDetails() {
       const gStart = g.grantDate;
       const gEnd = g.expiryDate;
 
-      // Period: grant date ~ next grant date - 1 day (or expiry if last)
+      // Period: grant date ~ next grant date - 1 day
       const nextGrant = processedGrants[origIdx + 1];
-      const periodEnd = nextGrant ? new Date(nextGrant.grantDate.getTime() - 86400000) : g.expiryDate;
+      const periodEnd = nextGrant ? new Date(nextGrant.grantDate.getTime() - 86400000) : new Date();
 
+      // Records used within this grant's validity (for display)
+      // Filter records within this grant PERIOD (grant date ~ next grant date - 1 day)
+      const periodEndDate = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
       const grantRecords = leaveRecords.filter(r => {
         const d = new Date(r[F.leaveDate]);
-        return d >= gStart && d < gEnd;
+        return d >= gStart && d < periodEndDate;
       }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
 
       let actualUsedDays = 0;
       grantRecords.forEach(r => { actualUsedDays += getRecordDays(r); });
 
       const grantNum = origIdx + 1;
+      const carryover = g.carryoverDays || 0;
 
       return `
       <div class="card" style="border-left:4px solid ${g.expired ? '#999' : 'var(--primary)'};" id="grant-card-${idx}">
@@ -1176,26 +1200,31 @@ async function loadLeaveDetails() {
           </span>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:10px;text-align:center;">
-          <div style="background:#f0f0ff;border-radius:8px;padding:8px 4px;">
-            <div style="font-size:10px;color:var(--text-light);">付与</div>
-            <div style="font-size:18px;font-weight:700;color:var(--primary);">${g.grantedDays}</div>
-            <div style="font-size:10px;color:var(--text-light);">日</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:4px;margin-bottom:10px;text-align:center;">
+          <div style="background:${g.expiredDays > 0 ? '#ffebee' : '#f5f5f5'};border-radius:8px;padding:8px 2px;">
+            <div style="font-size:9px;color:var(--text-light);">消滅</div>
+            <div style="font-size:16px;font-weight:700;color:${g.expiredDays > 0 ? 'var(--danger)' : '#999'};">${g.expiredDays || 0}</div>
+            <div style="font-size:9px;color:var(--text-light);">日</div>
           </div>
-          <div style="background:#fff3e0;border-radius:8px;padding:8px 4px;">
-            <div style="font-size:10px;color:var(--text-light);">使用</div>
-            <div style="font-size:18px;font-weight:700;color:#e65100;">${g.usedDays}</div>
-            <div style="font-size:10px;color:var(--text-light);">日</div>
+          <div style="background:#f5f5f5;border-radius:8px;padding:8px 2px;">
+            <div style="font-size:9px;color:var(--text-light);">繰越</div>
+            <div style="font-size:16px;font-weight:700;color:#7b1fa2;">${carryover}</div>
+            <div style="font-size:9px;color:var(--text-light);">日</div>
           </div>
-          <div style="background:${g.expiredDays > 0 ? '#ffebee' : '#f5f5f5'};border-radius:8px;padding:8px 4px;">
-            <div style="font-size:10px;color:var(--text-light);">消滅</div>
-            <div style="font-size:18px;font-weight:700;color:${g.expiredDays > 0 ? 'var(--danger)' : '#999'};">${g.expiredDays || 0}</div>
-            <div style="font-size:10px;color:var(--text-light);">日</div>
+          <div style="background:#f0f0ff;border-radius:8px;padding:8px 2px;">
+            <div style="font-size:9px;color:var(--text-light);">付与</div>
+            <div style="font-size:16px;font-weight:700;color:var(--primary);">${g.grantedDays}</div>
+            <div style="font-size:9px;color:var(--text-light);">日</div>
           </div>
-          <div style="background:${g.remainingDays > 0 ? '#e8f5e9' : '#f5f5f5'};border-radius:8px;padding:8px 4px;">
-            <div style="font-size:10px;color:var(--text-light);">残</div>
-            <div style="font-size:18px;font-weight:700;color:${g.remainingDays > 0 ? '#2e7d32' : '#999'};">${g.remainingDays}</div>
-            <div style="font-size:10px;color:var(--text-light);">日</div>
+          <div style="background:#fff3e0;border-radius:8px;padding:8px 2px;">
+            <div style="font-size:9px;color:var(--text-light);">使用</div>
+            <div style="font-size:16px;font-weight:700;color:#e65100;">${g.usedDays}</div>
+            <div style="font-size:9px;color:var(--text-light);">日</div>
+          </div>
+          <div style="background:${g.remainingDays > 0 ? '#e8f5e9' : '#f5f5f5'};border-radius:8px;padding:8px 2px;">
+            <div style="font-size:9px;color:var(--text-light);">残</div>
+            <div style="font-size:16px;font-weight:700;color:${g.remainingDays > 0 ? '#2e7d32' : '#999'};">${g.remainingDays}</div>
+            <div style="font-size:9px;color:var(--text-light);">日</div>
           </div>
         </div>
 
@@ -1221,7 +1250,7 @@ async function loadLeaveDetails() {
                 </span>
                 <span style="margin-left:4px;font-size:11px;color:var(--text-light);">${dayCount}日</span>
                 <button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
-                  style="margin-left:auto;background:none;border:1px solid #ddd;border-radius:50%;width:24px;height:24px;font-size:14px;color:#999;cursor:pointer;line-height:1;">&times;</button>
+                  style="margin-left:auto;background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;">&times;</button>
               </div>`;
             }).join('')}
           </div>
@@ -1287,7 +1316,7 @@ function renderApplyScreen() {
     <div class="card">
       <div class="section-title">取得区分</div>
       <div class="type-selector" id="leaveTypeSelector" style="grid-template-columns: 1fr 1fr 1fr;">
-        <div class="type-option active" data-type="1日（定時）" onclick="selectLeaveType(this)">1日<br>（定時）</div>
+        <div class="type-option active" data-type="1日（定時）" onclick="selectLeaveType(this)"><span style="font-size:16px;">1日</span><br><span style="font-size:11px;color:var(--text-light);">（定時）</span></div>
         <div class="type-option" data-type="半日（午前）" onclick="selectLeaveType(this)">AM<br>有給</div>
         <div class="type-option" data-type="半日（午後）" onclick="selectLeaveType(this)">PM<br>有給</div>
       </div>
@@ -1665,9 +1694,10 @@ function copyDetailToClipboard() {
     const nextGrant = grants[origIdx + 1];
     const periodEnd = nextGrant ? new Date(nextGrant.grantDate.getTime() - 86400000) : g.expiryDate;
 
+    const periodEndDate = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
     const grantRecords = records.filter(r => {
       const d = new Date(r[F.leaveDate]);
-      return d >= g.grantDate && d < g.expiryDate;
+      return d >= g.grantDate && d < periodEndDate;
     }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
 
     text += '\n■ 付与' + grantNum + '（' + formatDateShort(g.grantDate) + ' ～ ' + formatDateShort(periodEnd) + '）\n';
