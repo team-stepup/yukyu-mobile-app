@@ -962,10 +962,12 @@ const GRANT_TABLE = [
   { months: 78, days: 20 },
 ];
 
-function calculateGrants(kisanDateStr) {
+function calculateGrants(kisanDateStr, retireDateStr) {
   if (!kisanDateStr) return [];
   const kisanDate = new Date(kisanDateStr);
   const today = new Date();
+  // 退社日がある場合、その日以降の付与は生成しない
+  const cutoffDate = retireDateStr ? new Date(retireDateStr) : today;
   const grants = [];
 
   for (let i = 0; i < 30; i++) {
@@ -979,7 +981,7 @@ function calculateGrants(kisanDateStr) {
     const grantDate = new Date(kisanDate);
     grantDate.setMonth(grantDate.getMonth() + months);
 
-    if (grantDate > today) break;
+    if (grantDate > cutoffDate) break;
 
     const expiryDate = new Date(grantDate);
     expiryDate.setFullYear(expiryDate.getFullYear() + 2);
@@ -1101,7 +1103,8 @@ async function loadLeaveDetails() {
   if (!emp) return;
 
   const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
-  const grants = calculateGrants(kisanDate);
+  const retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+  const grants = calculateGrants(kisanDate, retireDate);
 
   // Load leave records from SharePoint
   const filter = "$filter=" + F.syainNo + " eq " + emp[F.syainNo] +
