@@ -661,9 +661,30 @@ const MSAL_CONFIG = {
 
 const SP_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/PowerApps';
 const SP_SCOPES = ['https://teamstepupcom774.sharepoint.com/AllSites.Write'];
-const LIST_EMPLOYEES = '社員データsyain';
-const LIST_LEAVE = 'ゆうきゅうしんせい';
+const LIST_EMPLOYEES_GUID = '05a5a986-5958-4664-bb0d-7c1cfaedf845';
+const LIST_LEAVE_GUID = 'fe50ad49-5069-401d-ab2f-8d94fa826d1d';
 const LIST_ITEM_ENTITY = 'SP.Data.List10ListItem';
+
+// Field names (OData_ prefix required for REST API)
+const F = {
+  syainNo: 'OData__x793e__x54e1__x756a__x53f7_',
+  nyushaDate: 'OData__x5165__x793e__x65e5_',
+  kisanDate: 'OData__x30b9__x30c6__x30c3__x30d7__x30',
+  hakenTaisha: 'OData__x6d3e__x9063__x5148__x9000__x79',
+  yukyuTaisha: 'OData__x9000__x8077__x5e74__x6708__x65',
+  fullDayHours: 'OData__x6709__x4f11__xff08__xff11__x65',
+  amHours: 'OData__x6709__x4f11__xff08__x5348__x52',
+  pmHours: 'OData__x6709__x4f11__xff08__x5348__x5f',
+  // Leave list fields
+  leaveDate: 'OData__x6709__x7d66__x53d6__x5f97__x65',
+  leaveType: 'OData__x53d6__x5f97__x65e5__x6570_',
+  leaveHours: 'OData__x3057__x3085__x3068__x304f__x30',
+  hourlyRate: 'OData__x6642__x7d66__x30b8__x30ad__x30',
+  amount: 'OData__x91d1__x984d__x304d__x3093__x30',
+  category: 'OData__x7533__x8acb__x533a__x5206__x30',
+  closingDay: 'OData__x7d66__x6599__x8a08__x7b97__x30',
+  shimei: 'OData__x6c0f__x540d_',
+};
 
 let msalInstance = null;
 let accessToken = null;
@@ -759,7 +780,7 @@ async function getToken() {
 async function spGet(listName, query) {
   const token = await getToken();
   if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return null; }
-  const url = SP_SITE_URL + "/_api/web/lists/getbytitle('" + listName + "')/items" + (query ? '?' + query : '');
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + listName + "')/items" + (query ? '?' + query : '');
   const resp = await fetch(url, {
     headers: {
       'Authorization': 'Bearer ' + token,
@@ -778,7 +799,7 @@ async function spGet(listName, query) {
 async function spPost(listName, body) {
   const token = await getToken();
   if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return null; }
-  const url = SP_SITE_URL + "/_api/web/lists/getbytitle('" + listName + "')/items";
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + listName + "')/items";
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
@@ -842,8 +863,8 @@ async function searchEmployee() {
 
   showSpinner();
   try {
-    const filter = "$filter=_x793e__x54e1__x756a__x53f7_ eq " + num + "&$top=10";
-    const results = await spGet(LIST_EMPLOYEES, filter);
+    const filter = "$filter=" + F.syainNo + " eq " + num + "&$top=10";
+    const results = await spGet(LIST_EMPLOYEES_GUID, filter);
 
     if (!results || results.length === 0) {
       container.innerHTML = '<div class="empty-state"><p>該当する社員が見つかりません</p></div>';
@@ -851,13 +872,13 @@ async function searchEmployee() {
     }
 
     container.innerHTML = results.map(emp => {
-      const kisanDate = emp._x30b9__x30c6__x30c3__x30d7__x30 || emp._x5165__x793e__x65e5_;
+      const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
       const resigned = isResigned(emp);
       return `
         <div class="card card-clickable" onclick='selectEmployee(${JSON.stringify(emp).replace(/'/g, "&#39;")})'>
           <div class="emp-card-arrow">&#8250;</div>
           <div class="emp-card-name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
-          <div class="emp-card-num">社員番号: ${emp._x793e__x54e1__x756a__x53f7_ || ''}</div>
+          <div class="emp-card-num">社員番号: ${emp[F.syainNo] || ''}</div>
           <div class="emp-card-date">起算日: ${formatDate(kisanDate)}</div>
         </div>
       `;
@@ -872,7 +893,7 @@ async function searchEmployee() {
 }
 
 function isResigned(emp) {
-  const retireDate = emp._x9000__x8077__x5e74__x6708__x65 || emp._x6d3e__x9063__x5148__x9000__x79;
+  const retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
   if (!retireDate) return false;
   return new Date(retireDate) < new Date();
 }
@@ -959,14 +980,14 @@ function applyUsageFIFO(grants, leaveRecords) {
 
   // Sort leave records by date ascending
   const sortedRecords = [...leaveRecords].sort((a, b) => {
-    const da = new Date(a._x6709__x7d66__x53d6__x5f97__x65);
-    const db = new Date(b._x6709__x7d66__x53d6__x5f97__x65);
+    const da = new Date(a[F.leaveDate]);
+    const db = new Date(b[F.leaveDate]);
     return da - db;
   });
 
   for (const record of sortedRecords) {
     let daysToConsume = getRecordDays(record);
-    const recordDate = new Date(record._x6709__x7d66__x53d6__x5f97__x65);
+    const recordDate = new Date(record[F.leaveDate]);
 
     for (const grant of sortedGrants) {
       if (daysToConsume <= 0) break;
@@ -996,13 +1017,13 @@ function applyUsageFIFO(grants, leaveRecords) {
 }
 
 function getRecordDays(record) {
-  const type = record._x53d6__x5f97__x65e5__x6570_;
+  const type = record[F.leaveType];
   if (!type) return 1;
   if (type.indexOf('1日') >= 0 || type.indexOf('定時') >= 0) return 1;
   if (type.indexOf('半日') >= 0 || type.indexOf('午前') >= 0 || type.indexOf('午後') >= 0) return 0.5;
   if (type.indexOf('時間') >= 0) {
-    const hours = record._x3057__x3085__x3068__x304f__x30 || 0;
-    const fullDayHours = currentEmployee ? (currentEmployee._x6709__x4f11__xff08__xff11__x65 || 8) : 8;
+    const hours = record[F.leaveHours] || 0;
+    const fullDayHours = currentEmployee ? (currentEmployee[F.fullDayHours] || 8) : 8;
     return hours / fullDayHours;
   }
   return 1;
@@ -1015,15 +1036,15 @@ async function loadLeaveDetails() {
   const emp = currentEmployee;
   if (!emp) return;
 
-  const kisanDate = emp._x30b9__x30c6__x30c3__x30d7__x30 || emp._x5165__x793e__x65e5_;
+  const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
   const grants = calculateGrants(kisanDate);
 
   // Load leave records from SharePoint
-  const filter = "$filter=_x793e__x54e1__x756a__x53f7_ eq " + emp._x793e__x54e1__x756a__x53f7_ +
-    "&$orderby=_x6709__x7d66__x53d6__x5f97__x65 desc&$top=500";
+  const filter = "$filter=" + F.syainNo + " eq " + emp[F.syainNo] +
+    "&$orderby=" + F.leaveDate + " desc&$top=500";
   let leaveRecords = [];
   try {
-    leaveRecords = await spGet(LIST_LEAVE, filter) || [];
+    leaveRecords = await spGet(LIST_LEAVE_GUID, filter) || [];
   } catch (e) {
     console.error('Leave records fetch error:', e);
   }
@@ -1052,7 +1073,7 @@ async function loadLeaveDetails() {
   container.innerHTML = `
     <div class="detail-header">
       <div class="name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
-      <div class="sub">社員番号: ${emp._x793e__x54e1__x756a__x53f7_ || ''} | 起算日: ${formatDate(kisanDate)}</div>
+      <div class="sub">社員番号: ${emp[F.syainNo] || ''} | 起算日: ${formatDate(kisanDate)}</div>
     </div>
 
     <div class="balance-row">
@@ -1108,9 +1129,9 @@ async function loadLeaveDetails() {
       ${leaveRecords.length === 0 ? '<div class="empty-state"><p>申請履歴がありません</p></div>' :
         leaveRecords.slice(0, 20).map(r => `
           <div class="history-item">
-            <div class="history-date">${formatDate(r._x6709__x7d66__x53d6__x5f97__x65)}</div>
-            <div>${escHtml(r._x6c0f__x540d_ || '')}</div>
-            <div class="history-type">${escHtml(r._x53d6__x5f97__x65e5__x6570_ || '')}</div>
+            <div class="history-date">${formatDate(r[F.leaveDate])}</div>
+            <div>${escHtml(r[F.shimei] || '')}</div>
+            <div class="history-type">${escHtml(r[F.leaveType] || '')}</div>
           </div>
         `).join('')
       }
@@ -1140,9 +1161,9 @@ function renderApplyScreen() {
   let totalRemain = 0;
   activeGrants.forEach(g => totalRemain += g.remainingDays);
 
-  const fullDayHours = emp._x6709__x4f11__xff08__xff11__x65 || 8;
-  const amHours = emp._x6709__x4f11__xff08__x5348__x52 || 4;
-  const pmHours = emp._x6709__x4f11__xff08__x5348__x5f || 4;
+  const fullDayHours = emp[F.fullDayHours] || 8;
+  const amHours = emp[F.amHours] || 4;
+  const pmHours = emp[F.pmHours] || 4;
 
   document.getElementById('applyContent').innerHTML = `
     <div class="detail-header">
@@ -1237,7 +1258,7 @@ function renderCalendar() {
   // Get applied dates as Set for quick lookup
   const appliedSet = new Set();
   appliedDatesCache.forEach(r => {
-    const d = new Date(r._x6709__x7d66__x53d6__x5f97__x65);
+    const d = new Date(r[F.leaveDate]);
     appliedSet.add(formatDateISO(d));
   });
 
@@ -1337,9 +1358,9 @@ function updateCalcSummary() {
   const emp = currentEmployee;
   if (!emp) return;
 
-  const fullDayHours = emp._x6709__x4f11__xff08__xff11__x65 || 8;
-  const amHours = emp._x6709__x4f11__xff08__x5348__x52 || 4;
-  const pmHours = emp._x6709__x4f11__xff08__x5348__x5f || 4;
+  const fullDayHours = emp[F.fullDayHours] || 8;
+  const amHours = emp[F.amHours] || 4;
+  const pmHours = emp[F.pmHours] || 4;
 
   let daysPerDate = 1;
   let hoursPerDate = fullDayHours;
@@ -1363,8 +1384,8 @@ function updateCalcSummary() {
   let hourlyRate = 0;
   if (appliedDatesCache.length > 0) {
     for (const r of appliedDatesCache) {
-      if (r._x6642__x7d66__x30b8__x30ad__x30 && r._x6642__x7d66__x30b8__x30ad__x30 > 0) {
-        hourlyRate = r._x6642__x7d66__x30b8__x30ad__x30;
+      if (r[F.hourlyRate] && r[F.hourlyRate] > 0) {
+        hourlyRate = r[F.hourlyRate];
         break;
       }
     }
@@ -1407,9 +1428,9 @@ async function submitLeaveApplication() {
   }
 
   const leaveType = getSelectedLeaveType();
-  const fullDayHours = emp._x6709__x4f11__xff08__xff11__x65 || 8;
-  const amHours = emp._x6709__x4f11__xff08__x5348__x52 || 4;
-  const pmHours = emp._x6709__x4f11__xff08__x5348__x5f || 4;
+  const fullDayHours = emp[F.fullDayHours] || 8;
+  const amHours = emp[F.amHours] || 4;
+  const pmHours = emp[F.pmHours] || 4;
 
   let hoursPerDate = fullDayHours;
   if (leaveType === '半日（午前）') hoursPerDate = amHours;
@@ -1419,8 +1440,8 @@ async function submitLeaveApplication() {
   let hourlyRate = 0;
   if (appliedDatesCache.length > 0) {
     for (const r of appliedDatesCache) {
-      if (r._x6642__x7d66__x30b8__x30ad__x30 && r._x6642__x7d66__x30b8__x30ad__x30 > 0) {
-        hourlyRate = r._x6642__x7d66__x30b8__x30ad__x30;
+      if (r[F.hourlyRate] && r[F.hourlyRate] > 0) {
+        hourlyRate = r[F.hourlyRate];
         break;
       }
     }
@@ -1432,7 +1453,7 @@ async function submitLeaveApplication() {
   // Duplicate check
   const appliedSet = new Set();
   appliedDatesCache.forEach(r => {
-    const d = new Date(r._x6709__x7d66__x53d6__x5f97__x65);
+    const d = new Date(r[F.leaveDate]);
     appliedSet.add(formatDateISO(d));
   });
 
@@ -1465,22 +1486,22 @@ async function submitLeaveApplication() {
       const amount = Math.round(hourlyRate * hoursPerDate);
       const body = {
         __metadata: { type: LIST_ITEM_ENTITY },
-        _x793e__x54e1__x756a__x53f7_: emp._x793e__x54e1__x756a__x53f7_,
+        [F.syainNo]: emp[F.syainNo],
         Title: emp.Title || '',
-        _x6c0f__x540d_: emp.Title || '',
-        _x6709__x7d66__x53d6__x5f97__x65: dateStr + 'T00:00:00Z',
-        _x53d6__x5f97__x65e5__x6570_: leaveType,
-        _x6642__x7d66__x30b8__x30ad__x30: hourlyRate,
-        _x91d1__x984d__x304d__x3093__x30: amount,
-        _x7533__x8acb__x533a__x5206__x30: category,
-        _x7d66__x6599__x8a08__x7b97__x30: closingDay,
+        [F.shimei]: emp.Title || '',
+        [F.leaveDate]: dateStr + 'T00:00:00Z',
+        [F.leaveType]: leaveType,
+        [F.hourlyRate]: hourlyRate,
+        [F.amount]: amount,
+        [F.category]: category,
+        [F.closingDay]: closingDay,
       };
 
       if (leaveType === '時間有給') {
-        body._x3057__x3085__x3068__x304f__x30 = hoursPerDate;
+        body[F.leaveHours] = hoursPerDate;
       }
 
-      await spPost(LIST_LEAVE, body);
+      await spPost(LIST_LEAVE_GUID, body);
       successCount++;
     } catch (e) {
       console.error('Submit error for ' + dateStr, e);
