@@ -1178,11 +1178,14 @@ async function loadLeaveDetails() {
         periodEnd = new Date(nextDate.getTime() - 86400000);
       }
 
-      // Records used within this grant's validity (for display)
-      // Use FIFO-consumed records (which records were actually deducted from this grant)
-      const consumedItems = g.consumedRecords || [];
-      const grantRecords = consumedItems.map(c => c.record);
-      let actualUsedDays = g.usedDays;
+      // Filter records within this grant PERIOD (grant date ~ next grant date)
+      const periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
+      const grantRecords = leaveRecords.filter(r => {
+        const d = new Date(r[F.leaveDate]);
+        return d >= gStart && d < periodEndFilter;
+      }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
+      let actualUsedDays = 0;
+      grantRecords.forEach(r => { actualUsedDays += getRecordDays(r); });
 
       const grantNum = origIdx + 1;
       const carryover = g.carryoverDays || 0;
@@ -1223,7 +1226,7 @@ async function loadLeaveDetails() {
           </div>
           <div style="background:#fff3e0;border-radius:8px;padding:8px 2px;">
             <div style="font-size:9px;color:var(--text-light);">使用</div>
-            <div style="font-size:16px;font-weight:700;color:#e65100;">${g.usedDays}</div>
+            <div style="font-size:16px;font-weight:700;color:#e65100;">${actualUsedDays}</div>
             <div style="font-size:9px;color:var(--text-light);">日</div>
           </div>
           <div style="background:${g.remainingDays > 0 ? '#e8f5e9' : '#f5f5f5'};border-radius:8px;padding:8px 2px;">
@@ -1247,6 +1250,8 @@ async function loadLeaveDetails() {
             ${grantRecords.map(r => {
               const typeLabel = getRecordTypeLabel(r);
               const dayCount = getRecordDays(r);
+              const twoMonthsAgo = new Date(); twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+              const canDelete = new Date(r[F.leaveDate]) >= twoMonthsAgo;
               return `
               <div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;">
                 <span style="min-width:95px;font-weight:500;">${formatDate(r[F.leaveDate])}</span>
@@ -1254,8 +1259,8 @@ async function loadLeaveDetails() {
                   ${typeLabel}
                 </span>
                 <span style="margin-left:4px;font-size:11px;color:var(--text-light);">${dayCount}日</span>
-                <button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
-                  style="margin-left:auto;background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;">&times;</button>
+                ${canDelete ? `<button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
+                  style="margin-left:auto;background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;">&times;</button>` : ''}
               </div>`;
             }).join('')}
           </div>
@@ -1706,12 +1711,16 @@ function copyDetailToClipboard() {
       periodEnd = new Date(nd.getTime() - 86400000);
     }
 
-    const periodEndDate = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
-    const consumedItems = g.consumedRecords || [];
-    const grantRecords = consumedItems.map(c => c.record);
+    const periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
+    const grantRecords = records.filter(r => {
+      const d = new Date(r[F.leaveDate]);
+      return d >= g.grantDate && d < periodEndFilter;
+    }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
+    let periodUsed = 0;
+    grantRecords.forEach(r => { periodUsed += getRecordDays(r); });
 
-    text += '\n■ 付与' + grantNum + '（' + formatDateShort(g.grantDate) + ' ～ ' + formatDateShort(periodEnd) + '）\n';
-    text += '  付与 ' + g.grantedDays + '日 / 使用 ' + g.usedDays + '日 / 消滅 ' + (g.expiredDays||0) + '日 / 残 ' + g.remainingDays + '日';
+    text += '\n■ 付与' + grantNum + (g.isCurrentPeriod ? '（現在）' : '') + '（' + formatDateShort(g.grantDate) + ' ～ ' + formatDateShort(periodEnd) + '）\n';
+    text += '  付与 ' + g.grantedDays + '日 / 使用 ' + periodUsed + '日 / 消滅 ' + (g.expiredDays||0) + '日 / 残 ' + g.remainingDays + '日';
     text += '  [' + (g.expired ? '消滅済' : '有効') + ']\n';
 
     if (g.expired && g.expiredDays > 0) {
@@ -1745,6 +1754,17 @@ function copyDetailToClipboard() {
 }
 
 async function deleteLeaveRecord(itemId, dateStr) {
+  // Block deletion of records older than 2 months
+  const twoMonthsAgo = new Date();
+  twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+    const recordDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    if (recordDate < twoMonthsAgo) {
+      showToast('2ヶ月以上前の記録は削除できません', 'error');
+      return;
+    }
+  }
   if (!confirm('この有給取得記録を削除しますか？\n取得日: ' + dateStr)) return;
   showSpinner();
   try {
