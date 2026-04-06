@@ -700,6 +700,7 @@ const F = {
   // Leave list fields
   leaveDate: 'OData__x6709__x7d66__x53d6__x5f97__x65',
   leaveType: 'OData__x53d6__x5f97__x65e5__x6570_',
+  leaveTypeDetail: 'OData__x53d6__x5f97__x65e5__x6570__x66',
   leaveHours: 'OData__x3057__x3085__x3068__x304f__x30',
   hourlyRate: 'OData__x6642__x7d66__x30b8__x30ad__x30',
   amount: 'OData__x91d1__x984d__x304d__x3093__x30',
@@ -1042,16 +1043,29 @@ function applyUsageFIFO(grants, leaveRecords) {
 }
 
 function getRecordDays(record) {
-  const type = record[F.leaveType];
-  if (!type) return 1;
-  if (type.indexOf('1日') >= 0 || type.indexOf('定時') >= 0) return 1;
-  if (type.indexOf('半日') >= 0 || type.indexOf('午前') >= 0 || type.indexOf('午後') >= 0) return 0.5;
-  if (type.indexOf('時間') >= 0) {
-    const hours = record[F.leaveHours] || 0;
-    const fullDayHours = currentEmployee ? (currentEmployee[F.fullDayHours] || 8) : 8;
-    return hours / fullDayHours;
+  // Use leaveTypeDetail (取得日数時間) as primary source: "1  日（定時）", "0.5日AM", "0.5日PM"
+  const detail = (record[F.leaveTypeDetail] || '').trim();
+  if (detail) {
+    if (detail.indexOf('0.5') >= 0) return 0.5;
+    if (detail.indexOf('1') >= 0) return 1;
   }
+  // Fallback to leaveType
+  const type = record[F.leaveType] || '';
+  if (type.indexOf('半日') >= 0 || type.indexOf('午前') >= 0 || type.indexOf('午後') >= 0) return 0.5;
   return 1;
+}
+
+function getRecordTypeLabel(record) {
+  const detail = (record[F.leaveTypeDetail] || '').trim();
+  if (detail) {
+    if (detail.indexOf('AM') >= 0 || detail.indexOf('午前') >= 0) return 'AM有給';
+    if (detail.indexOf('PM') >= 0 || detail.indexOf('午後') >= 0) return 'PM有給';
+    if (detail.indexOf('1') >= 0) return '1日';
+  }
+  const type = record[F.leaveType] || '';
+  if (type.indexOf('午前') >= 0) return 'AM有給';
+  if (type.indexOf('午後') >= 0) return 'PM有給';
+  return '1日';
 }
 
 // ============================================================
@@ -1127,44 +1141,33 @@ async function loadLeaveDetails() {
     </div>
 
     ${processedGrants.slice().reverse().map((g, idx) => {
+      const origIdx = processedGrants.indexOf(g);
       const gStart = g.grantDate;
       const gEnd = g.expiryDate;
+
+      // Period: grant date ~ next grant date - 1 day (or expiry if last)
+      const nextGrant = processedGrants[origIdx + 1];
+      const periodEnd = nextGrant ? new Date(nextGrant.grantDate.getTime() - 86400000) : g.expiryDate;
+
       const grantRecords = leaveRecords.filter(r => {
         const d = new Date(r[F.leaveDate]);
         return d >= gStart && d < gEnd;
       }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
 
-      // Calculate actual used days properly (1日=1, AM/PM=0.5)
       let actualUsedDays = 0;
       grantRecords.forEach(r => { actualUsedDays += getRecordDays(r); });
 
-      // Format leave type for display
-      function fmtType(r) {
-        const t = r[F.leaveType] || '';
-        if (t.indexOf('午前') >= 0) return 'AM有給';
-        if (t.indexOf('午後') >= 0) return 'PM有給';
-        if (t.indexOf('1日') >= 0 || t.indexOf('定時') >= 0) return '1日';
-        return t || '1日';
-      }
-      function fmtDays(r) {
-        const t = r[F.leaveType] || '';
-        if (t.indexOf('午前') >= 0 || t.indexOf('午後') >= 0) return '0.5日';
-        return '1日';
-      }
-
-      // Period label (e.g. "1年目" "2年目")
-      const periodLabel = idx === processedGrants.length - 1 ? '初回付与（入社半年後）' :
-        (processedGrants.length - idx - 1) + '年目';
+      const grantNum = origIdx + 1;
 
       return `
       <div class="card" style="border-left:4px solid ${g.expired ? '#999' : 'var(--primary)'};" id="grant-card-${idx}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div>
             <div style="font-weight:700;font-size:15px;color:${g.expired ? '#999' : 'var(--primary)'};">
-              ${escHtml(periodLabel)}
+              付与${grantNum}
             </div>
             <div style="font-size:12px;color:var(--text-light);">
-              付与日: ${formatDateShort(g.grantDate)} ～ 期限: ${formatDateShort(g.expiryDate)}
+              ${formatDateShort(g.grantDate)} ～ ${formatDateShort(periodEnd)}
             </div>
           </div>
           <span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;
@@ -1207,17 +1210,20 @@ async function loadLeaveDetails() {
             取得履歴 ${grantRecords.length}件（合計 ${actualUsedDays}日消化）
           </div>
           <div style="background:#fafafa;border-radius:8px;padding:4px 8px;">
-            ${grantRecords.map(r => `
+            ${grantRecords.map(r => {
+              const typeLabel = getRecordTypeLabel(r);
+              const dayCount = getRecordDays(r);
+              return `
               <div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;">
                 <span style="min-width:95px;font-weight:500;">${formatDate(r[F.leaveDate])}</span>
-                <span style="background:${fmtType(r)==='1日'?'#e3f2fd':'#fff3e0'};color:${fmtType(r)==='1日'?'#1565c0':'#e65100'};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;min-width:55px;text-align:center;">
-                  ${fmtType(r)}
+                <span style="background:${typeLabel==='1日'?'#e3f2fd':'#fff3e0'};color:${typeLabel==='1日'?'#1565c0':'#e65100'};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;min-width:55px;text-align:center;">
+                  ${typeLabel}
                 </span>
-                <span style="margin-left:4px;font-size:11px;color:var(--text-light);">${fmtDays(r)}</span>
+                <span style="margin-left:4px;font-size:11px;color:var(--text-light);">${dayCount}日</span>
                 <button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
                   style="margin-left:auto;background:none;border:1px solid #ddd;border-radius:50%;width:24px;height:24px;font-size:14px;color:#999;cursor:pointer;line-height:1;">&times;</button>
-              </div>
-            `).join('')}
+              </div>`;
+            }).join('')}
           </div>
         ` : `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px;">取得なし</div>`}
       </div>`;
@@ -1654,15 +1660,17 @@ function copyDetailToClipboard() {
   const records = appliedDatesCache || [];
 
   grants.slice().reverse().forEach((g, idx) => {
-    const periodLabel = idx === grants.length - 1 ? '初回付与（入社半年後）' :
-      (grants.length - idx - 1) + '年目';
+    const origIdx = grants.indexOf(g);
+    const grantNum = origIdx + 1;
+    const nextGrant = grants[origIdx + 1];
+    const periodEnd = nextGrant ? new Date(nextGrant.grantDate.getTime() - 86400000) : g.expiryDate;
+
     const grantRecords = records.filter(r => {
       const d = new Date(r[F.leaveDate]);
       return d >= g.grantDate && d < g.expiryDate;
     }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
 
-    text += '\n■ ' + periodLabel + '\n';
-    text += '  付与日: ' + formatDateShort(g.grantDate) + '  期限: ' + formatDateShort(g.expiryDate) + '\n';
+    text += '\n■ 付与' + grantNum + '（' + formatDateShort(g.grantDate) + ' ～ ' + formatDateShort(periodEnd) + '）\n';
     text += '  付与 ' + g.grantedDays + '日 / 使用 ' + g.usedDays + '日 / 消滅 ' + (g.expiredDays||0) + '日 / 残 ' + g.remainingDays + '日';
     text += '  [' + (g.expired ? '消滅済' : '有効') + ']\n';
 
@@ -1673,12 +1681,9 @@ function copyDetailToClipboard() {
     if (grantRecords.length > 0) {
       text += '  取得履歴:\n';
       grantRecords.forEach(r => {
-        const t = r[F.leaveType] || '';
-        let typeStr = '1日';
-        let dayStr = '1日';
-        if (t.indexOf('午前') >= 0) { typeStr = 'AM有給'; dayStr = '0.5日'; }
-        else if (t.indexOf('午後') >= 0) { typeStr = 'PM有給'; dayStr = '0.5日'; }
-        text += '    ' + formatDate(r[F.leaveDate]) + '  ' + typeStr + '（' + dayStr + '）\n';
+        const typeStr = getRecordTypeLabel(r);
+        const dayCount = getRecordDays(r);
+        text += '    ' + formatDate(r[F.leaveDate]) + '  ' + typeStr + '（' + dayCount + '日）\n';
       });
     }
   });
