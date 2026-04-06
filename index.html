@@ -1165,7 +1165,9 @@ async function loadLeaveDetails() {
       // Pre-calculate display values in chronological order (oldest first)
       // Formula: 残 = 付与 + 繰越 - 消滅 - 使用
       // 繰越 = ALWAYS previous grant card's 残
-      // 消滅 = shown on the card whose period contains the old grant's 2-year expiryDate
+      // 消滅 = 消滅日(=付与日+2年)がこの付与期間に含まれる場合に表示
+      //        消滅日は次の付与日と一致するため >= grantDate で判定
+      //        消滅日数はFIFO計算のexpiredDaysを使用（正確な残日数）
       processedGrants.forEach((g, i) => {
         const nextG = processedGrants[i + 1];
         const pEndFilter = nextG ? nextG.grantDate : new Date(9999,0,1);
@@ -1182,35 +1184,33 @@ async function loadLeaveDetails() {
         g._displayCarryover = prevG ? Math.max(0, prevG._displayRemain || 0) : 0;
 
         // Check which older grants expire during this period
+        // 消滅日 >= this grantDate AND 消滅日 < next grantDate
+        // (消滅日 = 付与日+2年 = 2つ後の付与日 なので、その付与カードに表示)
         let expiredTotal = 0;
-        g._expiredDetails = []; // track for display message
+        g._expiredDetails = [];
         for (let j = 0; j < i; j++) {
           const oldG = processedGrants[j];
-          if (oldG.expiryDate > g.grantDate && oldG.expiryDate <= pEndFilter) {
-            // oldG expires during this period
-            if (j === i - 1) {
-              // Previous grant expires: carryover portion may expire
-              const usedBeforeExpiry = leaveRecords.filter(r => {
-                const d = new Date(r[F.leaveDate]);
-                return d >= g.grantDate && d < oldG.expiryDate;
-              }).reduce((sum, r) => sum + getRecordDays(r), 0);
-              const carryoverRemainAtExpiry = Math.max(0, g._displayCarryover - usedBeforeExpiry);
-              if (carryoverRemainAtExpiry > 0) {
-                expiredTotal += carryoverRemainAtExpiry;
-                g._expiredDetails.push({ date: oldG.expiryDate, days: carryoverRemainAtExpiry });
-              }
+          if (oldG.expiryDate >= g.grantDate && oldG.expiryDate < pEndFilter) {
+            // oldGの消滅日がこの付与期間内 → FIFO計算の消滅日数を使用
+            if (oldG.expiredDays > 0) {
+              expiredTotal += oldG.expiredDays;
+              g._expiredDetails.push({
+                date: oldG.expiryDate,
+                days: oldG.expiredDays,
+                grantNum: j + 1
+              });
             }
-            // For j < i-1: those grants' balances already expired in earlier periods
           }
         }
 
-        // Self-expiry: if this is the last grant and it's expired
-        if (!nextG && g.expired) {
-          const remainBeforeSelfExpiry = Math.max(0, g._displayCarryover + g.grantedDays - pUsed - expiredTotal);
-          if (remainBeforeSelfExpiry > 0) {
-            expiredTotal += remainBeforeSelfExpiry;
-            g._expiredDetails.push({ date: g.expiryDate, days: remainBeforeSelfExpiry });
-          }
+        // Self-expiry: last grant with no next grant, and it's expired
+        if (!nextG && g.expired && g.expiredDays > 0) {
+          expiredTotal += g.expiredDays;
+          g._expiredDetails.push({
+            date: g.expiryDate,
+            days: g.expiredDays,
+            grantNum: i + 1
+          });
         }
 
         g._displayExpired = expiredTotal;
@@ -1299,7 +1299,7 @@ async function loadLeaveDetails() {
 
         ${displayExpired > 0 && g._expiredDetails && g._expiredDetails.length > 0 ? g._expiredDetails.map(ed => `
           <div style="background:#ffebee;border-radius:6px;padding:6px 10px;font-size:12px;color:var(--danger);margin-bottom:8px;">
-            ${formatDateShort(ed.date)} に未使用 ${ed.days}日 が時効消滅
+            ${formatDateShort(ed.date)} に付与${ed.grantNum}の未使用 ${ed.days}日 が時効消滅
           </div>
         `).join('') : ''}
 
@@ -1780,12 +1780,18 @@ function copyDetailToClipboard() {
     let periodUsed = 0;
     grantRecords.forEach(r => { periodUsed += getRecordDays(r); });
 
+    const dCarry = g._displayCarryover || 0;
+    const dExpired = g._displayExpired || 0;
+    const dRemain = g._displayRemain || 0;
+
     text += '\n■ 付与' + grantNum + (g.isCurrentPeriod ? '（現在）' : '') + '（' + formatDateShort(g.grantDate) + ' ～ ' + formatDateShort(periodEnd) + '）\n';
-    text += '  付与 ' + g.grantedDays + '日 / 使用 ' + periodUsed + '日 / 消滅 ' + (g.expiredDays||0) + '日 / 残 ' + g.remainingDays + '日';
+    text += '  消滅 ' + dExpired + '日 / 繰越 ' + dCarry + '日 / 付与 ' + g.grantedDays + '日 / 使用 ' + periodUsed + '日 / 残 ' + dRemain + '日';
     text += '  [' + (g.expired ? '消滅済' : '有効') + ']\n';
 
-    if (g.expired && g.expiredDays > 0) {
-      text += '  ※ ' + formatDateShort(g.expiryDate) + ' に ' + g.expiredDays + '日が時効消滅\n';
+    if (g._expiredDetails && g._expiredDetails.length > 0) {
+      g._expiredDetails.forEach(function(ed) {
+        text += '  ※ ' + formatDateShort(ed.date) + ' に付与' + ed.grantNum + 'の未使用 ' + ed.days + '日が時効消滅\n';
+      });
     }
 
     if (grantRecords.length > 0) {
