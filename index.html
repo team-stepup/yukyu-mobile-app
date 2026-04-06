@@ -765,9 +765,12 @@ async function spGet(listName, query) {
       'Authorization': 'Bearer ' + token,
       'Accept': 'application/json;odata=verbose',
     },
-    credentials: 'include',
   });
-  if (!resp.ok) throw new Error('SP API Error: ' + resp.status);
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error('SP API Error:', resp.status, errText);
+    throw new Error('SP API Error: ' + resp.status);
+  }
   const data = await resp.json();
   return data.d.results;
 }
@@ -783,7 +786,6 @@ async function spPost(listName, body) {
       'Accept': 'application/json;odata=verbose',
       'Content-Type': 'application/json;odata=verbose',
     },
-    credentials: 'include',
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
@@ -863,8 +865,8 @@ async function searchEmployee() {
     }).join('');
   } catch (e) {
     console.error('Search error:', e);
-    showToast('検索エラーが発生しました', 'error');
-    container.innerHTML = '<div class="empty-state"><p>エラーが発生しました</p></div>';
+    showToast('検索エラー: ' + e.message, 'error');
+    container.innerHTML = '<div class="empty-state"><p>エラー: ' + escHtml(e.message) + '</p></div>';
   } finally {
     hideSpinner();
   }
@@ -1539,4 +1541,5 @@ initMsal();
 </script>
 </body>
 </html>
+
 
