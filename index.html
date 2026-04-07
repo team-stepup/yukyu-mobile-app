@@ -216,6 +216,76 @@ body {
 .balance-box .unit { font-size: 12px; color: var(--text-light); }
 .balance-box.highlight { border-color: var(--primary); background: var(--selected-bg); }
 
+/* Top Tabs (有給管理 / 前払い) */
+.top-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid var(--primary);
+}
+.top-tab {
+  flex: 1;
+  padding: 10px 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: var(--card-bg);
+  color: var(--primary);
+  transition: background 0.2s, color 0.2s;
+}
+.top-tab.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* 前払い */
+.maebari-period-label {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-light);
+  margin-bottom: 8px;
+}
+.maebari-total-box {
+  text-align: center;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--selected-bg);
+  border: 2px solid var(--primary);
+  margin-bottom: 12px;
+}
+.maebari-total-box .label { font-size: 12px; color: var(--text-light); margin-bottom: 4px; }
+.maebari-total-box .amount { font-size: 28px; font-weight: 700; color: var(--primary); }
+.maebari-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.maebari-table th {
+  background: var(--primary);
+  color: #fff;
+  padding: 8px 6px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 12px;
+}
+.maebari-table td {
+  padding: 8px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.maebari-table td.amount-cell { text-align: right; font-weight: 600; }
+.maebari-table tr:nth-child(even) { background: #fafafa; }
+.maebari-nav { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 12px; }
+.maebari-nav button { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 16px; cursor: pointer; color: var(--primary); }
+.maebari-nav button:active { background: var(--selected-bg); }
+.maebari-nav .period-text { font-size: 14px; font-weight: 600; min-width: 200px; text-align: center; }
+
 /* Grant Table */
 .grant-table {
   width: 100%;
@@ -632,9 +702,15 @@ body {
     <div id="searchResults"></div>
   </div>
 
-  <!-- Screen 2: Leave Details -->
+  <!-- Screen 2: Leave Details / 前払い -->
   <div class="screen" id="detailScreen">
-    <div id="detailContent"></div>
+    <div id="detailHeader"></div>
+    <div class="top-tabs" id="topTabs" style="display:none;">
+      <button class="top-tab active" onclick="switchTopTab('yukyu')">有給管理</button>
+      <button class="top-tab" onclick="switchTopTab('maebari')">前払い</button>
+    </div>
+    <div id="yukyuContent"></div>
+    <div id="maebariContent" style="display:none;"></div>
   </div>
 
   <!-- Screen 3: Leave Application -->
@@ -689,7 +765,19 @@ const SP_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/PowerApps';
 const SP_SCOPES = ['https://teamstepupcom774.sharepoint.com/AllSites.Write'];
 const LIST_EMPLOYEES_GUID = '05a5a986-5958-4664-bb0d-7c1cfaedf845';
 const LIST_LEAVE_GUID = 'fe50ad49-5069-401d-ab2f-8d94fa826d1d';
+const LIST_MAEBARI_GUID = 'd34be315-365a-460f-976e-fb8da6977cec';
 const LIST_ITEM_ENTITY = 'SP.Data.List10ListItem';
+
+// 前払い field names
+const MF = {
+  payDate: 'OData__x652f__x6255__x65e5_',
+  syainNo: 'NO_x002e_',
+  name: 'OData__x540d__x3000__x3000__x3000__x52',
+  amount: 'OData__x91d1__x984d_',
+  total: 'OData__x5408__x8a08_',
+  fee: 'OData__x624b__x6570__x6599_',
+  hakensaki: 'OData__x6d3e__x9063__x5148_',
+};
 
 // Field names (OData_ prefix required for REST API)
 const F = {
@@ -721,6 +809,7 @@ let currentGrantData = null;
 let selectedDates = [];
 let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
+let maebariPeriodOffset = 0; // 0 = current period, -1 = previous, etc.
 let appliedDatesCache = [];
 
 // ============================================================
@@ -1168,13 +1257,20 @@ async function loadLeaveDetails() {
   const resigned = isResigned(emp);
   const hakensaki = getHakensaki(emp);
 
-  const container = document.getElementById('detailContent');
-  container.innerHTML = `
+  // Header (shared between 有給 and 前払い)
+  document.getElementById('detailHeader').innerHTML = `
     <div class="detail-header">
       <div class="name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
       <div class="sub">社員番号: ${emp[F.syainNo] || ''}${hakensaki ? ' | 派遣先: ' + escHtml(hakensaki) : ''} | 起算日: ${formatDate(kisanDate)}${resigned ? ' | 退社日: ' + getRetireDateStr(emp) : ''}</div>
     </div>
+  `;
 
+  // Show top tabs and reset to 有給 tab
+  document.getElementById('topTabs').style.display = 'flex';
+  switchTopTab('yukyu');
+
+  const container = document.getElementById('yukyuContent');
+  container.innerHTML = `
     <div class="balance-row">
       <div class="balance-box">
         <div class="label">繰越</div>
@@ -1316,6 +1412,138 @@ async function loadLeaveDetails() {
       </div>`;
     }).join('')}
   `;
+}
+
+// ============================================================
+// Top Tab Switch (有給管理 / 前払い)
+// ============================================================
+function switchTopTab(tab) {
+  const tabs = document.querySelectorAll('.top-tab');
+  tabs[0].classList.toggle('active', tab === 'yukyu');
+  tabs[1].classList.toggle('active', tab === 'maebari');
+  document.getElementById('yukyuContent').style.display = tab === 'yukyu' ? 'block' : 'none';
+  document.getElementById('maebariContent').style.display = tab === 'maebari' ? 'block' : 'none';
+  if (tab === 'maebari') {
+    maebariPeriodOffset = 0;
+    loadMaebariData();
+  }
+}
+
+// ============================================================
+// 前払い Period Calculation
+// ============================================================
+// N-th Friday of a given month (n=1 for 1st, n=2 for 2nd)
+function getNthFriday(year, month, n) {
+  const firstDay = new Date(year, month, 1);
+  let dayOfWeek = firstDay.getDay(); // 0=Sun..6=Sat
+  let firstFriday = 1 + ((5 - dayOfWeek + 7) % 7); // day of month for 1st Friday
+  return new Date(year, month, firstFriday + (n - 1) * 7);
+}
+
+// Get the 前払い period that contains today (offset by maebariPeriodOffset months)
+// Period: 2nd Friday of month M ~ 1st Friday of month M+1
+function getMaebariPeriod(offset) {
+  const today = new Date();
+  // Start from current month and apply offset
+  let refYear = today.getFullYear();
+  let refMonth = today.getMonth() + offset;
+  // Normalize month
+  while (refMonth < 0) { refMonth += 12; refYear--; }
+  while (refMonth > 11) { refMonth -= 12; refYear++; }
+
+  // Find which period contains today (when offset=0)
+  // Try: 2nd Friday of refMonth ~ 1st Friday of refMonth+1
+  const start = getNthFriday(refYear, refMonth, 2);
+  let endMonth = refMonth + 1;
+  let endYear = refYear;
+  if (endMonth > 11) { endMonth -= 12; endYear++; }
+  const end = getNthFriday(endYear, endMonth, 1);
+
+  return { start, end };
+}
+
+function formatCurrency(num) {
+  return '¥' + Math.round(num).toLocaleString();
+}
+
+// ============================================================
+// 前払い Data Loading
+// ============================================================
+async function loadMaebariData() {
+  const emp = currentEmployee;
+  if (!emp) return;
+
+  const container = document.getElementById('maebariContent');
+  container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+
+  const period = getMaebariPeriod(maebariPeriodOffset);
+  const startISO = period.start.toISOString();
+  const endISO = period.end.toISOString();
+
+  try {
+    const syainNo = emp[F.syainNo];
+    const filter = "$filter=" + MF.syainNo + " eq '" + syainNo + "' and " +
+      MF.payDate + " ge datetime'" + startISO + "' and " +
+      MF.payDate + " le datetime'" + endISO + "'" +
+      "&$orderby=" + MF.payDate + " desc&$top=100" +
+      "&$select=Id," + MF.payDate + "," + MF.amount + "," + MF.total + "," + MF.fee;
+    const records = await spGet(LIST_MAEBARI_GUID, filter) || [];
+
+    let grandTotal = 0;
+    records.forEach(r => {
+      const t = parseFloat(r[MF.total]) || 0;
+      grandTotal += t;
+    });
+
+    const periodLabel = formatDateShort(period.start) + ' ～ ' + formatDateShort(period.end);
+
+    container.innerHTML = `
+      <div class="maebari-nav">
+        <button onclick="changeMaebariPeriod(-1)">&lsaquo; 前</button>
+        <div class="period-text">${periodLabel}</div>
+        <button onclick="changeMaebariPeriod(1)">次 &rsaquo;</button>
+      </div>
+
+      <div class="maebari-total-box">
+        <div class="label">この期間の前払い合計</div>
+        <div class="amount">${formatCurrency(grandTotal)}</div>
+      </div>
+
+      ${records.length > 0 ? `
+        <table class="maebari-table">
+          <thead>
+            <tr>
+              <th>支払日</th>
+              <th>金額</th>
+              <th>手数料</th>
+              <th>合計</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${records.map(r => {
+              const amount = r[MF.amount] || '';
+              const fee = r[MF.fee] || '';
+              const total = parseFloat(r[MF.total]) || 0;
+              return `<tr>
+                <td>${formatDate(r[MF.payDate])}</td>
+                <td class="amount-cell">${escHtml(String(amount))}</td>
+                <td class="amount-cell">${escHtml(String(fee))}</td>
+                <td class="amount-cell" style="font-weight:700;">${formatCurrency(total)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      ` : '<div style="text-align:center;padding:20px;color:var(--text-light);">この期間の前払いデータはありません</div>'}
+    `;
+  } catch (e) {
+    console.error('Maebari fetch error:', e);
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">前払いデータの取得に失敗しました</div>';
+  }
+}
+
+function changeMaebariPeriod(direction) {
+  maebariPeriodOffset += direction;
+  loadMaebariData();
 }
 
 // ============================================================
