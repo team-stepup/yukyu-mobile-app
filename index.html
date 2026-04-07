@@ -910,13 +910,62 @@ body {
   font-size: 11px;
   margin-left: 8px;
 }
+
+/* 前払い一覧テーブル モバイル最適化 */
+.maebari-fit {
+  table-layout: fixed;
+  width: 100%;
+}
+.maebari-fit thead th,
+.maebari-fit tbody td {
+  padding: 6px 3px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.maebari-fit thead th:nth-child(1),
+.maebari-fit tbody td:nth-child(1) { width: 32px; text-align: center; }  /* No. */
+.maebari-fit thead th:nth-child(2),
+.maebari-fit tbody td:nth-child(2) { width: 52px; }  /* 派遣先 */
+.maebari-fit thead th:nth-child(3),
+.maebari-fit tbody td:nth-child(3) { width: 52px; }  /* 氏名 */
+.maebari-fit thead th:nth-child(4),
+.maebari-fit tbody td:nth-child(4) { width: 48px; text-align: right; }  /* 金額 */
+.maebari-fit thead th:nth-child(5),
+.maebari-fit tbody td:nth-child(5) { width: 32px; text-align: right; }  /* 手数 */
+.maebari-fit thead th:nth-child(6),
+.maebari-fit tbody td:nth-child(6) { width: 48px; }  /* 登録者 */
+.maebari-fit thead th:nth-child(7),
+.maebari-fit tbody td:nth-child(7) { width: 64px; font-size: 10px; }  /* 登録日時 */
+.maebari-fit .r { text-align: right; }
+
+/* 戻るボタン */
+.back-btn {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.back-btn:active { background: rgba(255,255,255,0.35); }
+.back-btn svg { width: 18px; height: 18px; }
 </style>
 </head>
 <body>
 
 <!-- Header -->
 <header class="app-header">
-  <button class="home-btn" id="homeBtn" onclick="switchScreen('searchScreen')" style="display:none;" title="ホーム">
+  <button class="back-btn" id="backBtn" onclick="goBack()" style="display:none;" title="戻る">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <button class="home-btn" id="homeBtn" onclick="screenHistory.length=0;switchScreen('searchScreen')" style="display:none;" title="ホーム">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
   </button>
   <h1 id="headerTitle">申請（前払、有給）</h1>
@@ -1238,7 +1287,15 @@ async function spPost(listName, body) {
 // ============================================================
 // Screen Navigation
 // ============================================================
-function switchScreen(screenId) {
+const screenHistory = [];
+let currentScreenId = 'loginScreen';
+
+function switchScreen(screenId, skipHistory) {
+  if (!skipHistory && currentScreenId && currentScreenId !== screenId) {
+    screenHistory.push(currentScreenId);
+  }
+  currentScreenId = screenId;
+
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
@@ -1248,12 +1305,21 @@ function switchScreen(screenId) {
   // Home button: show when not on home
   document.getElementById('homeBtn').style.display = screenId === 'searchScreen' ? 'none' : 'flex';
 
+  // Back button: show when there is history and not on home/login
+  document.getElementById('backBtn').style.display = (screenHistory.length > 0 && screenId !== 'searchScreen' && screenId !== 'loginScreen') ? 'flex' : 'none';
+
   // Hide fixed footer when not on maebari list
   const mFooter = document.getElementById('maebariListFooter');
   if (mFooter && screenId !== 'maebariListScreen') mFooter.style.display = 'none';
 
   if (screenId === 'maebariListScreen') initMaebariListDate();
   if (screenId === 'yukyuListScreen') initYukyuListDate();
+}
+
+function goBack() {
+  if (screenHistory.length === 0) { switchScreen('searchScreen'); return; }
+  const prev = screenHistory.pop();
+  switchScreen(prev, true);
 }
 
 function showScreen(screenId) {
@@ -2238,8 +2304,8 @@ async function loadMaebariList() {
     const de = new Date(dateVal); de.setHours(23,59,59,999);
     const filter = "$filter=" + MF.payDate + " ge datetime'" + ds.toISOString() + "' and " +
       MF.payDate + " le datetime'" + de.toISOString() + "'" +
-      "&$orderby=" + MF.hakensaki + "," + MF.syainNo +
-      "&$top=500&$select=Id," + [MF.syainNo, MF.name, MF.hakensaki, MF.amount, MF.fee, MF.total, MF.payDate, MF.bank, MF.branch, MF.account, MF.meigi, 'zaiyokusyubetu', 'zaisyoku'].join(',');
+      "&$orderby=" + MF.hakensaki + " asc," + MF.syainNo +
+      "&$top=500&$expand=Author&$select=Id,Created,Author/Title," + [MF.syainNo, MF.name, MF.hakensaki, MF.amount, MF.fee, MF.total, MF.payDate, MF.bank, MF.branch, MF.account, MF.meigi, 'zaiyokusyubetu', 'zaisyoku'].join(',');
     const records = await spGet(LIST_MAEBARI_GUID, filter) || [];
     window._maebariListRecords = records;
 
@@ -2251,24 +2317,29 @@ async function loadMaebariList() {
     }
 
     let totalAmount = 0;
-    let html = '<div style="overflow-x:auto;"><table class="list-table"><thead><tr><th>No.</th><th>派遣先</th><th>氏名</th><th>金額</th><th>手数料</th></tr></thead><tbody>';
+    let html = '<table class="list-table maebari-fit"><thead><tr><th>No.</th><th>派遣先</th><th>氏名</th><th>金額</th><th>手数</th><th>登録者</th><th>登録日時</th></tr></thead><tbody>';
     records.forEach(r => {
       const amt = parseInt(String(r[MF.amount] || '0').replace(/,/g, '')) || 0;
-      totalAmount += amt;
+      const fee = parseInt(String(r[MF.fee] || '0').replace(/,/g, '')) || 0;
+      totalAmount += amt + fee;
       let haken = r[MF.hakensaki] || '';
       const hMatch = haken.match(/(\d+:[^\d].*)/);
       if (hMatch) haken = hMatch[1].replace(/\d+$/, '');
       const colonIdx = haken.indexOf(':');
       if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
+      const author = r.Author ? r.Author.Title : '';
+      const created = r.Created ? formatTimeShort(r.Created) : '';
       html += '<tr style="cursor:pointer;" onclick="openMaebariEdit(' + r.Id + ')">'
         + '<td>' + escHtml(String(r[MF.syainNo] || '')) + '</td>'
         + '<td>' + escHtml(haken) + '</td>'
         + '<td>' + escHtml(r[MF.name] || '') + '</td>'
-        + '<td style="text-align:right;">' + amt.toLocaleString() + '</td>'
-        + '<td style="text-align:right;">' + escHtml(String(r[MF.fee] || '')) + '</td>'
+        + '<td class="r">' + amt.toLocaleString() + '</td>'
+        + '<td class="r">' + (r[MF.fee] || '') + '</td>'
+        + '<td>' + escHtml(author) + '</td>'
+        + '<td>' + created + '</td>'
         + '</tr>';
     });
-    html += '</tbody></table></div><div style="height:50px;"></div>';
+    html += '</tbody></table><div style="height:50px;"></div>';
     body.innerHTML = html;
 
     footer.style.display = 'flex';
@@ -2278,6 +2349,11 @@ async function loadMaebariList() {
     console.error('Maebari list error:', e);
     body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
   }
+}
+
+function formatTimeShort(isoStr) {
+  const d = new Date(isoStr);
+  return (d.getMonth()+1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 }
 
 // ============================================================
