@@ -940,6 +940,30 @@ body {
 .maebari-fit tbody td:nth-child(7) { width: 64px; font-size: 10px; }  /* 登録日時 */
 .maebari-fit .r { text-align: right; }
 
+/* 有給確認テーブル モバイル最適化 */
+.yukyu-fit {
+  table-layout: fixed;
+  width: 100%;
+}
+.yukyu-fit thead th,
+.yukyu-fit tbody td {
+  padding: 6px 3px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.yukyu-fit thead th:nth-child(1),
+.yukyu-fit tbody td:nth-child(1) { width: 60px; }  /* 派遣先 */
+.yukyu-fit thead th:nth-child(2),
+.yukyu-fit tbody td:nth-child(2) { width: 36px; text-align: center; }  /* 社番 */
+.yukyu-fit thead th:nth-child(3),
+.yukyu-fit tbody td:nth-child(3) { width: 60px; }  /* 氏名 */
+.yukyu-fit thead th:nth-child(4),
+.yukyu-fit tbody td:nth-child(4) { width: 72px; }  /* 有給日 */
+.yukyu-fit thead th:nth-child(5),
+.yukyu-fit tbody td:nth-child(5) { width: auto; font-size: 10px; }  /* 取得日数 */
+
 /* 戻るボタン */
 .back-btn {
   background: rgba(255,255,255,0.15);
@@ -1042,22 +1066,27 @@ body {
   <div class="screen" id="yukyuListScreen">
     <div class="list-screen-header">
       <div class="list-date-row">
-        <label>から</label>
         <div class="date-display-wrap">
           <span class="date-display-text" id="yukyuFromDisplay" onclick="document.getElementById('yukyuListDateFrom').showPicker()"></span>
           <input type="date" id="yukyuListDateFrom" class="date-hidden-input" onchange="onDateInputChange('yukyuListDateFrom','yukyuFromDisplay');loadYukyuList()">
         </div>
+        <span style="font-size:13px;font-weight:600;color:var(--text-light);flex-shrink:0;">から</span>
       </div>
       <div class="list-date-row">
-        <label>まで</label>
         <div class="date-display-wrap">
           <span class="date-display-text" id="yukyuToDisplay" onclick="document.getElementById('yukyuListDateTo').showPicker()"></span>
           <input type="date" id="yukyuListDateTo" class="date-hidden-input" onchange="onDateInputChange('yukyuListDateTo','yukyuToDisplay');loadYukyuList()">
         </div>
+        <span style="font-size:13px;font-weight:600;color:var(--text-light);flex-shrink:0;">まで</span>
       </div>
     </div>
     <div id="yukyuListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
     <div id="yukyuListBody"></div>
+  </div>
+
+  <!-- Screen: 有給編集 -->
+  <div class="screen" id="yukyuEditScreen">
+    <div id="yukyuEditContent"></div>
   </div>
 
   <!-- Screen: 前払い編集 -->
@@ -1299,7 +1328,7 @@ function switchScreen(screenId, skipHistory) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除' };
+  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除' };
   document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
 
   // Home button: show when not on home
@@ -2580,9 +2609,10 @@ async function loadYukyuList() {
     const de = new Date(toVal); de.setHours(23,59,59,999);
     const filter = "$filter=" + F.leaveDate + " ge datetime'" + ds.toISOString() + "' and " +
       F.leaveDate + " le datetime'" + de.toISOString() + "'" +
-      "&$orderby=" + F.leaveDate + " desc&$top=500" +
-      "&$select=Title," + [F.syainNo, F.shimei, F.leaveDate, F.leaveType, F.leaveTypeDetail].join(',');
+      "&$orderby=Title asc," + F.leaveDate + " desc&$top=500" +
+      "&$select=Id,Title," + [F.syainNo, F.shimei, F.leaveDate, F.leaveType, F.leaveTypeDetail, F.leaveHours, F.hourlyRate, F.amount, F.category].join(',');
     const records = await spGet(LIST_LEAVE_GUID, filter) || [];
+    window._yukyuListRecords = records;
 
     countEl.textContent = records.length + '件';
 
@@ -2591,7 +2621,7 @@ async function loadYukyuList() {
       return;
     }
 
-    let html = '<div style="overflow-x:auto;"><table class="list-table"><thead><tr><th>派遣先</th><th>社番</th><th>氏名</th><th>有給日</th><th>取得日数</th></tr></thead><tbody>';
+    let html = '<table class="list-table yukyu-fit"><thead><tr><th>派遣先</th><th>社番</th><th>氏名</th><th>有給日</th><th>取得日数</th></tr></thead><tbody>';
     records.forEach(r => {
       let haken = r.Title || '';
       const hMatch = haken.match(/(\d+:[^\d].*)/);
@@ -2601,8 +2631,8 @@ async function loadYukyuList() {
       const leaveDate = r[F.leaveDate] ? formatDateShort(new Date(r[F.leaveDate])) : '';
       const dayType = r[F.leaveType] || '';
       const detail = r[F.leaveTypeDetail] || '';
-      const dayDisplay = dayType + (detail ? '（' + detail + '）' : '');
-      html += '<tr>'
+      const dayDisplay = dayType + (detail ? '(' + detail + ')' : '');
+      html += '<tr style="cursor:pointer;" onclick="openYukyuEdit(' + r.Id + ')">'
         + '<td>' + escHtml(haken) + '</td>'
         + '<td>' + (r[F.syainNo] || '') + '</td>'
         + '<td>' + escHtml(r[F.shimei] || '') + '</td>'
@@ -2610,11 +2640,171 @@ async function loadYukyuList() {
         + '<td>' + escHtml(dayDisplay) + '</td>'
         + '</tr>';
     });
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     body.innerHTML = html;
   } catch (e) {
     console.error('Yukyu list error:', e);
     body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
+  }
+}
+
+// ============================================================
+// 有給編集 Screen
+// ============================================================
+let editingYukyuRecord = null;
+
+function openYukyuEdit(itemId) {
+  const records = window._yukyuListRecords || [];
+  const record = records.find(r => r.Id === itemId);
+  if (!record) { showToast('レコードが見つかりません', 'error'); return; }
+  editingYukyuRecord = record;
+
+  let haken = record.Title || '';
+  const hMatch = haken.match(/(\d+:[^\d].*)/);
+  if (hMatch) haken = hMatch[1].replace(/\d+$/, '');
+  const colonIdx = haken.indexOf(':');
+  if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
+
+  const leaveDate = record[F.leaveDate] ? record[F.leaveDate].substring(0, 10) : '';
+  const leaveDateDisplay = formatDateWithDay(leaveDate);
+  const dayType = record[F.leaveType] || '';
+
+  // Map dayType to select value
+  let selectVal = '1日(定時)';
+  if (dayType.indexOf('半日') >= 0 && dayType.indexOf('午前') >= 0) selectVal = '0.5日AM';
+  else if (dayType.indexOf('半日') >= 0 && dayType.indexOf('午後') >= 0) selectVal = '0.5日PM';
+
+  const content = document.getElementById('yukyuEditContent');
+  content.innerHTML = `
+    <div class="edit-header">
+      <div class="edit-haken">${escHtml(haken)}</div>
+      <div class="edit-emp">${escHtml(record[F.shimei] || '')}（${record[F.syainNo] || ''}）</div>
+    </div>
+
+    <div class="edit-field">
+      <div class="edit-field-label">有給取得日</div>
+      <div class="date-display-wrap">
+        <span class="date-display-text" id="yukyuEditDateDisplay" onclick="document.getElementById('yukyuEditDateInput').showPicker()">${escHtml(leaveDateDisplay)}</span>
+        <input type="date" id="yukyuEditDateInput" class="date-hidden-input" value="${leaveDate}" onchange="onDateInputChange('yukyuEditDateInput','yukyuEditDateDisplay')">
+      </div>
+    </div>
+
+    <div class="edit-field">
+      <div class="edit-field-label">取得日数</div>
+      <select id="yukyuEditDayType">
+        <option value="1日(定時)" ${selectVal === '1日(定時)' ? 'selected' : ''}>1日（定時）</option>
+        <option value="0.5日AM" ${selectVal === '0.5日AM' ? 'selected' : ''}>0.5日（午前）</option>
+        <option value="0.5日PM" ${selectVal === '0.5日PM' ? 'selected' : ''}>0.5日（午後）</option>
+      </select>
+    </div>
+
+    <div class="edit-actions">
+      <button class="btn btn-primary btn-block btn-lg" id="editYukyuSaveBtn" onclick="saveYukyuEdit()">修正完了</button>
+      <button class="btn btn-danger btn-block btn-lg" id="editYukyuDeleteBtn" onclick="deleteYukyuEdit()">🗑 削除</button>
+    </div>
+  `;
+
+  switchScreen('yukyuEditScreen');
+}
+
+async function saveYukyuEdit() {
+  if (!editingYukyuRecord) return;
+  const btn = document.getElementById('editYukyuSaveBtn');
+  btn.disabled = true; btn.textContent = '保存中...';
+
+  try {
+    const newDate = document.getElementById('yukyuEditDateInput').value;
+    const dayTypeSelect = document.getElementById('yukyuEditDayType').value;
+
+    if (!newDate) { showToast('日付を入力してください', 'error'); btn.disabled = false; btn.textContent = '修正完了'; return; }
+
+    // Map select value to SharePoint field values
+    let leaveType = '1日(定時)';
+    let leaveTypeDetail = '';
+    if (dayTypeSelect === '0.5日AM') { leaveType = '半日（午前）'; leaveTypeDetail = '午前'; }
+    else if (dayTypeSelect === '0.5日PM') { leaveType = '半日（午後）'; leaveTypeDetail = '午後'; }
+
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+
+    const itemId = editingYukyuRecord.Id;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_LEAVE_GUID + "')/items(" + itemId + ")";
+    const body = {
+      '__metadata': { 'type': LIST_ITEM_ENTITY },
+    };
+    body[F.leaveDate] = newDate + 'T00:00:00Z';
+    body[F.leaveType] = leaveType;
+    body[F.leaveTypeDetail] = leaveTypeDetail;
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Yukyu update error:', errText);
+      throw new Error('更新失敗: ' + resp.status);
+    }
+
+    showToast('修正しました', 'success');
+    switchScreen('yukyuListScreen');
+    loadYukyuList();
+  } catch (e) {
+    console.error('Yukyu save error:', e);
+    showToast('修正エラー: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '修正完了';
+  }
+}
+
+async function deleteYukyuEdit() {
+  if (!editingYukyuRecord) return;
+  const name = editingYukyuRecord[F.shimei] || '';
+  const leaveDate = editingYukyuRecord[F.leaveDate] ? formatDateShort(new Date(editingYukyuRecord[F.leaveDate])) : '';
+  const dayType = editingYukyuRecord[F.leaveType] || '';
+  if (!confirm(name + ' の有給 ' + leaveDate + '（' + dayType + '）を削除しますか？\nこの操作は取り消せません。')) return;
+
+  const btn = document.getElementById('editYukyuDeleteBtn');
+  btn.disabled = true; btn.textContent = '削除中...';
+
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+
+    const itemId = editingYukyuRecord.Id;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_LEAVE_GUID + "')/items(" + itemId + ")";
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'DELETE',
+      },
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Yukyu delete error:', errText);
+      throw new Error('削除失敗: ' + resp.status);
+    }
+
+    showToast('削除しました', 'success');
+    editingYukyuRecord = null;
+    switchScreen('yukyuListScreen');
+    loadYukyuList();
+  } catch (e) {
+    console.error('Yukyu delete error:', e);
+    showToast('削除エラー: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '🗑 削除';
   }
 }
 
