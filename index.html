@@ -819,6 +819,9 @@ const MF = {
   total: 'OData__x5408__x8a08_',
   fee: 'OData__x624b__x6570__x6599_',
   hakensaki: 'OData__x6d3e__x9063__x5148_',
+  bank: 'OData__x9280__x884c_',
+  branch: 'OData__x652f__x5e97_',
+  account: 'OData__x53e3__x5ea7_',
 };
 
 // Field names (OData_ prefix required for REST API)
@@ -842,6 +845,9 @@ const F = {
   closingDay: 'OData__x7d66__x6599__x8a08__x7b97__x30',
   shimei: 'OData__x6c0f__x540d_',
   hakensaki: 'OData__xff7c__xff92__xff72_ID_xff8a__x',
+  bank: 'OData__x7d66__x4e0e__xff1a__x9280__x88',
+  branch: 'OData__x7d66__x4e0e__xff1a__x652f__x5e',
+  account: 'OData__x7d66__x4e0e__xff1a__x53e3__x5e',
 };
 
 let msalInstance = null;
@@ -1610,9 +1616,10 @@ async function loadMaebariData() {
         <div id="maebariConfirm" style="margin-top:16px;padding:12px;background:#f0f0ff;border-radius:10px;display:none;">
           <div style="text-align:center;font-size:13px;color:var(--text-light);">申請内容</div>
           <div style="text-align:center;font-size:15px;font-weight:700;color:var(--primary);margin:4px 0;" id="maebariConfirmText"></div>
+          <div id="maebariAccountInfo" style="margin-top:8px;padding:8px;background:#fff;border-radius:8px;border:1px solid var(--border);"></div>
         </div>
 
-        <button class="btn btn-primary btn-block btn-lg" id="maebariSubmitBtn" onclick="submitMaebari()" style="margin-top:12px;" disabled>前払い申請</button>
+        <button class="btn btn-primary btn-block btn-lg" id="maebariSubmitBtn" onclick="confirmMaebari()" style="margin-top:12px;" disabled>前払い申請</button>
       </div>
     `;
 
@@ -1712,19 +1719,66 @@ function onMaebariCustomInput(input) {
   updateMaebariConfirm();
 }
 
+function getEmployeeBankInfo(emp) {
+  const bank = emp[F.bank] || '';
+  const branch = emp[F.branch] || '';
+  const account = emp[F.account] || '';
+  return { bank, branch, account, hasBank: !!(bank && branch && account) };
+}
+
 function updateMaebariConfirm() {
   const confirmDiv = document.getElementById('maebariConfirm');
   const confirmText = document.getElementById('maebariConfirmText');
+  const accountInfo = document.getElementById('maebariAccountInfo');
   const submitBtn = document.getElementById('maebariSubmitBtn');
   if (!confirmDiv || !submitBtn) return;
 
   if (maebariSelectedPayDate && maebariSelectedAmount) {
     confirmDiv.style.display = 'block';
     confirmText.textContent = formatDateShort(maebariSelectedPayDate) + ' / ' + formatCurrency(maebariSelectedAmount);
+    const info = getEmployeeBankInfo(currentEmployee);
+    if (info.hasBank) {
+      accountInfo.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--success);margin-bottom:4px;">振込先口座</div>'
+        + '<div style="font-size:13px;line-height:1.6;">'
+        + '銀行: ' + escHtml(info.bank) + '<br>'
+        + '支店: ' + escHtml(info.branch) + '<br>'
+        + '口座: ' + escHtml(info.account)
+        + '</div>'
+        + '<div style="font-size:12px;color:var(--primary);font-weight:600;margin-top:4px;">この口座に振り込みます</div>';
+    } else {
+      accountInfo.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--warning);margin-bottom:4px;">口座情報なし</div>'
+        + '<div style="font-size:12px;color:var(--text-light);">振込日までに口座情報を社員データに保存してください。</div>';
+    }
     submitBtn.disabled = false;
   } else {
     confirmDiv.style.display = 'none';
     submitBtn.disabled = true;
+  }
+}
+
+function confirmMaebari() {
+  if (!maebariSelectedPayDate || !maebariSelectedAmount || !currentEmployee) return;
+  const info = getEmployeeBankInfo(currentEmployee);
+  const dateStr = formatDateShort(maebariSelectedPayDate);
+  const amountStr = formatCurrency(maebariSelectedAmount);
+
+  let msg;
+  if (info.hasBank) {
+    msg = dateStr + ' に ' + amountStr + ' を申請します。\n\n'
+      + '【振込先】\n'
+      + '銀行: ' + info.bank + '\n'
+      + '支店: ' + info.branch + '\n'
+      + '口座: ' + info.account + '\n\n'
+      + 'この口座に振り込みます。よろしいですか？';
+  } else {
+    msg = dateStr + ' に ' + amountStr + ' を申請します。\n\n'
+      + '⚠ 口座情報が登録されていません。\n'
+      + '振込日までに口座情報を社員データに保存してください。\n\n'
+      + 'このまま申請を続けますか？';
+  }
+
+  if (confirm(msg)) {
+    submitMaebari();
   }
 }
 
@@ -1740,7 +1794,8 @@ async function submitMaebari() {
     const token = await getToken();
     if (!token) { showToast('認証エラー', 'error'); return; }
 
-    const hakensaki = emp[F.hakensaki] || '';
+    const hakensaki = getHakensakiCode(emp);
+    const bankInfo = getEmployeeBankInfo(emp);
     const body = {
       '__metadata': { 'type': LIST_MAEBARI_ENTITY },
       'Title': String(emp[F.syainNo] || ''),
@@ -1749,6 +1804,9 @@ async function submitMaebari() {
       'OData__x6d3e__x9063__x5148_': hakensaki,
       'OData__x540d__x3000__x3000__x3000__x52': emp.Title || '',
       'OData__x91d1__x984d_': maebariSelectedAmount.toLocaleString(),
+      'OData__x9280__x884c_': bankInfo.bank,
+      'OData__x652f__x5e97_': bankInfo.branch,
+      'OData__x53e3__x5ea7_': bankInfo.account,
     };
 
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items";
@@ -2157,15 +2215,20 @@ function escHtml(str) {
   return div.innerHTML;
 }
 
-function getHakensaki(emp) {
+function getHakensakiCode(emp) {
   const val = emp[F.hakensaki];
   if (!val) return '';
-  const colonIdx = val.indexOf(':');
-  if (colonIdx < 0) return '';
-  let name = val.substring(colonIdx + 1);
-  // Remove trailing digits
-  name = name.replace(/\d+$/, '');
-  return name;
+  const match = val.match(/(\d+:[^\d].+)/);
+  if (!match) return '';
+  return match[1].replace(/\d+$/, '');
+}
+
+function getHakensaki(emp) {
+  const code = getHakensakiCode(emp);
+  if (!code) return '';
+  const colonIdx = code.indexOf(':');
+  if (colonIdx < 0) return code;
+  return code.substring(colonIdx + 1);
 }
 
 function getRetireDateStr(emp) {
