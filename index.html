@@ -51,71 +51,83 @@ body {
   z-index: 100;
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   color: #fff;
-  padding: 0 16px;
+  padding: 0 12px;
   height: var(--header-height);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  gap: 8px;
 }
 
 .app-header h1 {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .header-btn {
   background: rgba(255,255,255,0.2);
   border: none;
   color: #fff;
-  padding: 6px 12px;
+  padding: 6px 10px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .header-btn:active { background: rgba(255,255,255,0.3); }
 
+.header-nav {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.header-nav-btn {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.header-nav-btn:active { background: rgba(255,255,255,0.35); }
+.header-nav-btn.active { background: rgba(255,255,255,0.35); border-color: #fff; }
+.header-nav-btn svg { width: 14px; height: 14px; }
+
+.home-btn {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.home-btn:active { background: rgba(255,255,255,0.35); }
+.home-btn svg { width: 18px; height: 18px; }
+
 /* Main Content */
 .main-content {
   flex: 1;
-  padding: 12px 12px calc(var(--tab-height) + 12px);
+  padding: 12px;
   overflow-y: auto;
 }
-
-/* Bottom Tab Navigation */
-.tab-nav {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 500px;
-  height: var(--tab-height);
-  background: #fff;
-  display: flex;
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -2px 8px rgba(0,0,0,0.08);
-  z-index: 100;
-}
-
-.tab-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: none;
-  color: var(--text-light);
-  font-size: 11px;
-  cursor: pointer;
-  gap: 2px;
-  transition: color 0.2s;
-}
-
-.tab-item.active { color: var(--primary); }
-.tab-item svg { width: 24px; height: 24px; }
 
 /* Screens */
 .screen { display: none; }
@@ -356,18 +368,21 @@ body {
 }
 .list-table tbody tr:nth-child(even) { background: #f8f8fc; }
 .list-footer {
-  position: sticky;
-  bottom: var(--tab-height);
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 500px;
   background: var(--primary-dark);
   color: #fff;
   display: flex;
   justify-content: space-around;
-  padding: 10px 12px;
-  border-radius: 10px;
-  margin-top: 8px;
+  padding: 12px 16px;
   font-weight: 700;
   font-size: 14px;
-  box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.15);
+  z-index: 50;
 }
 .list-footer .footer-item {
   display: flex;
@@ -838,7 +853,20 @@ body {
 
 <!-- Header -->
 <header class="app-header">
+  <button class="home-btn" id="homeBtn" onclick="switchScreen('searchScreen')" style="display:none;" title="ホーム">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+  </button>
   <h1 id="headerTitle">申請（前払、有給）</h1>
+  <nav class="header-nav" id="headerNav" style="display:none;">
+    <button class="header-nav-btn" data-screen="detailScreen" onclick="switchScreen('detailScreen')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      詳細
+    </button>
+    <button class="header-nav-btn" data-screen="applyScreen" onclick="switchScreen('applyScreen')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      申請
+    </button>
+  </nav>
   <button class="header-btn" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
 
@@ -897,7 +925,8 @@ body {
     <div class="list-screen-header">
       <div class="list-date-row">
         <label>前払日</label>
-        <input type="date" id="maebariListDate" onchange="loadMaebariList()">
+        <input type="date" id="maebariListDate" onchange="updateDateLabel('maebariListDate','maebariListDayLabel');loadMaebariList()">
+        <span id="maebariListDayLabel" style="font-size:14px;font-weight:700;color:var(--primary);min-width:32px;"></span>
       </div>
     </div>
     <div id="maebariListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
@@ -910,11 +939,13 @@ body {
     <div class="list-screen-header">
       <div class="list-date-row">
         <label>から</label>
-        <input type="date" id="yukyuListDateFrom" onchange="loadYukyuList()">
+        <input type="date" id="yukyuListDateFrom" onchange="updateDateLabel('yukyuListDateFrom','yukyuFromDayLabel');loadYukyuList()">
+        <span id="yukyuFromDayLabel" style="font-size:14px;font-weight:700;color:var(--primary);min-width:32px;"></span>
       </div>
       <div class="list-date-row">
         <label>まで</label>
-        <input type="date" id="yukyuListDateTo" onchange="loadYukyuList()">
+        <input type="date" id="yukyuListDateTo" onchange="updateDateLabel('yukyuListDateTo','yukyuToDayLabel');loadYukyuList()">
+        <span id="yukyuToDayLabel" style="font-size:14px;font-weight:700;color:var(--primary);min-width:32px;"></span>
       </div>
     </div>
     <div id="yukyuListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
@@ -939,30 +970,6 @@ body {
 
 </div>
 
-<!-- Bottom Tab Navigation -->
-<nav class="tab-nav" id="tabNav" style="display:none;">
-  <button class="tab-item active" data-screen="searchScreen" onclick="switchScreen('searchScreen')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-    </svg>
-    <span>検索</span>
-  </button>
-  <button class="tab-item" data-screen="detailScreen" onclick="switchScreen('detailScreen')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-      <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-    </svg>
-    <span>詳細</span>
-  </button>
-  <button class="tab-item" data-screen="applyScreen" onclick="switchScreen('applyScreen')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-      <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
-      <line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/>
-    </svg>
-    <span>申請</span>
-  </button>
-</nav>
 
 <script>
 // ============================================================
@@ -1071,7 +1078,7 @@ async function handleAuth() {
     accessToken = null;
     currentEmployee = null;
     document.getElementById('authBtn').textContent = 'ログイン';
-    document.getElementById('tabNav').style.display = 'none';
+    document.getElementById('headerNav').style.display = 'none';
     showScreen('loginScreen');
     return;
   }
@@ -1093,7 +1100,7 @@ async function onLoginSuccess(resp) {
     if (!token) { showToast('トークン取得に失敗しました', 'error'); return; }
   }
   document.getElementById('authBtn').textContent = 'ログアウト';
-  document.getElementById('tabNav').style.display = 'flex';
+  document.getElementById('headerNav').style.display = 'flex';
   switchScreen('searchScreen');
   showToast('ログインしました', 'success');
 }
@@ -1105,7 +1112,7 @@ async function acquireToken() {
     const resp = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0] });
     accessToken = resp.accessToken;
     document.getElementById('authBtn').textContent = 'ログアウト';
-    document.getElementById('tabNav').style.display = 'flex';
+    document.getElementById('headerNav').style.display = 'flex';
     switchScreen('searchScreen');
     return resp.accessToken;
   } catch (e) {
@@ -1173,10 +1180,20 @@ async function spPost(listName, body) {
 function switchScreen(screenId) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
-  document.querySelectorAll('.tab-item').forEach(t => t.classList.toggle('active', t.dataset.screen === screenId));
 
-  const titles = { searchScreen: '申請（前払、有給）', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認' };
+  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認' };
   document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
+
+  // Home button: show when not on home
+  document.getElementById('homeBtn').style.display = screenId === 'searchScreen' ? 'none' : 'flex';
+
+  // Header nav: highlight active
+  document.querySelectorAll('.header-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.screen === screenId));
+
+  // Hide fixed footer when not on maebari list
+  const mFooter = document.getElementById('maebariListFooter');
+  if (mFooter && screenId !== 'maebariListScreen') mFooter.style.display = 'none';
+
   if (screenId === 'maebariListScreen') initMaebariListDate();
   if (screenId === 'yukyuListScreen') initYukyuListDate();
 }
@@ -2112,12 +2129,34 @@ async function submitMaebari() {
 // ============================================================
 // 前払い一覧 Screen
 // ============================================================
+function getThisFriday() {
+  const today = new Date();
+  const dow = today.getDay(); // 0=Sun..6=Sat
+  const diff = (5 - dow + 7) % 7; // days until Friday
+  const fri = new Date(today);
+  fri.setDate(today.getDate() + diff);
+  return fri;
+}
+
+const WEEKDAY_JP = ['日','月','火','水','木','金','土'];
+
+function updateDateLabel(inputId, labelId) {
+  const inp = document.getElementById(inputId);
+  const label = document.getElementById(labelId);
+  if (!inp || !label) return;
+  if (!inp.value) { label.textContent = ''; return; }
+  const d = new Date(inp.value);
+  label.textContent = '（' + WEEKDAY_JP[d.getDay()] + '）';
+}
+
 function initMaebariListDate() {
   const inp = document.getElementById('maebariListDate');
   if (!inp.value) {
-    inp.value = new Date().toISOString().slice(0, 10);
-    loadMaebariList();
+    const fri = getThisFriday();
+    inp.value = fri.toISOString().slice(0, 10);
   }
+  updateDateLabel('maebariListDate', 'maebariListDayLabel');
+  loadMaebariList();
 }
 
 async function loadMaebariList() {
@@ -2163,7 +2202,7 @@ async function loadMaebariList() {
         + '<td style="text-align:right;">' + escHtml(String(r[MF.fee] || '')) + '</td>'
         + '</tr>';
     });
-    html += '</tbody></table></div>';
+    html += '</tbody></table></div><div style="height:50px;"></div>';
     body.innerHTML = html;
 
     footer.style.display = 'flex';
@@ -2185,8 +2224,10 @@ function initYukyuListDate() {
     const today = new Date().toISOString().slice(0, 10);
     fromInp.value = today;
     toInp.value = today;
-    loadYukyuList();
   }
+  updateDateLabel('yukyuListDateFrom', 'yukyuFromDayLabel');
+  updateDateLabel('yukyuListDateTo', 'yukyuToDayLabel');
+  loadYukyuList();
 }
 
 async function loadYukyuList() {
