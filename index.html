@@ -342,6 +342,92 @@ body {
   font-weight: 600;
   color: var(--text);
 }
+.date-display-wrap {
+  flex: 1;
+  position: relative;
+}
+.date-display-text {
+  display: block;
+  padding: 10px 12px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  background: #fff;
+  cursor: pointer;
+}
+.date-hidden-input {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+/* 前払い編集画面 */
+.edit-header {
+  background: var(--primary-dark);
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+.edit-header .edit-pay-date { font-size: 14px; margin-bottom: 4px; }
+.edit-header .edit-haken { font-size: 14px; }
+.edit-header .edit-emp { font-size: 16px; font-weight: 700; }
+.edit-field {
+  margin-bottom: 12px;
+}
+.edit-field-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 4px;
+}
+.edit-field-value {
+  padding: 10px 12px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: #f8f8fc;
+}
+.edit-field select, .edit-field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px solid var(--primary);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  background: #fff;
+  color: var(--text);
+}
+.edit-bank-info {
+  padding: 12px;
+  background: #f8f8fc;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.8;
+  margin-bottom: 12px;
+}
+.edit-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-danger:active { opacity: 0.8; }
 .list-table {
   width: 100%;
   border-collapse: collapse;
@@ -925,8 +1011,10 @@ body {
     <div class="list-screen-header">
       <div class="list-date-row">
         <label>前払日</label>
-        <input type="date" id="maebariListDate" onchange="updateDateLabel('maebariListDate','maebariListDayLabel');loadMaebariList()">
-        <span id="maebariListDayLabel" style="font-size:14px;font-weight:700;color:var(--primary);min-width:32px;"></span>
+        <div class="date-display-wrap">
+          <span class="date-display-text" id="maebariListDateDisplay" onclick="document.getElementById('maebariListDate').showPicker()"></span>
+          <input type="date" id="maebariListDate" class="date-hidden-input" onchange="onDateInputChange('maebariListDate','maebariListDateDisplay');loadMaebariList()">
+        </div>
       </div>
     </div>
     <div id="maebariListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
@@ -939,17 +1027,26 @@ body {
     <div class="list-screen-header">
       <div class="list-date-row">
         <label>から</label>
-        <input type="date" id="yukyuListDateFrom" onchange="updateDateLabel('yukyuListDateFrom','yukyuFromDayLabel');loadYukyuList()">
-        <span id="yukyuFromDayLabel" style="font-size:14px;font-weight:700;color:var(--primary);min-width:32px;"></span>
+        <div class="date-display-wrap">
+          <span class="date-display-text" id="yukyuFromDisplay" onclick="document.getElementById('yukyuListDateFrom').showPicker()"></span>
+          <input type="date" id="yukyuListDateFrom" class="date-hidden-input" onchange="onDateInputChange('yukyuListDateFrom','yukyuFromDisplay');loadYukyuList()">
+        </div>
       </div>
       <div class="list-date-row">
         <label>まで</label>
-        <input type="date" id="yukyuListDateTo" onchange="updateDateLabel('yukyuListDateTo','yukyuToDayLabel');loadYukyuList()">
-        <span id="yukyuToDayLabel" style="font-size:14px;font-weight:700;color:var(--primary);min-width:32px;"></span>
+        <div class="date-display-wrap">
+          <span class="date-display-text" id="yukyuToDisplay" onclick="document.getElementById('yukyuListDateTo').showPicker()"></span>
+          <input type="date" id="yukyuListDateTo" class="date-hidden-input" onchange="onDateInputChange('yukyuListDateTo','yukyuToDisplay');loadYukyuList()">
+        </div>
       </div>
     </div>
     <div id="yukyuListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
     <div id="yukyuListBody"></div>
+  </div>
+
+  <!-- Screen: 前払い編集 -->
+  <div class="screen" id="maebariEditScreen">
+    <div id="maebariEditContent"></div>
   </div>
 
   <!-- Screen 2: Leave Details / 前払い -->
@@ -1181,7 +1278,7 @@ function switchScreen(screenId) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認' };
+  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除' };
   document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
 
   // Home button: show when not on home
@@ -2140,13 +2237,20 @@ function getThisFriday() {
 
 const WEEKDAY_JP = ['日','月','火','水','木','金','土'];
 
-function updateDateLabel(inputId, labelId) {
+function formatDateWithDay(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '/' + m + '/' + day + '（' + WEEKDAY_JP[d.getDay()] + '）';
+}
+
+function onDateInputChange(inputId, displayId) {
   const inp = document.getElementById(inputId);
-  const label = document.getElementById(labelId);
-  if (!inp || !label) return;
-  if (!inp.value) { label.textContent = ''; return; }
-  const d = new Date(inp.value);
-  label.textContent = '（' + WEEKDAY_JP[d.getDay()] + '）';
+  const disp = document.getElementById(displayId);
+  if (!inp || !disp) return;
+  disp.textContent = formatDateWithDay(inp.value);
 }
 
 function initMaebariListDate() {
@@ -2155,7 +2259,7 @@ function initMaebariListDate() {
     const fri = getThisFriday();
     inp.value = fri.toISOString().slice(0, 10);
   }
-  updateDateLabel('maebariListDate', 'maebariListDayLabel');
+  onDateInputChange('maebariListDate', 'maebariListDateDisplay');
   loadMaebariList();
 }
 
@@ -2174,8 +2278,9 @@ async function loadMaebariList() {
     const filter = "$filter=" + MF.payDate + " ge datetime'" + ds.toISOString() + "' and " +
       MF.payDate + " le datetime'" + de.toISOString() + "'" +
       "&$orderby=" + MF.hakensaki + "," + MF.syainNo +
-      "&$top=500&$select=" + [MF.syainNo, MF.name, MF.hakensaki, MF.amount, MF.fee, MF.total, MF.payDate].join(',');
+      "&$top=500&$select=Id," + [MF.syainNo, MF.name, MF.hakensaki, MF.amount, MF.fee, MF.total, MF.payDate, MF.bank, MF.branch, MF.account, MF.meigi, 'zaiyokusyubetu', 'zaisyoku'].join(',');
     const records = await spGet(LIST_MAEBARI_GUID, filter) || [];
+    window._maebariListRecords = records;
 
     countEl.textContent = records.length + '件';
 
@@ -2194,7 +2299,7 @@ async function loadMaebariList() {
       if (hMatch) haken = hMatch[1].replace(/\d+$/, '');
       const colonIdx = haken.indexOf(':');
       if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
-      html += '<tr>'
+      html += '<tr style="cursor:pointer;" onclick="openMaebariEdit(' + r.Id + ')">'
         + '<td>' + escHtml(String(r[MF.syainNo] || '')) + '</td>'
         + '<td>' + escHtml(haken) + '</td>'
         + '<td>' + escHtml(r[MF.name] || '') + '</td>'
@@ -2215,6 +2320,176 @@ async function loadMaebariList() {
 }
 
 // ============================================================
+// 前払い編集 Screen
+// ============================================================
+let editingMaebariRecord = null;
+
+function openMaebariEdit(itemId) {
+  const records = window._maebariListRecords || [];
+  const record = records.find(r => r.Id === itemId);
+  if (!record) { showToast('レコードが見つかりません', 'error'); return; }
+  editingMaebariRecord = record;
+
+  const payDate = record[MF.payDate] ? formatDateWithDay(record[MF.payDate].substring(0, 10)) : '';
+  let haken = record[MF.hakensaki] || '';
+  const hMatch = haken.match(/(\d+:[^\d].*)/);
+  if (hMatch) haken = hMatch[1].replace(/\d+$/, '');
+  const syainNo = record[MF.syainNo] || '';
+  const name = record[MF.name] || '';
+  const zaiyoku = record.zaiyokusyubetu || '';
+  const amount = record[MF.amount] || '';
+  const fee = record[MF.fee] || '';
+  const bank = record[MF.bank] || '';
+  const branch = record[MF.branch] || '';
+  const account = record[MF.account] || '';
+  const meigi = record[MF.meigi] || '';
+
+  const container = document.getElementById('maebariEditContent');
+  container.innerHTML = `
+    <div class="edit-header">
+      <div class="edit-pay-date">支払日：${escHtml(payDate)}</div>
+      <div class="edit-haken">${escHtml(haken)}</div>
+      <div class="edit-emp">${escHtml(syainNo)}　${escHtml(name)}</div>
+    </div>
+
+    ${zaiyoku ? '<div class="edit-field"><div class="edit-field-value" style="color:var(--primary);font-weight:700;border-color:var(--primary);">' + escHtml(zaiyoku) + '</div></div>' : ''}
+
+    <div class="edit-field">
+      <div class="edit-field-label">金額</div>
+      <select id="editMaebariAmount">
+        <option value="">選択してください</option>
+        ${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].map(a =>
+          '<option value="' + a.toLocaleString() + '"' + (amount === a.toLocaleString() ? ' selected' : '') + '>' + a.toLocaleString() + '円</option>'
+        ).join('')}
+      </select>
+      <div style="margin-top:6px;">
+        <input type="text" id="editMaebariAmountCustom" placeholder="その他（例: 15,000）" value="${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) ? '' : escHtml(amount)}" style="font-size:14px;">
+      </div>
+    </div>
+
+    <div class="edit-field">
+      <div class="edit-field-label">手数料</div>
+      <select id="editMaebariFee">
+        <option value="">選択してください</option>
+        <option value="275"${fee === '275' ? ' selected' : ''}>275円</option>
+        <option value="440"${fee === '440' ? ' selected' : ''}>440円</option>
+      </select>
+    </div>
+
+    <div class="edit-bank-info">
+      <div style="font-weight:700;color:var(--primary);margin-bottom:4px;">振込先口座</div>
+      ${bank ? escHtml(bank) + '<br>' : ''}
+      ${branch ? escHtml(branch) + '<br>' : ''}
+      ${account ? '<b>' + escHtml(account) + '</b><br>' : ''}
+      ${meigi ? escHtml(meigi) : ''}
+      ${!bank && !branch && !account ? '<span style="color:var(--warning);">口座情報なし</span>' : ''}
+    </div>
+
+    <div class="edit-actions">
+      <button class="btn btn-primary btn-block btn-lg" id="editMaebariSaveBtn" onclick="saveMaebariEdit()">修正完了</button>
+      <button class="btn-danger btn-block" id="editMaebariDeleteBtn" onclick="deleteMaebariEdit()">🗑 削除</button>
+    </div>
+  `;
+
+  switchScreen('maebariEditScreen');
+}
+
+async function saveMaebariEdit() {
+  if (!editingMaebariRecord) return;
+  const btn = document.getElementById('editMaebariSaveBtn');
+  btn.disabled = true; btn.textContent = '保存中...';
+
+  try {
+    const selAmount = document.getElementById('editMaebariAmount').value;
+    const customAmount = document.getElementById('editMaebariAmountCustom').value.trim();
+    const amount = customAmount || selAmount;
+    const fee = document.getElementById('editMaebariFee').value;
+
+    if (!amount) { showToast('金額を入力してください', 'error'); btn.disabled = false; btn.textContent = '修正完了'; return; }
+
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+
+    const itemId = editingMaebariRecord.Id;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + itemId + ")";
+    const body = {
+      '__metadata': { 'type': LIST_MAEBARI_ENTITY },
+    };
+    body[MF.amount] = amount;
+    if (fee) body[MF.fee] = fee;
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Update error:', errText);
+      throw new Error('更新失敗: ' + resp.status);
+    }
+
+    showToast('修正しました', 'success');
+    switchScreen('maebariListScreen');
+    loadMaebariList();
+  } catch (e) {
+    console.error('Save error:', e);
+    showToast('修正エラー: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '修正完了';
+  }
+}
+
+async function deleteMaebariEdit() {
+  if (!editingMaebariRecord) return;
+  const name = editingMaebariRecord[MF.name] || '';
+  const amount = editingMaebariRecord[MF.amount] || '';
+  if (!confirm(name + ' の前払い ' + amount + '円 を削除しますか？\nこの操作は取り消せません。')) return;
+
+  const btn = document.getElementById('editMaebariDeleteBtn');
+  btn.disabled = true; btn.textContent = '削除中...';
+
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+
+    const itemId = editingMaebariRecord.Id;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + itemId + ")";
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'DELETE',
+      },
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Delete error:', errText);
+      throw new Error('削除失敗: ' + resp.status);
+    }
+
+    showToast('削除しました', 'success');
+    editingMaebariRecord = null;
+    switchScreen('maebariListScreen');
+    loadMaebariList();
+  } catch (e) {
+    console.error('Delete error:', e);
+    showToast('削除エラー: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '🗑 削除';
+  }
+}
+
+// ============================================================
 // 有給確認一覧 Screen
 // ============================================================
 function initYukyuListDate() {
@@ -2225,8 +2500,8 @@ function initYukyuListDate() {
     fromInp.value = today;
     toInp.value = today;
   }
-  updateDateLabel('yukyuListDateFrom', 'yukyuFromDayLabel');
-  updateDateLabel('yukyuListDateTo', 'yukyuToDayLabel');
+  onDateInputChange('yukyuListDateFrom', 'yukyuFromDisplay');
+  onDateInputChange('yukyuListDateTo', 'yukyuToDisplay');
   loadYukyuList();
 }
 
