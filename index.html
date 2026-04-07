@@ -82,29 +82,6 @@ body {
 
 .header-btn:active { background: rgba(255,255,255,0.3); }
 
-.header-nav {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.header-nav-btn {
-  background: rgba(255,255,255,0.15);
-  border: 1px solid rgba(255,255,255,0.3);
-  color: #fff;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  white-space: nowrap;
-  transition: background 0.2s;
-}
-.header-nav-btn:active { background: rgba(255,255,255,0.35); }
-.header-nav-btn.active { background: rgba(255,255,255,0.35); border-color: #fff; }
-.header-nav-btn svg { width: 14px; height: 14px; }
 
 .home-btn {
   background: rgba(255,255,255,0.15);
@@ -943,16 +920,6 @@ body {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
   </button>
   <h1 id="headerTitle">申請（前払、有給）</h1>
-  <nav class="header-nav" id="headerNav" style="display:none;">
-    <button class="header-nav-btn" data-screen="detailScreen" onclick="switchScreen('detailScreen')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      詳細
-    </button>
-    <button class="header-nav-btn" data-screen="applyScreen" onclick="switchScreen('applyScreen')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      申請
-    </button>
-  </nav>
   <button class="header-btn" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
 
@@ -1175,7 +1142,6 @@ async function handleAuth() {
     accessToken = null;
     currentEmployee = null;
     document.getElementById('authBtn').textContent = 'ログイン';
-    document.getElementById('headerNav').style.display = 'none';
     showScreen('loginScreen');
     return;
   }
@@ -1197,7 +1163,6 @@ async function onLoginSuccess(resp) {
     if (!token) { showToast('トークン取得に失敗しました', 'error'); return; }
   }
   document.getElementById('authBtn').textContent = 'ログアウト';
-  document.getElementById('headerNav').style.display = 'flex';
   switchScreen('searchScreen');
   showToast('ログインしました', 'success');
 }
@@ -1209,7 +1174,6 @@ async function acquireToken() {
     const resp = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0] });
     accessToken = resp.accessToken;
     document.getElementById('authBtn').textContent = 'ログアウト';
-    document.getElementById('headerNav').style.display = 'flex';
     switchScreen('searchScreen');
     return resp.accessToken;
   } catch (e) {
@@ -1283,9 +1247,6 @@ function switchScreen(screenId) {
 
   // Home button: show when not on home
   document.getElementById('homeBtn').style.display = screenId === 'searchScreen' ? 'none' : 'flex';
-
-  // Header nav: highlight active
-  document.querySelectorAll('.header-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.screen === screenId));
 
   // Hide fixed footer when not on maebari list
   const mFooter = document.getElementById('maebariListFooter');
@@ -2356,14 +2317,16 @@ function openMaebariEdit(itemId) {
 
     <div class="edit-field">
       <div class="edit-field-label">金額</div>
-      <select id="editMaebariAmount">
+      <select id="editMaebariAmount" onchange="onEditAmountChange()">
         <option value="">選択してください</option>
-        ${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].map(a =>
-          '<option value="' + a.toLocaleString() + '"' + (amount === a.toLocaleString() ? ' selected' : '') + '>' + a.toLocaleString() + '円</option>'
-        ).join('')}
+        ${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].map(a => {
+          const sel = amount === a.toLocaleString() ? ' selected' : '';
+          return '<option value="' + a.toLocaleString() + '"' + sel + '>' + a.toLocaleString() + '円</option>';
+        }).join('')}
+        <option value="__custom__"${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? ' selected' : ''}>その他</option>
       </select>
-      <div style="margin-top:6px;">
-        <input type="text" id="editMaebariAmountCustom" placeholder="その他（例: 15,000）" value="${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) ? '' : escHtml(amount)}" style="font-size:14px;">
+      <div id="editCustomAmountWrap" style="margin-top:6px;display:${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? 'block' : 'none'};">
+        <input type="text" id="editMaebariAmountCustom" placeholder="金額を入力（例: 15,000）" value="${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? escHtml(amount) : ''}">
       </div>
     </div>
 
@@ -2371,17 +2334,17 @@ function openMaebariEdit(itemId) {
       <div class="edit-field-label">手数料</div>
       <select id="editMaebariFee">
         <option value="">選択してください</option>
-        <option value="275"${fee === '275' ? ' selected' : ''}>275円</option>
-        <option value="440"${fee === '440' ? ' selected' : ''}>440円</option>
+        <option value="275"${fee === '275' ? ' selected' : ''}>275</option>
+        <option value="440"${fee === '440' ? ' selected' : ''}>440</option>
       </select>
     </div>
 
     <div class="edit-bank-info">
-      <div style="font-weight:700;color:var(--primary);margin-bottom:4px;">振込先口座</div>
-      ${bank ? escHtml(bank) + '<br>' : ''}
-      ${branch ? escHtml(branch) + '<br>' : ''}
-      ${account ? '<b>' + escHtml(account) + '</b><br>' : ''}
-      ${meigi ? escHtml(meigi) : ''}
+      <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">振込先口座</div>
+      ${bank ? '<div>' + escHtml(bank) + '</div>' : ''}
+      ${branch ? '<div>' + escHtml(branch) + '</div>' : ''}
+      ${account ? '<div style="display:flex;align-items:center;gap:6px;margin:4px 0;"><b style="font-size:16px;">' + escHtml(account) + '</b><button onclick="copyAccountNumber()" style="background:var(--primary);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;" id="copyAccBtn">コピー</button></div>' : ''}
+      ${meigi ? '<div style="font-size:18px;font-weight:700;margin-top:4px;">' + escHtml(meigi) + '</div>' : ''}
       ${!bank && !branch && !account ? '<span style="color:var(--warning);">口座情報なし</span>' : ''}
     </div>
 
@@ -2394,6 +2357,29 @@ function openMaebariEdit(itemId) {
   switchScreen('maebariEditScreen');
 }
 
+function onEditAmountChange() {
+  const sel = document.getElementById('editMaebariAmount');
+  const wrap = document.getElementById('editCustomAmountWrap');
+  if (sel.value === '__custom__') {
+    wrap.style.display = 'block';
+    document.getElementById('editMaebariAmountCustom').focus();
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+function copyAccountNumber() {
+  if (!editingMaebariRecord) return;
+  const acc = editingMaebariRecord[MF.account] || '';
+  const numMatch = acc.match(/[\d]+/);
+  const num = numMatch ? numMatch[0] : acc;
+  navigator.clipboard.writeText(num).then(() => {
+    const btn = document.getElementById('copyAccBtn');
+    btn.textContent = '✓'; btn.style.background = 'var(--success)';
+    setTimeout(() => { btn.textContent = 'コピー'; btn.style.background = 'var(--primary)'; }, 1500);
+  }).catch(() => showToast('コピーに失敗しました', 'error'));
+}
+
 async function saveMaebariEdit() {
   if (!editingMaebariRecord) return;
   const btn = document.getElementById('editMaebariSaveBtn');
@@ -2402,7 +2388,7 @@ async function saveMaebariEdit() {
   try {
     const selAmount = document.getElementById('editMaebariAmount').value;
     const customAmount = document.getElementById('editMaebariAmountCustom').value.trim();
-    const amount = customAmount || selAmount;
+    const amount = selAmount === '__custom__' ? customAmount : selAmount;
     const fee = document.getElementById('editMaebariFee').value;
 
     if (!amount) { showToast('金額を入力してください', 'error'); btn.disabled = false; btn.textContent = '修正完了'; return; }
