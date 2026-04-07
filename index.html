@@ -221,26 +221,54 @@ body {
   display: flex;
   gap: 0;
   margin-bottom: 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   border: 2px solid var(--primary);
+  box-shadow: 0 2px 8px rgba(98,100,167,0.25);
+  animation: tabPulse 2s ease-in-out 1;
+}
+@keyframes tabPulse {
+  0% { box-shadow: 0 2px 8px rgba(98,100,167,0.25); }
+  50% { box-shadow: 0 2px 16px rgba(98,100,167,0.5); }
+  100% { box-shadow: 0 2px 8px rgba(98,100,167,0.25); }
 }
 .top-tab {
   flex: 1;
-  padding: 10px 0;
+  padding: 12px 0;
   text-align: center;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
   border: none;
   background: var(--card-bg);
   color: var(--primary);
+  transition: background 0.2s, color 0.2s, transform 0.1s;
+  letter-spacing: 0.5px;
+}
+.top-tab:active { transform: scale(0.97); }
+.top-tab.active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 12px auto 0;
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-light);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
   transition: background 0.2s, color 0.2s;
 }
-.top-tab.active {
-  background: var(--primary);
-  color: #fff;
-}
+.copy-btn:active { background: var(--bg); }
+.copy-btn.copied { background: var(--success); color: #fff; border-color: var(--success); }
 
 /* 前払い */
 .maebari-period-label {
@@ -1470,6 +1498,53 @@ async function loadLeaveDetails() {
 }
 
 // ============================================================
+// Copy Maebari Summary
+// ============================================================
+function copyMaebariSummary() {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const period = getMaebariPeriod(maebariPeriodOffset);
+  const periodLabel = formatDateShort(period.start) + ' ～ ' + formatDateShort(period.end);
+  const hakensaki = getHakensaki(emp);
+
+  let text = '【前払い明細】\n';
+  text += '氏名: ' + (emp.Title || '') + '\n';
+  text += '社員番号: ' + (emp[F.syainNo] || '') + '\n';
+  if (hakensaki) text += '派遣先: ' + hakensaki + '\n';
+  text += '期間: ' + periodLabel + '\n';
+  text += '─────────────\n';
+
+  const rows = document.querySelectorAll('#maebariContent .maebari-table tbody tr');
+  if (rows.length > 0) {
+    rows.forEach(row => {
+      const cells = row.querySelectorAll('td');
+      if (cells.length >= 4) {
+        text += cells[0].textContent + '  ' + cells[1].textContent + '円  手数料' + cells[2].textContent + '円  合計' + cells[3].textContent + '\n';
+      }
+    });
+  } else {
+    text += 'この期間の前払いデータはありません\n';
+  }
+
+  const totalEl = document.querySelector('#maebariContent .maebari-total-box .amount');
+  if (totalEl) {
+    text += '─────────────\n';
+    text += '合計: ' + totalEl.textContent + '\n';
+  }
+
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    if (btn) {
+      btn.classList.add('copied');
+      btn.innerHTML = '✓ コピーしました';
+      setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = '📋 この画面をコピー'; }, 2000);
+    }
+  }).catch(() => {
+    showToast('コピーに失敗しました', 'error');
+  });
+}
+
+// ============================================================
 // Top Tab Switch (有給管理 / 前払い)
 // ============================================================
 function switchTopTab(tab) {
@@ -1478,6 +1553,7 @@ function switchTopTab(tab) {
   tabs[1].classList.toggle('active', tab === 'maebari');
   document.getElementById('yukyuContent').style.display = tab === 'yukyu' ? 'block' : 'none';
   document.getElementById('maebariContent').style.display = tab === 'maebari' ? 'block' : 'none';
+  document.getElementById('headerTitle').textContent = tab === 'maebari' ? '前払い詳細' : '有給詳細';
   if (tab === 'maebari') {
     maebariPeriodOffset = 0;
     loadMaebariData();
@@ -1594,6 +1670,8 @@ async function loadMaebariData() {
           </tbody>
         </table>
       ` : '<div style="text-align:center;padding:20px;color:var(--text-light);">この期間の前払いデータはありません</div>'}
+
+      <button class="copy-btn" onclick="copyMaebariSummary()">📋 この画面をコピー</button>
 
       <div class="card" style="margin-top:16px;border:2px solid var(--primary);">
         <div class="section-title" style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:12px;">前払い申請</div>
