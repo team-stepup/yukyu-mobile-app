@@ -822,6 +822,7 @@ const MF = {
   bank: 'OData__x9280__x884c_',
   branch: 'OData__x652f__x5e97_',
   account: 'OData__x53e3__x5ea7_',
+  meigi: 'OData__x540d__x7fa9_',
 };
 
 // Field names (OData_ prefix required for REST API)
@@ -848,6 +849,7 @@ const F = {
   bank: 'OData__x7d66__x4e0e__xff1a__x9280__x88',
   branch: 'OData__x7d66__x4e0e__xff1a__x652f__x5e',
   account: 'OData__x7d66__x4e0e__xff1a__x53e3__x5e',
+  meigi: 'OData__x53e3__x5ea7__x6c0f__x540d__x30',
 };
 
 let msalInstance = null;
@@ -1742,7 +1744,8 @@ function updateMaebariConfirm() {
         + '<div style="font-size:13px;line-height:1.6;">'
         + '銀行: ' + escHtml(info.bank) + '<br>'
         + '支店: ' + escHtml(info.branch) + '<br>'
-        + '口座: ' + escHtml(info.account)
+        + '口座: ' + escHtml(info.account) + '<br>'
+        + '名義: ' + escHtml(currentEmployee[F.meigi] || '未登録')
         + '</div>'
         + '<div style="font-size:12px;color:var(--primary);font-weight:600;margin-top:4px;">この口座に振り込みます</div>';
     } else {
@@ -1756,29 +1759,63 @@ function updateMaebariConfirm() {
   }
 }
 
-function confirmMaebari() {
+async function confirmMaebari() {
   if (!maebariSelectedPayDate || !maebariSelectedAmount || !currentEmployee) return;
-  const info = getEmployeeBankInfo(currentEmployee);
-  const dateStr = formatDateShort(maebariSelectedPayDate);
-  const amountStr = formatCurrency(maebariSelectedAmount);
 
-  let msg;
-  if (info.hasBank) {
-    msg = dateStr + ' に ' + amountStr + ' を申請します。\n\n'
-      + '【振込先】\n'
-      + '銀行: ' + info.bank + '\n'
-      + '支店: ' + info.branch + '\n'
-      + '口座: ' + info.account + '\n\n'
-      + 'この口座に振り込みます。よろしいですか？';
-  } else {
-    msg = dateStr + ' に ' + amountStr + ' を申請します。\n\n'
-      + '⚠ 口座情報が登録されていません。\n'
-      + '振込日までに口座情報を社員データに保存してください。\n\n'
-      + 'このまま申請を続けますか？';
-  }
+  const btn = document.getElementById('maebariSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = '確認中...';
 
-  if (confirm(msg)) {
-    submitMaebari();
+  try {
+    // Duplicate check: same employee + same pay date
+    const syainNo = currentEmployee[F.syainNo];
+    const dateStart = new Date(maebariSelectedPayDate);
+    dateStart.setHours(0,0,0,0);
+    const dateEnd = new Date(maebariSelectedPayDate);
+    dateEnd.setHours(23,59,59,999);
+    const dupFilter = "$filter=" + MF.syainNo + " eq '" + syainNo + "' and " +
+      MF.payDate + " ge datetime'" + dateStart.toISOString() + "' and " +
+      MF.payDate + " le datetime'" + dateEnd.toISOString() + "'&$top=1&$select=Id";
+    const dupRecords = await spGet(LIST_MAEBARI_GUID, dupFilter) || [];
+
+    if (dupRecords.length > 0) {
+      showToast('この支払日は既に申請済みです。重複申請はできません。', 'error');
+      btn.disabled = false;
+      btn.textContent = '前払い申請';
+      return;
+    }
+
+    const info = getEmployeeBankInfo(currentEmployee);
+    const dateStr = formatDateShort(maebariSelectedPayDate);
+    const amountStr = formatCurrency(maebariSelectedAmount);
+
+    let msg;
+    if (info.hasBank) {
+      msg = dateStr + ' に ' + amountStr + ' を申請します。\n\n'
+        + '【振込先】\n'
+        + '銀行: ' + info.bank + '\n'
+        + '支店: ' + info.branch + '\n'
+        + '口座: ' + info.account + '\n'
+        + '名義: ' + (currentEmployee[F.meigi] || '未登録') + '\n\n'
+        + 'この口座に振り込みます。よろしいですか？';
+    } else {
+      msg = dateStr + ' に ' + amountStr + ' を申請します。\n\n'
+        + '⚠ 口座情報が登録されていません。\n'
+        + '振込日までに口座情報を社員データに保存してください。\n\n'
+        + 'このまま申請を続けますか？';
+    }
+
+    btn.disabled = false;
+    btn.textContent = '前払い申請';
+
+    if (confirm(msg)) {
+      submitMaebari();
+    }
+  } catch (e) {
+    console.error('Duplicate check error:', e);
+    btn.disabled = false;
+    btn.textContent = '前払い申請';
+    showToast('確認中にエラーが発生しました', 'error');
   }
 }
 
@@ -1807,6 +1844,7 @@ async function submitMaebari() {
       'OData__x9280__x884c_': bankInfo.bank,
       'OData__x652f__x5e97_': bankInfo.branch,
       'OData__x53e3__x5ea7_': bankInfo.account,
+      'OData__x540d__x7fa9_': emp[F.meigi] || '',
     };
 
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items";
