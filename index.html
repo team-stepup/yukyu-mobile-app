@@ -2411,7 +2411,13 @@ function openMaebariEdit(itemId) {
   if (!record) { showToast('レコードが見つかりません', 'error'); return; }
   editingMaebariRecord = record;
 
-  const payDate = record[MF.payDate] ? formatDateWithDay(record[MF.payDate].substring(0, 10)) : '';
+  // 前払日が今日以前なら修正不可
+  const payDateRaw = record[MF.payDate] ? record[MF.payDate].substring(0, 10) : '';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const payDateObj = payDateRaw ? new Date(payDateRaw + 'T00:00:00') : null;
+  const isLocked = payDateObj ? payDateObj.getTime() <= today.getTime() : false;
+
+  const payDate = payDateRaw ? formatDateWithDay(payDateRaw) : '';
   let haken = record[MF.hakensaki] || '';
   const hMatch = haken.match(/(\d+:[^\d].*)/);
   if (hMatch) haken = hMatch[1].replace(/\d+$/, '');
@@ -2435,9 +2441,11 @@ function openMaebariEdit(itemId) {
 
     ${zaiyoku ? '<div class="edit-field"><div class="edit-field-value" style="color:var(--primary);font-weight:700;border-color:var(--primary);">' + escHtml(zaiyoku) + '</div></div>' : ''}
 
+    ${isLocked ? '<div style="background:#fff3e0;border:1px solid var(--warning);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--warning);margin-bottom:12px;text-align:center;font-weight:700;">⚠ 前払日を過ぎているため修正・削除できません</div>' : ''}
+
     <div class="edit-field">
       <div class="edit-field-label">金額</div>
-      <select id="editMaebariAmount" onchange="onEditAmountChange()">
+      <select id="editMaebariAmount" onchange="onEditAmountChange()" ${isLocked ? 'disabled' : ''}>
         <option value="">選択してください</option>
         ${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].map(a => {
           const sel = amount === a.toLocaleString() ? ' selected' : '';
@@ -2446,13 +2454,13 @@ function openMaebariEdit(itemId) {
         <option value="__custom__"${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? ' selected' : ''}>その他</option>
       </select>
       <div id="editCustomAmountWrap" style="margin-top:6px;display:${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? 'block' : 'none'};">
-        <input type="text" id="editMaebariAmountCustom" placeholder="金額を入力（例: 15,000）" value="${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? escHtml(amount) : ''}">
+        <input type="text" id="editMaebariAmountCustom" placeholder="金額を入力（例: 15,000）" value="${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? escHtml(amount) : ''}" ${isLocked ? 'disabled' : ''}>
       </div>
     </div>
 
     <div class="edit-field">
       <div class="edit-field-label">手数料</div>
-      <select id="editMaebariFee">
+      <select id="editMaebariFee" ${isLocked ? 'disabled' : ''}>
         <option value="">選択してください</option>
         <option value="275"${fee === '275' ? ' selected' : ''}>275</option>
         <option value="440"${fee === '440' ? ' selected' : ''}>440</option>
@@ -2469,8 +2477,7 @@ function openMaebariEdit(itemId) {
     </div>
 
     <div class="edit-actions">
-      <button class="btn btn-primary btn-block btn-lg" id="editMaebariSaveBtn" onclick="saveMaebariEdit()">修正完了</button>
-      <button class="btn-danger btn-block" id="editMaebariDeleteBtn" onclick="deleteMaebariEdit()">🗑 削除</button>
+      ${isLocked ? '' : '<button class="btn btn-primary btn-block btn-lg" id="editMaebariSaveBtn" onclick="saveMaebariEdit()">修正完了</button><button class="btn-danger btn-block" id="editMaebariDeleteBtn" onclick="deleteMaebariEdit()">🗑 削除</button>'}
     </div>
   `;
 
