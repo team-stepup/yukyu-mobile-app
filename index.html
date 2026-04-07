@@ -286,6 +286,47 @@ body {
 .maebari-nav button:active { background: var(--selected-bg); }
 .maebari-nav .period-text { font-size: 14px; font-weight: 600; min-width: 200px; text-align: center; }
 
+/* 前払い申請 */
+.amount-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.amount-btn {
+  padding: 12px 4px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+.amount-btn:active { transform: scale(0.97); }
+.amount-btn.selected { border-color: var(--primary); background: var(--selected-bg); color: var(--primary); }
+.maebari-custom-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  font-size: 16px;
+  text-align: right;
+  outline: none;
+}
+.maebari-custom-input:focus { border-color: var(--primary); }
+.current-period-badge {
+  display: inline-block;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 8px;
+  margin-left: 6px;
+}
+
 /* Grant Table */
 .grant-table {
   width: 100%;
@@ -658,7 +699,7 @@ body {
 
 <!-- Header -->
 <header class="app-header">
-  <h1 id="headerTitle">有給管理</h1>
+  <h1 id="headerTitle">申請（前払、有給）</h1>
   <button class="header-btn" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
 
@@ -767,6 +808,7 @@ const LIST_EMPLOYEES_GUID = '05a5a986-5958-4664-bb0d-7c1cfaedf845';
 const LIST_LEAVE_GUID = 'fe50ad49-5069-401d-ab2f-8d94fa826d1d';
 const LIST_MAEBARI_GUID = 'd34be315-365a-460f-976e-fb8da6977cec';
 const LIST_ITEM_ENTITY = 'SP.Data.List10ListItem';
+const LIST_MAEBARI_ENTITY = 'SP.Data.List1ListItem';
 
 // 前払い field names
 const MF = {
@@ -809,7 +851,9 @@ let currentGrantData = null;
 let selectedDates = [];
 let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
-let maebariPeriodOffset = 0; // 0 = current period, -1 = previous, etc.
+let maebariPeriodOffset = 0;
+let maebariCalYear = new Date().getFullYear();
+let maebariCalMonth = new Date().getMonth();
 let appliedDatesCache = [];
 
 // ============================================================
@@ -942,7 +986,7 @@ function switchScreen(screenId) {
   document.getElementById(screenId).classList.add('active');
   document.querySelectorAll('.tab-item').forEach(t => t.classList.toggle('active', t.dataset.screen === screenId));
 
-  const titles = { searchScreen: '社員検索', detailScreen: '有給詳細', applyScreen: '有給申請' };
+  const titles = { searchScreen: '申請（前払、有給）', detailScreen: '有給詳細', applyScreen: '有給申請' };
   document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
 }
 
@@ -1469,6 +1513,12 @@ function formatCurrency(num) {
 // ============================================================
 // 前払い Data Loading
 // ============================================================
+function isCurrentMaebariPeriod(offset) {
+  const today = new Date();
+  const period = getMaebariPeriod(offset);
+  return today >= period.start && today <= period.end;
+}
+
 async function loadMaebariData() {
   const emp = currentEmployee;
   if (!emp) return;
@@ -1479,6 +1529,7 @@ async function loadMaebariData() {
   const period = getMaebariPeriod(maebariPeriodOffset);
   const startISO = period.start.toISOString();
   const endISO = period.end.toISOString();
+  const isCurrent = isCurrentMaebariPeriod(maebariPeriodOffset);
 
   try {
     const syainNo = emp[F.syainNo];
@@ -1500,12 +1551,12 @@ async function loadMaebariData() {
     container.innerHTML = `
       <div class="maebari-nav">
         <button onclick="changeMaebariPeriod(-1)">&lsaquo; 前</button>
-        <div class="period-text">${periodLabel}</div>
+        <div class="period-text">${periodLabel}${isCurrent ? '<span class="current-period-badge">今月分</span>' : ''}</div>
         <button onclick="changeMaebariPeriod(1)">次 &rsaquo;</button>
       </div>
 
       <div class="maebari-total-box">
-        <div class="label">この期間の前払い合計</div>
+        <div class="label">この期間の前払い合計${isCurrent ? '（今月分）' : ''}</div>
         <div class="amount">${formatCurrency(grandTotal)}</div>
       </div>
 
@@ -1534,7 +1585,43 @@ async function loadMaebariData() {
           </tbody>
         </table>
       ` : '<div style="text-align:center;padding:20px;color:var(--text-light);">この期間の前払いデータはありません</div>'}
+
+      <div class="card" style="margin-top:16px;border:2px solid var(--primary);">
+        <div class="section-title" style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:12px;">前払い申請</div>
+
+        <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">① 支払日を選択</div>
+        <div id="maebariCalNav" class="calendar-nav" style="margin-bottom:4px;">
+          <button onclick="changeMaebariCalMonth(-1)">&lsaquo;</button>
+          <span id="maebariCalTitle"></span>
+          <button onclick="changeMaebariCalMonth(1)">&rsaquo;</button>
+        </div>
+        <div id="maebariCalendar" style="margin-bottom:16px;"></div>
+        <div id="maebariSelectedDate" style="font-size:13px;color:var(--primary);font-weight:600;margin-bottom:12px;text-align:center;"></div>
+
+        <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">② 金額を選択</div>
+        <div class="amount-grid">
+          ${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].map(a =>
+            '<button class="amount-btn" onclick="selectMaebariAmount(' + a + ',this)">' + a.toLocaleString() + '円</button>'
+          ).join('')}
+        </div>
+        <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">その他（半角数字、カンマ可）</div>
+        <input type="text" class="maebari-custom-input" id="maebariCustomAmount" placeholder="例: 15,000" oninput="onMaebariCustomInput(this)">
+
+        <div id="maebariConfirm" style="margin-top:16px;padding:12px;background:#f0f0ff;border-radius:10px;display:none;">
+          <div style="text-align:center;font-size:13px;color:var(--text-light);">申請内容</div>
+          <div style="text-align:center;font-size:15px;font-weight:700;color:var(--primary);margin:4px 0;" id="maebariConfirmText"></div>
+        </div>
+
+        <button class="btn btn-primary btn-block btn-lg" id="maebariSubmitBtn" onclick="submitMaebari()" style="margin-top:12px;" disabled>前払い申請</button>
+      </div>
     `;
+
+    // Initialize calendar
+    maebariCalYear = new Date().getFullYear();
+    maebariCalMonth = new Date().getMonth();
+    maebariSelectedPayDate = null;
+    maebariSelectedAmount = null;
+    renderMaebariCalendar();
   } catch (e) {
     console.error('Maebari fetch error:', e);
     container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">前払いデータの取得に失敗しました</div>';
@@ -1544,6 +1631,155 @@ async function loadMaebariData() {
 function changeMaebariPeriod(direction) {
   maebariPeriodOffset += direction;
   loadMaebariData();
+}
+
+// ============================================================
+// 前払い申請 Calendar & Form
+// ============================================================
+let maebariCalYear, maebariCalMonth;
+let maebariSelectedPayDate = null;
+let maebariSelectedAmount = null;
+
+function changeMaebariCalMonth(dir) {
+  maebariCalMonth += dir;
+  if (maebariCalMonth < 0) { maebariCalMonth = 11; maebariCalYear--; }
+  if (maebariCalMonth > 11) { maebariCalMonth = 0; maebariCalYear++; }
+  renderMaebariCalendar();
+}
+
+function renderMaebariCalendar() {
+  const titleEl = document.getElementById('maebariCalTitle');
+  const calEl = document.getElementById('maebariCalendar');
+  if (!titleEl || !calEl) return;
+
+  titleEl.textContent = maebariCalYear + '年' + (maebariCalMonth + 1) + '月';
+
+  const firstDay = new Date(maebariCalYear, maebariCalMonth, 1);
+  const lastDay = new Date(maebariCalYear, maebariCalMonth + 1, 0);
+  const startDow = firstDay.getDay();
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const days = ['日','月','火','水','木','金','土'];
+  let html = '<table style="width:100%;border-collapse:collapse;text-align:center;font-size:13px;">';
+  html += '<tr>' + days.map((d,i) => '<th style="padding:4px;font-size:11px;color:' + (i===0?'var(--danger)':i===6?'#1565c0':'var(--text-light)') + ';">' + d + '</th>').join('') + '</tr><tr>';
+
+  for (let i = 0; i < startDow; i++) html += '<td></td>';
+
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const date = new Date(maebariCalYear, maebariCalMonth, d);
+    const dow = date.getDay();
+    const isPast = date < today;
+    const isSelected = maebariSelectedPayDate && date.getTime() === maebariSelectedPayDate.getTime();
+    const isFriday = dow === 5;
+
+    let style = 'padding:8px 2px;border-radius:8px;cursor:pointer;';
+    if (isSelected) style += 'background:var(--primary);color:#fff;font-weight:700;';
+    else if (isFriday) style += 'background:#e8f5e9;font-weight:600;';
+    else if (dow === 0) style += 'color:var(--danger);';
+    else if (dow === 6) style += 'color:#1565c0;';
+
+    html += '<td style="' + style + '" onclick="selectMaebariDate(' + maebariCalYear + ',' + maebariCalMonth + ',' + d + ')">' + d + '</td>';
+
+    if (dow === 6 && d < lastDay.getDate()) html += '</tr><tr>';
+  }
+  html += '</tr></table>';
+  calEl.innerHTML = html;
+}
+
+function selectMaebariDate(y, m, d) {
+  maebariSelectedPayDate = new Date(y, m, d);
+  renderMaebariCalendar();
+  document.getElementById('maebariSelectedDate').textContent = '選択日: ' + formatDateShort(maebariSelectedPayDate);
+  updateMaebariConfirm();
+}
+
+function selectMaebariAmount(amount, btn) {
+  document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  maebariSelectedAmount = amount;
+  document.getElementById('maebariCustomAmount').value = '';
+  updateMaebariConfirm();
+}
+
+function onMaebariCustomInput(input) {
+  // Remove non-digit characters, then format with commas
+  let raw = input.value.replace(/[^\d]/g, '');
+  if (raw) {
+    maebariSelectedAmount = parseInt(raw);
+    input.value = parseInt(raw).toLocaleString();
+  } else {
+    maebariSelectedAmount = null;
+  }
+  document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+  updateMaebariConfirm();
+}
+
+function updateMaebariConfirm() {
+  const confirmDiv = document.getElementById('maebariConfirm');
+  const confirmText = document.getElementById('maebariConfirmText');
+  const submitBtn = document.getElementById('maebariSubmitBtn');
+  if (!confirmDiv || !submitBtn) return;
+
+  if (maebariSelectedPayDate && maebariSelectedAmount) {
+    confirmDiv.style.display = 'block';
+    confirmText.textContent = formatDateShort(maebariSelectedPayDate) + ' / ' + formatCurrency(maebariSelectedAmount);
+    submitBtn.disabled = false;
+  } else {
+    confirmDiv.style.display = 'none';
+    submitBtn.disabled = true;
+  }
+}
+
+async function submitMaebari() {
+  if (!maebariSelectedPayDate || !maebariSelectedAmount || !currentEmployee) return;
+
+  const emp = currentEmployee;
+  const btn = document.getElementById('maebariSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = '送信中...';
+
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+
+    const hakensaki = emp[F.hakensaki] || '';
+    const body = {
+      '__metadata': { 'type': LIST_MAEBARI_ENTITY },
+      'Title': String(emp[F.syainNo] || ''),
+      'NO_x002e_': String(emp[F.syainNo] || ''),
+      'OData__x652f__x6255__x65e5_': maebariSelectedPayDate.toISOString(),
+      'OData__x6d3e__x9063__x5148_': hakensaki,
+      'OData__x540d__x3000__x3000__x3000__x52': emp.Title || '',
+      'OData__x91d1__x984d_': maebariSelectedAmount.toLocaleString(),
+    };
+
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items";
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Maebari submit error:', resp.status, errText);
+      throw new Error('送信失敗: ' + resp.status);
+    }
+
+    showToast('前払い申請を送信しました', 'success');
+    maebariSelectedPayDate = null;
+    maebariSelectedAmount = null;
+    loadMaebariData();
+  } catch (e) {
+    console.error('Maebari submit error:', e);
+    showToast('前払い申請エラー: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = '前払い申請';
+  }
 }
 
 // ============================================================
