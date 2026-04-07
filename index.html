@@ -270,6 +270,117 @@ body {
 .copy-btn:active { background: var(--bg); }
 .copy-btn.copied { background: var(--success); color: #fff; border-color: var(--success); }
 
+/* Quick Links */
+.quick-links {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.quick-link-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 8px;
+  border: 2px solid var(--primary);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(98,100,167,0.15);
+}
+.quick-link-btn:active {
+  background: var(--primary);
+  color: #fff;
+  transform: scale(0.97);
+}
+.ql-icon { font-size: 20px; }
+
+/* List Screens */
+.list-screen-header {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.list-date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.list-date-row:last-child { margin-bottom: 0; }
+.list-date-row label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-light);
+  min-width: 40px;
+}
+.list-date-row input[type="date"] {
+  flex: 1;
+  padding: 10px 12px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: var(--card-bg);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.list-table thead th {
+  background: var(--primary);
+  color: #fff;
+  padding: 8px 6px;
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+.list-table tbody td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.list-table tbody tr:nth-child(even) { background: #f8f8fc; }
+.list-footer {
+  position: sticky;
+  bottom: var(--tab-height);
+  background: var(--primary-dark);
+  color: #fff;
+  display: flex;
+  justify-content: space-around;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-top: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+}
+.list-footer .footer-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.list-footer .footer-label {
+  font-size: 12px;
+  background: rgba(255,255,255,0.2);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
 /* 前払い */
 .maebari-period-label {
   text-align: center;
@@ -760,6 +871,16 @@ body {
 
   <!-- Screen 1: Employee Search -->
   <div class="screen" id="searchScreen">
+    <div class="quick-links">
+      <button class="quick-link-btn" onclick="switchScreen('maebariListScreen')">
+        <span class="ql-icon">💰</span>
+        <span class="ql-text">前払い一覧</span>
+      </button>
+      <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')">
+        <span class="ql-icon">📅</span>
+        <span class="ql-text">有給確認</span>
+      </button>
+    </div>
     <div class="search-box">
       <div style="position:relative;flex:1;">
         <input class="search-input" id="searchInput" type="text" placeholder="社員番号 または 名前で検索" style="width:100%;padding-right:32px;">
@@ -769,6 +890,35 @@ body {
       <button class="btn btn-primary" onclick="searchEmployee()">検索</button>
     </div>
     <div id="searchResults"></div>
+  </div>
+
+  <!-- Screen: 前払い一覧 -->
+  <div class="screen" id="maebariListScreen">
+    <div class="list-screen-header">
+      <div class="list-date-row">
+        <label>前払日</label>
+        <input type="date" id="maebariListDate" onchange="loadMaebariList()">
+      </div>
+    </div>
+    <div id="maebariListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
+    <div id="maebariListBody"></div>
+    <div id="maebariListFooter" class="list-footer" style="display:none;"></div>
+  </div>
+
+  <!-- Screen: 有給確認一覧 -->
+  <div class="screen" id="yukyuListScreen">
+    <div class="list-screen-header">
+      <div class="list-date-row">
+        <label>から</label>
+        <input type="date" id="yukyuListDateFrom" onchange="loadYukyuList()">
+      </div>
+      <div class="list-date-row">
+        <label>まで</label>
+        <input type="date" id="yukyuListDateTo" onchange="loadYukyuList()">
+      </div>
+    </div>
+    <div id="yukyuListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
+    <div id="yukyuListBody"></div>
   </div>
 
   <!-- Screen 2: Leave Details / 前払い -->
@@ -1025,8 +1175,10 @@ function switchScreen(screenId) {
   document.getElementById(screenId).classList.add('active');
   document.querySelectorAll('.tab-item').forEach(t => t.classList.toggle('active', t.dataset.screen === screenId));
 
-  const titles = { searchScreen: '申請（前払、有給）', detailScreen: '有給詳細', applyScreen: '有給申請' };
+  const titles = { searchScreen: '申請（前払、有給）', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認' };
   document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
+  if (screenId === 'maebariListScreen') initMaebariListDate();
+  if (screenId === 'yukyuListScreen') initYukyuListDate();
 }
 
 function showScreen(screenId) {
@@ -1954,6 +2106,137 @@ async function submitMaebari() {
     showToast('前払い申請エラー: ' + e.message, 'error');
     btn.disabled = false;
     btn.textContent = '前払い申請';
+  }
+}
+
+// ============================================================
+// 前払い一覧 Screen
+// ============================================================
+function initMaebariListDate() {
+  const inp = document.getElementById('maebariListDate');
+  if (!inp.value) {
+    inp.value = new Date().toISOString().slice(0, 10);
+    loadMaebariList();
+  }
+}
+
+async function loadMaebariList() {
+  const dateVal = document.getElementById('maebariListDate').value;
+  if (!dateVal) return;
+  const body = document.getElementById('maebariListBody');
+  const footer = document.getElementById('maebariListFooter');
+  const countEl = document.getElementById('maebariListCount');
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+  footer.style.display = 'none';
+
+  try {
+    const ds = new Date(dateVal); ds.setHours(0,0,0,0);
+    const de = new Date(dateVal); de.setHours(23,59,59,999);
+    const filter = "$filter=" + MF.payDate + " ge datetime'" + ds.toISOString() + "' and " +
+      MF.payDate + " le datetime'" + de.toISOString() + "'" +
+      "&$orderby=" + MF.hakensaki + "," + MF.syainNo +
+      "&$top=500&$select=" + [MF.syainNo, MF.name, MF.hakensaki, MF.amount, MF.fee, MF.total, MF.payDate].join(',');
+    const records = await spGet(LIST_MAEBARI_GUID, filter) || [];
+
+    countEl.textContent = records.length + '件';
+
+    if (records.length === 0) {
+      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">この日の前払いデータはありません</div>';
+      return;
+    }
+
+    let totalAmount = 0;
+    let html = '<div style="overflow-x:auto;"><table class="list-table"><thead><tr><th>No.</th><th>派遣先</th><th>氏名</th><th>金額</th><th>手数料</th></tr></thead><tbody>';
+    records.forEach(r => {
+      const amt = parseInt(String(r[MF.amount] || '0').replace(/,/g, '')) || 0;
+      totalAmount += amt;
+      let haken = r[MF.hakensaki] || '';
+      const hMatch = haken.match(/(\d+:[^\d].*)/);
+      if (hMatch) haken = hMatch[1].replace(/\d+$/, '');
+      const colonIdx = haken.indexOf(':');
+      if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
+      html += '<tr>'
+        + '<td>' + escHtml(String(r[MF.syainNo] || '')) + '</td>'
+        + '<td>' + escHtml(haken) + '</td>'
+        + '<td>' + escHtml(r[MF.name] || '') + '</td>'
+        + '<td style="text-align:right;">' + amt.toLocaleString() + '</td>'
+        + '<td style="text-align:right;">' + escHtml(String(r[MF.fee] || '')) + '</td>'
+        + '</tr>';
+    });
+    html += '</tbody></table></div>';
+    body.innerHTML = html;
+
+    footer.style.display = 'flex';
+    footer.innerHTML = '<div class="footer-item"><span class="footer-label">申請件数</span> ' + records.length + '件</div>'
+      + '<div class="footer-item"><span class="footer-label">合計金額</span> ' + totalAmount.toLocaleString() + '円</div>';
+  } catch (e) {
+    console.error('Maebari list error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
+  }
+}
+
+// ============================================================
+// 有給確認一覧 Screen
+// ============================================================
+function initYukyuListDate() {
+  const fromInp = document.getElementById('yukyuListDateFrom');
+  const toInp = document.getElementById('yukyuListDateTo');
+  if (!fromInp.value) {
+    const today = new Date().toISOString().slice(0, 10);
+    fromInp.value = today;
+    toInp.value = today;
+    loadYukyuList();
+  }
+}
+
+async function loadYukyuList() {
+  const fromVal = document.getElementById('yukyuListDateFrom').value;
+  const toVal = document.getElementById('yukyuListDateTo').value;
+  if (!fromVal || !toVal) return;
+  const body = document.getElementById('yukyuListBody');
+  const countEl = document.getElementById('yukyuListCount');
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+
+  try {
+    const ds = new Date(fromVal); ds.setHours(0,0,0,0);
+    const de = new Date(toVal); de.setHours(23,59,59,999);
+    const filter = "$filter=" + F.leaveDate + " ge datetime'" + ds.toISOString() + "' and " +
+      F.leaveDate + " le datetime'" + de.toISOString() + "'" +
+      "&$orderby=" + F.leaveDate + " desc&$top=500" +
+      "&$select=Title," + [F.syainNo, F.shimei, F.leaveDate, F.leaveType, F.leaveTypeDetail].join(',');
+    const records = await spGet(LIST_LEAVE_GUID, filter) || [];
+
+    countEl.textContent = records.length + '件';
+
+    if (records.length === 0) {
+      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">この期間の有給データはありません</div>';
+      return;
+    }
+
+    let html = '<div style="overflow-x:auto;"><table class="list-table"><thead><tr><th>派遣先</th><th>社番</th><th>氏名</th><th>有給日</th><th>取得日数</th></tr></thead><tbody>';
+    records.forEach(r => {
+      let haken = r.Title || '';
+      const hMatch = haken.match(/(\d+:[^\d].*)/);
+      if (hMatch) haken = hMatch[1].replace(/\d+$/, '');
+      const colonIdx = haken.indexOf(':');
+      if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
+      const leaveDate = r[F.leaveDate] ? formatDateShort(new Date(r[F.leaveDate])) : '';
+      const dayType = r[F.leaveType] || '';
+      const detail = r[F.leaveTypeDetail] || '';
+      const dayDisplay = dayType + (detail ? '（' + detail + '）' : '');
+      html += '<tr>'
+        + '<td>' + escHtml(haken) + '</td>'
+        + '<td>' + (r[F.syainNo] || '') + '</td>'
+        + '<td>' + escHtml(r[F.shimei] || '') + '</td>'
+        + '<td>' + leaveDate + '</td>'
+        + '<td>' + escHtml(dayDisplay) + '</td>'
+        + '</tr>';
+    });
+    html += '</tbody></table></div>';
+    body.innerHTML = html;
+  } catch (e) {
+    console.error('Yukyu list error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
   }
 }
 
