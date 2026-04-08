@@ -251,6 +251,20 @@ body {
 }
 .top-tab.active .tab-stat { color: #fff; }
 .tab-stat:empty { display: none; }
+.refresh-btn {
+  background: #f0f0ff;
+  color: var(--primary);
+  border: 1px solid var(--primary-light);
+  border-radius: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.refresh-btn:active { background: #e0e0f0; }
 .top-tab:active { transform: scale(0.97); }
 .top-tab.active {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -1138,7 +1152,7 @@ body {
   <button class="back-btn" id="backBtn" onclick="goBack()" style="display:none;" title="戻る">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
   </button>
-  <button class="home-btn" id="homeBtn" onclick="screenHistory.length=0;switchScreen('searchScreen')" style="display:none;" title="ホーム">
+  <button class="home-btn" id="homeBtn" onclick="screenHistory.length=0;resetSearch();switchScreen('searchScreen')" style="display:none;" title="ホーム">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
   </button>
   <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo">
@@ -1189,7 +1203,7 @@ body {
       <div class="section-title">社員検索</div>
       <div class="search-box" style="margin-bottom:0;">
         <div style="position:relative;flex:1;">
-          <input class="search-input" id="searchInput" type="text" placeholder="社員番号 または 名前" style="width:100%;padding-right:32px;padding:10px 32px 10px 14px;">
+          <input class="search-input" id="searchInput" type="text" placeholder="社員番号 / 名前 / 生年月日(S60.2.17)" style="width:100%;padding-right:32px;padding:10px 32px 10px 14px;">
           <button id="searchClearBtn" onclick="document.getElementById('searchInput').value='';document.getElementById('searchResults').innerHTML='';this.style.display='none';"
             style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#999;cursor:pointer;padding:0;line-height:1;">&times;</button>
         </div>
@@ -1210,7 +1224,7 @@ body {
         </div>
       </div>
     </div>
-    <div id="maebariListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:4px 8px;"><span id="maebariListCount" style="font-size:13px;color:var(--text-light);"></span><button class="refresh-btn" onclick="loadMaebariList()">&#x21bb; 更新</button></div>
     <div id="maebariListBody"></div>
     <div id="maebariListFooter" class="list-footer" style="display:none;"></div>
   </div>
@@ -1233,7 +1247,7 @@ body {
         <span style="font-size:13px;font-weight:600;color:var(--text-light);flex-shrink:0;">まで</span>
       </div>
     </div>
-    <div id="yukyuListCount" style="text-align:right;font-size:13px;color:var(--text-light);margin:4px 8px;"></div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:4px 8px;"><span id="yukyuListCount" style="font-size:13px;color:var(--text-light);"></span><button class="refresh-btn" onclick="loadYukyuList()">&#x21bb; 更新</button></div>
     <div id="yukyuListBody"></div>
   </div>
 
@@ -1504,8 +1518,14 @@ function switchScreen(screenId, skipHistory) {
   if (screenId === 'yukyuListScreen') initYukyuListDate();
 }
 
+function resetSearch() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+  document.getElementById('searchClearBtn').style.display = 'none';
+}
+
 function goBack() {
-  if (screenHistory.length === 0) { switchScreen('searchScreen'); return; }
+  if (screenHistory.length === 0) { resetSearch(); switchScreen('searchScreen'); return; }
   const prev = screenHistory.pop();
   switchScreen(prev, true);
 }
@@ -1533,6 +1553,40 @@ function hideSpinner() { document.getElementById('spinner').classList.remove('sh
 // ============================================================
 // Screen 1: Employee Search
 // ============================================================
+// Convert wareki to seireki date string (YYYY-MM-DD or YYYY)
+function warekiToSeireki(str) {
+  // 和暦パターン: 昭和60年2月17日, S60.2.17, S60/2/17, H5, R3, etc
+  const eraMap = { '明治': 1868, '大正': 1912, '昭和': 1926, '平成': 1989, '令和': 2019,
+    'M': 1868, 'T': 1912, 'S': 1926, 'H': 1989, 'R': 2019,
+    'm': 1868, 't': 1912, 's': 1926, 'h': 1989, 'r': 2019 };
+  // Full: 昭和60年2月17日
+  let m = str.match(/^(明治|大正|昭和|平成|令和)(\d{1,2})年?(\d{1,2})?月?(\d{1,2})?日?$/);
+  if (m) {
+    const y = eraMap[m[1]] + parseInt(m[2]) - 1;
+    return { year: y, month: m[3] ? parseInt(m[3]) : null, day: m[4] ? parseInt(m[4]) : null };
+  }
+  // Alphabet: S60.2.17, S60/2/17, S60-2-17, H5
+  m = str.match(/^([MmTtSsHhRr])(\d{1,2})[\.\/\-]?(\d{1,2})?[\.\/\-]?(\d{1,2})?$/);
+  if (m) {
+    const y = eraMap[m[1]] + parseInt(m[2]) - 1;
+    return { year: y, month: m[3] ? parseInt(m[3]) : null, day: m[4] ? parseInt(m[4]) : null };
+  }
+  return null;
+}
+
+// Parse date query to { year, month, day } from seireki or wareki
+function parseDateQuery(query) {
+  // Try wareki first
+  const w = warekiToSeireki(query);
+  if (w) return w;
+  // Seireki: 1985/2/17, 1985-02-17, 1985.2.17, 1985
+  const m = query.match(/^(\d{4})[\.\/\-]?(\d{1,2})?[\.\/\-]?(\d{1,2})?$/);
+  if (m && parseInt(m[1]) >= 1900 && parseInt(m[1]) <= 2100) {
+    return { year: parseInt(m[1]), month: m[2] ? parseInt(m[2]) : null, day: m[3] ? parseInt(m[3]) : null };
+  }
+  return null;
+}
+
 async function searchEmployee() {
   const query = document.getElementById('searchInput').value.trim();
   const container = document.getElementById('searchResults');
@@ -1545,7 +1599,23 @@ async function searchEmployee() {
   showSpinner();
   try {
     let filter;
-    if (/^\d+$/.test(query)) {
+    const dateQ = parseDateQuery(query);
+    if (dateQ) {
+      // Birthday search
+      const bdField = 'OData__x751f__x5e74__x6708__x65e5_';
+      if (dateQ.month && dateQ.day) {
+        const ds = dateQ.year + '-' + String(dateQ.month).padStart(2,'0') + '-' + String(dateQ.day).padStart(2,'0');
+        filter = "$filter=" + bdField + " ge datetime'" + ds + "T00:00:00Z' and " + bdField + " lt datetime'" + ds + "T23:59:59Z'&$top=50";
+      } else if (dateQ.month) {
+        const s = dateQ.year + '-' + String(dateQ.month).padStart(2,'0') + '-01';
+        const eM = dateQ.month === 12 ? 1 : dateQ.month + 1;
+        const eY = dateQ.month === 12 ? dateQ.year + 1 : dateQ.year;
+        const e = eY + '-' + String(eM).padStart(2,'0') + '-01';
+        filter = "$filter=" + bdField + " ge datetime'" + s + "T00:00:00Z' and " + bdField + " lt datetime'" + e + "T00:00:00Z'&$top=50";
+      } else {
+        filter = "$filter=" + bdField + " ge datetime'" + dateQ.year + "-01-01T00:00:00Z' and " + bdField + " lt datetime'" + (dateQ.year + 1) + "-01-01T00:00:00Z'&$top=50";
+      }
+    } else if (/^\d+$/.test(query)) {
       // Number only → search by employee number
       filter = "$filter=" + F.syainNo + " eq " + query + "&$top=10";
     } else {
@@ -1890,7 +1960,8 @@ async function loadLeaveDetails() {
       </div>
     </div>
 
-    <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+    <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
+      <button class="refresh-btn" onclick="loadLeaveDetails()">&#x21bb; 更新</button>
       <button class="btn" onclick="copyDetailToClipboard()" style="background:#f0f0ff;color:var(--primary);font-size:12px;padding:6px 14px;">
         コピー
       </button>
@@ -2415,6 +2486,7 @@ function formatProfileValue(val, format) {
 
 // Check if a category has any expiry alerts
 function categoryHasAlert(emp, keyMap, category) {
+  if (isResigned(emp)) return false;
   for (const field of category.fields) {
     if (field.format !== 'dateExpiry') continue;
     const odataKey = keyMap[field.key];
@@ -2575,6 +2647,7 @@ async function loadEmployeeProfile() {
     html += '</table></div></div>';
   });
 
+  html = '<div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><button class="refresh-btn" onclick="employeeFieldsCache=null;loadEmployeeProfile()">&#x21bb; 更新</button></div>' + html;
   container.innerHTML = html;
 }
 
@@ -2674,6 +2747,7 @@ async function loadMaebariData() {
     const periodLabel = formatDateShort(period.start) + ' ～ ' + formatDateShort(period.end);
 
     container.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:4px;"><button class="refresh-btn" onclick="loadMaebariData()">&#x21bb; 更新</button></div>
       <div class="maebari-nav">
         <button onclick="changeMaebariPeriod(-1)">&lsaquo; 前</button>
         <div class="period-text">${periodLabel}${isCurrent ? '<span class="current-period-badge">今月分</span>' : ''}</div>
