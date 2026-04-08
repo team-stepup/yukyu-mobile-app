@@ -2197,6 +2197,11 @@ const PROFILE_CATEGORIES = [
       { key: 'koyouShutoku', label: '雇用：資格取得日', format: 'date' },
       { key: 'koyouName', label: 'Koyou Name' },
       { key: 'shahoSoushitsu', label: '社保喪失日', format: 'date' },
+      { key: 'soumuKoyou', label: '総務・雇用', format: 'badge' },
+      { key: 'soumuShaho', label: '総務-社保', format: 'badge' },
+      { key: 'soumuRishoku', label: '総務-離職票', format: 'badge' },
+      { key: 'rishokuhyou', label: '離職票', format: 'badge' },
+      { key: 'rishokuWatashi', label: '離職票渡し方', format: 'badge' },
     ]
   },
 ];
@@ -2269,6 +2274,11 @@ function buildFieldKeyMap(fieldsMeta) {
     koyouShutoku: '雇用：資格取得日',
     koyouName: 'Koyou Name',
     shahoSoushitsu: '社保喪失日',
+    soumuKoyou: '総務・雇用',
+    soumuShaho: '総務-社保',
+    soumuRishoku: '総務-離職票',
+    rishokuhyou: '離職票risyokuhyou',
+    rishokuWatashi: '離職票渡し方risyokuhyou watashikata',
     tokki1: '特記事項１',
     syainFile: '社員ファイル',
   };
@@ -2330,6 +2340,16 @@ function formatProfileValue(val, format) {
   }
   if (format === 'map') {
     return '<a href="https://www.google.com/maps/search/' + encodeURIComponent(str) + '" target="_blank" style="color:var(--primary);">' + escHtml(str) + ' &#x1F4CD;</a>';
+  }
+  if (format === 'badge') {
+    // Color-coded badge for status values
+    let bg = '#f0f0f0'; let color = '#666';
+    if (str.indexOf('完了') >= 0 || str.indexOf('取得') >= 0) { bg = '#e3f2fd'; color = '#1565c0'; }
+    else if (str.indexOf('未加入') >= 0 || str.indexOf('未') >= 0) { bg = '#fff3e0'; color = '#e65100'; }
+    else if (str.indexOf('不要') >= 0 || str.indexOf('iranai') >= 0 || str.indexOf('いらない') >= 0) { bg = '#f5f5f5'; color = '#999'; }
+    else if (str.indexOf('必要') >= 0) { bg = '#e8f5e9'; color = '#2e7d32'; }
+    else if (str.indexOf('手渡し') >= 0 || str.indexOf('郵送') >= 0) { bg = '#fff8e1'; color = '#f57f17'; }
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:' + bg + ';color:' + color + ';">' + escHtml(str) + '</span>';
   }
   if (format === 'spUrl') {
     // SharePoint URL field: {Url, Description}
