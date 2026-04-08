@@ -67,6 +67,14 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.header-logo {
+  height: 28px;
+  flex: 1;
+  object-fit: contain;
+  object-position: left;
+  filter: brightness(0) invert(1);
+  opacity: 0.95;
+}
 
 .header-btn {
   background: rgba(255,255,255,0.2);
@@ -1134,7 +1142,8 @@ body {
   <button class="home-btn" id="homeBtn" onclick="screenHistory.length=0;switchScreen('searchScreen')" style="display:none;" title="ホーム">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
   </button>
-  <h1 id="headerTitle">申請（前払、有給）</h1>
+  <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo">
+  <h1 id="headerTitle" style="display:none;">ホーム</h1>
   <button class="header-btn" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
 
@@ -1178,8 +1187,7 @@ body {
       </button>
     </div>
     <div class="card" style="padding:12px;">
-      <div class="section-title">🔍 社員検索（有給申請・前払い申請）</div>
-      <p style="font-size:12px;color:var(--text-light);margin-bottom:10px;">社員を検索して、有給の確認・申請、前払い申請ができます</p>
+      <div class="section-title">社員検索</div>
       <div class="search-box" style="margin-bottom:0;">
         <div style="position:relative;flex:1;">
           <input class="search-input" id="searchInput" type="text" placeholder="社員番号 または 名前" style="width:100%;padding-right:32px;padding:10px 32px 10px 14px;">
@@ -1477,8 +1485,11 @@ function switchScreen(screenId, skipHistory) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報' };
-  document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報' };
+  const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
+  document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
+  document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
+  document.getElementById('headerTitle').textContent = titles[screenId] || '';
 
   // Home button: show when not on home
   document.getElementById('homeBtn').style.display = screenId === 'searchScreen' ? 'none' : 'flex';
