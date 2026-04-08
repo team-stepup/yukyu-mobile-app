@@ -1330,10 +1330,13 @@ body {
       <span id="nyutaiMonthLabel" style="font-size:17px;font-weight:800;color:var(--primary);min-width:120px;text-align:center;"></span>
       <button class="nyutai-nav-btn" onclick="changeNyutaiMonth(1)">▶</button>
     </div>
-    <div style="display:flex;justify-content:center;gap:4px;padding:0 0 8px;">
-      <button class="nyutai-range-btn active" onclick="setNyutaiRange(1)">1ヶ月</button>
-      <button class="nyutai-range-btn" onclick="setNyutaiRange(2)">2ヶ月</button>
-      <button class="nyutai-range-btn" onclick="setNyutaiRange(3)">3ヶ月</button>
+    <div style="display:flex;justify-content:center;align-items:center;gap:6px;padding:0 0 8px;">
+      <button class="nyutai-range-btn active" data-range="1" onclick="setNyutaiRange(1)">1</button>
+      <button class="nyutai-range-btn" data-range="2" onclick="setNyutaiRange(2)">2</button>
+      <button class="nyutai-range-btn" data-range="3" onclick="setNyutaiRange(3)">3</button>
+      <button class="nyutai-range-btn" data-range="6" onclick="setNyutaiRange(6)">6</button>
+      <button class="nyutai-range-btn" data-range="12" onclick="setNyutaiRange(12)">12</button>
+      <span style="font-size:11px;color:var(--text-light);">ヶ月</span>
     </div>
     <div id="nyutaiSummary" style="display:flex;gap:6px;padding:0 4px 8px;flex-wrap:wrap;justify-content:center;"></div>
     <div id="nyutaiBody"></div>
@@ -5134,8 +5137,8 @@ function changeNyutaiMonth(delta) {
 
 function setNyutaiRange(r) {
   nyutaiRange = r;
-  document.querySelectorAll('.nyutai-range-btn').forEach((btn, i) => {
-    btn.classList.toggle('active', (i + 1) === r);
+  document.querySelectorAll('.nyutai-range-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.getAttribute('data-range')) === r);
   });
   loadNyutaiScreen();
 }
@@ -5251,62 +5254,120 @@ async function loadNyutaiScreen() {
     // Build body
     let html = '';
 
-    // 入社 section
-    html += '<div class="nyutai-section">';
-    html += '<div class="nyutai-section-title"><span style="color:#2e7d32;">🟢</span> 入社 (' + nyusha.length + '件)</div>';
-    if (nyusha.length === 0) {
-      html += '<div class="nyutai-empty">この月の入社はありません</div>';
-    } else {
-      nyusha.sort((a, b) => new Date(a[F.nyushaDate]) - new Date(b[F.nyushaDate]));
-      nyusha.forEach(emp => {
-        const dt = formatDate(emp[F.nyushaDate]);
-        const name = emp.Title || '';
-        const buka = getBukaValue(emp) || '';
-        const no = emp[F.syainNo] || '';
-        html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
-        html += '<div class="nyutai-emp-date">' + dt.replace(/^\d{4}\//, '') + '</div>';
-        html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div></div>';
-        html += '<span class="nyutai-badge new">入社</span>';
-        html += '</div>';
-      });
-    }
-    html += '</div>';
+    if (nyutaiRange >= 7) {
+      // ===== 7ヶ月以上: 月別集計テーブルのみ =====
+      html += '<div class="card" style="padding:8px;margin-top:4px;">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+      html += '<thead><tr style="background:var(--primary);color:#fff;">';
+      html += '<th style="padding:6px 8px;text-align:left;border-radius:6px 0 0 0;">月</th>';
+      html += '<th style="padding:6px 4px;text-align:center;width:50px;">入社</th>';
+      html += '<th style="padding:6px 4px;text-align:center;width:50px;">退社</th>';
+      html += '<th style="padding:6px 8px;text-align:center;width:50px;border-radius:0 6px 0 0;">実績</th>';
+      html += '</tr></thead><tbody>';
 
-    // 退社 section
-    html += '<div class="nyutai-section">';
-    html += '<div class="nyutai-section-title"><span style="color:#c62828;">🔴</span> 退社 (' + taishaList.length + '件)</div>';
-    if (taishaList.length === 0) {
-      html += '<div class="nyutai-empty">この月の退社はありません</div>';
+      for (let m = 0; m < nyutaiRange; m++) {
+        const mm = (nyutaiMonth + m) % 12;
+        const yy = nyutaiYear + Math.floor((nyutaiMonth + m) / 12);
+        const ms = new Date(yy, mm, 1);
+        const me = new Date(yy, mm + 1, 0, 23, 59, 59);
+        const mKey = yy * 12 + mm;
+
+        const mNyusha = nyusha.filter(e => { const d = new Date(e[F.nyushaDate]); return d >= ms && d <= me; }).length;
+        const mTaisha = taishaList.filter(e => {
+          const hd = e[F.hakenTaisha], yd = e[F.yukyuTaisha];
+          // Re-apply count logic for this specific month
+          if (hd && yd) {
+            const hdM = new Date(hd).getFullYear() * 12 + new Date(hd).getMonth();
+            const ydM = new Date(yd).getFullYear() * 12 + new Date(yd).getMonth();
+            const countM = (hdM === ydM) ? hdM : ydM;
+            return countM === mKey;
+          }
+          if (yd) { const d = new Date(yd); return d >= ms && d <= me; }
+          if (hd) { const d = new Date(hd); return d >= ms && d <= me; }
+          return false;
+        }).length;
+        const mJisseki = mNyusha - mTaisha;
+        const isCurrentMonth = (yy === new Date().getFullYear() && mm === new Date().getMonth());
+        const rowBg = isCurrentMonth ? 'background:#f0f4ff;' : (m % 2 === 0 ? '' : 'background:#fafafa;');
+
+        html += '<tr style="' + rowBg + '">';
+        html += '<td style="padding:8px;font-weight:' + (isCurrentMonth ? '800' : '600') + ';">' + (mm + 1) + '月</td>';
+        html += '<td style="padding:8px;text-align:center;color:#2e7d32;font-weight:700;">' + (mNyusha || '-') + '</td>';
+        html += '<td style="padding:8px;text-align:center;color:#c62828;font-weight:700;">' + (mTaisha || '-') + '</td>';
+        const jColor = mJisseki > 0 ? '#1565c0' : mJisseki < 0 ? '#e65100' : 'var(--text-light)';
+        html += '<td style="padding:8px;text-align:center;color:' + jColor + ';font-weight:800;">' + (mJisseki > 0 ? '+' : '') + mJisseki + '</td>';
+        html += '</tr>';
+      }
+
+      // 合計行
+      html += '<tr style="background:var(--bg);border-top:2px solid var(--primary);">';
+      html += '<td style="padding:8px;font-weight:800;">合計</td>';
+      html += '<td style="padding:8px;text-align:center;color:#2e7d32;font-weight:800;">' + nyusha.length + '</td>';
+      html += '<td style="padding:8px;text-align:center;color:#c62828;font-weight:800;">' + taishaList.length + '</td>';
+      const jColor2 = jisseki > 0 ? '#1565c0' : jisseki < 0 ? '#e65100' : 'var(--text-light)';
+      html += '<td style="padding:8px;text-align:center;color:' + jColor2 + ';font-weight:800;">' + (jisseki > 0 ? '+' : '') + jisseki + '</td>';
+      html += '</tr>';
+
+      html += '</tbody></table></div>';
+
     } else {
-      taishaList.sort((a, b) => {
-        const da = new Date(a[F.yukyuTaisha] || a[F.hakenTaisha]);
-        const db = new Date(b[F.yukyuTaisha] || b[F.hakenTaisha]);
-        return da - db;
-      });
-      taishaList.forEach(emp => {
-        const hd = emp[F.hakenTaisha];
-        const yd = emp[F.yukyuTaisha];
-        const name = emp.Title || '';
-        const buka = getBukaValue(emp) || '';
-        const tenure = calcTenure(emp[F.nyushaDate], yd || hd);
-        let dateInfo = '';
-        if (hd) dateInfo += '派遣退社:' + formatDate(hd).replace(/^\d{4}\//, '');
-        if (yd) dateInfo += (dateInfo ? ' ' : '') + '有給退社:' + formatDate(yd).replace(/^\d{4}\//, '');
-        const displayDate = formatDate(yd || hd).replace(/^\d{4}\//, '');
-        // Check if future
-        const now = new Date();
-        const retDate = new Date(yd || hd);
-        const isPlan = retDate > now;
-        html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
-        html += '<div class="nyutai-emp-date">' + displayDate + '</div>';
-        html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div>';
-        html += '<div class="nyutai-emp-buka">' + escHtml(buka) + (tenure ? ' <span style="color:var(--primary);font-weight:600;">(' + tenure + ')</span>' : '') + '</div>';
-        html += '<div style="font-size:10px;color:var(--text-light);margin-top:2px;">' + escHtml(dateInfo) + '</div></div>';
-        html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '予定' : '退社') + '</span>';
-        html += '</div>';
-      });
+      // ===== 1〜6ヶ月: 個別カード表示 =====
+
+      // 入社 section
+      html += '<div class="nyutai-section">';
+      html += '<div class="nyutai-section-title"><span style="color:#2e7d32;">🟢</span> 入社 (' + nyusha.length + '件)</div>';
+      if (nyusha.length === 0) {
+        html += '<div class="nyutai-empty">この期間の入社はありません</div>';
+      } else {
+        nyusha.sort((a, b) => new Date(a[F.nyushaDate]) - new Date(b[F.nyushaDate]));
+        nyusha.forEach(emp => {
+          const dt = formatDate(emp[F.nyushaDate]);
+          const name = emp.Title || '';
+          const buka = getBukaValue(emp) || '';
+          html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
+          html += '<div class="nyutai-emp-date">' + dt.replace(/^\d{4}\//, '') + '</div>';
+          html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div></div>';
+          html += '<span class="nyutai-badge new">入社</span>';
+          html += '</div>';
+        });
+      }
+      html += '</div>';
+
+      // 退社 section
+      html += '<div class="nyutai-section">';
+      html += '<div class="nyutai-section-title"><span style="color:#c62828;">🔴</span> 退社 (' + taishaList.length + '件)</div>';
+      if (taishaList.length === 0) {
+        html += '<div class="nyutai-empty">この期間の退社はありません</div>';
+      } else {
+        taishaList.sort((a, b) => {
+          const da = new Date(a[F.yukyuTaisha] || a[F.hakenTaisha]);
+          const db = new Date(b[F.yukyuTaisha] || b[F.hakenTaisha]);
+          return da - db;
+        });
+        taishaList.forEach(emp => {
+          const hd = emp[F.hakenTaisha];
+          const yd = emp[F.yukyuTaisha];
+          const name = emp.Title || '';
+          const buka = getBukaValue(emp) || '';
+          const tenure = calcTenure(emp[F.nyushaDate], yd || hd);
+          let dateInfo = '';
+          if (hd) dateInfo += '派遣退社:' + formatDate(hd).replace(/^\d{4}\//, '');
+          if (yd) dateInfo += (dateInfo ? ' ' : '') + '有給退社:' + formatDate(yd).replace(/^\d{4}\//, '');
+          const displayDate = formatDate(yd || hd).replace(/^\d{4}\//, '');
+          const now = new Date();
+          const retDate = new Date(yd || hd);
+          const isPlan = retDate > now;
+          html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
+          html += '<div class="nyutai-emp-date">' + displayDate + '</div>';
+          html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div>';
+          html += '<div class="nyutai-emp-buka">' + escHtml(buka) + (tenure ? ' <span style="color:var(--primary);font-weight:600;">(' + tenure + ')</span>' : '') + '</div>';
+          html += '<div style="font-size:10px;color:var(--text-light);margin-top:2px;">' + escHtml(dateInfo) + '</div></div>';
+          html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '予定' : '退社') + '</span>';
+          html += '</div>';
+        });
+      }
+      html += '</div>';
     }
-    html += '</div>';
 
     body.innerHTML = html;
   } catch (e) {
