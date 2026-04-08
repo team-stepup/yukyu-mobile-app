@@ -265,6 +265,26 @@ body {
   gap: 4px;
 }
 .refresh-btn:active { background: #e0e0f0; }
+.haken-filter-btn {
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.haken-filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.haken-filter-btn.warn { background: #fff3e0; color: var(--warning); border-color: var(--warning); }
+.haken-filter-btn.warn.active { background: var(--warning); color: #fff; }
+.haken-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.haken-table th { background: var(--primary); color: #fff; padding: 8px 6px; text-align: left; font-size: 11px; font-weight: 600; position: sticky; top: 0; }
+.haken-table td { padding: 7px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.haken-table tr:last-child td { border-bottom: none; }
+.haken-table tr:nth-child(even) { background: #fafafe; }
+.haken-dl-btn { background: #388e3c; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.haken-dl-btn:active { background: #2e7d32; }
 .top-tab:active { transform: scale(0.97); }
 .top-tab.active {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -1211,6 +1231,26 @@ body {
       </div>
     </div>
     <div id="searchResults"></div>
+
+    <div class="card" style="padding:12px;margin-top:8px;">
+      <div class="section-title">派遣先一覧</div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="hakenSelect" class="search-input" style="flex:1;padding:10px;">
+          <option value="">派遣先を選択...</option>
+        </select>
+        <label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px;">
+          <input type="checkbox" id="hakenIncludeRetired"> 退職含む
+        </label>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="openHakenList()">表示</button>
+    </div>
+  </div>
+
+  <!-- Screen: 派遣先社員一覧 -->
+  <div class="screen" id="hakenListScreen">
+    <div id="hakenListHeader" style="padding:8px 0;"></div>
+    <div id="hakenFilterBtns" style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;"></div>
+    <div id="hakenListBody"></div>
   </div>
 
   <!-- Screen: 前払い一覧 -->
@@ -1413,6 +1453,7 @@ async function onLoginSuccess(resp) {
   document.getElementById('authBtn').textContent = 'ログアウト';
   switchScreen('searchScreen');
   showToast('ログインしました', 'success');
+  populateHakenDropdown();
 }
 
 async function acquireToken() {
@@ -1498,7 +1539,7 @@ function switchScreen(screenId, skipHistory) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -4146,6 +4187,232 @@ async function deleteLeaveRecord(itemId, dateStr) {
   } finally {
     hideSpinner();
   }
+}
+
+// ============================================================
+// 派遣先一覧 (Dispatch Destination Employee List)
+// ============================================================
+let hakenEmployeesCache = [];
+let hakenCurrentFilter = 'all';
+
+async function populateHakenDropdown() {
+  try {
+    const select = document.getElementById('hakenSelect');
+    // Fetch all employees to get unique hakensaki values
+    let allEmps = [];
+    let skip = 0;
+    while (true) {
+      const batch = await spGet(LIST_EMPLOYEES_GUID, '$select=Title,' + F.syainNo + ',' + F.hakensaki + ',' + F.hakenTaisha + ',' + F.yukyuTaisha + '&$top=500&$skip=' + skip);
+      if (!batch || batch.length === 0) break;
+      allEmps = allEmps.concat(batch);
+      if (batch.length < 500) break;
+      skip += 500;
+    }
+    // Extract unique hakensaki from active employees
+    const hakenSet = new Set();
+    allEmps.forEach(emp => {
+      const h = getHakensaki(emp);
+      if (h) hakenSet.add(h);
+    });
+    const sorted = Array.from(hakenSet).sort();
+    select.innerHTML = '<option value="">派遣先を選択...</option>';
+    sorted.forEach(h => {
+      const opt = document.createElement('option');
+      opt.value = h;
+      opt.textContent = h;
+      select.appendChild(opt);
+    });
+  } catch (e) {
+    console.error('Haken dropdown error:', e);
+  }
+}
+
+async function openHakenList() {
+  const select = document.getElementById('hakenSelect');
+  const hakensaki = select.value;
+  if (!hakensaki) {
+    showToast('派遣先を選択してください', 'error');
+    return;
+  }
+  const includeRetired = document.getElementById('hakenIncludeRetired').checked;
+  showSpinner();
+  try {
+    // Fetch all employees (need to filter client-side because hakensaki is embedded in a complex field)
+    let allEmps = [];
+    let skip = 0;
+    while (true) {
+      const batch = await spGet(LIST_EMPLOYEES_GUID, '$top=500&$skip=' + skip);
+      if (!batch || batch.length === 0) break;
+      allEmps = allEmps.concat(batch);
+      if (batch.length < 500) break;
+      skip += 500;
+    }
+    // Filter by hakensaki
+    let filtered = allEmps.filter(emp => getHakensaki(emp) === hakensaki);
+    // Filter retired if needed
+    if (!includeRetired) {
+      filtered = filtered.filter(emp => !isResigned(emp));
+    }
+    hakenEmployeesCache = filtered;
+    hakenCurrentFilter = 'all';
+    switchScreen('hakenListScreen');
+    renderHakenList(hakensaki, filtered);
+  } catch (e) {
+    console.error('Haken list error:', e);
+    showToast('読み込みエラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function getTsukinValue(emp) {
+  const key = Object.keys(emp).find(k => k.indexOf('x901a__x52e4__x65b9__x6cd5') >= 0);
+  return key ? (emp[key] || '') : '';
+}
+
+function renderHakenList(hakensaki, employees) {
+  const header = document.getElementById('hakenListHeader');
+  const filterDiv = document.getElementById('hakenFilterBtns');
+  const body = document.getElementById('hakenListBody');
+
+  // Count by tsukin category
+  let countSougei = 0, countOther = 0, countEmpty = 0;
+  employees.forEach(emp => {
+    const t = getTsukinValue(emp);
+    if (!t) countEmpty++;
+    else if (t.indexOf('送迎') >= 0) countSougei++;
+    else countOther++;
+  });
+
+  header.innerHTML = '<div style="font-size:16px;font-weight:700;color:var(--primary);">' + escHtml(hakensaki) + '</div>' +
+    '<div style="font-size:12px;color:var(--text-light);margin-top:2px;">社員数: ' + employees.length + '名</div>';
+
+  filterDiv.innerHTML =
+    '<button class="haken-filter-btn active" data-filter="all" onclick="applyHakenFilter(\'all\',this)">全員 (' + employees.length + ')</button>' +
+    '<button class="haken-filter-btn" data-filter="sougei" onclick="applyHakenFilter(\'sougei\',this)">🚐 送迎 (' + countSougei + ')</button>' +
+    '<button class="haken-filter-btn" data-filter="other" onclick="applyHakenFilter(\'other\',this)">🚗 送迎以外 (' + countOther + ')</button>' +
+    '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
+    '<button class="haken-dl-btn" onclick="downloadHakenExcel()" style="margin-left:auto;">📥 Excel</button>' +
+    '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
+
+  renderHakenTable(employees, body);
+}
+
+function applyHakenFilter(filter, btn) {
+  hakenCurrentFilter = filter;
+  // Update active button
+  document.querySelectorAll('#hakenFilterBtns .haken-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  let filtered = hakenEmployeesCache;
+  if (filter === 'sougei') {
+    filtered = hakenEmployeesCache.filter(emp => getTsukinValue(emp).indexOf('送迎') >= 0);
+  } else if (filter === 'other') {
+    filtered = hakenEmployeesCache.filter(emp => { const t = getTsukinValue(emp); return t && t.indexOf('送迎') < 0; });
+  } else if (filter === 'empty') {
+    filtered = hakenEmployeesCache.filter(emp => !getTsukinValue(emp));
+  }
+  renderHakenTable(filtered, document.getElementById('hakenListBody'));
+}
+
+function renderHakenTable(employees, container) {
+  if (employees.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>該当する社員がいません</p></div>';
+    return;
+  }
+  let html = '<table class="haken-table"><thead><tr>' +
+    '<th>氏名</th><th>社番</th><th>通勤方法</th><th>在職</th>' +
+    '</tr></thead><tbody>';
+  employees.forEach(emp => {
+    const tsukin = getTsukinValue(emp);
+    const resigned = isResigned(emp);
+    const tsukinDisplay = tsukin ? escHtml(tsukin) : '<span style="color:var(--warning);font-weight:600;">⚠未登録</span>';
+    const statusDisplay = resigned ? '<span style="color:var(--danger);">退社</span>' : '<span style="color:var(--success);">在職</span>';
+    html += '<tr onclick=\'selectEmployee(' + JSON.stringify(emp).replace(/'/g, "&#39;") + ')\' style="cursor:pointer;">' +
+      '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
+      '<td>' + (emp[F.syainNo] || '') + '</td>' +
+      '<td>' + tsukinDisplay + '</td>' +
+      '<td>' + statusDisplay + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+async function refreshHakenList() {
+  const select = document.getElementById('hakenSelect');
+  const hakensaki = select.value;
+  if (!hakensaki) return;
+  const includeRetired = document.getElementById('hakenIncludeRetired').checked;
+  showSpinner();
+  try {
+    let allEmps = [];
+    let skip = 0;
+    while (true) {
+      const batch = await spGet(LIST_EMPLOYEES_GUID, '$top=500&$skip=' + skip);
+      if (!batch || batch.length === 0) break;
+      allEmps = allEmps.concat(batch);
+      if (batch.length < 500) break;
+      skip += 500;
+    }
+    let filtered = allEmps.filter(emp => getHakensaki(emp) === hakensaki);
+    if (!includeRetired) {
+      filtered = filtered.filter(emp => !isResigned(emp));
+    }
+    hakenEmployeesCache = filtered;
+    renderHakenList(hakensaki, filtered);
+    // Re-apply current filter
+    if (hakenCurrentFilter !== 'all') {
+      const btn = document.querySelector('#hakenFilterBtns .haken-filter-btn[data-filter="' + hakenCurrentFilter + '"]');
+      if (btn) applyHakenFilter(hakenCurrentFilter, btn);
+    }
+    showToast('更新しました', 'success');
+  } catch (e) {
+    showToast('更新エラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function downloadHakenExcel() {
+  // Get currently displayed employees based on filter
+  let data = hakenEmployeesCache;
+  if (hakenCurrentFilter === 'sougei') {
+    data = data.filter(emp => getTsukinValue(emp).indexOf('送迎') >= 0);
+  } else if (hakenCurrentFilter === 'other') {
+    data = data.filter(emp => { const t = getTsukinValue(emp); return t && t.indexOf('送迎') < 0; });
+  } else if (hakenCurrentFilter === 'empty') {
+    data = data.filter(emp => !getTsukinValue(emp));
+  }
+
+  const hakensaki = document.getElementById('hakenSelect').value || '派遣先';
+
+  // Build CSV with BOM for Excel Japanese support
+  const BOM = '\uFEFF';
+  const headers = ['氏名', '社員番号', '通勤方法', '在職状態', '派遣先'];
+  const rows = data.map(emp => {
+    const tsukin = getTsukinValue(emp);
+    const status = isResigned(emp) ? '退社' : '在職';
+    return [
+      '"' + (emp.Title || '').replace(/"/g, '""') + '"',
+      emp[F.syainNo] || '',
+      '"' + tsukin.replace(/"/g, '""') + '"',
+      status,
+      '"' + hakensaki.replace(/"/g, '""') + '"'
+    ].join(',');
+  });
+
+  const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = hakensaki + '_社員一覧.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('ダウンロードしました', 'success');
 }
 
 // Enter key search + clear button toggle
