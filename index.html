@@ -991,6 +991,154 @@ body {
 }
 .back-btn:active { background: rgba(255,255,255,0.35); }
 .back-btn svg { width: 18px; height: 18px; }
+
+/* Profile Header (案C) */
+.profile-header {
+  background: #fff;
+  border-radius: 12px;
+  margin: 8px 0;
+  padding: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.profile-header .profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.profile-header .profile-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.profile-header .profile-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.profile-badge.active { background: #e8f5e9; color: #2e7d32; }
+.profile-badge.retiring { background: #fff3e0; color: #e65100; }
+.profile-badge.retired { background: #ffebee; color: #c62828; }
+.profile-header .profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--text-light);
+  margin-bottom: 8px;
+}
+.profile-header .profile-meta span { white-space: nowrap; }
+.profile-header .profile-stats {
+  display: flex;
+  gap: 8px;
+}
+.profile-stat-box {
+  flex: 1;
+  background: #f5f5fa;
+  border-radius: 8px;
+  padding: 6px 4px;
+  text-align: center;
+}
+.profile-stat-box .stat-label {
+  font-size: 9px;
+  color: var(--text-light);
+  margin-bottom: 2px;
+}
+.profile-stat-box .stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.profile-stat-box .stat-unit {
+  font-size: 9px;
+  color: var(--text-light);
+}
+.profile-stat-box.warn .stat-value { color: var(--warning); }
+.profile-stat-box.danger .stat-value { color: var(--danger); }
+
+/* Accordion */
+.accordion-section {
+  background: #fff;
+  border-radius: 10px;
+  margin-bottom: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  overflow: hidden;
+}
+.accordion-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.accordion-header:active { background: #f5f5f5; }
+.accordion-header .acc-icon {
+  font-size: 14px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.accordion-header .acc-arrow {
+  margin-left: auto;
+  transition: transform 0.2s;
+  font-size: 12px;
+  color: #999;
+}
+.accordion-section.open .acc-arrow { transform: rotate(90deg); }
+.accordion-header .acc-alert {
+  background: #ffebee;
+  color: var(--danger);
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+.accordion-body {
+  display: none;
+  padding: 0 12px 10px;
+}
+.accordion-section.open .accordion-body { display: block; }
+.acc-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.acc-table tr { border-bottom: 1px solid #f0f0f0; }
+.acc-table tr:last-child { border-bottom: none; }
+.acc-table th {
+  text-align: left;
+  font-size: 11px;
+  color: var(--text-light);
+  padding: 5px 4px;
+  width: 35%;
+  font-weight: 500;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.acc-table td {
+  font-size: 12px;
+  color: var(--text);
+  padding: 5px 4px;
+  word-break: break-all;
+}
+.acc-table td a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.acc-table td .expiry-warn {
+  font-size: 10px;
+  color: var(--warning);
+  font-weight: 600;
+}
+.acc-table td .expiry-danger {
+  font-size: 10px;
+  color: var(--danger);
+  font-weight: 600;
+}
 </style>
 </head>
 <body>
@@ -1115,9 +1263,11 @@ body {
     <div class="top-tabs" id="topTabs" style="display:none;">
       <button class="top-tab active" onclick="switchTopTab('yukyu')">有給管理</button>
       <button class="top-tab" onclick="switchTopTab('maebari')">前払い</button>
+      <button class="top-tab" onclick="switchTopTab('profile')">社員情報</button>
     </div>
     <div id="yukyuContent"></div>
     <div id="maebariContent" style="display:none;"></div>
+    <div id="profileContent" style="display:none;"></div>
   </div>
 
   <!-- Screen 3: Leave Application -->
@@ -1208,6 +1358,7 @@ let maebariCalMonth = new Date().getMonth();
 let maebariSelectedPayDate = null;
 let maebariSelectedAmount = null;
 let appliedDatesCache = [];
+let employeeFieldsCache = null; // cached field metadata {internalName: title}
 
 // ============================================================
 // Initialize MSAL
@@ -1343,7 +1494,7 @@ function switchScreen(screenId, skipHistory) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除' };
+  const titles = { searchScreen: 'ホーム', detailScreen: '有給詳細', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報' };
   document.getElementById('headerTitle').textContent = titles[screenId] || '有給管理';
 
   // Home button: show when not on home
@@ -1677,11 +1828,52 @@ async function loadLeaveDetails() {
   const resigned = isResigned(emp);
   const hakensaki = getHakensaki(emp);
 
-  // Header (shared between 有給 and 前払い)
+  // Status badge
+  let statusLabel = '在職';
+  let statusClass = 'active';
+  if (resigned) {
+    statusLabel = '退職済';
+    statusClass = 'retired';
+  } else {
+    const retRaw = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+    if (retRaw && new Date(retRaw) > new Date()) {
+      statusLabel = '退職予定';
+      statusClass = 'retiring';
+    }
+  }
+
+  // 前払い合計 (async, update after render)
+  const headerMaebariId = 'headerMaebariTotal';
+  calcMaebariTotal(emp[F.syainNo]).then(total => {
+    const el = document.getElementById(headerMaebariId);
+    if (el) el.textContent = total > 0 ? '¥' + Math.round(total).toLocaleString() : '¥0';
+  });
+
+  // Header (shared between all tabs)
   document.getElementById('detailHeader').innerHTML = `
-    <div class="detail-header">
-      <div class="name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
-      <div class="sub">社員番号: ${emp[F.syainNo] || ''}${hakensaki ? ' | 派遣先: ' + escHtml(hakensaki) : ''} | 起算日: ${formatDate(kisanDate)}${resigned ? ' | 退社日: ' + getRetireDateStr(emp) : ''}</div>
+    <div class="profile-header">
+      <div class="profile-name-row">
+        <span class="profile-name">${escHtml(emp.Title || '')}</span>
+        <span class="profile-badge ${statusClass}">${statusLabel}</span>
+      </div>
+      <div class="profile-meta">
+        <span>社番: ${emp[F.syainNo] || ''}</span>
+        ${hakensaki ? '<span>派遣先: ' + escHtml(hakensaki) + '</span>' : ''}
+        <span>起算日: ${formatDate(kisanDate)}</span>
+        ${resigned ? '<span style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</span>' : ''}
+      </div>
+      <div class="profile-stats">
+        <div class="profile-stat-box${totalRemain <= 0 ? ' danger' : ''}">
+          <div class="stat-label">有給残数</div>
+          <div class="stat-value">${totalRemain}</div>
+          <div class="stat-unit">日</div>
+        </div>
+        <div class="profile-stat-box">
+          <div class="stat-label">前払い(当期)</div>
+          <div class="stat-value" id="${headerMaebariId}">...</div>
+          <div class="stat-unit"></div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -1882,18 +2074,419 @@ function copyMaebariSummary() {
 }
 
 // ============================================================
+// Employee Profile (案C: Accordion)
+// ============================================================
+
+// Fetch field metadata from SharePoint (title → internalName mapping)
+async function fetchEmployeeFields() {
+  if (employeeFieldsCache) return employeeFieldsCache;
+  try {
+    const token = await getToken();
+    if (!token) return null;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString&$top=200";
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    const data = await resp.json();
+    const fields = {};
+    (data.d.results || []).forEach(f => {
+      fields[f.InternalName] = { title: f.Title, type: f.TypeAsString };
+    });
+    employeeFieldsCache = fields;
+    return fields;
+  } catch (e) {
+    console.error('Fields fetch error:', e);
+    return null;
+  }
+}
+
+// Fetch full employee record with all fields
+async function fetchFullEmployee(syainNo) {
+  try {
+    const filter = "$filter=" + F.syainNo + " eq " + syainNo + "&$top=1";
+    const results = await spGet(LIST_EMPLOYEES_GUID, filter);
+    return results && results.length > 0 ? results[0] : null;
+  } catch (e) {
+    console.error('Full employee fetch error:', e);
+    return null;
+  }
+}
+
+// Calculate 前払い合計 for current period
+async function calcMaebariTotal(syainNo) {
+  try {
+    const period = getMaebariPeriod(0);
+    const startISO = period.start.toISOString();
+    const endISO = period.end.toISOString();
+    const filter = "$filter=" + MF.syainNo + " eq '" + syainNo + "' and " +
+      MF.payDate + " ge datetime'" + startISO + "' and " +
+      MF.payDate + " le datetime'" + endISO + "'&$select=" + MF.amount + "," + MF.fee;
+    const records = await spGet(LIST_MAEBARI_GUID, filter) || [];
+    let total = 0;
+    records.forEach(r => {
+      total += (r[MF.amount] || 0) + (r[MF.fee] || 0);
+    });
+    return total;
+  } catch (e) {
+    console.error('Maebari total error:', e);
+    return 0;
+  }
+}
+
+// Profile category definitions: { label, icon, fields: [{ key, label, format? }] }
+// key: F constant key or OData field name; label: display name
+const PROFILE_CATEGORIES = [
+  {
+    id: 'basic', label: '基本情報', icon: '👤',
+    fields: [
+      { key: 'sex', label: '性別' },
+      { key: 'birthday', label: '生年月日', format: 'date' },
+      { key: 'age', label: '年齢', format: 'age' },
+      { key: 'zaiyokuSyubetu', label: '採用種別' },
+      { key: 'nyushaDate', label: '入社日', format: 'date' },
+      { key: 'kisanDate', label: '有休付与起算日', format: 'date' },
+    ]
+  },
+  {
+    id: 'work', label: '勤務情報', icon: '🏢',
+    fields: [
+      { key: 'hakensaki', label: '派遣先' },
+      { key: 'buka', label: '部課' },
+      { key: 'soshikiTani', label: '組織単位' },
+      { key: 'trexId', label: 'T-REX ID' },
+      { key: 'syokusyu', label: '職種' },
+      { key: 'seikyu', label: '請求単価', format: 'currency' },
+      { key: 'kyuyoTaikei', label: '給与体系' },
+      { key: 'tsukinTeate', label: '通勤手当', format: 'currency' },
+      { key: 'tsukinHouhou', label: '通勤方法' },
+    ]
+  },
+  {
+    id: 'contact', label: '連絡先', icon: '📱',
+    fields: [
+      { key: 'keitai', label: '携帯電話', format: 'tel' },
+      { key: 'email', label: 'Eメール', format: 'email' },
+      { key: 'yubin', label: '郵便番号' },
+      { key: 'address', label: '住所' },
+    ]
+  },
+  {
+    id: 'emergency', label: '緊急連絡先', icon: '🆘',
+    fields: [
+      { key: 'emergencyName', label: '氏名' },
+      { key: 'emergencyRelation', label: '続柄' },
+      { key: 'emergencyTel', label: '連絡先', format: 'tel' },
+    ]
+  },
+  {
+    id: 'bank', label: '振込先（給与）', icon: '🏦',
+    fields: [
+      { key: 'bankName', label: '銀行' },
+      { key: 'bankBranch', label: '支店' },
+      { key: 'bankAccount', label: '口座番号' },
+      { key: 'bankMeigi', label: '氏名フリガナ' },
+    ]
+  },
+  {
+    id: 'residence', label: '在留・国籍', icon: '🌏',
+    fields: [
+      { key: 'nationality', label: '本(国)籍' },
+      { key: 'zairyuShikaku', label: '在留資格' },
+      { key: 'zairyuKigen', label: '在留期限', format: 'dateExpiry' },
+      { key: 'zairyuKigenCard', label: '在留期限（カード）', format: 'dateExpiry' },
+      { key: 'zairyuBikou', label: '備考' },
+    ]
+  },
+  {
+    id: 'vehicle', label: '車両・免許・保険', icon: '🚗',
+    fields: [
+      { key: 'carMaker', label: '車両メーカー' },
+      { key: 'carName', label: '車名' },
+      { key: 'carNumber', label: '登録番号' },
+      { key: 'carColor', label: '色' },
+      { key: 'shakenExpiry', label: '車検満了日', format: 'dateExpiry' },
+      { key: 'licenseType', label: '免許の種類' },
+      { key: 'licenseNo', label: '免許証番号' },
+      { key: 'licenseExpiry', label: '免許有効期限', format: 'dateExpiry' },
+      { key: 'jibaisekiExpiry', label: '自賠責満了日', format: 'dateExpiry' },
+      { key: 'niniExpiry', label: '任意保険満了日', format: 'dateExpiry' },
+      { key: 'taijin', label: '対人' },
+      { key: 'taibutsu', label: '対物' },
+    ]
+  },
+  {
+    id: 'insurance', label: '社会保険・雇用', icon: '🛡',
+    fields: [
+      { key: 'kenpoHihokensha', label: '健保：被保険者' },
+      { key: 'kenpoShutoku', label: '健保：資格取得日', format: 'date' },
+      { key: 'seiriNo', label: '整理番号' },
+      { key: 'koyouNo', label: '雇用：被保険者番号' },
+      { key: 'koyouShutoku', label: '雇用：資格取得日', format: 'date' },
+      { key: 'koyouName', label: 'Koyou Name' },
+      { key: 'shahoSoushitsu', label: '社保喪失日', format: 'date' },
+    ]
+  },
+];
+
+// Map profile category field keys to actual OData field names found in employee data
+// This mapping is built dynamically from field metadata
+function buildFieldKeyMap(fieldsMeta) {
+  // Known mappings from F constant
+  const map = {
+    nyushaDate: F.nyushaDate,
+    kisanDate: F.kisanDate,
+    zaiyokuSyubetu: F.zaiyokuSyubetu,
+    hakensaki: F.hakensaki,
+  };
+
+  // Search field metadata for remaining fields by Japanese title
+  const titleToKey = {};
+  if (fieldsMeta) {
+    Object.keys(fieldsMeta).forEach(k => {
+      titleToKey[fieldsMeta[k].title] = k;
+    });
+  }
+
+  const titleMap = {
+    sex: '性別',
+    birthday: '生年月日',
+    age: '年齢ねんれい',
+    buka: '部課',
+    soshikiTani: '組織単位ｿｼｷﾀﾝｲ',
+    trexId: 'T-REX ID',
+    syokusyu: '職種syokusyu',
+    seikyu: '請求',
+    kyuyoTaikei: '給与体系',
+    tsukinTeate: '通勤手当',
+    tsukinHouhou: '通勤方法tsukinhouhou',
+    keitai: '携帯電話',
+    email: 'Ｅメール',
+    yubin: '郵便番号',
+    address: '住所',
+    emergencyName: '緊急連絡先（氏名）',
+    emergencyRelation: '緊急連絡先（続柄）',
+    emergencyTel: '緊急連絡先（連絡先）',
+    bankName: '振込先：銀行',
+    bankBranch: '振込先：支店',
+    bankAccount: '振込先：口座番号',
+    bankMeigi: '振込先氏名フリガナ',
+    nationality: '本(国)籍',
+    zairyuShikaku: '在留資格',
+    zairyuKigen: '在留期限',
+    zairyuKigenCard: '在留期限（カード）',
+    zairyuBikou: '在留：備考１',
+    carMaker: '車両メーカー名',
+    carName: '車名',
+    carNumber: '登録番号',
+    carColor: '車の色',
+    shakenExpiry: '車検満了日',
+    licenseType: '免許の種類',
+    licenseNo: '免許証番号',
+    licenseExpiry: '免許証有効期限',
+    jibaisekiExpiry: '自賠責満了日',
+    niniExpiry: '任意保険満了日',
+    taijin: '保険：対人',
+    taibutsu: '保険：対物',
+    kenpoHihokensha: '健保：被保険者',
+    kenpoShutoku: '健保：資格取得日',
+    seiriNo: '整理番号',
+    koyouNo: '雇用：被保険者番号',
+    koyouShutoku: '雇用：資格取得日',
+    koyouName: 'Koyou Name',
+    shahoSoushitsu: '社保喪失日',
+  };
+
+  Object.keys(titleMap).forEach(key => {
+    if (map[key]) return; // already mapped
+    const title = titleMap[key];
+    // Try exact match first
+    if (titleToKey[title]) {
+      map[key] = titleToKey[title];
+    } else {
+      // Try partial match
+      const found = Object.keys(titleToKey).find(t => t.indexOf(title) >= 0 || title.indexOf(t) >= 0);
+      if (found) map[key] = titleToKey[found];
+    }
+  });
+
+  return map;
+}
+
+// Format a field value for display
+function formatProfileValue(val, format) {
+  if (val === null || val === undefined || val === '') return '';
+  const str = String(val);
+  if (format === 'date') {
+    return formatDate(val);
+  }
+  if (format === 'dateExpiry') {
+    const d = new Date(val);
+    if (isNaN(d)) return str;
+    const now = new Date();
+    const diffMs = d - now;
+    const diffDays = Math.ceil(diffMs / 86400000);
+    let alert = '';
+    if (diffDays < 0) {
+      alert = ' <span class="expiry-danger">期限切れ</span>';
+    } else if (diffDays <= 180) {
+      alert = ' <span class="expiry-danger">残り' + diffDays + '日</span>';
+    } else if (diffDays <= 365) {
+      alert = ' <span class="expiry-warn">残り' + diffDays + '日</span>';
+    }
+    return formatDate(val) + alert;
+  }
+  if (format === 'currency') {
+    const num = parseFloat(val);
+    if (isNaN(num)) return str;
+    return '¥' + Math.round(num).toLocaleString();
+  }
+  if (format === 'tel') {
+    return '<a href="tel:' + str.replace(/[^\d\-+]/g, '') + '">' + escHtml(str) + '</a>';
+  }
+  if (format === 'email') {
+    return '<a href="mailto:' + escHtml(str) + '">' + escHtml(str) + '</a>';
+  }
+  if (format === 'age') {
+    const num = parseInt(val);
+    if (isNaN(num)) return str;
+    return num + '歳';
+  }
+  return escHtml(str);
+}
+
+// Check if a category has any expiry alerts
+function categoryHasAlert(emp, keyMap, category) {
+  for (const field of category.fields) {
+    if (field.format !== 'dateExpiry') continue;
+    const odataKey = keyMap[field.key];
+    if (!odataKey) continue;
+    const val = emp[odataKey];
+    if (!val) continue;
+    const d = new Date(val);
+    if (isNaN(d)) continue;
+    const diffDays = Math.ceil((d - new Date()) / 86400000);
+    if (diffDays <= 365) return true;
+  }
+  return false;
+}
+
+// Load and render employee profile
+async function loadEmployeeProfile() {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const container = document.getElementById('profileContent');
+  container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+
+  // Fetch field metadata and full employee data in parallel
+  const [fieldsMeta, maebariTotal] = await Promise.all([
+    fetchEmployeeFields(),
+    calcMaebariTotal(emp[F.syainNo]),
+  ]);
+
+  const keyMap = buildFieldKeyMap(fieldsMeta);
+
+  // Build status
+  const resigned = isResigned(emp);
+  const hakensaki = getHakensaki(emp);
+  const hakenTaisha = emp[F.hakenTaisha];
+  const yukyuTaisha = emp[F.yukyuTaisha];
+
+  let statusLabel = '在職';
+  let statusClass = 'active';
+  if (resigned) {
+    statusLabel = '退職済';
+    statusClass = 'retired';
+  } else if (yukyuTaisha || hakenTaisha) {
+    const retDate = new Date(yukyuTaisha || hakenTaisha);
+    if (retDate > new Date()) {
+      statusLabel = '退職予定(' + formatDate(yukyuTaisha || hakenTaisha) + ')';
+      statusClass = 'retiring';
+    }
+  }
+
+  // 有給残数 from currentGrantData
+  let yukyuRemain = 0;
+  if (currentGrantData && currentGrantData.length > 0) {
+    const latest = currentGrantData[currentGrantData.length - 1];
+    yukyuRemain = latest._displayRemain || 0;
+  }
+
+  // Profile header
+  let html = '<div class="profile-header">';
+  html += '<div class="profile-name-row">';
+  html += '<span class="profile-name">' + escHtml(emp.Title || '') + '</span>';
+  html += '<span class="profile-badge ' + statusClass + '">' + statusLabel + '</span>';
+  html += '</div>';
+  html += '<div class="profile-meta">';
+  html += '<span>社番: ' + (emp[F.syainNo] || '') + '</span>';
+  if (hakensaki) html += '<span>派遣先: ' + escHtml(hakensaki) + '</span>';
+  html += '</div>';
+  html += '<div class="profile-stats">';
+  html += '<div class="profile-stat-box' + (yukyuRemain <= 0 ? ' danger' : '') + '">';
+  html += '<div class="stat-label">有給残数</div>';
+  html += '<div class="stat-value">' + yukyuRemain + '</div>';
+  html += '<div class="stat-unit">日</div>';
+  html += '</div>';
+  html += '<div class="profile-stat-box' + (maebariTotal > 0 ? ' warn' : '') + '">';
+  html += '<div class="stat-label">前払い(当期)</div>';
+  html += '<div class="stat-value">' + (maebariTotal > 0 ? '¥' + Math.round(maebariTotal).toLocaleString() : '0') + '</div>';
+  html += '<div class="stat-unit">' + (maebariTotal > 0 ? '' : '円') + '</div>';
+  html += '</div>';
+  html += '</div></div>';
+
+  // Accordion sections
+  PROFILE_CATEGORIES.forEach(cat => {
+    // Check if category has any data
+    let hasData = false;
+    const rows = [];
+    cat.fields.forEach(field => {
+      const odataKey = keyMap[field.key];
+      if (!odataKey) return;
+      let val = emp[odataKey];
+      if (val === null || val === undefined || val === '') return;
+      hasData = true;
+      const formatted = formatProfileValue(val, field.format);
+      if (formatted) rows.push({ label: field.label, value: formatted });
+    });
+
+    // Skip empty sections (especially 在留・車両)
+    if (!hasData) return;
+
+    const hasAlert = categoryHasAlert(emp, keyMap, cat);
+    html += '<div class="accordion-section">';
+    html += '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+    html += '<span class="acc-icon">' + cat.icon + '</span>';
+    html += '<span>' + cat.label + '</span>';
+    if (hasAlert) html += '<span class="acc-alert">期限注意</span>';
+    html += '<span class="acc-arrow">&#9654;</span>';
+    html += '</div>';
+    html += '<div class="accordion-body"><table class="acc-table">';
+    rows.forEach(r => {
+      html += '<tr><th>' + r.label + '</th><td>' + r.value + '</td></tr>';
+    });
+    html += '</table></div></div>';
+  });
+
+  container.innerHTML = html;
+}
+
+// ============================================================
 // Top Tab Switch (有給管理 / 前払い)
 // ============================================================
 function switchTopTab(tab) {
   const tabs = document.querySelectorAll('.top-tab');
   tabs[0].classList.toggle('active', tab === 'yukyu');
   tabs[1].classList.toggle('active', tab === 'maebari');
+  tabs[2].classList.toggle('active', tab === 'profile');
   document.getElementById('yukyuContent').style.display = tab === 'yukyu' ? 'block' : 'none';
   document.getElementById('maebariContent').style.display = tab === 'maebari' ? 'block' : 'none';
-  document.getElementById('headerTitle').textContent = tab === 'maebari' ? '前払い詳細' : '有給詳細';
+  document.getElementById('profileContent').style.display = tab === 'profile' ? 'block' : 'none';
+  const titleMap = { yukyu: '有給詳細', maebari: '前払い詳細', profile: '社員情報' };
+  document.getElementById('headerTitle').textContent = titleMap[tab] || '有給詳細';
   if (tab === 'maebari') {
     maebariPeriodOffset = 0;
     loadMaebariData();
+  }
+  if (tab === 'profile') {
+    loadEmployeeProfile();
   }
 }
 
