@@ -4590,54 +4590,87 @@ async function deleteEmployee() {
 // Document Capture & OCR
 // ============================================================
 const DOC_TYPES = [
-  { id: 'mynumber', label: 'マイナンバー', icon: '🆔' },
-  { id: 'zairyu', label: '在留カード', icon: '🌏' },
-  { id: 'bank', label: 'キャッシュカード/通帳', icon: '🏦' },
-  { id: 'license', label: '免許証', icon: '🪪' },
-  { id: 'shaken', label: '車検証', icon: '🚗' },
-  { id: 'jibaiseki', label: '自賠責保険証', icon: '🛡' },
-  { id: 'nini', label: '任意保険証', icon: '📋' },
+  { id: 'mynumber', label: 'マイナンバー', icon: '🆔', hint: '表・裏' },
+  { id: 'zairyu', label: '在留カード', icon: '🌏', hint: '表・裏' },
+  { id: 'bank', label: 'キャッシュカード/通帳', icon: '🏦', hint: '表紙・見開き' },
+  { id: 'license', label: '免許証', icon: '🪪', hint: '表・裏' },
+  { id: 'shaken', label: '車検証', icon: '🚗', hint: '1枚' },
+  { id: 'jibaiseki', label: '自賠責保険証', icon: '🛡', hint: '表・裏' },
+  { id: 'nini', label: '任意保険証', icon: '📋', hint: '複数ページ可' },
 ];
 
-const capturedDocs = {}; // { docId: { file: File, dataUrl: string } }
+// { docId: [ {file, dataUrl}, {file, dataUrl}, ... ] }
+const capturedDocs = {};
 
 function onDocCapture(docId, input) {
   const file = input.files[0];
   if (!file) return;
+  if (!capturedDocs[docId]) capturedDocs[docId] = [];
 
   const reader = new FileReader();
   reader.onload = function(e) {
-    capturedDocs[docId] = { file: file, dataUrl: e.target.result };
-    const card = document.getElementById('docCard_' + docId);
-    card.classList.add('has-image');
-    document.getElementById('docRemove_' + docId).style.display = '';
-    const preview = document.getElementById('docPreview_' + docId);
-    preview.style.display = 'block';
-    preview.innerHTML = '<img src="' + e.target.result + '" alt="' + docId + '">' +
-      '<button class="doc-ocr-btn" onclick="runOcr(\'' + docId + '\')">🔍 テキスト抽出</button>' +
-      '<div id="docOcrResult_' + docId + '"></div>';
+    const idx = capturedDocs[docId].length;
+    capturedDocs[docId].push({ file: file, dataUrl: e.target.result });
+    renderDocPreview(docId);
   };
   reader.readAsDataURL(file);
+  // Reset input so same file can be re-selected
+  input.value = '';
+}
+
+function renderDocPreview(docId) {
+  const imgs = capturedDocs[docId] || [];
+  const card = document.getElementById('docCard_' + docId);
+  const preview = document.getElementById('docPreview_' + docId);
+  const countEl = document.getElementById('docCount_' + docId);
+
+  if (imgs.length === 0) {
+    card.classList.remove('has-image');
+    preview.style.display = 'none';
+    preview.innerHTML = '';
+    countEl.textContent = '';
+    return;
+  }
+
+  card.classList.add('has-image');
+  countEl.textContent = imgs.length + '枚';
+  preview.style.display = 'block';
+
+  let html = '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+  imgs.forEach((img, i) => {
+    html += '<div style="position:relative;width:calc(50% - 3px);">';
+    html += '<img src="' + img.dataUrl + '" style="width:100%;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.1);">';
+    html += '<div style="position:absolute;top:4px;left:4px;background:var(--primary);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;">' + (i + 1) + '</div>';
+    html += '<button onclick="removeDocPage(\'' + docId + '\',' + i + ')" style="position:absolute;top:2px;right:2px;background:var(--danger);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:13px;cursor:pointer;line-height:1;">&times;</button>';
+    html += '</div>';
+  });
+  html += '</div>';
+  html += '<div style="display:flex;gap:6px;margin-top:6px;">';
+  imgs.forEach((img, i) => {
+    html += '<button class="doc-ocr-btn" onclick="runOcr(\'' + docId + '\',' + i + ')">🔍 ' + (i + 1) + '枚目</button>';
+  });
+  html += '</div>';
+  html += '<div id="docOcrResult_' + docId + '"></div>';
+  preview.innerHTML = html;
+}
+
+function removeDocPage(docId, idx) {
+  if (!capturedDocs[docId]) return;
+  capturedDocs[docId].splice(idx, 1);
+  if (capturedDocs[docId].length === 0) delete capturedDocs[docId];
+  renderDocPreview(docId);
 }
 
 function removeDocCapture(docId) {
   delete capturedDocs[docId];
-  const card = document.getElementById('docCard_' + docId);
-  card.classList.remove('has-image');
-  document.getElementById('docRemove_' + docId).style.display = 'none';
-  const preview = document.getElementById('docPreview_' + docId);
-  preview.style.display = 'none';
-  preview.innerHTML = '';
-  // Reset file input
-  const fileInput = card.querySelector('input[type=file]');
-  if (fileInput) fileInput.value = '';
+  renderDocPreview(docId);
 }
 
-async function runOcr(docId) {
-  const doc = capturedDocs[docId];
-  if (!doc) return;
+async function runOcr(docId, idx) {
+  const imgs = capturedDocs[docId];
+  if (!imgs || !imgs[idx]) return;
   const resultDiv = document.getElementById('docOcrResult_' + docId);
-  resultDiv.innerHTML = '<div class="doc-ocr-progress">⏳ テキスト抽出中... (初回は少し時間がかかります)</div>';
+  resultDiv.innerHTML = '<div class="doc-ocr-progress">⏳ ' + (idx + 1) + '枚目テキスト抽出中...</div>';
 
   try {
     const worker = await Tesseract.createWorker('jpn+eng', 1, {
@@ -4648,11 +4681,12 @@ async function runOcr(docId) {
         }
       }
     });
-    const { data } = await worker.recognize(doc.dataUrl);
+    const { data } = await worker.recognize(imgs[idx].dataUrl);
     await worker.terminate();
 
     if (data.text && data.text.trim()) {
-      resultDiv.innerHTML = '<div class="doc-ocr-text">' + escHtml(data.text.trim()) + '</div>' +
+      resultDiv.innerHTML = '<div style="font-size:11px;color:var(--text-light);margin-bottom:2px;">' + (idx + 1) + '枚目の抽出結果:</div>' +
+        '<div class="doc-ocr-text">' + escHtml(data.text.trim()) + '</div>' +
         '<button class="doc-ocr-btn" style="margin-top:4px;" onclick="copyOcrText(\'' + docId + '\')">📋 コピー</button>';
     } else {
       resultDiv.innerHTML = '<div class="doc-ocr-progress">テキストを検出できませんでした</div>';
@@ -4669,7 +4703,6 @@ function copyOcrText(docId) {
   navigator.clipboard.writeText(textEl.textContent).then(() => {
     showToast('テキストをコピーしました', 'success');
   }).catch(() => {
-    // Fallback: select text
     const range = document.createRange();
     range.selectNodeContents(textEl);
     window.getSelection().removeAllRanges();
@@ -4740,16 +4773,27 @@ async function uploadCapturedDocs(bukaVal, syainNo, name) {
     await ensureSpFolder(bukaFolder);
     await ensureSpFolder(empFolder);
 
-    // Upload each document
+    // Upload each document (array of pages per doc type)
+    let totalFiles = 0;
     for (const docId of docIds) {
-      const doc = capturedDocs[docId];
+      const pages = capturedDocs[docId];
+      if (!pages || !Array.isArray(pages) || pages.length === 0) continue;
       const docType = DOC_TYPES.find(d => d.id === docId);
-      const ext = doc.file.name.split('.').pop() || 'jpg';
-      const fileName = (docType ? docType.label : docId) + '.' + ext;
-      await uploadFileToSp(empFolder, fileName, doc.file);
+      const label = docType ? docType.label : docId;
+
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        const ext = page.file.name.split('.').pop() || 'jpg';
+        // Single page: マイナンバー.jpg, Multiple pages: マイナンバー_1.jpg, マイナンバー_2.jpg
+        const fileName = pages.length === 1
+          ? label + '.' + ext
+          : label + '_' + (i + 1) + '.' + ext;
+        await uploadFileToSp(empFolder, fileName, page.file);
+        totalFiles++;
+      }
     }
 
-    showToast(docIds.length + '件の書類をアップロードしました', 'success');
+    showToast(totalFiles + '件の書類をアップロードしました', 'success');
   } catch (e) {
     console.error('Doc upload error:', e);
     showToast('書類アップロードエラー: ' + e.message, 'error');
@@ -4799,9 +4843,9 @@ async function renderAddEmployeeForm() {
     html += '<div class="doc-capture-card" id="docCard_' + doc.id + '">';
     html += '<div class="doc-capture-header">';
     html += '<span class="doc-icon">' + doc.icon + '</span>';
-    html += '<span class="doc-label">' + doc.label + '</span>';
+    html += '<span class="doc-label">' + doc.label + (doc.hint ? ' <span style="font-size:10px;color:var(--text-light);font-weight:400;">(' + doc.hint + ')</span>' : '') + '</span>';
+    html += '<span id="docCount_' + doc.id + '" style="font-size:10px;color:var(--primary);font-weight:700;min-width:28px;text-align:center;"></span>';
     html += '<label class="doc-capture-btn"><input type="file" accept="image/*" capture="environment" style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📷 撮影</label>';
-    html += '<button class="doc-capture-btn remove" id="docRemove_' + doc.id + '" style="display:none;" onclick="removeDocCapture(\'' + doc.id + '\')">✕</button>';
     html += '</div>';
     html += '<div class="doc-preview" id="docPreview_' + doc.id + '" style="display:none;"></div>';
     html += '</div>';
