@@ -2139,22 +2139,23 @@ const PROFILE_CATEGORIES = [
     fields: [
       { key: 'sex', label: '性別' },
       { key: 'birthday', label: '生年月日', format: 'date' },
-      { key: 'age', label: '年齢', format: 'age' },
+      { key: '_calcAge', label: '年齢', format: 'calcAge' },
       { key: 'zaiyokuSyubetu', label: '採用種別' },
       { key: 'nyushaDate', label: '入社日', format: 'date' },
       { key: 'kisanDate', label: '有休付与起算日', format: 'date' },
+      { key: '_calcTenure', label: '在職期間', format: 'calcTenure' },
+      { key: 'syainFile', label: '社員ファイル', format: 'spUrl' },
     ]
   },
   {
     id: 'work', label: '勤務情報', icon: '🏢',
     fields: [
       { key: 'hakensaki', label: '派遣先' },
-      { key: 'buka', label: '部課' },
       { key: 'soshikiTani', label: '組織単位' },
       { key: 'trexId', label: 'T-REX ID' },
       { key: 'syokusyu', label: '職種' },
       { key: 'seikyu', label: '請求単価', format: 'currency' },
-      { key: 'kyuyoTaikei', label: '給与体系' },
+      { key: 'kyuyoTaikei', label: '給与体系', format: 'currency' },
       { key: 'tsukinTeate', label: '通勤手当', format: 'currency' },
       { key: 'tsukinHouhou', label: '通勤方法' },
     ]
@@ -2165,7 +2166,7 @@ const PROFILE_CATEGORIES = [
       { key: 'keitai', label: '携帯電話', format: 'tel' },
       { key: 'email', label: 'Eメール', format: 'email' },
       { key: 'yubin', label: '郵便番号' },
-      { key: 'address', label: '住所' },
+      { key: 'address', label: '住所', format: 'map' },
     ]
   },
   {
@@ -2188,6 +2189,7 @@ const PROFILE_CATEGORIES = [
   {
     id: 'residence', label: '在留・国籍', icon: '🌏',
     fields: [
+      { key: 'tokki1', label: '氏名（ローマ字）' },
       { key: 'nationality', label: '本(国)籍' },
       { key: 'zairyuShikaku', label: '在留資格' },
       { key: 'zairyuKigen', label: '在留期限', format: 'dateExpiry' },
@@ -2294,6 +2296,8 @@ function buildFieldKeyMap(fieldsMeta) {
     koyouShutoku: '雇用：資格取得日',
     koyouName: 'Koyou Name',
     shahoSoushitsu: '社保喪失日',
+    tokki1: '特記事項１',
+    syainFile: '社員ファイル',
   };
 
   Object.keys(titleMap).forEach(key => {
@@ -2350,6 +2354,17 @@ function formatProfileValue(val, format) {
     const num = parseInt(val);
     if (isNaN(num)) return str;
     return num + '歳';
+  }
+  if (format === 'map') {
+    return '<a href="https://www.google.com/maps/search/' + encodeURIComponent(str) + '" target="_blank" style="color:var(--primary);">' + escHtml(str) + ' &#x1F4CD;</a>';
+  }
+  if (format === 'spUrl') {
+    // SharePoint URL field: {Url, Description}
+    if (typeof val === 'object' && val.Url) {
+      const desc = val.Description || '開く';
+      return '<a href="' + escHtml(val.Url) + '" target="_blank" style="color:var(--primary);">' + escHtml(desc) + ' &#x1F4C2;</a>';
+    }
+    return escHtml(str);
   }
   return escHtml(str);
 }
@@ -2440,6 +2455,49 @@ async function loadEmployeeProfile() {
     let hasData = false;
     const rows = [];
     cat.fields.forEach(field => {
+      // Handle computed fields (prefixed with _calc)
+      if (field.format === 'calcAge') {
+        const bdKey = keyMap['birthday'];
+        const bdVal = bdKey ? emp[bdKey] : null;
+        if (bdVal) {
+          const bd = new Date(bdVal);
+          const now = new Date();
+          let age = now.getFullYear() - bd.getFullYear();
+          if (now.getMonth() < bd.getMonth() || (now.getMonth() === bd.getMonth() && now.getDate() < bd.getDate())) age--;
+          hasData = true;
+          rows.push({ label: field.label, value: age + '歳' });
+        }
+        return;
+      }
+      if (field.format === 'calcTenure') {
+        const nyushaKey = keyMap['nyushaDate'];
+        const kisanKey = keyMap['kisanDate'];
+        const hakenTaishaKey = F.hakenTaisha;
+        const nyushaVal = nyushaKey ? emp[nyushaKey] : null;
+        const kisanVal = kisanKey ? emp[kisanKey] : null;
+        const parts = [];
+        function calcPeriod(startVal, endDate) {
+          const s = new Date(startVal);
+          if (isNaN(s)) return '';
+          let y = endDate.getFullYear() - s.getFullYear();
+          let m = endDate.getMonth() - s.getMonth();
+          if (m < 0) { y--; m += 12; }
+          return y > 0 ? y + '年' + m + 'ヶ月' : m + 'ヶ月';
+        }
+        const now = new Date();
+        if (nyushaVal) {
+          const endDate = (emp[hakenTaishaKey] && new Date(emp[hakenTaishaKey]) < now) ? new Date(emp[hakenTaishaKey]) : now;
+          parts.push('派遣先: ' + calcPeriod(nyushaVal, endDate));
+        }
+        if (kisanVal && kisanVal !== nyushaVal) {
+          parts.push('当社: ' + calcPeriod(kisanVal, now));
+        }
+        if (parts.length > 0) {
+          hasData = true;
+          rows.push({ label: field.label, value: parts.join('<br>') });
+        }
+        return;
+      }
       const odataKey = keyMap[field.key];
       if (!odataKey) return;
       let val = emp[odataKey];
