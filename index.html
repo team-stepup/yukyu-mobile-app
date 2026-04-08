@@ -2508,7 +2508,9 @@ function buildFieldKeyMap(fieldsMeta) {
   const titleToKey = {};
   if (fieldsMeta) {
     Object.keys(fieldsMeta).forEach(k => {
-      const odataKey = (k === 'Title' || k === 'Id') ? k : 'OData_' + k;
+      // OData_ prefix only for InternalNames starting with _ (encoded Japanese fields)
+      // Alphabetic InternalNames (like T_x002d_REX...) don't get OData_ prefix
+      const odataKey = (k === 'Title' || k === 'Id') ? k : (k.startsWith('_') ? 'OData_' + k : k);
       titleToKey[fieldsMeta[k].title] = odataKey;
     });
   }
