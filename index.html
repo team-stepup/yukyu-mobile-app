@@ -3054,7 +3054,12 @@ function openMaebariEdit(itemId) {
   editingMaebariRecord = record;
 
   // 前払日が今日以前なら修正不可
-  const payDateRaw = record[MF.payDate] ? record[MF.payDate].substring(0, 10) : '';
+  // Convert UTC to JST date string (YYYY-MM-DD)
+  let payDateRaw = '';
+  if (record[MF.payDate]) {
+    const d = new Date(record[MF.payDate]);
+    payDateRaw = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
   const today = new Date(); today.setHours(0,0,0,0);
   const payDateObj = payDateRaw ? new Date(payDateRaw + 'T00:00:00') : null;
   const isLocked = payDateObj ? payDateObj.getTime() <= today.getTime() : false;
