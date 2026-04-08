@@ -223,9 +223,9 @@ body {
 }
 .top-tab {
   flex: 1;
-  padding: 12px 0;
+  padding: 8px 0 6px;
   text-align: center;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   border: none;
@@ -233,7 +233,17 @@ body {
   color: var(--primary);
   transition: background 0.2s, color 0.2s, transform 0.1s;
   letter-spacing: 0.5px;
+  line-height: 1.2;
 }
+.tab-stat {
+  display: block;
+  font-size: 15px;
+  font-weight: 800;
+  margin-top: 2px;
+  letter-spacing: 0;
+}
+.top-tab.active .tab-stat { color: #fff; }
+.tab-stat:empty { display: none; }
 .top-tab:active { transform: scale(0.97); }
 .top-tab.active {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -1029,33 +1039,6 @@ body {
   margin-bottom: 8px;
 }
 .profile-header .profile-meta span { white-space: nowrap; }
-.profile-header .profile-stats {
-  display: flex;
-  gap: 8px;
-}
-.profile-stat-box {
-  flex: 1;
-  background: #f5f5fa;
-  border-radius: 8px;
-  padding: 6px 4px;
-  text-align: center;
-}
-.profile-stat-box .stat-label {
-  font-size: 9px;
-  color: var(--text-light);
-  margin-bottom: 2px;
-}
-.profile-stat-box .stat-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--primary);
-}
-.profile-stat-box .stat-unit {
-  font-size: 9px;
-  color: var(--text-light);
-}
-.profile-stat-box.warn .stat-value { color: var(--warning); }
-.profile-stat-box.danger .stat-value { color: var(--danger); }
 
 /* Accordion */
 .accordion-section {
@@ -1261,8 +1244,8 @@ body {
   <div class="screen" id="detailScreen">
     <div id="detailHeader"></div>
     <div class="top-tabs" id="topTabs" style="display:none;">
-      <button class="top-tab active" onclick="switchTopTab('yukyu')">有給管理</button>
-      <button class="top-tab" onclick="switchTopTab('maebari')">前払い</button>
+      <button class="top-tab active" onclick="switchTopTab('yukyu')">有給管理<span class="tab-stat" id="tabStatYukyu"></span></button>
+      <button class="top-tab" onclick="switchTopTab('maebari')">前払い<span class="tab-stat" id="tabStatMaebari"></span></button>
       <button class="top-tab" onclick="switchTopTab('profile')">社員情報</button>
     </div>
     <div id="yukyuContent"></div>
@@ -1842,13 +1825,6 @@ async function loadLeaveDetails() {
     }
   }
 
-  // 前払い合計 (async, update after render)
-  const headerMaebariId = 'headerMaebariTotal';
-  calcMaebariTotal(emp[F.syainNo]).then(total => {
-    const el = document.getElementById(headerMaebariId);
-    if (el) el.textContent = total > 0 ? '¥' + Math.round(total).toLocaleString() : '¥0';
-  });
-
   // Header (shared between all tabs)
   document.getElementById('detailHeader').innerHTML = `
     <div class="profile-header">
@@ -1862,20 +1838,17 @@ async function loadLeaveDetails() {
         <span>起算日: ${formatDate(kisanDate)}</span>
         ${resigned ? '<span style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</span>' : ''}
       </div>
-      <div class="profile-stats">
-        <div class="profile-stat-box${totalRemain <= 0 ? ' danger' : ''}">
-          <div class="stat-label">有給残数</div>
-          <div class="stat-value">${totalRemain}</div>
-          <div class="stat-unit">日</div>
-        </div>
-        <div class="profile-stat-box">
-          <div class="stat-label">前払い(当期)</div>
-          <div class="stat-value" id="${headerMaebariId}">...</div>
-          <div class="stat-unit"></div>
-        </div>
-      </div>
     </div>
   `;
+
+  // Set tab stats
+  const yukyuStatEl = document.getElementById('tabStatYukyu');
+  if (yukyuStatEl) yukyuStatEl.textContent = '残 ' + totalRemain + '日';
+  // 前払い合計 (async, update after render)
+  calcMaebariTotal(emp[F.syainNo]).then(total => {
+    const el = document.getElementById('tabStatMaebari');
+    if (el) el.textContent = total > 0 ? '¥' + Math.round(total).toLocaleString() : '¥0';
+  });
 
   // Show top tabs and reset to 有給 tab
   document.getElementById('topTabs').style.display = 'flex';
