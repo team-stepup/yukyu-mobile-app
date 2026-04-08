@@ -367,6 +367,26 @@ body {
 }
 .ql-icon { font-size: 20px; }
 
+/* 入退連絡 Styles */
+.nyutai-nav-btn { background:none; border:2px solid var(--primary); color:var(--primary); border-radius:50%; width:34px; height:34px; font-size:14px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.15s; }
+.nyutai-nav-btn:active { background:var(--primary); color:#fff; }
+.nyutai-stat-card { flex:1; min-width:70px; text-align:center; padding:10px 4px; border-radius:12px; background:#fff; box-shadow:0 1px 6px rgba(0,0,0,0.06); }
+.nyutai-stat-card .stat-num { font-size:22px; font-weight:800; line-height:1.2; }
+.nyutai-stat-card .stat-label { font-size:10px; font-weight:600; color:var(--text-light); margin-top:2px; }
+.nyutai-section { margin-bottom:12px; }
+.nyutai-section-title { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:700; padding:8px 4px; }
+.nyutai-emp-card { display:flex; align-items:center; gap:10px; padding:10px 12px; background:#fff; border-radius:10px; margin-bottom:6px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer; transition: transform 0.1s; }
+.nyutai-emp-card:active { transform:scale(0.98); }
+.nyutai-emp-date { font-size:13px; font-weight:700; color:var(--primary); min-width:42px; }
+.nyutai-emp-info { flex:1; }
+.nyutai-emp-name { font-size:14px; font-weight:700; }
+.nyutai-emp-buka { font-size:11px; color:var(--text-light); margin-top:1px; }
+.nyutai-badge { padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; white-space:nowrap; }
+.nyutai-badge.new { background:#e8f5e9; color:#2e7d32; }
+.nyutai-badge.retire { background:#fce4ec; color:#c62828; }
+.nyutai-badge.plan { background:#fff3e0; color:#e65100; }
+.nyutai-empty { text-align:center; padding:20px; color:var(--text-light); font-size:13px; }
+
 /* List Screens */
 .list-screen-header {
   background: var(--card-bg);
@@ -1245,6 +1265,10 @@ body {
         <span class="ql-icon">📅</span>
         <span class="ql-text">有給確認</span>
       </button>
+      <button class="quick-link-btn" onclick="switchScreen('nyutaiScreen')">
+        <span class="ql-icon">🚪</span>
+        <span class="ql-text">入退連絡</span>
+      </button>
     </div>
     <div class="card" style="padding:12px;">
       <div class="section-title">社員検索</div>
@@ -1295,6 +1319,17 @@ body {
       </div>
     </div>
     <div id="hakenListBody" style="overflow-x:auto;"></div>
+  </div>
+
+  <!-- Screen: 入退連絡 -->
+  <div class="screen" id="nyutaiScreen">
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 0;">
+      <button class="nyutai-nav-btn" onclick="changeNyutaiMonth(-1)">◀</button>
+      <span id="nyutaiMonthLabel" style="font-size:17px;font-weight:800;color:var(--primary);min-width:120px;text-align:center;"></span>
+      <button class="nyutai-nav-btn" onclick="changeNyutaiMonth(1)">▶</button>
+    </div>
+    <div id="nyutaiSummary" style="display:flex;gap:6px;padding:0 4px 8px;flex-wrap:wrap;justify-content:center;"></div>
+    <div id="nyutaiBody"></div>
   </div>
 
   <!-- Screen: 前払い一覧 -->
@@ -1681,7 +1716,7 @@ function switchScreen(screenId, skipHistory) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -1699,6 +1734,7 @@ function switchScreen(screenId, skipHistory) {
 
   if (screenId === 'maebariListScreen') initMaebariListDate();
   if (screenId === 'yukyuListScreen') initYukyuListDate();
+  if (screenId === 'nyutaiScreen') loadNyutaiScreen();
 }
 
 function resetSearch() {
@@ -5072,6 +5108,178 @@ async function populateHakenDropdown() {
     });
   } catch (e) {
     console.error('Haken dropdown error:', e);
+  }
+}
+
+// ============================================================
+// 入退連絡 (Entry / Exit Notifications)
+// ============================================================
+let nyutaiYear = new Date().getFullYear();
+let nyutaiMonth = new Date().getMonth(); // 0-based
+
+function changeNyutaiMonth(delta) {
+  nyutaiMonth += delta;
+  if (nyutaiMonth > 11) { nyutaiMonth = 0; nyutaiYear++; }
+  if (nyutaiMonth < 0) { nyutaiMonth = 11; nyutaiYear--; }
+  loadNyutaiScreen();
+}
+
+async function loadNyutaiScreen() {
+  const label = document.getElementById('nyutaiMonthLabel');
+  const summary = document.getElementById('nyutaiSummary');
+  const body = document.getElementById('nyutaiBody');
+
+  label.textContent = nyutaiYear + '年' + (nyutaiMonth + 1) + '月';
+  summary.innerHTML = '';
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
+
+  try {
+    // Month range
+    const mStart = new Date(nyutaiYear, nyutaiMonth, 1);
+    const mEnd = new Date(nyutaiYear, nyutaiMonth + 1, 0, 23, 59, 59);
+    const isoStart = mStart.toISOString();
+    const isoEnd = mEnd.toISOString();
+
+    // Fetch all employees (no $select to ensure buka key is available)
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '');
+
+    // Classify
+    const nyusha = []; // 入社
+    const taisha = []; // 退社（派遣退社 in month）
+    const taishaYukyu = []; // 有給退社 in month (退社予定含む)
+
+    allEmps.forEach(emp => {
+      const nd = emp[F.nyushaDate];
+      const hd = emp[F.hakenTaisha];
+      const yd = emp[F.yukyuTaisha];
+
+      // 入社: nyushaDate within the month
+      if (nd) {
+        const d = new Date(nd);
+        if (d >= mStart && d <= mEnd) {
+          nyusha.push(emp);
+        }
+      }
+
+      // 派遣退社: hakenTaisha within the month
+      if (hd) {
+        const d = new Date(hd);
+        if (d >= mStart && d <= mEnd) {
+          taisha.push(emp);
+        }
+      }
+
+      // 有給退社: yukyuTaisha within the month
+      if (yd) {
+        const d = new Date(yd);
+        if (d >= mStart && d <= mEnd) {
+          taishaYukyu.push(emp);
+        }
+      }
+    });
+
+    // Unique taisha (merge haken + yukyu)
+    const taishaAll = [];
+    const taishaIds = new Set();
+    taisha.forEach(e => { taishaAll.push(e); taishaIds.add(e.Id); });
+    taishaYukyu.forEach(e => { if (!taishaIds.has(e.Id)) taishaAll.push(e); });
+
+    // Summary cards
+    const stats = [
+      { label: '入社', num: nyusha.length, color: '#2e7d32', bg: '#e8f5e9' },
+      { label: '退社', num: taishaAll.length, color: '#c62828', bg: '#fce4ec' },
+      { label: '派遣退社', num: taisha.length, color: '#e65100', bg: '#fff3e0' },
+      { label: '有給退社', num: taishaYukyu.length, color: '#1565c0', bg: '#e3f2fd' },
+    ];
+    summary.innerHTML = stats.map(s =>
+      '<div class="nyutai-stat-card" style="border-left:3px solid ' + s.color + ';">' +
+      '<div class="stat-num" style="color:' + s.color + ';">' + s.num + '</div>' +
+      '<div class="stat-label">' + s.label + '</div></div>'
+    ).join('');
+
+    // Build body
+    let html = '';
+
+    // 入社 section
+    html += '<div class="nyutai-section">';
+    html += '<div class="nyutai-section-title"><span style="color:#2e7d32;">🟢</span> 入社 (' + nyusha.length + '件)</div>';
+    if (nyusha.length === 0) {
+      html += '<div class="nyutai-empty">この月の入社はありません</div>';
+    } else {
+      nyusha.sort((a, b) => new Date(a[F.nyushaDate]) - new Date(b[F.nyushaDate]));
+      nyusha.forEach(emp => {
+        const dt = formatDate(emp[F.nyushaDate]);
+        const name = emp.Title || '';
+        const buka = getBukaValue(emp) || '';
+        const syubetu = emp[F.zaiyokuSyubetu] || '新規';
+        html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
+        html += '<div class="nyutai-emp-date">' + dt.replace(/^\d{4}\//, '') + '</div>';
+        html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div></div>';
+        html += '<span class="nyutai-badge new">' + escHtml(syubetu) + '</span>';
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+
+    // 退社 section
+    html += '<div class="nyutai-section">';
+    html += '<div class="nyutai-section-title"><span style="color:#c62828;">🔴</span> 退社 (' + taishaAll.length + '件)</div>';
+    if (taishaAll.length === 0) {
+      html += '<div class="nyutai-empty">この月の退社はありません</div>';
+    } else {
+      taishaAll.sort((a, b) => {
+        const da = new Date(a[F.hakenTaisha] || a[F.yukyuTaisha]);
+        const db = new Date(b[F.hakenTaisha] || b[F.yukyuTaisha]);
+        return da - db;
+      });
+      taishaAll.forEach(emp => {
+        const hd = emp[F.hakenTaisha];
+        const yd = emp[F.yukyuTaisha];
+        const name = emp.Title || '';
+        const buka = getBukaValue(emp) || '';
+        let dateInfo = '';
+        if (hd) dateInfo += '派遣退社:' + formatDate(hd).replace(/^\d{4}\//, '');
+        if (yd) dateInfo += (dateInfo ? ' ' : '') + '有給退社:' + formatDate(yd).replace(/^\d{4}\//, '');
+        const displayDate = formatDate(hd || yd).replace(/^\d{4}\//, '');
+        // Check if future
+        const now = new Date();
+        const retDate = new Date(yd || hd);
+        const isPlan = retDate > now;
+        html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
+        html += '<div class="nyutai-emp-date">' + displayDate + '</div>';
+        html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div>';
+        html += '<div style="font-size:10px;color:var(--text-light);margin-top:2px;">' + escHtml(dateInfo) + '</div></div>';
+        html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '予定' : '退社') + '</span>';
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+
+    body.innerHTML = html;
+  } catch (e) {
+    console.error('Nyutai load error:', e);
+    body.innerHTML = '<div class="nyutai-empty" style="color:var(--danger);">データ取得エラー: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function openNyutaiEmployee(empId) {
+  try {
+    const token = await getToken();
+    if (!token) return;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + empId + ")";
+    const resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) throw new Error('取得失敗');
+    const data = await resp.json();
+    currentEmployee = data.d;
+    switchScreen('detailScreen');
+    switchTopTab('profile');
+    showDetailHeader();
+    loadEmployeeProfile();
+  } catch (e) {
+    console.error('Open nyutai employee error:', e);
+    showToast('社員情報の取得に失敗しました', 'error');
   }
 }
 
