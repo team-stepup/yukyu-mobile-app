@@ -2426,30 +2426,9 @@ async function loadEmployeeProfile() {
     yukyuRemain = latest._displayRemain || 0;
   }
 
-  // Profile header
-  let html = '<div class="profile-header">';
-  html += '<div class="profile-name-row">';
-  html += '<span class="profile-name">' + escHtml(emp.Title || '') + '</span>';
-  html += '<span class="profile-badge ' + statusClass + '">' + statusLabel + '</span>';
-  html += '</div>';
-  html += '<div class="profile-meta">';
-  html += '<span>社番: ' + (emp[F.syainNo] || '') + '</span>';
-  if (hakensaki) html += '<span>派遣先: ' + escHtml(hakensaki) + '</span>';
-  html += '</div>';
-  html += '<div class="profile-stats">';
-  html += '<div class="profile-stat-box' + (yukyuRemain <= 0 ? ' danger' : '') + '">';
-  html += '<div class="stat-label">有給残数</div>';
-  html += '<div class="stat-value">' + yukyuRemain + '</div>';
-  html += '<div class="stat-unit">日</div>';
-  html += '</div>';
-  html += '<div class="profile-stat-box' + (maebariTotal > 0 ? ' warn' : '') + '">';
-  html += '<div class="stat-label">前払い(当期)</div>';
-  html += '<div class="stat-value">' + (maebariTotal > 0 ? '¥' + Math.round(maebariTotal).toLocaleString() : '0') + '</div>';
-  html += '<div class="stat-unit">' + (maebariTotal > 0 ? '' : '円') + '</div>';
-  html += '</div>';
-  html += '</div></div>';
+  // Accordion sections (header is already shown by detailHeader)
+  let html = '';
 
-  // Accordion sections
   PROFILE_CATEGORIES.forEach(cat => {
     // Check if category has any data
     let hasData = false;
@@ -2503,6 +2482,12 @@ async function loadEmployeeProfile() {
       let val = emp[odataKey];
       if (val === null || val === undefined || val === '') return;
       hasData = true;
+      // Special: 派遣先 uses getHakensaki() for clean display
+      if (field.key === 'hakensaki') {
+        const clean = getHakensaki(emp);
+        if (clean) rows.push({ label: field.label, value: escHtml(clean) });
+        return;
+      }
       const formatted = formatProfileValue(val, field.format);
       if (formatted) rows.push({ label: field.label, value: formatted });
     });
