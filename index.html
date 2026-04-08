@@ -386,6 +386,8 @@ body {
 .nyutai-badge.retire { background:#fce4ec; color:#c62828; }
 .nyutai-badge.plan { background:#fff3e0; color:#e65100; }
 .nyutai-empty { text-align:center; padding:20px; color:var(--text-light); font-size:13px; }
+.nyutai-range-btn { background:#f0f0f0; border:1px solid var(--border); border-radius:16px; padding:4px 14px; font-size:12px; font-weight:600; color:var(--text-light); cursor:pointer; transition:all 0.15s; }
+.nyutai-range-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
 
 /* List Screens */
 .list-screen-header {
@@ -1323,10 +1325,15 @@ body {
 
   <!-- Screen: 入退連絡 -->
   <div class="screen" id="nyutaiScreen">
-    <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 0;">
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 0;">
       <button class="nyutai-nav-btn" onclick="changeNyutaiMonth(-1)">◀</button>
       <span id="nyutaiMonthLabel" style="font-size:17px;font-weight:800;color:var(--primary);min-width:120px;text-align:center;"></span>
       <button class="nyutai-nav-btn" onclick="changeNyutaiMonth(1)">▶</button>
+    </div>
+    <div style="display:flex;justify-content:center;gap:4px;padding:0 0 8px;">
+      <button class="nyutai-range-btn active" onclick="setNyutaiRange(1)">1ヶ月</button>
+      <button class="nyutai-range-btn" onclick="setNyutaiRange(2)">2ヶ月</button>
+      <button class="nyutai-range-btn" onclick="setNyutaiRange(3)">3ヶ月</button>
     </div>
     <div id="nyutaiSummary" style="display:flex;gap:6px;padding:0 4px 8px;flex-wrap:wrap;justify-content:center;"></div>
     <div id="nyutaiBody"></div>
@@ -5116,6 +5123,7 @@ async function populateHakenDropdown() {
 // ============================================================
 let nyutaiYear = new Date().getFullYear();
 let nyutaiMonth = new Date().getMonth(); // 0-based
+let nyutaiRange = 1; // 1~3 months
 
 function changeNyutaiMonth(delta) {
   nyutaiMonth += delta;
@@ -5124,29 +5132,62 @@ function changeNyutaiMonth(delta) {
   loadNyutaiScreen();
 }
 
+function setNyutaiRange(r) {
+  nyutaiRange = r;
+  document.querySelectorAll('.nyutai-range-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', (i + 1) === r);
+  });
+  loadNyutaiScreen();
+}
+
+function calcTenure(startDateStr, endDateStr) {
+  if (!startDateStr) return '';
+  const s = new Date(startDateStr);
+  const e = endDateStr ? new Date(endDateStr) : new Date();
+  if (isNaN(s.getTime())) return '';
+  let years = e.getFullYear() - s.getFullYear();
+  let months = e.getMonth() - s.getMonth();
+  if (months < 0) { years--; months += 12; }
+  if (years > 0 && months > 0) return years + '年' + months + 'ヶ月';
+  if (years > 0) return years + '年';
+  if (months > 0) return months + 'ヶ月';
+  return '1ヶ月未満';
+}
+
 async function loadNyutaiScreen() {
   const label = document.getElementById('nyutaiMonthLabel');
   const summary = document.getElementById('nyutaiSummary');
   const body = document.getElementById('nyutaiBody');
 
-  label.textContent = nyutaiYear + '年' + (nyutaiMonth + 1) + '月';
+  // Label based on range
+  if (nyutaiRange === 1) {
+    label.textContent = nyutaiYear + '年' + (nyutaiMonth + 1) + '月';
+  } else {
+    const endM = (nyutaiMonth + nyutaiRange - 1) % 12 + 1;
+    const endY = nyutaiYear + Math.floor((nyutaiMonth + nyutaiRange - 1) / 12);
+    label.textContent = nyutaiYear + '年' + (nyutaiMonth + 1) + '月〜' + (endY !== nyutaiYear ? endY + '年' : '') + endM + '月';
+  }
   summary.innerHTML = '';
   body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
 
   try {
-    // Month range
+    // Month range (supports multi-month)
     const mStart = new Date(nyutaiYear, nyutaiMonth, 1);
-    const mEnd = new Date(nyutaiYear, nyutaiMonth + 1, 0, 23, 59, 59);
+    const mEnd = new Date(nyutaiYear, nyutaiMonth + nyutaiRange, 0, 23, 59, 59);
 
     // Fetch all employees
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '');
 
-    // Helper: check if date is in the target month
-    function inMonth(dateStr) {
+    // Helper: check if date is in the target range
+    function inRange(dateStr) {
       if (!dateStr) return false;
       const d = new Date(dateStr);
       return d >= mStart && d <= mEnd;
     }
+
+    // Range of months (as year*12+month) for multi-month check
+    const rangeStartM = nyutaiYear * 12 + nyutaiMonth;
+    const rangeEndM = rangeStartM + nyutaiRange - 1;
 
     // Classify
     const nyusha = []; // 入社
@@ -5157,44 +5198,38 @@ async function loadNyutaiScreen() {
       const hd = emp[F.hakenTaisha];
       const yd = emp[F.yukyuTaisha];
 
-      // 入社: nyushaDate within the month
-      if (nd && inMonth(nd)) {
+      // 入社: nyushaDate within the range
+      if (nd && inRange(nd)) {
         nyusha.push(emp);
       }
 
       // 退社カウントロジック:
       // - 派遣退社と有給退社が同日 or 同月 → その月に1カウント
-      // - 有給退社が派遣退社の翌月 → 有給退社月に1カウント
+      // - 有給退社が派遣退社の翌月 → 有給退社月にカウント
       // - 片方だけ → その日付の月に1カウント
+      // 判定月が表示範囲内ならリストに追加
       if (hd && yd) {
         const hdDate = new Date(hd);
         const ydDate = new Date(yd);
-        const hdMonth = hdDate.getFullYear() * 12 + hdDate.getMonth();
-        const ydMonth = ydDate.getFullYear() * 12 + ydDate.getMonth();
-        const targetMonth = nyutaiYear * 12 + nyutaiMonth;
+        const hdM = hdDate.getFullYear() * 12 + hdDate.getMonth();
+        const ydM = ydDate.getFullYear() * 12 + ydDate.getMonth();
 
-        if (hdMonth === ydMonth) {
-          // 同月 → その月に1カウント
-          if (hdMonth === targetMonth) {
-            taishaList.push(emp);
-          }
-        } else if (ydMonth === hdMonth + 1) {
-          // 有給退社が翌月 → 有給退社月にカウント
-          if (ydMonth === targetMonth) {
-            taishaList.push(emp);
-          }
+        // Determine count month
+        let countM;
+        if (hdM === ydM) {
+          countM = hdM; // 同月
+        } else if (ydM === hdM + 1) {
+          countM = ydM; // 有給退社が翌月 → 有給退社月
         } else {
-          // それ以外（稀なケース）→ 有給退社月にカウント
-          if (ydMonth === targetMonth) {
-            taishaList.push(emp);
-          }
+          countM = ydM; // それ以外 → 有給退社月
+        }
+        if (countM >= rangeStartM && countM <= rangeEndM) {
+          taishaList.push(emp);
         }
       } else if (yd) {
-        // 有給退社のみ
-        if (inMonth(yd)) taishaList.push(emp);
+        if (inRange(yd)) taishaList.push(emp);
       } else if (hd) {
-        // 派遣退社のみ
-        if (inMonth(hd)) taishaList.push(emp);
+        if (inRange(hd)) taishaList.push(emp);
       }
     });
 
@@ -5253,6 +5288,7 @@ async function loadNyutaiScreen() {
         const yd = emp[F.yukyuTaisha];
         const name = emp.Title || '';
         const buka = getBukaValue(emp) || '';
+        const tenure = calcTenure(emp[F.nyushaDate], yd || hd);
         let dateInfo = '';
         if (hd) dateInfo += '派遣退社:' + formatDate(hd).replace(/^\d{4}\//, '');
         if (yd) dateInfo += (dateInfo ? ' ' : '') + '有給退社:' + formatDate(yd).replace(/^\d{4}\//, '');
@@ -5263,7 +5299,8 @@ async function loadNyutaiScreen() {
         const isPlan = retDate > now;
         html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
         html += '<div class="nyutai-emp-date">' + displayDate + '</div>';
-        html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div>';
+        html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div>';
+        html += '<div class="nyutai-emp-buka">' + escHtml(buka) + (tenure ? ' <span style="color:var(--primary);font-weight:600;">(' + tenure + ')</span>' : '') + '</div>';
         html += '<div style="font-size:10px;color:var(--text-light);margin-top:2px;">' + escHtml(dateInfo) + '</div></div>';
         html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '予定' : '退社') + '</span>';
         html += '</div>';
@@ -5279,23 +5316,26 @@ async function loadNyutaiScreen() {
 }
 
 async function openNyutaiEmployee(empId) {
+  showSpinner();
   try {
     const token = await getToken();
-    if (!token) return;
+    if (!token) { hideSpinner(); return; }
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + empId + ")";
     const resp = await fetch(url, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
-    if (!resp.ok) throw new Error('取得失敗');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     currentEmployee = data.d;
+    // Use same flow as selectEmployee
+    await loadLeaveDetails();
     switchScreen('detailScreen');
     switchTopTab('profile');
-    showDetailHeader();
-    loadEmployeeProfile();
   } catch (e) {
     console.error('Open nyutai employee error:', e);
-    showToast('社員情報の取得に失敗しました', 'error');
+    showToast('社員情報の取得に失敗しました: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
   }
 }
 
