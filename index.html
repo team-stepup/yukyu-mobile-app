@@ -3117,8 +3117,17 @@ function switchTopTab(tab) {
   document.getElementById('profileContent').style.display = tab === 'profile' ? 'block' : 'none';
   const titleMap = { yukyu: '有給詳細', maebari: '前払い詳細', profile: '社員情報' };
   document.getElementById('headerTitle').textContent = titleMap[tab] || '有給詳細';
-  // Show header refresh button only on profile tab
-  document.getElementById('headerRefreshBtn').style.display = tab === 'profile' ? 'block' : 'none';
+  // Show header refresh button on profile and maebari tabs
+  const refreshBtn = document.getElementById('headerRefreshBtn');
+  if (tab === 'profile') {
+    refreshBtn.style.display = 'block';
+    refreshBtn.onclick = function() { employeeFieldsCache = null; loadEmployeeProfile(); };
+  } else if (tab === 'maebari') {
+    refreshBtn.style.display = 'block';
+    refreshBtn.onclick = function() { loadMaebariData(); };
+  } else {
+    refreshBtn.style.display = 'none';
+  }
   if (tab === 'maebari') {
     maebariPeriodOffset = 0;
     loadMaebariData();
@@ -3141,24 +3150,36 @@ function getNthFriday(year, month, n) {
 
 // Get the 前払い period that contains today (offset by maebariPeriodOffset months)
 // Period: 2nd Friday of month M ~ 1st Friday of month M+1
+// 今月分(offset=0)の終了日はユーザーが変更可能（localStorage保存）
+// 変更した場合、翌月(offset=1)の開始日は変更後終了日の翌週金曜日
 function getMaebariPeriod(offset) {
   const today = new Date();
-  // Start from current month and apply offset
   let refYear = today.getFullYear();
   let refMonth = today.getMonth() + offset;
-  // Normalize month
   while (refMonth < 0) { refMonth += 12; refYear--; }
   while (refMonth > 11) { refMonth -= 12; refYear++; }
 
-  // Find which period contains today (when offset=0)
-  // Try: 2nd Friday of refMonth ~ 1st Friday of refMonth+1
-  const start = getNthFriday(refYear, refMonth, 2);
+  const defaultStart = getNthFriday(refYear, refMonth, 2);
   let endMonth = refMonth + 1;
   let endYear = refYear;
   if (endMonth > 11) { endMonth -= 12; endYear++; }
-  const end = getNthFriday(endYear, endMonth, 1);
+  const defaultEnd = getNthFriday(endYear, endMonth, 1);
 
-  return { start, end };
+  // Check if current month(offset=0) has custom end date
+  const customKey = 'maebari_custom_end_' + today.getFullYear() + '_' + today.getMonth();
+  const customEndStr = localStorage.getItem(customKey);
+
+  if (offset === 0 && customEndStr) {
+    // 今月分: use custom end
+    return { start: defaultStart, end: new Date(customEndStr + 'T00:00:00'), customEnd: true };
+  } else if (offset === 1 && customEndStr) {
+    // 翌月分: start = custom end の1週間後の金曜日
+    const customEnd = new Date(customEndStr + 'T00:00:00');
+    const newStart = getNextFridayAfter(customEnd, 7);
+    return { start: newStart, end: defaultEnd };
+  }
+
+  return { start: defaultStart, end: defaultEnd };
 }
 
 function formatCurrency(num) {
@@ -3199,18 +3220,20 @@ async function loadMaebariData() {
       grandTotal += t;
     });
 
-    const periodLabel = formatDateShort(period.start) + ' ～ ' + formatDateShort(period.end);
-    // 支払日デフォルト: 期間終了日の翌週金曜日
-    const defaultPayDay = getNextFridayAfter(period.end, 7);
+    // 前払日デフォルト: 翌金曜日（金曜当日含む）
+    const defaultPayDay = getNextFriday();
+
+    // Period end: editable only for current month
+    const endEditable = isCurrent;
+    const endDateHtml = endEditable
+      ? `<span id="maebariPeriodEndDisplay" style="cursor:pointer;text-decoration:underline dotted;color:var(--primary);" onclick="document.getElementById('maebariPeriodEndInput').showPicker()">${formatDateShort(period.end)}</span><input type="date" id="maebariPeriodEndInput" value="${formatDateISO(period.end)}" style="position:absolute;opacity:0;width:0;height:0;" onchange="onMaebariPeriodEndChange(this.value)">`
+      : formatDateShort(period.end);
 
     container.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:4px;"><button class="refresh-btn" onclick="loadMaebariData()">&#x21bb; 更新</button></div>
       <div class="maebari-nav">
         <button onclick="changeMaebariPeriod(-1)">&lsaquo; 前</button>
         <div class="period-text">
-          ${formatDateShort(period.start)} ～
-          <span id="maebariPeriodEndDisplay" style="cursor:pointer;text-decoration:underline;color:var(--primary);" onclick="document.getElementById('maebariPeriodEndInput').showPicker()">${formatDateShort(period.end)}</span>
-          <input type="date" id="maebariPeriodEndInput" value="${formatDateISO(period.end)}" style="position:absolute;opacity:0;width:0;height:0;" onchange="onMaebariPeriodEndChange(this.value)">
+          ${formatDateShort(period.start)} ～ ${endDateHtml}
           ${isCurrent ? '<span class="current-period-badge">今月分</span>' : ''}
         </div>
         <button onclick="changeMaebariPeriod(1)">次 &rsaquo;</button>
@@ -3253,8 +3276,8 @@ async function loadMaebariData() {
         <div class="section-title" style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:12px;">前払い申請</div>
 
         <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">① 前払日</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-          <div id="maebariDefaultDateDisplay" style="font-size:15px;font-weight:700;color:var(--primary);flex:1;">${formatDateShort(defaultPayDay)}（金）</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div id="maebariSelectedDate" style="font-size:15px;font-weight:700;color:var(--primary);flex:1;"></div>
           <button class="refresh-btn" style="font-size:11px;" onclick="toggleMaebariCalendar()">📅 変更</button>
         </div>
         <div id="maebariCalWrap" style="display:none;">
@@ -3265,7 +3288,6 @@ async function loadMaebariData() {
           </div>
           <div id="maebariCalendar" style="margin-bottom:8px;"></div>
         </div>
-        <div id="maebariSelectedDate" style="font-size:13px;color:var(--primary);font-weight:600;margin-bottom:12px;text-align:center;"></div>
 
         <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">② 金額を選択</div>
         <div class="amount-grid">
@@ -3290,9 +3312,10 @@ async function loadMaebariData() {
     maebariCalYear = new Date().getFullYear();
     maebariCalMonth = new Date().getMonth();
     maebariSelectedAmount = null;
-    // Auto-select next Friday as default pay date
-    maebariSelectedPayDate = getNextFriday();
-    document.getElementById('maebariSelectedDate').textContent = '選択日: ' + formatDateShort(maebariSelectedPayDate);
+    // Auto-select next Friday as default pay date (including today if Friday)
+    maebariSelectedPayDate = defaultPayDay;
+    const days = ['日','月','火','水','木','金','土'];
+    document.getElementById('maebariSelectedDate').textContent = formatDateShort(maebariSelectedPayDate) + '（' + days[maebariSelectedPayDate.getDay()] + '）';
     renderMaebariCalendar();
   } catch (e) {
     console.error('Maebari fetch error:', e);
@@ -3343,18 +3366,13 @@ function toggleMaebariCalendar() {
 
 function onMaebariPeriodEndChange(val) {
   if (!val) return;
-  const newEnd = new Date(val + 'T00:00:00');
-  document.getElementById('maebariPeriodEndDisplay').textContent = formatDateShort(newEnd);
-  // Recalc default pay day (next Friday after 1 week from new end)
-  const newPayDay = getNextFridayAfter(newEnd, 7);
-  const display = document.getElementById('maebariDefaultDateDisplay');
-  if (display) {
-    display.textContent = formatDateShort(newPayDay) + '（金）';
-  }
-  // Auto-select the new pay day
-  maebariSelectedPayDate = newPayDay;
-  document.getElementById('maebariSelectedDate').textContent = '選択日: ' + formatDateShort(newPayDay);
-  updateMaebariConfirm();
+  // Save custom end date for current month to localStorage
+  const today = new Date();
+  const customKey = 'maebari_custom_end_' + today.getFullYear() + '_' + today.getMonth();
+  localStorage.setItem(customKey, val);
+  showToast('期間終了日を変更しました', 'success');
+  // Reload maebari data with new period
+  loadMaebariData();
 }
 
 function changeMaebariCalMonth(dir) {
@@ -3406,7 +3424,10 @@ function renderMaebariCalendar() {
 function selectMaebariDate(y, m, d) {
   maebariSelectedPayDate = new Date(y, m, d);
   renderMaebariCalendar();
-  document.getElementById('maebariSelectedDate').textContent = '選択日: ' + formatDateShort(maebariSelectedPayDate);
+  const days = ['日','月','火','水','木','金','土'];
+  document.getElementById('maebariSelectedDate').textContent = formatDateShort(maebariSelectedPayDate) + '（' + days[maebariSelectedPayDate.getDay()] + '）';
+  // Hide calendar after selection
+  document.getElementById('maebariCalWrap').style.display = 'none';
   updateMaebariConfirm();
 }
 
