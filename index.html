@@ -2467,9 +2467,17 @@ async function loadEmployeeProfile() {
   // Accordion sections (header is already shown by detailHeader)
   let html = '';
 
+  // Detect 通勤方法 for car-related section logic
+  const tsukinKey = keyMap['tsukinHouhou'];
+  const tsukinVal = tsukinKey ? (emp[tsukinKey] || '') : '';
+  const isCar = tsukinVal.indexOf('車') >= 0 || tsukinVal.indexOf('自動車') >= 0 || tsukinVal.toLowerCase().indexOf('car') >= 0;
+  // Sections that must show all fields when commuting by car
+  const carRequiredSections = ['vehicle', 'license', 'carInsurance'];
+
   PROFILE_CATEGORIES.forEach(cat => {
     // Check if category has any data
     let hasData = false;
+    const forceShowAll = isCar && carRequiredSections.indexOf(cat.id) >= 0;
     const rows = [];
     cat.fields.forEach(field => {
       // Handle computed fields (prefixed with _calc)
@@ -2518,7 +2526,20 @@ async function loadEmployeeProfile() {
       const odataKey = keyMap[field.key];
       if (!odataKey) return;
       let val = emp[odataKey];
-      if (val === null || val === undefined || val === '') return;
+      const isEmpty = val === null || val === undefined || val === '';
+      // 通勤方法: always show, even if empty
+      if (field.key === 'tsukinHouhou') {
+        hasData = true;
+        rows.push({ label: field.label, value: isEmpty ? '<span style="color:#ccc;">未登録</span>' : escHtml(String(val)) });
+        return;
+      }
+      // Car-required sections: show empty fields as 未登録
+      if (isEmpty && forceShowAll) {
+        hasData = true;
+        rows.push({ label: field.label, value: '<span style="color:var(--danger);font-size:11px;">未登録</span>' });
+        return;
+      }
+      if (isEmpty) return;
       hasData = true;
       // Special: 派遣先 uses getHakensaki() for clean display
       if (field.key === 'hakensaki') {
