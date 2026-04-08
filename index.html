@@ -388,6 +388,20 @@ body {
 .nyutai-empty { text-align:center; padding:20px; color:var(--text-light); font-size:13px; }
 .nyutai-range-btn { background:#f0f0f0; border:1px solid var(--border); border-radius:16px; padding:4px 14px; font-size:12px; font-weight:600; color:var(--text-light); cursor:pointer; transition:all 0.15s; }
 .nyutai-range-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+.nyutai-analysis-panel { border:1px solid var(--border); border-radius:12px; background:#fff; }
+.nyutai-analysis-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; font-size:14px; font-weight:700; color:var(--primary); cursor:pointer; }
+.nyutai-analysis-header:active { background:#f8f8ff; }
+.nyutai-analysis-panel.open .nyutai-analysis-header { border-bottom:1px solid var(--border); }
+.nyutai-analysis-panel.open #nyutaiAnalysisArrow { transform:rotate(90deg); }
+.nyutai-chart-bar-wrap { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+.nyutai-chart-label { font-size:11px; font-weight:600; min-width:36px; text-align:right; color:var(--text); }
+.nyutai-chart-bar-bg { flex:1; height:20px; background:#f0f0f0; border-radius:10px; overflow:hidden; position:relative; }
+.nyutai-chart-bar { height:100%; border-radius:10px; transition:width 0.4s ease; min-width:2px; }
+.nyutai-chart-val { font-size:11px; font-weight:700; min-width:24px; }
+.nyutai-buka-table { width:100%; border-collapse:collapse; font-size:12px; }
+.nyutai-buka-table th { text-align:left; padding:6px 8px; background:var(--bg); font-weight:700; color:var(--text-light); font-size:11px; border-bottom:1px solid var(--border); }
+.nyutai-buka-table td { padding:6px 8px; border-bottom:1px solid #f0f0f0; }
+.nyutai-buka-table tr:last-child td { border-bottom:none; }
 
 /* List Screens */
 .list-screen-header {
@@ -1339,6 +1353,15 @@ body {
       <span style="font-size:11px;color:var(--text-light);">ヶ月</span>
     </div>
     <div id="nyutaiSummary" style="display:flex;gap:6px;padding:0 4px 8px;flex-wrap:wrap;justify-content:center;"></div>
+    <div id="nyutaiAnalysisWrap" style="display:none;">
+      <div class="card nyutai-analysis-panel" style="padding:0;margin-bottom:10px;overflow:hidden;">
+        <div class="nyutai-analysis-header" onclick="toggleNyutaiAnalysis()">
+          <span>📊 分析</span>
+          <span id="nyutaiAnalysisArrow" class="acc-arrow" style="font-size:10px;">&#9654;</span>
+        </div>
+        <div id="nyutaiAnalysisBody" style="display:none;padding:12px;"></div>
+      </div>
+    </div>
     <div id="nyutaiBody"></div>
   </div>
 
@@ -5135,6 +5158,13 @@ function changeNyutaiMonth(delta) {
   loadNyutaiScreen();
 }
 
+function toggleNyutaiAnalysis() {
+  const panel = document.querySelector('.nyutai-analysis-panel');
+  const body = document.getElementById('nyutaiAnalysisBody');
+  panel.classList.toggle('open');
+  body.style.display = panel.classList.contains('open') ? 'block' : 'none';
+}
+
 function setNyutaiRange(r) {
   nyutaiRange = r;
   document.querySelectorAll('.nyutai-range-btn').forEach(btn => {
@@ -5376,10 +5406,117 @@ async function loadNyutaiScreen() {
     }
 
     body.innerHTML = html;
+
+    // ===== 分析パネル生成 =====
+    renderNyutaiAnalysis(nyusha, taishaList, startY, startM);
+
   } catch (e) {
     console.error('Nyutai load error:', e);
     body.innerHTML = '<div class="nyutai-empty" style="color:var(--danger);">データ取得エラー: ' + escHtml(e.message) + '</div>';
   }
+}
+
+function renderNyutaiAnalysis(nyusha, taishaList, startY, startM) {
+  const wrap = document.getElementById('nyutaiAnalysisWrap');
+  const aBody = document.getElementById('nyutaiAnalysisBody');
+
+  if (nyusha.length === 0 && taishaList.length === 0) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+
+  let html = '';
+
+  // ── 1. 部課別 入退内訳 ──
+  html += '<div style="margin-bottom:16px;">';
+  html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">📋 部課別 入退内訳</div>';
+
+  const bukaMap = {};
+  nyusha.forEach(emp => {
+    const b = getBukaValue(emp) || '(未設定)';
+    if (!bukaMap[b]) bukaMap[b] = { nyusha: 0, taisha: 0 };
+    bukaMap[b].nyusha++;
+  });
+  taishaList.forEach(emp => {
+    const b = getBukaValue(emp) || '(未設定)';
+    if (!bukaMap[b]) bukaMap[b] = { nyusha: 0, taisha: 0 };
+    bukaMap[b].taisha++;
+  });
+
+  // Sort by total descending
+  const bukaArr = Object.entries(bukaMap).sort((a, b) => (b[1].nyusha + b[1].taisha) - (a[1].nyusha + a[1].taisha));
+
+  html += '<table class="nyutai-buka-table">';
+  html += '<tr><th>部課</th><th style="text-align:center;width:45px;">入社</th><th style="text-align:center;width:45px;">退社</th><th style="text-align:center;width:45px;">実績</th></tr>';
+  bukaArr.forEach(([buka, d]) => {
+    const j = d.nyusha - d.taisha;
+    const jColor = j > 0 ? '#2e7d32' : j < 0 ? '#c62828' : 'var(--text-light)';
+    html += '<tr>';
+    html += '<td style="font-weight:600;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(buka) + '</td>';
+    html += '<td style="text-align:center;color:#2e7d32;font-weight:700;">' + (d.nyusha || '-') + '</td>';
+    html += '<td style="text-align:center;color:#c62828;font-weight:700;">' + (d.taisha || '-') + '</td>';
+    html += '<td style="text-align:center;color:' + jColor + ';font-weight:700;">' + (j > 0 ? '+' : '') + j + '</td>';
+    html += '</tr>';
+  });
+  html += '</table></div>';
+
+  // ── 2. 月別推移グラフ（横棒） ──
+  html += '<div>';
+  html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">📈 月別推移</div>';
+
+  // Collect monthly data
+  const monthlyData = [];
+  let maxVal = 1;
+  for (let m = 0; m < nyutaiRange; m++) {
+    const totalM = startY * 12 + startM + m;
+    const yy = Math.floor(totalM / 12);
+    const mm = totalM % 12;
+    const ms = new Date(yy, mm, 1);
+    const me = new Date(yy, mm + 1, 0, 23, 59, 59);
+    const mKey = yy * 12 + mm;
+
+    const mN = nyusha.filter(e => { const d = new Date(e[F.nyushaDate]); return d >= ms && d <= me; }).length;
+    const mT = taishaList.filter(e => {
+      const hd = e[F.hakenTaisha], yd = e[F.yukyuTaisha];
+      if (hd && yd) {
+        const hdM = new Date(hd).getFullYear() * 12 + new Date(hd).getMonth();
+        const ydM = new Date(yd).getFullYear() * 12 + new Date(yd).getMonth();
+        return ((hdM === ydM) ? hdM : ydM) === mKey;
+      }
+      if (yd) { const d = new Date(yd); return d >= ms && d <= me; }
+      if (hd) { const d = new Date(hd); return d >= ms && d <= me; }
+      return false;
+    }).length;
+
+    monthlyData.push({ label: (mm + 1) + '月', n: mN, t: mT });
+    if (mN > maxVal) maxVal = mN;
+    if (mT > maxVal) maxVal = mT;
+  }
+
+  monthlyData.forEach(d => {
+    const nPct = Math.round((d.n / maxVal) * 100);
+    const tPct = Math.round((d.t / maxVal) * 100);
+    html += '<div style="margin-bottom:8px;">';
+    html += '<div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:3px;">' + d.label + '</div>';
+    // 入社 bar
+    html += '<div class="nyutai-chart-bar-wrap">';
+    html += '<div class="nyutai-chart-label" style="color:#2e7d32;">入社</div>';
+    html += '<div class="nyutai-chart-bar-bg"><div class="nyutai-chart-bar" style="width:' + nPct + '%;background:linear-gradient(90deg,#66bb6a,#2e7d32);"></div></div>';
+    html += '<div class="nyutai-chart-val" style="color:#2e7d32;">' + d.n + '</div>';
+    html += '</div>';
+    // 退社 bar
+    html += '<div class="nyutai-chart-bar-wrap">';
+    html += '<div class="nyutai-chart-label" style="color:#c62828;">退社</div>';
+    html += '<div class="nyutai-chart-bar-bg"><div class="nyutai-chart-bar" style="width:' + tPct + '%;background:linear-gradient(90deg,#ef9a9a,#c62828);"></div></div>';
+    html += '<div class="nyutai-chart-val" style="color:#c62828;">' + d.t + '</div>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  html += '</div>';
+
+  aBody.innerHTML = html;
 }
 
 async function openNyutaiEmployee(empId) {
