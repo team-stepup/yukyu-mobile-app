@@ -377,10 +377,10 @@ body {
 .nyutai-section-title { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:700; padding:8px 4px; }
 .nyutai-emp-card { display:flex; align-items:center; gap:10px; padding:10px 12px; background:#fff; border-radius:10px; margin-bottom:6px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer; transition: transform 0.1s; }
 .nyutai-emp-card:active { transform:scale(0.98); }
-.nyutai-emp-date { font-size:13px; font-weight:700; color:var(--primary); min-width:42px; }
-.nyutai-emp-info { flex:1; }
-.nyutai-emp-name { font-size:14px; font-weight:700; }
-.nyutai-emp-buka { font-size:11px; color:var(--text-light); margin-top:1px; }
+.nyutai-emp-date { font-size:15px; font-weight:800; color:var(--primary); min-width:48px; text-align:center; flex-shrink:0; }
+.nyutai-emp-info { flex:1; min-width:0; }
+.nyutai-emp-name { font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nyutai-emp-buka { font-size:11px; color:var(--text-light); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .nyutai-badge { padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; white-space:nowrap; }
 .nyutai-badge.new { background:#e8f5e9; color:#2e7d32; }
 .nyutai-badge.retire { background:#fce4ec; color:#c62828; }
@@ -5137,16 +5137,20 @@ async function loadNyutaiScreen() {
     // Month range
     const mStart = new Date(nyutaiYear, nyutaiMonth, 1);
     const mEnd = new Date(nyutaiYear, nyutaiMonth + 1, 0, 23, 59, 59);
-    const isoStart = mStart.toISOString();
-    const isoEnd = mEnd.toISOString();
 
-    // Fetch all employees (no $select to ensure buka key is available)
+    // Fetch all employees
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '');
+
+    // Helper: check if date is in the target month
+    function inMonth(dateStr) {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return d >= mStart && d <= mEnd;
+    }
 
     // Classify
     const nyusha = []; // 入社
-    const taisha = []; // 退社（派遣退社 in month）
-    const taishaYukyu = []; // 有給退社 in month (退社予定含む)
+    const taishaList = []; // 退社 (deduplicated, counted per rules)
 
     allEmps.forEach(emp => {
       const nd = emp[F.nyushaDate];
@@ -5154,46 +5158,58 @@ async function loadNyutaiScreen() {
       const yd = emp[F.yukyuTaisha];
 
       // 入社: nyushaDate within the month
-      if (nd) {
-        const d = new Date(nd);
-        if (d >= mStart && d <= mEnd) {
-          nyusha.push(emp);
-        }
+      if (nd && inMonth(nd)) {
+        nyusha.push(emp);
       }
 
-      // 派遣退社: hakenTaisha within the month
-      if (hd) {
-        const d = new Date(hd);
-        if (d >= mStart && d <= mEnd) {
-          taisha.push(emp);
-        }
-      }
+      // 退社カウントロジック:
+      // - 派遣退社と有給退社が同日 or 同月 → その月に1カウント
+      // - 有給退社が派遣退社の翌月 → 有給退社月に1カウント
+      // - 片方だけ → その日付の月に1カウント
+      if (hd && yd) {
+        const hdDate = new Date(hd);
+        const ydDate = new Date(yd);
+        const hdMonth = hdDate.getFullYear() * 12 + hdDate.getMonth();
+        const ydMonth = ydDate.getFullYear() * 12 + ydDate.getMonth();
+        const targetMonth = nyutaiYear * 12 + nyutaiMonth;
 
-      // 有給退社: yukyuTaisha within the month
-      if (yd) {
-        const d = new Date(yd);
-        if (d >= mStart && d <= mEnd) {
-          taishaYukyu.push(emp);
+        if (hdMonth === ydMonth) {
+          // 同月 → その月に1カウント
+          if (hdMonth === targetMonth) {
+            taishaList.push(emp);
+          }
+        } else if (ydMonth === hdMonth + 1) {
+          // 有給退社が翌月 → 有給退社月にカウント
+          if (ydMonth === targetMonth) {
+            taishaList.push(emp);
+          }
+        } else {
+          // それ以外（稀なケース）→ 有給退社月にカウント
+          if (ydMonth === targetMonth) {
+            taishaList.push(emp);
+          }
         }
+      } else if (yd) {
+        // 有給退社のみ
+        if (inMonth(yd)) taishaList.push(emp);
+      } else if (hd) {
+        // 派遣退社のみ
+        if (inMonth(hd)) taishaList.push(emp);
       }
     });
 
-    // Unique taisha (merge haken + yukyu)
-    const taishaAll = [];
-    const taishaIds = new Set();
-    taisha.forEach(e => { taishaAll.push(e); taishaIds.add(e.Id); });
-    taishaYukyu.forEach(e => { if (!taishaIds.has(e.Id)) taishaAll.push(e); });
+    // 実績 = 入社 - 退社
+    const jisseki = nyusha.length - taishaList.length;
 
-    // Summary cards
+    // Summary cards (3 cards: 入社, 退社, 実績)
     const stats = [
-      { label: '入社', num: nyusha.length, color: '#2e7d32', bg: '#e8f5e9' },
-      { label: '退社', num: taishaAll.length, color: '#c62828', bg: '#fce4ec' },
-      { label: '派遣退社', num: taisha.length, color: '#e65100', bg: '#fff3e0' },
-      { label: '有給退社', num: taishaYukyu.length, color: '#1565c0', bg: '#e3f2fd' },
+      { label: '入社', num: nyusha.length, color: '#2e7d32' },
+      { label: '退社', num: taishaList.length, color: '#c62828' },
+      { label: '実績', num: jisseki, color: jisseki >= 0 ? '#1565c0' : '#e65100' },
     ];
     summary.innerHTML = stats.map(s =>
       '<div class="nyutai-stat-card" style="border-left:3px solid ' + s.color + ';">' +
-      '<div class="stat-num" style="color:' + s.color + ';">' + s.num + '</div>' +
+      '<div class="stat-num" style="color:' + s.color + ';">' + (s.num >= 0 ? '+' : '') + s.num + '</div>' +
       '<div class="stat-label">' + s.label + '</div></div>'
     ).join('');
 
@@ -5211,11 +5227,11 @@ async function loadNyutaiScreen() {
         const dt = formatDate(emp[F.nyushaDate]);
         const name = emp.Title || '';
         const buka = getBukaValue(emp) || '';
-        const syubetu = emp[F.zaiyokuSyubetu] || '新規';
+        const no = emp[F.syainNo] || '';
         html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
         html += '<div class="nyutai-emp-date">' + dt.replace(/^\d{4}\//, '') + '</div>';
         html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div></div>';
-        html += '<span class="nyutai-badge new">' + escHtml(syubetu) + '</span>';
+        html += '<span class="nyutai-badge new">入社</span>';
         html += '</div>';
       });
     }
@@ -5223,16 +5239,16 @@ async function loadNyutaiScreen() {
 
     // 退社 section
     html += '<div class="nyutai-section">';
-    html += '<div class="nyutai-section-title"><span style="color:#c62828;">🔴</span> 退社 (' + taishaAll.length + '件)</div>';
-    if (taishaAll.length === 0) {
+    html += '<div class="nyutai-section-title"><span style="color:#c62828;">🔴</span> 退社 (' + taishaList.length + '件)</div>';
+    if (taishaList.length === 0) {
       html += '<div class="nyutai-empty">この月の退社はありません</div>';
     } else {
-      taishaAll.sort((a, b) => {
-        const da = new Date(a[F.hakenTaisha] || a[F.yukyuTaisha]);
-        const db = new Date(b[F.hakenTaisha] || b[F.yukyuTaisha]);
+      taishaList.sort((a, b) => {
+        const da = new Date(a[F.yukyuTaisha] || a[F.hakenTaisha]);
+        const db = new Date(b[F.yukyuTaisha] || b[F.hakenTaisha]);
         return da - db;
       });
-      taishaAll.forEach(emp => {
+      taishaList.forEach(emp => {
         const hd = emp[F.hakenTaisha];
         const yd = emp[F.yukyuTaisha];
         const name = emp.Title || '';
@@ -5240,7 +5256,7 @@ async function loadNyutaiScreen() {
         let dateInfo = '';
         if (hd) dateInfo += '派遣退社:' + formatDate(hd).replace(/^\d{4}\//, '');
         if (yd) dateInfo += (dateInfo ? ' ' : '') + '有給退社:' + formatDate(yd).replace(/^\d{4}\//, '');
-        const displayDate = formatDate(hd || yd).replace(/^\d{4}\//, '');
+        const displayDate = formatDate(yd || hd).replace(/^\d{4}\//, '');
         // Check if future
         const now = new Date();
         const retDate = new Date(yd || hd);
