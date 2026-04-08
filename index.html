@@ -1233,7 +1233,7 @@ body {
     <div id="searchResults"></div>
 
     <div class="card" style="padding:12px;margin-top:8px;">
-      <div class="section-title">派遣先一覧</div>
+      <div class="section-title">派遣先一覧（部課）</div>
       <div style="display:flex;gap:6px;align-items:center;">
         <select id="hakenSelect" class="search-input" style="flex:1;padding:10px;">
           <option value="">派遣先を選択...</option>
@@ -4195,49 +4195,15 @@ async function deleteLeaveRecord(itemId, dateStr) {
 let hakenEmployeesCache = [];
 let hakenCurrentFilter = 'all';
 
+function getBukaValue(emp) {
+  const key = Object.keys(emp).find(k => k.indexOf('x90e8__x8ab2_') >= 0);
+  return key ? (emp[key] || '').trim() : '';
+}
+
 async function populateHakenDropdown() {
   try {
     const select = document.getElementById('hakenSelect');
-    // Fetch all employees to get unique hakensaki values
-    let allEmps = [];
-    let skip = 0;
-    while (true) {
-      const batch = await spGet(LIST_EMPLOYEES_GUID, '$select=Title,' + F.syainNo + ',' + F.hakensaki + ',' + F.hakenTaisha + ',' + F.yukyuTaisha + '&$top=500&$skip=' + skip);
-      if (!batch || batch.length === 0) break;
-      allEmps = allEmps.concat(batch);
-      if (batch.length < 500) break;
-      skip += 500;
-    }
-    // Extract unique hakensaki from active employees
-    const hakenSet = new Set();
-    allEmps.forEach(emp => {
-      const h = getHakensaki(emp);
-      if (h) hakenSet.add(h);
-    });
-    const sorted = Array.from(hakenSet).sort();
-    select.innerHTML = '<option value="">派遣先を選択...</option>';
-    sorted.forEach(h => {
-      const opt = document.createElement('option');
-      opt.value = h;
-      opt.textContent = h;
-      select.appendChild(opt);
-    });
-  } catch (e) {
-    console.error('Haken dropdown error:', e);
-  }
-}
-
-async function openHakenList() {
-  const select = document.getElementById('hakenSelect');
-  const hakensaki = select.value;
-  if (!hakensaki) {
-    showToast('派遣先を選択してください', 'error');
-    return;
-  }
-  const includeRetired = document.getElementById('hakenIncludeRetired').checked;
-  showSpinner();
-  try {
-    // Fetch all employees (need to filter client-side because hakensaki is embedded in a complex field)
+    // Fetch all employees to get unique 部課 values
     let allEmps = [];
     let skip = 0;
     while (true) {
@@ -4247,16 +4213,53 @@ async function openHakenList() {
       if (batch.length < 500) break;
       skip += 500;
     }
-    // Filter by hakensaki
-    let filtered = allEmps.filter(emp => getHakensaki(emp) === hakensaki);
-    // Filter retired if needed
+    // Extract unique 部課 values
+    const bukaSet = new Set();
+    allEmps.forEach(emp => {
+      const b = getBukaValue(emp);
+      if (b) bukaSet.add(b);
+    });
+    const sorted = Array.from(bukaSet).sort();
+    select.innerHTML = '<option value="">派遣先(部課)を選択...</option>';
+    sorted.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b;
+      opt.textContent = b;
+      select.appendChild(opt);
+    });
+  } catch (e) {
+    console.error('Haken dropdown error:', e);
+  }
+}
+
+async function openHakenList() {
+  const select = document.getElementById('hakenSelect');
+  const buka = select.value;
+  if (!buka) {
+    showToast('派遣先(部課)を選択してください', 'error');
+    return;
+  }
+  const includeRetired = document.getElementById('hakenIncludeRetired').checked;
+  showSpinner();
+  try {
+    let allEmps = [];
+    let skip = 0;
+    while (true) {
+      const batch = await spGet(LIST_EMPLOYEES_GUID, '$top=500&$skip=' + skip);
+      if (!batch || batch.length === 0) break;
+      allEmps = allEmps.concat(batch);
+      if (batch.length < 500) break;
+      skip += 500;
+    }
+    // Filter by 部課
+    let filtered = allEmps.filter(emp => getBukaValue(emp) === buka);
     if (!includeRetired) {
       filtered = filtered.filter(emp => !isResigned(emp));
     }
     hakenEmployeesCache = filtered;
     hakenCurrentFilter = 'all';
     switchScreen('hakenListScreen');
-    renderHakenList(hakensaki, filtered);
+    renderHakenList(buka, filtered);
   } catch (e) {
     console.error('Haken list error:', e);
     showToast('読み込みエラー: ' + e.message, 'error');
@@ -4341,8 +4344,8 @@ function renderHakenTable(employees, container) {
 
 async function refreshHakenList() {
   const select = document.getElementById('hakenSelect');
-  const hakensaki = select.value;
-  if (!hakensaki) return;
+  const buka = select.value;
+  if (!buka) return;
   const includeRetired = document.getElementById('hakenIncludeRetired').checked;
   showSpinner();
   try {
@@ -4355,12 +4358,12 @@ async function refreshHakenList() {
       if (batch.length < 500) break;
       skip += 500;
     }
-    let filtered = allEmps.filter(emp => getHakensaki(emp) === hakensaki);
+    let filtered = allEmps.filter(emp => getBukaValue(emp) === buka);
     if (!includeRetired) {
       filtered = filtered.filter(emp => !isResigned(emp));
     }
     hakenEmployeesCache = filtered;
-    renderHakenList(hakensaki, filtered);
+    renderHakenList(buka, filtered);
     // Re-apply current filter
     if (hakenCurrentFilter !== 'all') {
       const btn = document.querySelector('#hakenFilterBtns .haken-filter-btn[data-filter="' + hakenCurrentFilter + '"]');
@@ -4385,11 +4388,11 @@ function downloadHakenExcel() {
     data = data.filter(emp => !getTsukinValue(emp));
   }
 
-  const hakensaki = document.getElementById('hakenSelect').value || '派遣先';
+  const buka = document.getElementById('hakenSelect').value || '部課';
 
   // Build CSV with BOM for Excel Japanese support
   const BOM = '\uFEFF';
-  const headers = ['氏名', '社員番号', '通勤方法', '在職状態', '派遣先'];
+  const headers = ['氏名', '社員番号', '通勤方法', '在職状態', '部課'];
   const rows = data.map(emp => {
     const tsukin = getTsukinValue(emp);
     const status = isResigned(emp) ? '退社' : '在職';
@@ -4398,7 +4401,7 @@ function downloadHakenExcel() {
       emp[F.syainNo] || '',
       '"' + tsukin.replace(/"/g, '""') + '"',
       status,
-      '"' + hakensaki.replace(/"/g, '""') + '"'
+      '"' + buka.replace(/"/g, '""') + '"'
     ].join(',');
   });
 
@@ -4407,7 +4410,7 @@ function downloadHakenExcel() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = hakensaki + '_社員一覧.csv';
+  a.download = buka + '_社員一覧.csv';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
