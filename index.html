@@ -4345,6 +4345,23 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
   // Skip spUrl (complex)
   if (field.format === 'spUrl') return '';
 
+  // 派遣先 → 部課ドロップダウン
+  if (field.key === 'hakensaki') {
+    const bukaVal = getBukaValue(currentEmployee || {});
+    const opts = document.getElementById('hakenSelect');
+    let html = '<select class="edit-select" id="' + id + '" data-field="hakensaki" data-buka="1">';
+    html += '<option value="">（未選択）</option>';
+    if (opts) {
+      Array.from(opts.options).forEach(o => {
+        if (!o.value) return;
+        const selected = (bukaVal === o.value) ? ' selected' : '';
+        html += '<option value="' + escHtml(o.value) + '"' + selected + '>' + escHtml(o.value) + '</option>';
+      });
+    }
+    html += '</select>';
+    return html;
+  }
+
   if (field.format === 'date' || field.format === 'dateExpiry') {
     let dateVal = '';
     if (val) {
@@ -4446,13 +4463,20 @@ async function saveEditSection(catId) {
 
     cat.fields.forEach(field => {
       if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
-      const odataKey = editKeyMap[field.key];
-      if (!odataKey) return;
-      const internalName = odataKeyToInternal(odataKey);
-      if (!internalName) return;
 
       const inputEl = document.getElementById('editField_' + field.key);
       if (!inputEl) return;
+
+      // 派遣先 → 部課フィールドに書き込み
+      let odataKey, internalName;
+      if (inputEl.dataset.buka === '1') {
+        odataKey = bukaODataKey;
+        internalName = odataKeyToInternal(bukaODataKey);
+      } else {
+        odataKey = editKeyMap[field.key];
+        internalName = odataKey ? odataKeyToInternal(odataKey) : null;
+      }
+      if (!odataKey || !internalName) return;
 
       const oldVal = emp[odataKey];
       let newVal = inputEl.value.trim();
@@ -4620,15 +4644,22 @@ async function saveNewEmployee() {
     PROFILE_CATEGORIES.forEach(cat => {
       cat.fields.forEach(field => {
         if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
-        const odataKey = editKeyMap[field.key];
-        if (!odataKey) return;
-        const internalName = odataKeyToInternal(odataKey);
-        if (!internalName || internalName === 'Title') return;
 
         const inputEl = document.getElementById('addField_' + field.key);
         if (!inputEl) return;
         let val = inputEl.value.trim();
         if (!val) return;
+
+        // 派遣先 → 部課フィールドに書き込み
+        let internalName;
+        if (inputEl.dataset.buka === '1') {
+          internalName = odataKeyToInternal(bukaODataKey);
+        } else {
+          const odataKey = editKeyMap[field.key];
+          if (!odataKey) return;
+          internalName = odataKeyToInternal(odataKey);
+        }
+        if (!internalName || internalName === 'Title') return;
 
         if (inputEl.dataset.format === 'date') {
           val = val + 'T00:00:00Z';
