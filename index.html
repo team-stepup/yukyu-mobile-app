@@ -4195,15 +4195,41 @@ async function deleteLeaveRecord(itemId, dateStr) {
 let hakenEmployeesCache = [];
 let hakenCurrentFilter = 'all';
 
+let bukaODataKey = null;
+
+async function resolveBukaKey() {
+  if (bukaODataKey) return bukaODataKey;
+  const meta = await fetchEmployeeFields();
+  if (meta) {
+    const found = Object.keys(meta).find(k => meta[k].title === '部課');
+    if (found) {
+      bukaODataKey = (found === 'Title' || found === 'Id') ? found : 'OData_' + found;
+      console.log('部課 OData key resolved:', bukaODataKey);
+      return bukaODataKey;
+    }
+  }
+  // Fallback: search employee data keys directly
+  return null;
+}
+
 function getBukaValue(emp) {
-  const key = Object.keys(emp).find(k => k.indexOf('x90e8__x8ab2_') >= 0);
-  return key ? (emp[key] || '').trim() : '';
+  if (bukaODataKey && emp[bukaODataKey] !== undefined) {
+    return (emp[bukaODataKey] || '').trim();
+  }
+  // Fallback: search for key containing 部課-related patterns
+  const key = Object.keys(emp).find(k => k.indexOf('x90e8_') >= 0 && k.indexOf('x8ab2_') >= 0);
+  if (key) {
+    bukaODataKey = key;
+    return (emp[key] || '').trim();
+  }
+  return '';
 }
 
 async function populateHakenDropdown() {
   try {
     const select = document.getElementById('hakenSelect');
-    // Fetch all employees to get unique 部課 values
+    await resolveBukaKey();
+    // Fetch all employees
     let allEmps = [];
     let skip = 0;
     while (true) {
@@ -4212,6 +4238,11 @@ async function populateHakenDropdown() {
       allEmps = allEmps.concat(batch);
       if (batch.length < 500) break;
       skip += 500;
+    }
+    // If key still not found, try to detect from first employee's keys
+    if (!bukaODataKey && allEmps.length > 0) {
+      const keys = Object.keys(allEmps[0]);
+      console.log('Employee keys:', keys.filter(k => k.startsWith('OData_')).join(', '));
     }
     // Extract unique 部課 values
     const bukaSet = new Set();
@@ -4227,6 +4258,9 @@ async function populateHakenDropdown() {
       opt.textContent = b;
       select.appendChild(opt);
     });
+    if (sorted.length === 0) {
+      console.warn('部課の値が見つかりません。bukaODataKey:', bukaODataKey);
+    }
   } catch (e) {
     console.error('Haken dropdown error:', e);
   }
