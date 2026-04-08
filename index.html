@@ -1835,12 +1835,18 @@ async function loadLeaveDetails() {
     }
   }
 
+  // 通勤方法 for header badge
+  const tsukinKeyH = Object.keys(emp).find(k => k.indexOf('x901a__x52e4__x65b9__x6cd5') >= 0);
+  const tsukinValH = tsukinKeyH ? (emp[tsukinKeyH] || '') : '';
+  const tsukinIcon = tsukinValH.indexOf('車') >= 0 ? '🚗' : tsukinValH.indexOf('電車') >= 0 ? '🚃' : tsukinValH.indexOf('バス') >= 0 ? '🚌' : tsukinValH.indexOf('自転車') >= 0 ? '🚲' : tsukinValH.indexOf('徒歩') >= 0 ? '🚶' : '🚶';
+
   // Header (shared between all tabs)
   document.getElementById('detailHeader').innerHTML = `
     <div class="profile-header">
       <div class="profile-name-row">
         <span class="profile-name">${escHtml(emp.Title || '')}</span>
         <span class="profile-badge ${statusClass}">${statusLabel}</span>
+        ${tsukinValH ? '<span class="profile-badge" style="background:#f0f0ff;color:var(--primary);">' + tsukinIcon + ' ' + escHtml(tsukinValH) + '</span>' : '<span class="profile-badge" style="background:#ffebee;color:var(--danger);">通勤方法未登録</span>'}
       </div>
       <div class="profile-meta">
         <span>社番: ${emp[F.syainNo] || ''}</span>
