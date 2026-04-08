@@ -4589,7 +4589,19 @@ async function renderAddEmployeeForm() {
   html += '<div class="section-title">👤 基本必須項目</div>';
   html += '<table class="acc-table">';
   html += '<tr><th>社員氏名 <span style="color:var(--danger);">*</span></th><td><input type="text" class="edit-input" id="addField_Title" placeholder="例: ヤマダ タロウ"></td></tr>';
-  html += '<tr><th>社員番号 <span style="color:var(--danger);">*</span></th><td><input type="number" class="edit-input" id="addField_syainNo" placeholder="例: 1234"></td></tr>';
+  // 派遣先（部課）ドロップダウン
+  const hakenOpts = document.getElementById('hakenSelect');
+  let bukaHtml = '<select class="edit-select" id="addField_buka" onchange="autoAssignSyainNo()">';
+  bukaHtml += '<option value="">派遣先(部課)を選択...</option>';
+  if (hakenOpts) {
+    Array.from(hakenOpts.options).forEach(o => {
+      if (!o.value) return;
+      bukaHtml += '<option value="' + escHtml(o.value) + '">' + escHtml(o.value) + '</option>';
+    });
+  }
+  bukaHtml += '</select>';
+  html += '<tr><th>派遣先(部課) <span style="color:var(--danger);">*</span></th><td>' + bukaHtml + '</td></tr>';
+  html += '<tr><th>社員番号 <span style="color:var(--danger);">*</span></th><td><div style="display:flex;gap:6px;align-items:center;"><input type="number" class="edit-input" id="addField_syainNo" placeholder="部課選択で自動入力" style="flex:1;"><span id="addSyainNoStatus" style="font-size:11px;white-space:nowrap;"></span></div></td></tr>';
   html += '</table></div>';
 
   // Other categories
@@ -4601,6 +4613,8 @@ async function renderAddEmployeeForm() {
     html += '<div class="accordion-body"><table class="acc-table">';
     cat.fields.forEach(field => {
       if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
+      // 派遣先は基本必須項目に移動済み
+      if (field.key === 'hakensaki') return;
       const odataKey = keyMap[field.key];
       if (!odataKey) return;
       const fieldType = getFieldType(field.key, keyMap);
@@ -4622,14 +4636,59 @@ async function renderAddEmployeeForm() {
   container.innerHTML = html;
 }
 
+async function autoAssignSyainNo() {
+  const bukaVal = document.getElementById('addField_buka').value;
+  const noInput = document.getElementById('addField_syainNo');
+  const statusEl = document.getElementById('addSyainNoStatus');
+  if (!bukaVal) { noInput.value = ''; statusEl.innerHTML = ''; return; }
+
+  statusEl.innerHTML = '<span style="color:var(--text-light);">取得中...</span>';
+
+  try {
+    // Determine number range based on buka
+    let rangeStart, rangeEnd, rangeLabel;
+    if (bukaVal.indexOf('ASTI') >= 0 || bukaVal.indexOf('asti') >= 0) {
+      rangeStart = 70000; rangeEnd = 79999; rangeLabel = '70000番台';
+    } else if (bukaVal.indexOf('ﾕｰｼﾝ') >= 0 || bukaVal.indexOf('ユーシン') >= 0) {
+      rangeStart = 60000; rangeEnd = 69999; rangeLabel = '60000番台';
+    } else {
+      rangeStart = 50000; rangeEnd = 59999; rangeLabel = '50000番台';
+    }
+
+    // Fetch all employee numbers in the range
+    const filter = '$filter=' + F.syainNo + ' ge ' + rangeStart + ' and ' + F.syainNo + ' le ' + rangeEnd + '&$select=' + F.syainNo + '&$top=5000&$orderby=' + F.syainNo + ' desc';
+    const results = await spGet(LIST_EMPLOYEES_GUID, filter);
+
+    let nextNo = rangeStart + 1;
+    if (results && results.length > 0) {
+      const maxNo = results[0][F.syainNo];
+      nextNo = (typeof maxNo === 'number' ? maxNo : parseInt(maxNo)) + 1;
+    }
+
+    if (nextNo > rangeEnd) {
+      statusEl.innerHTML = '<span style="color:var(--danger);">⚠ ' + rangeLabel + '枠が満杯</span>';
+      noInput.value = '';
+      return;
+    }
+
+    noInput.value = nextNo;
+    statusEl.innerHTML = '<span style="color:var(--success);">✓ ' + rangeLabel + '</span>';
+  } catch (e) {
+    console.error('Auto assign error:', e);
+    statusEl.innerHTML = '<span style="color:var(--danger);">取得失敗</span>';
+  }
+}
+
 async function saveNewEmployee() {
   const btn = document.getElementById('addEmployeeSaveBtn');
   btn.disabled = true; btn.textContent = '登録中...';
 
   try {
     const nameVal = document.getElementById('addField_Title').value.trim();
+    const bukaSelVal = document.getElementById('addField_buka').value.trim();
     const noVal = document.getElementById('addField_syainNo').value.trim();
     if (!nameVal) { showToast('社員氏名を入力してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
+    if (!bukaSelVal) { showToast('派遣先(部課)を選択してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
     if (!noVal) { showToast('社員番号を入力してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
 
     // Check duplicate
@@ -4643,9 +4702,14 @@ async function saveNewEmployee() {
     const body = {
       Title: nameVal,
     };
-    // Add syainNo - need internal name
+    // Add syainNo
     const syainNoInternal = odataKeyToInternal(F.syainNo);
     if (syainNoInternal) body[syainNoInternal] = parseInt(noVal);
+    // Add buka
+    if (bukaODataKey && bukaSelVal) {
+      const bukaInternal = odataKeyToInternal(bukaODataKey);
+      if (bukaInternal) body[bukaInternal] = bukaSelVal;
+    }
 
     // Collect all addField_ inputs
     PROFILE_CATEGORIES.forEach(cat => {
