@@ -1503,6 +1503,24 @@ async function spGet(listName, query) {
   return data.d.results;
 }
 
+// Fetch all items with __next pagination support
+async function spGetAll(listGuid, query) {
+  const token = await getToken();
+  if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return []; }
+  let allResults = [];
+  let url = SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')/items" + (query ? '?' + query : '');
+  while (url) {
+    const resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' },
+    });
+    if (!resp.ok) { console.error('SP API Error:', resp.status); break; }
+    const data = await resp.json();
+    allResults = allResults.concat(data.d.results || []);
+    url = (data.d.__next) ? data.d.__next : null;
+  }
+  return allResults;
+}
+
 async function spPost(listName, body) {
   const token = await getToken();
   if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return null; }
@@ -4229,22 +4247,7 @@ async function populateHakenDropdown() {
   try {
     const select = document.getElementById('hakenSelect');
     await resolveBukaKey();
-    // Fetch all employees
-    let allEmps = [];
-    let skip = 0;
-    while (true) {
-      const batch = await spGet(LIST_EMPLOYEES_GUID, '$top=500&$skip=' + skip);
-      if (!batch || batch.length === 0) break;
-      allEmps = allEmps.concat(batch);
-      if (batch.length < 500) break;
-      skip += 500;
-    }
-    // If key still not found, try to detect from first employee's keys
-    if (!bukaODataKey && allEmps.length > 0) {
-      const keys = Object.keys(allEmps[0]);
-      console.log('Employee keys:', keys.filter(k => k.startsWith('OData_')).join(', '));
-    }
-    // Extract unique 部課 values
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$select=Id,' + (bukaODataKey || 'Title') + '&$top=500');
     const bukaSet = new Set();
     allEmps.forEach(emp => {
       const b = getBukaValue(emp);
@@ -4258,9 +4261,6 @@ async function populateHakenDropdown() {
       opt.textContent = b;
       select.appendChild(opt);
     });
-    if (sorted.length === 0) {
-      console.warn('部課の値が見つかりません。bukaODataKey:', bukaODataKey);
-    }
   } catch (e) {
     console.error('Haken dropdown error:', e);
   }
@@ -4276,16 +4276,7 @@ async function openHakenList() {
   const includeRetired = document.getElementById('hakenIncludeRetired').checked;
   showSpinner();
   try {
-    let allEmps = [];
-    let skip = 0;
-    while (true) {
-      const batch = await spGet(LIST_EMPLOYEES_GUID, '$top=500&$skip=' + skip);
-      if (!batch || batch.length === 0) break;
-      allEmps = allEmps.concat(batch);
-      if (batch.length < 500) break;
-      skip += 500;
-    }
-    // Filter by 部課
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
     let filtered = allEmps.filter(emp => getBukaValue(emp) === buka);
     if (!includeRetired) {
       filtered = filtered.filter(emp => !isResigned(emp));
@@ -4383,15 +4374,7 @@ async function refreshHakenList() {
   const includeRetired = document.getElementById('hakenIncludeRetired').checked;
   showSpinner();
   try {
-    let allEmps = [];
-    let skip = 0;
-    while (true) {
-      const batch = await spGet(LIST_EMPLOYEES_GUID, '$top=500&$skip=' + skip);
-      if (!batch || batch.length === 0) break;
-      allEmps = allEmps.concat(batch);
-      if (batch.length < 500) break;
-      skip += 500;
-    }
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
     let filtered = allEmps.filter(emp => getBukaValue(emp) === buka);
     if (!includeRetired) {
       filtered = filtered.filter(emp => !isResigned(emp));
