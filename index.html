@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>有給管理アプリ - Step Up</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -296,6 +297,20 @@ body {
 .cancel-btn { background:#f0f0f0; color:var(--text); border:none; border-radius:8px; padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer; }
 .delete-emp-btn { background:var(--danger); color:#fff; border:none; border-radius:8px; padding:8px 16px; font-size:12px; font-weight:600; cursor:pointer; margin-top:16px; width:100%; }
 .add-emp-btn { background:var(--success); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer; width:100%; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:6px; }
+/* Document capture styles */
+.doc-capture-card { border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; background:#fff; }
+.doc-capture-card.has-image { border-color: var(--success); background:#f6fff6; }
+.doc-capture-header { display:flex; align-items:center; gap:8px; }
+.doc-capture-header .doc-icon { font-size:20px; }
+.doc-capture-header .doc-label { font-weight:600; font-size:13px; flex:1; }
+.doc-capture-btn { background:var(--primary); color:#fff; border:none; border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; }
+.doc-capture-btn:active { background:var(--primary-dark); }
+.doc-capture-btn.remove { background:var(--danger); font-size:11px; padding:4px 10px; }
+.doc-preview { margin-top:8px; position:relative; }
+.doc-preview img { width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+.doc-ocr-btn { background:#f0f0ff; color:var(--primary); border:1px solid var(--primary-light); border-radius:6px; padding:4px 12px; font-size:11px; font-weight:600; cursor:pointer; margin-top:6px; }
+.doc-ocr-text { margin-top:6px; padding:8px; background:#f8f8ff; border:1px solid var(--border); border-radius:6px; font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-all; max-height:150px; overflow-y:auto; user-select:text; -webkit-user-select:text; }
+.doc-ocr-progress { font-size:11px; color:var(--text-light); margin-top:4px; }
 .top-tab:active { transform: scale(0.95); }
 .top-tab.active {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -4571,7 +4586,179 @@ async function deleteEmployee() {
 // ============================================================
 // New Employee Registration
 // ============================================================
+// ============================================================
+// Document Capture & OCR
+// ============================================================
+const DOC_TYPES = [
+  { id: 'mynumber', label: 'マイナンバー', icon: '🆔' },
+  { id: 'zairyu', label: '在留カード', icon: '🌏' },
+  { id: 'bank', label: 'キャッシュカード/通帳', icon: '🏦' },
+  { id: 'license', label: '免許証', icon: '🪪' },
+  { id: 'shaken', label: '車検証', icon: '🚗' },
+  { id: 'jibaiseki', label: '自賠責保険証', icon: '🛡' },
+  { id: 'nini', label: '任意保険証', icon: '📋' },
+];
+
+const capturedDocs = {}; // { docId: { file: File, dataUrl: string } }
+
+function onDocCapture(docId, input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    capturedDocs[docId] = { file: file, dataUrl: e.target.result };
+    const card = document.getElementById('docCard_' + docId);
+    card.classList.add('has-image');
+    document.getElementById('docRemove_' + docId).style.display = '';
+    const preview = document.getElementById('docPreview_' + docId);
+    preview.style.display = 'block';
+    preview.innerHTML = '<img src="' + e.target.result + '" alt="' + docId + '">' +
+      '<button class="doc-ocr-btn" onclick="runOcr(\'' + docId + '\')">🔍 テキスト抽出</button>' +
+      '<div id="docOcrResult_' + docId + '"></div>';
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeDocCapture(docId) {
+  delete capturedDocs[docId];
+  const card = document.getElementById('docCard_' + docId);
+  card.classList.remove('has-image');
+  document.getElementById('docRemove_' + docId).style.display = 'none';
+  const preview = document.getElementById('docPreview_' + docId);
+  preview.style.display = 'none';
+  preview.innerHTML = '';
+  // Reset file input
+  const fileInput = card.querySelector('input[type=file]');
+  if (fileInput) fileInput.value = '';
+}
+
+async function runOcr(docId) {
+  const doc = capturedDocs[docId];
+  if (!doc) return;
+  const resultDiv = document.getElementById('docOcrResult_' + docId);
+  resultDiv.innerHTML = '<div class="doc-ocr-progress">⏳ テキスト抽出中... (初回は少し時間がかかります)</div>';
+
+  try {
+    const worker = await Tesseract.createWorker('jpn+eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = Math.round((m.progress || 0) * 100);
+          resultDiv.innerHTML = '<div class="doc-ocr-progress">⏳ 認識中... ' + pct + '%</div>';
+        }
+      }
+    });
+    const { data } = await worker.recognize(doc.dataUrl);
+    await worker.terminate();
+
+    if (data.text && data.text.trim()) {
+      resultDiv.innerHTML = '<div class="doc-ocr-text">' + escHtml(data.text.trim()) + '</div>' +
+        '<button class="doc-ocr-btn" style="margin-top:4px;" onclick="copyOcrText(\'' + docId + '\')">📋 コピー</button>';
+    } else {
+      resultDiv.innerHTML = '<div class="doc-ocr-progress">テキストを検出できませんでした</div>';
+    }
+  } catch (e) {
+    console.error('OCR error:', e);
+    resultDiv.innerHTML = '<div class="doc-ocr-progress" style="color:var(--danger);">OCRエラー: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function copyOcrText(docId) {
+  const textEl = document.querySelector('#docOcrResult_' + docId + ' .doc-ocr-text');
+  if (!textEl) return;
+  navigator.clipboard.writeText(textEl.textContent).then(() => {
+    showToast('テキストをコピーしました', 'success');
+  }).catch(() => {
+    // Fallback: select text
+    const range = document.createRange();
+    range.selectNodeContents(textEl);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    showToast('テキストを選択しました（Ctrl+Cでコピー）', 'success');
+  });
+}
+
+// SharePoint Document Library Upload
+const SP_DOC_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
+const SP_DOC_LIB_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル';
+
+async function ensureSpFolder(folderPath) {
+  const token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  // Try to create folder (will silently succeed if exists)
+  const url = SP_DOC_SITE_URL + "/_api/web/folders";
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+      },
+      body: JSON.stringify({
+        '__metadata': { type: 'SP.Folder' },
+        'ServerRelativeUrl': folderPath
+      }),
+    });
+  } catch (e) {
+    console.log('Folder may already exist:', folderPath);
+  }
+}
+
+async function uploadFileToSp(folderPath, fileName, file) {
+  const token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  const arrayBuffer = await file.arrayBuffer();
+  const encodedFolder = encodeURIComponent(folderPath).replace(/%2F/g, '/');
+  const encodedName = encodeURIComponent(fileName);
+  const url = SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedFolder + "')/files/add(url='" + encodedName + "',overwrite=true)";
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+    },
+    body: arrayBuffer,
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error('Upload error:', errText);
+    throw new Error('アップロード失敗: ' + resp.status);
+  }
+  return await resp.json();
+}
+
+async function uploadCapturedDocs(bukaVal, syainNo, name) {
+  const docIds = Object.keys(capturedDocs);
+  if (docIds.length === 0) return;
+
+  try {
+    // Create folder: 社員ファイル/部課/社員番号 氏名
+    const bukaFolder = SP_DOC_LIB_PATH + '/' + bukaVal;
+    const empFolder = bukaFolder + '/' + syainNo + ' ' + name;
+
+    await ensureSpFolder(bukaFolder);
+    await ensureSpFolder(empFolder);
+
+    // Upload each document
+    for (const docId of docIds) {
+      const doc = capturedDocs[docId];
+      const docType = DOC_TYPES.find(d => d.id === docId);
+      const ext = doc.file.name.split('.').pop() || 'jpg';
+      const fileName = (docType ? docType.label : docId) + '.' + ext;
+      await uploadFileToSp(empFolder, fileName, doc.file);
+    }
+
+    showToast(docIds.length + '件の書類をアップロードしました', 'success');
+  } catch (e) {
+    console.error('Doc upload error:', e);
+    showToast('書類アップロードエラー: ' + e.message, 'error');
+  }
+}
+
 function showAddEmployeeForm() {
+  // Reset captured docs
+  Object.keys(capturedDocs).forEach(k => delete capturedDocs[k]);
   switchScreen('addEmployeeScreen');
   renderAddEmployeeForm();
 }
@@ -4603,6 +4790,23 @@ async function renderAddEmployeeForm() {
   html += '<tr><th>派遣先(部課) <span style="color:var(--danger);">*</span></th><td>' + bukaHtml + '</td></tr>';
   html += '<tr><th>社員番号 <span style="color:var(--danger);">*</span></th><td><div style="display:flex;gap:6px;align-items:center;"><input type="number" class="edit-input" id="addField_syainNo" placeholder="部課選択で自動入力" style="flex:1;"><span id="addSyainNoStatus" style="font-size:11px;white-space:nowrap;"></span></div></td></tr>';
   html += '</table></div>';
+
+  // Document capture section
+  html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
+  html += '<div class="section-title">📷 書類撮影</div>';
+  html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:8px;">撮影した画像はSharePointに自動保存されます。テキスト抽出でコピペも可能です。</div>';
+  DOC_TYPES.forEach(doc => {
+    html += '<div class="doc-capture-card" id="docCard_' + doc.id + '">';
+    html += '<div class="doc-capture-header">';
+    html += '<span class="doc-icon">' + doc.icon + '</span>';
+    html += '<span class="doc-label">' + doc.label + '</span>';
+    html += '<label class="doc-capture-btn"><input type="file" accept="image/*" capture="environment" style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📷 撮影</label>';
+    html += '<button class="doc-capture-btn remove" id="docRemove_' + doc.id + '" style="display:none;" onclick="removeDocCapture(\'' + doc.id + '\')">✕</button>';
+    html += '</div>';
+    html += '<div class="doc-preview" id="docPreview_' + doc.id + '" style="display:none;"></div>';
+    html += '</div>';
+  });
+  html += '</div>';
 
   // Other categories
   PROFILE_CATEGORIES.forEach(cat => {
@@ -4748,7 +4952,14 @@ async function saveNewEmployee() {
     console.log('Creating employee:', JSON.stringify(body));
     await spCreateEmployee(body);
 
+    // Upload captured documents to SharePoint
+    if (Object.keys(capturedDocs).length > 0) {
+      btn.textContent = '書類アップロード中...';
+      await uploadCapturedDocs(bukaSelVal, noVal, nameVal);
+    }
+
     showToast(nameVal + ' を登録しました', 'success');
+    Object.keys(capturedDocs).forEach(k => delete capturedDocs[k]);
     resetSearch();
     switchScreen('searchScreen');
 
