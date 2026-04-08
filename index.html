@@ -5162,21 +5162,25 @@ async function loadNyutaiScreen() {
   const summary = document.getElementById('nyutaiSummary');
   const body = document.getElementById('nyutaiBody');
 
-  // Label based on range
+  // nyutaiYear/nyutaiMonth = 基準月（表示の右端＝最新月）
+  // nyutaiRange = 過去何ヶ月分表示するか
+  // 開始月 = 基準月 - (range - 1)
+  const startTotal = nyutaiYear * 12 + nyutaiMonth - (nyutaiRange - 1);
+  const startY = Math.floor(startTotal / 12);
+  const startM = ((startTotal % 12) + 12) % 12;
+
   if (nyutaiRange === 1) {
     label.textContent = nyutaiYear + '年' + (nyutaiMonth + 1) + '月';
   } else {
-    const endM = (nyutaiMonth + nyutaiRange - 1) % 12 + 1;
-    const endY = nyutaiYear + Math.floor((nyutaiMonth + nyutaiRange - 1) / 12);
-    label.textContent = nyutaiYear + '年' + (nyutaiMonth + 1) + '月〜' + (endY !== nyutaiYear ? endY + '年' : '') + endM + '月';
+    label.textContent = startY + '年' + (startM + 1) + '月〜' + (nyutaiYear !== startY ? nyutaiYear + '年' : '') + (nyutaiMonth + 1) + '月';
   }
   summary.innerHTML = '';
   body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
 
   try {
-    // Month range (supports multi-month)
-    const mStart = new Date(nyutaiYear, nyutaiMonth, 1);
-    const mEnd = new Date(nyutaiYear, nyutaiMonth + nyutaiRange, 0, 23, 59, 59);
+    // Month range: startMonth to baseMonth (past → current)
+    const mStart = new Date(startY, startM, 1);
+    const mEnd = new Date(nyutaiYear, nyutaiMonth + 1, 0, 23, 59, 59);
 
     // Fetch all employees
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '');
@@ -5189,8 +5193,8 @@ async function loadNyutaiScreen() {
     }
 
     // Range of months (as year*12+month) for multi-month check
-    const rangeStartM = nyutaiYear * 12 + nyutaiMonth;
-    const rangeEndM = rangeStartM + nyutaiRange - 1;
+    const rangeStartM = startY * 12 + startM;
+    const rangeEndM = nyutaiYear * 12 + nyutaiMonth;
 
     // Classify
     const nyusha = []; // 入社
@@ -5266,8 +5270,9 @@ async function loadNyutaiScreen() {
       html += '</tr></thead><tbody>';
 
       for (let m = 0; m < nyutaiRange; m++) {
-        const mm = (nyutaiMonth + m) % 12;
-        const yy = nyutaiYear + Math.floor((nyutaiMonth + m) / 12);
+        const totalM = startY * 12 + startM + m;
+        const yy = Math.floor(totalM / 12);
+        const mm = totalM % 12;
         const ms = new Date(yy, mm, 1);
         const me = new Date(yy, mm + 1, 0, 23, 59, 59);
         const mKey = yy * 12 + mm;
