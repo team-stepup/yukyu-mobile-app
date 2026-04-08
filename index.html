@@ -5251,7 +5251,7 @@ async function loadNyutaiScreen() {
     ];
     summary.innerHTML = stats.map(s =>
       '<div class="nyutai-stat-card" style="border-left:3px solid ' + s.color + ';">' +
-      '<div class="stat-num" style="color:' + s.color + ';">' + (s.num >= 0 ? '+' : '') + s.num + '</div>' +
+      '<div class="stat-num" style="color:' + s.color + ';">' + (s.label === '実績' ? (s.num > 0 ? '+' : '') + s.num : s.num) + '</div>' +
       '<div class="stat-label">' + s.label + '</div></div>'
     ).join('');
 
@@ -5329,10 +5329,11 @@ async function loadNyutaiScreen() {
           const dt = formatDate(emp[F.nyushaDate]);
           const name = emp.Title || '';
           const buka = getBukaValue(emp) || '';
+          const isFuture = new Date(emp[F.nyushaDate]) > new Date();
           html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
           html += '<div class="nyutai-emp-date">' + dt.replace(/^\d{4}\//, '') + '</div>';
           html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div></div>';
-          html += '<span class="nyutai-badge new">入社</span>';
+          html += '<span class="nyutai-badge ' + (isFuture ? 'plan' : 'new') + '">' + (isFuture ? '入社予定' : '入社') + '</span>';
           html += '</div>';
         });
       }
@@ -5367,7 +5368,7 @@ async function loadNyutaiScreen() {
           html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div>';
           html += '<div class="nyutai-emp-buka">' + escHtml(buka) + (tenure ? ' <span style="color:var(--primary);font-weight:600;">(' + tenure + ')</span>' : '') + '</div>';
           html += '<div style="font-size:10px;color:var(--text-light);margin-top:2px;">' + escHtml(dateInfo) + '</div></div>';
-          html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '予定' : '退社') + '</span>';
+          html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '退社予定' : '退社') + '</span>';
           html += '</div>';
         });
       }
