@@ -1631,7 +1631,7 @@ function odataKeyToInternal(odataKey) {
   return odataKey;
 }
 
-// Get SP field type from metadata for a profile field key
+// Get SP field info from metadata for a profile field key
 function getFieldType(fieldKey, keyMap) {
   const odataKey = keyMap[fieldKey];
   if (!odataKey) return 'Text';
@@ -1640,6 +1640,16 @@ function getFieldType(fieldKey, keyMap) {
     return employeeFieldsCache[internalName].type || 'Text';
   }
   return 'Text';
+}
+
+function getFieldChoices(fieldKey, keyMap) {
+  const odataKey = keyMap[fieldKey];
+  if (!odataKey) return null;
+  const internalName = odataKeyToInternal(odataKey);
+  if (employeeFieldsCache && employeeFieldsCache[internalName]) {
+    return employeeFieldsCache[internalName].choices || null;
+  }
+  return null;
 }
 
 // ============================================================
@@ -2308,12 +2318,12 @@ async function fetchEmployeeFields() {
   try {
     const token = await getToken();
     if (!token) return null;
-    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString&$top=200";
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString,Choices&$top=200";
     const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     const data = await resp.json();
     const fields = {};
     (data.d.results || []).forEach(f => {
-      fields[f.InternalName] = { title: f.Title, type: f.TypeAsString };
+      fields[f.InternalName] = { title: f.Title, type: f.TypeAsString, choices: f.Choices ? f.Choices.results || f.Choices : null };
     });
     employeeFieldsCache = fields;
     return fields;
@@ -4326,7 +4336,7 @@ async function deleteLeaveRecord(itemId, dateStr) {
 // ============================================================
 let editKeyMap = null; // cached keyMap for edit operations
 
-function getEditInputHtml(field, currentVal, fieldType) {
+function getEditInputHtml(field, currentVal, fieldType, choices) {
   const id = 'editField_' + field.key;
   const val = (currentVal === null || currentVal === undefined) ? '' : currentVal;
 
@@ -4353,9 +4363,16 @@ function getEditInputHtml(field, currentVal, fieldType) {
   if (field.format === 'email') {
     return '<input type="email" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
   }
-  if (fieldType === 'Choice' || field.format === 'badge') {
-    // For choice fields, show text input (SharePoint accepts text for choice fields)
-    return '<input type="text" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
+  // Choice field with choices → dropdown select
+  if ((fieldType === 'Choice' || field.format === 'badge') && choices && choices.length > 0) {
+    let html = '<select class="edit-select" id="' + id + '" data-field="' + field.key + '">';
+    html += '<option value="">（未選択）</option>';
+    choices.forEach(c => {
+      const selected = (String(val) === c) ? ' selected' : '';
+      html += '<option value="' + escHtml(c) + '"' + selected + '>' + escHtml(c) + '</option>';
+    });
+    html += '</select>';
+    return html;
   }
   if (fieldType === 'Number' || fieldType === 'Currency') {
     const num = val ? parseFloat(String(val).replace(/,/g,'')) : '';
@@ -4392,7 +4409,8 @@ async function startEditSection(catId) {
     if (!odataKey) return;
     const val = emp[odataKey];
     const fieldType = getFieldType(field.key, editKeyMap);
-    const inputHtml = getEditInputHtml(field, val, fieldType);
+    const choices = getFieldChoices(field.key, editKeyMap);
+    const inputHtml = getEditInputHtml(field, val, fieldType, choices);
     if (!inputHtml) return;
     html += '<tr><th>' + escHtml(field.label) + '</th><td>' + inputHtml + '</td></tr>';
   });
@@ -4555,7 +4573,8 @@ async function renderAddEmployeeForm() {
       const odataKey = keyMap[field.key];
       if (!odataKey) return;
       const fieldType = getFieldType(field.key, keyMap);
-      const inputHtml = getEditInputHtml(field, '', fieldType);
+      const choices = getFieldChoices(field.key, keyMap);
+      const inputHtml = getEditInputHtml(field, '', fieldType, choices);
       if (!inputHtml) return;
       // Change id to addField_ prefix
       const addInput = inputHtml.replace('id="editField_', 'id="addField_');
