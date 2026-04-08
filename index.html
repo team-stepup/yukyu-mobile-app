@@ -263,6 +263,8 @@ body {
   gap: 4px;
 }
 .refresh-btn:active { background: #e0e0f0; }
+.header-refresh-btn { background:none; border:none; color:#fff; font-size:20px; cursor:pointer; padding:4px 8px; opacity:0.9; transition:transform 0.2s; }
+.header-refresh-btn:active { transform:rotate(180deg); opacity:1; }
 .haken-filter-btn {
   padding: 6px 12px;
   border-radius: 16px;
@@ -294,6 +296,17 @@ body {
 .save-btn { background:var(--primary); color:#fff; border:none; border-radius:8px; padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer; }
 .save-btn:active { background:var(--primary-dark); }
 .save-btn:disabled { opacity:0.5; cursor:not-allowed; }
+.save-btn-orange { background:linear-gradient(135deg,#ff9800,#f57c00); }
+.save-btn-orange:active { background:#e65100; }
+/* Confirm Modal */
+.confirm-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.45); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px; }
+.confirm-box { background:#fff; border-radius:16px; padding:24px; max-width:320px; width:100%; box-shadow:0 8px 32px rgba(0,0,0,0.2); text-align:center; }
+.confirm-box .confirm-title { font-size:16px; font-weight:800; margin-bottom:8px; }
+.confirm-box .confirm-msg { font-size:13px; color:var(--text-light); margin-bottom:16px; line-height:1.6; }
+.confirm-box .confirm-btns { display:flex; gap:10px; }
+.confirm-box .confirm-btns button { flex:1; padding:10px; border-radius:10px; font-size:14px; font-weight:700; border:none; cursor:pointer; }
+.confirm-box .btn-cancel { background:#f0f0f0; color:var(--text); }
+.confirm-box .btn-ok { background:linear-gradient(135deg,#ff9800,#f57c00); color:#fff; }
 .cancel-btn { background:#f0f0f0; color:var(--text); border:none; border-radius:8px; padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer; }
 .delete-emp-btn { background:var(--danger); color:#fff; border:none; border-radius:8px; padding:8px 16px; font-size:12px; font-weight:600; cursor:pointer; margin-top:16px; width:100%; }
 .add-emp-btn { background:var(--success); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer; width:100%; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:6px; }
@@ -1240,6 +1253,7 @@ body {
   </button>
   <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo">
   <h1 id="headerTitle" style="display:none;">ホーム</h1>
+  <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-btn" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
 
@@ -1760,6 +1774,9 @@ function switchScreen(screenId, skipHistory) {
 
   // Back button: show when there is history and not on home/login
   document.getElementById('backBtn').style.display = (screenHistory.length > 0 && screenId !== 'searchScreen' && screenId !== 'loginScreen') ? 'flex' : 'none';
+
+  // Header refresh button: hide when leaving detailScreen
+  if (screenId !== 'detailScreen') document.getElementById('headerRefreshBtn').style.display = 'none';
 
   // Hide fixed footer when not on maebari list
   const mFooter = document.getElementById('maebariListFooter');
@@ -2920,8 +2937,6 @@ async function loadEmployeeProfile() {
     html += '</div></div>';
   });
 
-  html = '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px;">' +
-    '<button class="refresh-btn" onclick="employeeFieldsCache=null;loadEmployeeProfile()">&#x21bb; 更新</button></div>' + html;
   container.innerHTML = html;
 }
 
@@ -2938,6 +2953,8 @@ function switchTopTab(tab) {
   document.getElementById('profileContent').style.display = tab === 'profile' ? 'block' : 'none';
   const titleMap = { yukyu: '有給詳細', maebari: '前払い詳細', profile: '社員情報' };
   document.getElementById('headerTitle').textContent = titleMap[tab] || '有給詳細';
+  // Show header refresh button only on profile tab
+  document.getElementById('headerRefreshBtn').style.display = tab === 'profile' ? 'block' : 'none';
   if (tab === 'maebari') {
     maebariPeriodOffset = 0;
     loadMaebariData();
@@ -3019,12 +3036,19 @@ async function loadMaebariData() {
     });
 
     const periodLabel = formatDateShort(period.start) + ' ～ ' + formatDateShort(period.end);
+    // 支払日デフォルト: 期間終了日の翌週金曜日
+    const defaultPayDay = getNextFridayAfter(period.end, 7);
 
     container.innerHTML = `
       <div style="display:flex;justify-content:flex-end;margin-bottom:4px;"><button class="refresh-btn" onclick="loadMaebariData()">&#x21bb; 更新</button></div>
       <div class="maebari-nav">
         <button onclick="changeMaebariPeriod(-1)">&lsaquo; 前</button>
-        <div class="period-text">${periodLabel}${isCurrent ? '<span class="current-period-badge">今月分</span>' : ''}</div>
+        <div class="period-text">
+          ${formatDateShort(period.start)} ～
+          <span id="maebariPeriodEndDisplay" style="cursor:pointer;text-decoration:underline;color:var(--primary);" onclick="document.getElementById('maebariPeriodEndInput').showPicker()">${formatDateShort(period.end)}</span>
+          <input type="date" id="maebariPeriodEndInput" value="${formatDateISO(period.end)}" style="position:absolute;opacity:0;width:0;height:0;" onchange="onMaebariPeriodEndChange(this.value)">
+          ${isCurrent ? '<span class="current-period-badge">今月分</span>' : ''}
+        </div>
         <button onclick="changeMaebariPeriod(1)">次 &rsaquo;</button>
       </div>
 
@@ -3064,13 +3088,19 @@ async function loadMaebariData() {
       <div class="card" style="margin-top:16px;border:2px solid var(--primary);">
         <div class="section-title" style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:12px;">前払い申請</div>
 
-        <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">① 前払日を選択</div>
-        <div id="maebariCalNav" class="calendar-nav" style="margin-bottom:4px;">
-          <button onclick="changeMaebariCalMonth(-1)">&lsaquo;</button>
-          <span id="maebariCalTitle"></span>
-          <button onclick="changeMaebariCalMonth(1)">&rsaquo;</button>
+        <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">① 前払日</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <div id="maebariDefaultDateDisplay" style="font-size:15px;font-weight:700;color:var(--primary);flex:1;">${formatDateShort(defaultPayDay)}（金）</div>
+          <button class="refresh-btn" style="font-size:11px;" onclick="toggleMaebariCalendar()">📅 変更</button>
         </div>
-        <div id="maebariCalendar" style="margin-bottom:16px;"></div>
+        <div id="maebariCalWrap" style="display:none;">
+          <div id="maebariCalNav" class="calendar-nav" style="margin-bottom:4px;">
+            <button onclick="changeMaebariCalMonth(-1)">&lsaquo;</button>
+            <span id="maebariCalTitle"></span>
+            <button onclick="changeMaebariCalMonth(1)">&rsaquo;</button>
+          </div>
+          <div id="maebariCalendar" style="margin-bottom:8px;"></div>
+        </div>
         <div id="maebariSelectedDate" style="font-size:13px;color:var(--primary);font-weight:600;margin-bottom:12px;text-align:center;"></div>
 
         <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">② 金額を選択</div>
@@ -3095,8 +3125,10 @@ async function loadMaebariData() {
     // Initialize calendar
     maebariCalYear = new Date().getFullYear();
     maebariCalMonth = new Date().getMonth();
-    maebariSelectedPayDate = null;
     maebariSelectedAmount = null;
+    // Auto-select next Friday as default pay date
+    maebariSelectedPayDate = getNextFriday();
+    document.getElementById('maebariSelectedDate').textContent = '選択日: ' + formatDateShort(maebariSelectedPayDate);
     renderMaebariCalendar();
   } catch (e) {
     console.error('Maebari fetch error:', e);
@@ -3113,6 +3145,53 @@ function changeMaebariPeriod(direction) {
 // 前払い申請 Calendar & Form
 // ============================================================
 // maebariCalYear, maebariCalMonth declared above with globals
+
+// Get next Friday on or after a given date, with optional daysAhead offset
+function getNextFridayAfter(baseDate, daysAhead) {
+  const d = new Date(baseDate);
+  d.setDate(d.getDate() + (daysAhead || 0));
+  const dow = d.getDay();
+  const diff = (5 - dow + 7) % 7; // days until Friday
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+// Get next Friday from today (including today if Friday)
+function getNextFriday() {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const dow = today.getDay();
+  if (dow === 5) return today; // Today is Friday
+  const diff = (5 - dow + 7) % 7;
+  today.setDate(today.getDate() + diff);
+  return today;
+}
+
+function toggleMaebariCalendar() {
+  const wrap = document.getElementById('maebariCalWrap');
+  if (wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    renderMaebariCalendar();
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+function onMaebariPeriodEndChange(val) {
+  if (!val) return;
+  const newEnd = new Date(val + 'T00:00:00');
+  document.getElementById('maebariPeriodEndDisplay').textContent = formatDateShort(newEnd);
+  // Recalc default pay day (next Friday after 1 week from new end)
+  const newPayDay = getNextFridayAfter(newEnd, 7);
+  const display = document.getElementById('maebariDefaultDateDisplay');
+  if (display) {
+    display.textContent = formatDateShort(newPayDay) + '（金）';
+  }
+  // Auto-select the new pay day
+  maebariSelectedPayDate = newPayDay;
+  document.getElementById('maebariSelectedDate').textContent = '選択日: ' + formatDateShort(newPayDay);
+  updateMaebariConfirm();
+}
 
 function changeMaebariCalMonth(dir) {
   maebariCalMonth += dir;
@@ -4525,7 +4604,7 @@ async function startEditSection(catId) {
   html += '</table>';
   html += '<div class="edit-actions">';
   html += '<button class="cancel-btn" onclick="cancelEditSection(\'' + catId + '\')">キャンセル</button>';
-  html += '<button class="save-btn" id="saveBtn_' + catId + '" onclick="saveEditSection(\'' + catId + '\')">💾 保存</button>';
+  html += '<button class="save-btn save-btn-orange" id="saveBtn_' + catId + '" onclick="confirmSaveEditSection(\'' + catId + '\')">📝 変更保存</button>';
   html += '</div>';
 
   viewDiv.style.display = 'none';
@@ -4536,6 +4615,23 @@ async function startEditSection(catId) {
 function cancelEditSection(catId) {
   document.getElementById('view_' + catId).style.display = '';
   document.getElementById('edit_' + catId).style.display = 'none';
+}
+
+function confirmSaveEditSection(catId) {
+  const cat = PROFILE_CATEGORIES.find(c => c.id === catId);
+  const catLabel = cat ? cat.label : '';
+  const overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.innerHTML = '<div class="confirm-box">' +
+    '<div class="confirm-title">⚠️ 変更確認</div>' +
+    '<div class="confirm-msg">「' + escHtml(catLabel) + '」の変更内容を<br>SharePointに保存しますか？</div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">キャンセル</button>' +
+    '<button class="btn-ok" onclick="this.closest(\'.confirm-overlay\').remove();saveEditSection(\'' + catId + '\')">📝 保存する</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  // Close on overlay click (outside box)
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
 }
 
 async function saveEditSection(catId) {
@@ -4604,7 +4700,7 @@ async function saveEditSection(catId) {
 
     if (!hasChanges) {
       showToast('変更がありません', 'error');
-      btn.disabled = false; btn.textContent = '💾 保存';
+      btn.disabled = false; btn.textContent = '📝 変更保存';
       return;
     }
 
@@ -4624,7 +4720,7 @@ async function saveEditSection(catId) {
   } catch (e) {
     console.error('Save error:', e);
     showToast('保存エラー: ' + e.message, 'error');
-    btn.disabled = false; btn.textContent = '💾 保存';
+    btn.disabled = false; btn.textContent = '📝 変更保存';
   }
 }
 
