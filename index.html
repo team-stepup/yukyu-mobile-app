@@ -2628,7 +2628,7 @@ async function loadMaebariData() {
         <table class="maebari-table">
           <thead>
             <tr>
-              <th>支払日</th>
+              <th>前払日</th>
               <th>金額</th>
               <th>手数料</th>
               <th>合計</th>
@@ -2655,7 +2655,7 @@ async function loadMaebariData() {
       <div class="card" style="margin-top:16px;border:2px solid var(--primary);">
         <div class="section-title" style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:12px;">前払い申請</div>
 
-        <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">① 支払日を選択</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text-light);margin-bottom:6px;">① 前払日を選択</div>
         <div id="maebariCalNav" class="calendar-nav" style="margin-bottom:4px;">
           <button onclick="changeMaebariCalMonth(-1)">&lsaquo;</button>
           <span id="maebariCalTitle"></span>
@@ -2837,7 +2837,7 @@ async function confirmMaebari() {
     const dupRecords = await spGet(LIST_MAEBARI_GUID, dupFilter) || [];
 
     if (dupRecords.length > 0) {
-      showToast('この支払日は既に申請済みです。重複申請はできません。', 'error');
+      showToast('この前払日は既に申請済みです。重複申請はできません。', 'error');
       btn.disabled = false;
       btn.textContent = '前払い申請';
       return;
@@ -3077,7 +3077,7 @@ function openMaebariEdit(itemId) {
   container.innerHTML = `
     <div class="edit-header">
       <div class="edit-pay-date" style="display:flex;align-items:center;gap:6px;">
-        支払日：${isLocked ? escHtml(payDate) : '<span id="editPayDateDisplay" style="cursor:pointer;text-decoration:underline;" onclick="document.getElementById(\'editPayDateInput\').showPicker()">' + escHtml(payDate) + '</span><input type="date" id="editPayDateInput" value="' + payDateRaw + '" style="position:absolute;opacity:0;width:0;height:0;" onchange="onDateInputChange(\'editPayDateInput\',\'editPayDateDisplay\')">'}
+        前払日：${isLocked ? escHtml(payDate) : '<span id="editPayDateDisplay" style="cursor:pointer;text-decoration:underline;" onclick="document.getElementById(\'editPayDateInput\').showPicker()">' + escHtml(payDate) + '</span><input type="date" id="editPayDateInput" value="' + payDateRaw + '" style="position:absolute;opacity:0;width:0;height:0;" onchange="onDateInputChange(\'editPayDateInput\',\'editPayDateDisplay\')">'}
       </div>
       <div class="edit-haken">${escHtml(haken)}</div>
       <div class="edit-emp">${escHtml(syainNo)}　${escHtml(name)}</div>
@@ -3301,8 +3301,8 @@ async function loadYukyuList() {
       const colonIdx = haken.indexOf(':');
       if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
       const leaveDate = r[F.leaveDate] ? formatDateShort(new Date(r[F.leaveDate])) : '';
-      const dayType = (r[F.leaveType] || '').replace(/[()（）]/g, '');
-      const dayDisplay = dayType;
+      const dayTypeRaw = r[F.leaveTypeDetail] || r[F.leaveType] || '';
+      const dayDisplay = dayTypeRaw.replace(/[()（）]/g, '').replace(/\s+/g, '').trim();
       const shimei = (r[F.shimei] || '').length > 10 ? (r[F.shimei] || '').substring(0, 10) + '..' : (r[F.shimei] || '');
       html += '<tr style="cursor:pointer;" onclick="openYukyuEdit(' + r.Id + ')">'
         + '<td>' + escHtml(haken) + '</td>'
