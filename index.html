@@ -285,6 +285,19 @@ body {
 .haken-table tr:nth-child(even) { background: #fafafe; }
 .haken-dl-btn { background: #388e3c; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .haken-dl-btn:active { background: #2e7d32; }
+/* Edit mode styles */
+.edit-btn { background:none; border:1px solid var(--primary-light); color:var(--primary); border-radius:6px; padding:2px 10px; font-size:11px; cursor:pointer; font-weight:600; }
+.edit-btn:active { background:#e8e8f5; }
+.edit-input { width:100%; padding:6px 8px; border:1px solid var(--primary-light); border-radius:6px; font-size:13px; font-family:inherit; background:#fafaff; }
+.edit-input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(98,100,167,0.15); }
+.edit-select { width:100%; padding:6px 8px; border:1px solid var(--primary-light); border-radius:6px; font-size:13px; background:#fafaff; }
+.edit-actions { display:flex; gap:8px; padding:8px 0; justify-content:flex-end; }
+.save-btn { background:var(--primary); color:#fff; border:none; border-radius:8px; padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer; }
+.save-btn:active { background:var(--primary-dark); }
+.save-btn:disabled { opacity:0.5; cursor:not-allowed; }
+.cancel-btn { background:#f0f0f0; color:var(--text); border:none; border-radius:8px; padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer; }
+.delete-emp-btn { background:var(--danger); color:#fff; border:none; border-radius:8px; padding:8px 16px; font-size:12px; font-weight:600; cursor:pointer; margin-top:16px; width:100%; }
+.add-emp-btn { background:var(--success); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer; width:100%; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:6px; }
 .top-tab:active { transform: scale(0.97); }
 .top-tab.active {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -1232,6 +1245,8 @@ body {
     </div>
     <div id="searchResults"></div>
 
+    <button class="add-emp-btn" id="addEmpBtn" style="margin-top:8px;" onclick="showAddEmployeeForm()">➕ 新規社員登録</button>
+
     <div id="hakenSectionCard" class="card" style="padding:12px;margin-top:8px;">
       <div class="section-title">派遣先一覧（部課）</div>
       <div style="display:flex;gap:6px;align-items:center;">
@@ -1244,6 +1259,11 @@ body {
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="openHakenList()">表示</button>
     </div>
+  </div>
+
+  <!-- Screen: 新規社員登録 -->
+  <div class="screen" id="addEmployeeScreen">
+    <div id="addEmployeeBody"></div>
   </div>
 
   <!-- Screen: 派遣先社員一覧 -->
@@ -1552,6 +1572,76 @@ async function spPost(listName, body) {
   return await resp.json();
 }
 
+// Update employee record (MERGE)
+async function spPatchEmployee(itemId, body) {
+  const token = await getToken();
+  if (!token) { showToast('認証エラー', 'error'); throw new Error('No token'); }
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'MERGE',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error('SP PATCH Employee Error:', errText);
+    throw new Error('更新失敗: ' + resp.status + ' ' + errText);
+  }
+  return true;
+}
+
+// Delete employee record
+async function spDeleteEmployee(itemId) {
+  const token = await getToken();
+  if (!token) { showToast('認証エラー', 'error'); throw new Error('No token'); }
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'DELETE',
+    },
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error('SP DELETE Employee Error:', errText);
+    throw new Error('削除失敗: ' + resp.status);
+  }
+  return true;
+}
+
+// Create new employee record
+async function spCreateEmployee(body) {
+  return await spPost(LIST_EMPLOYEES_GUID, body);
+}
+
+// Convert OData key back to InternalName for writes
+function odataKeyToInternal(odataKey) {
+  if (!odataKey) return null;
+  if (odataKey === 'Title' || odataKey === 'Id') return odataKey;
+  if (odataKey.startsWith('OData_')) return odataKey.substring(6);
+  return odataKey;
+}
+
+// Get SP field type from metadata for a profile field key
+function getFieldType(fieldKey, keyMap) {
+  const odataKey = keyMap[fieldKey];
+  if (!odataKey) return 'Text';
+  const internalName = odataKeyToInternal(odataKey);
+  if (employeeFieldsCache && employeeFieldsCache[internalName]) {
+    return employeeFieldsCache[internalName].type || 'Text';
+  }
+  return 'Text';
+}
+
 // ============================================================
 // Screen Navigation
 // ============================================================
@@ -1567,7 +1657,7 @@ function switchScreen(screenId, skipHistory) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -1594,6 +1684,7 @@ function resetSearch() {
   document.getElementById('hakenSelect').value = '';
   document.getElementById('hakenIncludeRetired').checked = false;
   document.getElementById('hakenSectionCard').style.display = '';
+  document.getElementById('addEmpBtn').style.display = '';
 }
 
 function goBack() {
@@ -1702,6 +1793,7 @@ async function searchEmployee() {
     }
 
     document.getElementById('hakenSectionCard').style.display = 'none';
+    document.getElementById('addEmpBtn').style.display = 'none';
     container.innerHTML = results.map(emp => {
       const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
       const resigned = isResigned(emp);
@@ -2706,21 +2798,29 @@ async function loadEmployeeProfile() {
     if (!hasData) return;
 
     const hasAlert = categoryHasAlert(emp, keyMap, cat);
-    html += '<div class="accordion-section">';
+    html += '<div class="accordion-section" id="acc_' + cat.id + '">';
     html += '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
     html += '<span class="acc-icon">' + cat.icon + '</span>';
     html += '<span>' + cat.label + '</span>';
     if (hasAlert) html += '<span class="acc-alert">期限注意</span>';
+    html += '<button class="edit-btn" onclick="event.stopPropagation();startEditSection(\'' + cat.id + '\')" style="margin-left:auto;margin-right:8px;">✏️ 編集</button>';
     html += '<span class="acc-arrow">&#9654;</span>';
     html += '</div>';
-    html += '<div class="accordion-body"><table class="acc-table">';
+    html += '<div class="accordion-body">';
+    // View mode table
+    html += '<div id="view_' + cat.id + '"><table class="acc-table">';
     rows.forEach(r => {
       html += '<tr><th>' + r.label + '</th><td>' + r.value + '</td></tr>';
     });
-    html += '</table></div></div>';
+    html += '</table></div>';
+    // Edit mode (hidden initially)
+    html += '<div id="edit_' + cat.id + '" style="display:none;"></div>';
+    html += '</div></div>';
   });
 
-  html = '<div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><button class="refresh-btn" onclick="employeeFieldsCache=null;loadEmployeeProfile()">&#x21bb; 更新</button></div>' + html;
+  html = '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px;">' +
+    '<button class="refresh-btn" onclick="employeeFieldsCache=null;loadEmployeeProfile()">&#x21bb; 更新</button></div>' + html;
+  html += '<button class="delete-emp-btn" onclick="deleteEmployee()">🗑️ この社員を削除</button>';
   container.innerHTML = html;
 }
 
@@ -4218,6 +4318,323 @@ async function deleteLeaveRecord(itemId, dateStr) {
     showToast('削除に失敗しました: ' + e.message, 'error');
   } finally {
     hideSpinner();
+  }
+}
+
+// ============================================================
+// Employee Profile Edit Mode
+// ============================================================
+let editKeyMap = null; // cached keyMap for edit operations
+
+function getEditInputHtml(field, currentVal, fieldType) {
+  const id = 'editField_' + field.key;
+  const val = (currentVal === null || currentVal === undefined) ? '' : currentVal;
+
+  // Skip computed fields
+  if (field.key.startsWith('_calc')) return '';
+  // Skip spUrl (complex)
+  if (field.format === 'spUrl') return '';
+
+  if (field.format === 'date' || field.format === 'dateExpiry') {
+    let dateVal = '';
+    if (val) {
+      const d = new Date(val);
+      if (!isNaN(d)) dateVal = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }
+    return '<input type="date" class="edit-input" id="' + id + '" value="' + dateVal + '" data-field="' + field.key + '" data-format="date">';
+  }
+  if (field.format === 'currency') {
+    const num = val ? parseFloat(String(val).replace(/,/g,'')) : '';
+    return '<input type="number" class="edit-input" id="' + id + '" value="' + (isNaN(num) ? '' : num) + '" data-field="' + field.key + '" data-format="currency">';
+  }
+  if (field.format === 'tel') {
+    return '<input type="tel" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
+  }
+  if (field.format === 'email') {
+    return '<input type="email" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
+  }
+  if (fieldType === 'Choice' || field.format === 'badge') {
+    // For choice fields, show text input (SharePoint accepts text for choice fields)
+    return '<input type="text" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
+  }
+  if (fieldType === 'Number' || fieldType === 'Currency') {
+    const num = val ? parseFloat(String(val).replace(/,/g,'')) : '';
+    return '<input type="number" step="any" class="edit-input" id="' + id + '" value="' + (isNaN(num) ? '' : num) + '" data-field="' + field.key + '" data-format="number">';
+  }
+  // Default: text
+  return '<input type="text" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
+}
+
+async function startEditSection(catId) {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const meta = await fetchEmployeeFields();
+  if (!meta) { showToast('フィールド情報の取得に失敗', 'error'); return; }
+  editKeyMap = buildFieldKeyMap(meta);
+
+  const cat = PROFILE_CATEGORIES.find(c => c.id === catId);
+  if (!cat) return;
+
+  const viewDiv = document.getElementById('view_' + catId);
+  const editDiv = document.getElementById('edit_' + catId);
+  const accSection = document.getElementById('acc_' + catId);
+
+  // Ensure accordion is open
+  if (!accSection.classList.contains('open')) accSection.classList.add('open');
+
+  let html = '<table class="acc-table">';
+  cat.fields.forEach(field => {
+    if (field.key.startsWith('_calc') || field.format === 'spUrl') {
+      // Show computed/readonly fields as-is
+      return;
+    }
+    const odataKey = editKeyMap[field.key];
+    if (!odataKey) return;
+    const val = emp[odataKey];
+    const fieldType = getFieldType(field.key, editKeyMap);
+    const inputHtml = getEditInputHtml(field, val, fieldType);
+    if (!inputHtml) return;
+    html += '<tr><th>' + escHtml(field.label) + '</th><td>' + inputHtml + '</td></tr>';
+  });
+  html += '</table>';
+  html += '<div class="edit-actions">';
+  html += '<button class="cancel-btn" onclick="cancelEditSection(\'' + catId + '\')">キャンセル</button>';
+  html += '<button class="save-btn" id="saveBtn_' + catId + '" onclick="saveEditSection(\'' + catId + '\')">💾 保存</button>';
+  html += '</div>';
+
+  viewDiv.style.display = 'none';
+  editDiv.innerHTML = html;
+  editDiv.style.display = 'block';
+}
+
+function cancelEditSection(catId) {
+  document.getElementById('view_' + catId).style.display = '';
+  document.getElementById('edit_' + catId).style.display = 'none';
+}
+
+async function saveEditSection(catId) {
+  const emp = currentEmployee;
+  if (!emp || !emp.Id) { showToast('社員データが見つかりません', 'error'); return; }
+
+  const btn = document.getElementById('saveBtn_' + catId);
+  btn.disabled = true; btn.textContent = '保存中...';
+
+  try {
+    const cat = PROFILE_CATEGORIES.find(c => c.id === catId);
+    if (!cat) throw new Error('カテゴリが見つかりません');
+
+    const body = {};
+    let hasChanges = false;
+
+    cat.fields.forEach(field => {
+      if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
+      const odataKey = editKeyMap[field.key];
+      if (!odataKey) return;
+      const internalName = odataKeyToInternal(odataKey);
+      if (!internalName) return;
+
+      const inputEl = document.getElementById('editField_' + field.key);
+      if (!inputEl) return;
+
+      const oldVal = emp[odataKey];
+      let newVal = inputEl.value.trim();
+
+      // Convert based on format
+      if (inputEl.dataset.format === 'date' && newVal) {
+        newVal = newVal + 'T00:00:00Z';
+      } else if (inputEl.dataset.format === 'date' && !newVal) {
+        newVal = null;
+      } else if (inputEl.dataset.format === 'number' || inputEl.dataset.format === 'currency') {
+        newVal = newVal ? parseFloat(newVal) : null;
+      } else if (newVal === '') {
+        newVal = null;
+      }
+
+      // Check if value changed
+      let changed = false;
+      if (inputEl.dataset.format === 'date') {
+        const oldDate = oldVal ? new Date(oldVal).toISOString().substring(0,10) : '';
+        const newDate = newVal ? newVal.substring(0,10) : '';
+        changed = oldDate !== newDate;
+      } else if (inputEl.dataset.format === 'number' || inputEl.dataset.format === 'currency') {
+        const oldNum = oldVal ? parseFloat(String(oldVal).replace(/,/g,'')) : null;
+        changed = oldNum !== newVal;
+      } else {
+        changed = (oldVal || '') !== (newVal || '');
+      }
+
+      if (changed) {
+        body[internalName] = newVal;
+        hasChanges = true;
+      }
+    });
+
+    if (!hasChanges) {
+      showToast('変更がありません', 'error');
+      btn.disabled = false; btn.textContent = '💾 保存';
+      return;
+    }
+
+    console.log('Saving to SP, itemId:', emp.Id, 'body:', JSON.stringify(body));
+    await spPatchEmployee(emp.Id, body);
+
+    // Reload employee data
+    const updated = await fetchFullEmployee(emp[F.syainNo]);
+    if (updated) {
+      currentEmployee = updated;
+    }
+
+    showToast('保存しました', 'success');
+    // Re-render profile
+    await loadEmployeeProfile();
+
+  } catch (e) {
+    console.error('Save error:', e);
+    showToast('保存エラー: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '💾 保存';
+  }
+}
+
+async function deleteEmployee() {
+  const emp = currentEmployee;
+  if (!emp || !emp.Id) { showToast('社員データが見つかりません', 'error'); return; }
+
+  const name = emp.Title || '';
+  const no = emp[F.syainNo] || '';
+  if (!confirm('⚠️ 社員データを完全に削除しますか？\n\n氏名: ' + name + '\n社員番号: ' + no + '\n\nこの操作は取り消せません。')) return;
+  if (!confirm('本当に削除してよろしいですか？\n「' + name + '」のデータが完全に失われます。')) return;
+
+  showSpinner();
+  try {
+    await spDeleteEmployee(emp.Id);
+    showToast(name + ' を削除しました', 'success');
+    currentEmployee = null;
+    resetSearch();
+    switchScreen('searchScreen');
+  } catch (e) {
+    console.error('Delete employee error:', e);
+    showToast('削除エラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+// ============================================================
+// New Employee Registration
+// ============================================================
+function showAddEmployeeForm() {
+  switchScreen('addEmployeeScreen');
+  renderAddEmployeeForm();
+}
+
+async function renderAddEmployeeForm() {
+  const container = document.getElementById('addEmployeeBody');
+  const meta = await fetchEmployeeFields();
+  if (!meta) { container.innerHTML = '<p>フィールド情報の取得に失敗しました</p>'; return; }
+  const keyMap = buildFieldKeyMap(meta);
+  editKeyMap = keyMap;
+
+  let html = '';
+  // Essential fields first
+  html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
+  html += '<div class="section-title">👤 基本必須項目</div>';
+  html += '<table class="acc-table">';
+  html += '<tr><th>社員氏名 <span style="color:var(--danger);">*</span></th><td><input type="text" class="edit-input" id="addField_Title" placeholder="例: ヤマダ タロウ"></td></tr>';
+  html += '<tr><th>社員番号 <span style="color:var(--danger);">*</span></th><td><input type="number" class="edit-input" id="addField_syainNo" placeholder="例: 1234"></td></tr>';
+  html += '</table></div>';
+
+  // Other categories
+  PROFILE_CATEGORIES.forEach(cat => {
+    html += '<div class="accordion-section open">';
+    html += '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+    html += '<span class="acc-icon">' + cat.icon + '</span><span>' + cat.label + '</span>';
+    html += '<span class="acc-arrow">&#9654;</span></div>';
+    html += '<div class="accordion-body"><table class="acc-table">';
+    cat.fields.forEach(field => {
+      if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
+      const odataKey = keyMap[field.key];
+      if (!odataKey) return;
+      const fieldType = getFieldType(field.key, keyMap);
+      const inputHtml = getEditInputHtml(field, '', fieldType);
+      if (!inputHtml) return;
+      // Change id to addField_ prefix
+      const addInput = inputHtml.replace('id="editField_', 'id="addField_');
+      html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
+    });
+    html += '</table></div></div>';
+  });
+
+  html += '<div class="edit-actions" style="padding:12px 0;">';
+  html += '<button class="cancel-btn" onclick="goBack()">キャンセル</button>';
+  html += '<button class="save-btn" id="addEmployeeSaveBtn" onclick="saveNewEmployee()">➕ 登録</button>';
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+async function saveNewEmployee() {
+  const btn = document.getElementById('addEmployeeSaveBtn');
+  btn.disabled = true; btn.textContent = '登録中...';
+
+  try {
+    const nameVal = document.getElementById('addField_Title').value.trim();
+    const noVal = document.getElementById('addField_syainNo').value.trim();
+    if (!nameVal) { showToast('社員氏名を入力してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
+    if (!noVal) { showToast('社員番号を入力してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
+
+    // Check duplicate
+    const existing = await spGet(LIST_EMPLOYEES_GUID, '$filter=' + F.syainNo + ' eq ' + noVal + '&$top=1');
+    if (existing && existing.length > 0) {
+      showToast('社員番号 ' + noVal + ' は既に存在します', 'error');
+      btn.disabled = false; btn.textContent = '➕ 登録';
+      return;
+    }
+
+    const body = {
+      Title: nameVal,
+    };
+    // Add syainNo - need internal name
+    const syainNoInternal = odataKeyToInternal(F.syainNo);
+    if (syainNoInternal) body[syainNoInternal] = parseInt(noVal);
+
+    // Collect all addField_ inputs
+    PROFILE_CATEGORIES.forEach(cat => {
+      cat.fields.forEach(field => {
+        if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
+        const odataKey = editKeyMap[field.key];
+        if (!odataKey) return;
+        const internalName = odataKeyToInternal(odataKey);
+        if (!internalName || internalName === 'Title') return;
+
+        const inputEl = document.getElementById('addField_' + field.key);
+        if (!inputEl) return;
+        let val = inputEl.value.trim();
+        if (!val) return;
+
+        if (inputEl.dataset.format === 'date') {
+          val = val + 'T00:00:00Z';
+        } else if (inputEl.dataset.format === 'number' || inputEl.dataset.format === 'currency') {
+          val = parseFloat(val);
+          if (isNaN(val)) return;
+        }
+        body[internalName] = val;
+      });
+    });
+
+    // Add entity type
+    body['__metadata'] = { type: 'SP.Data.SyainListItem' };
+
+    console.log('Creating employee:', JSON.stringify(body));
+    await spCreateEmployee(body);
+
+    showToast(nameVal + ' を登録しました', 'success');
+    resetSearch();
+    switchScreen('searchScreen');
+
+  } catch (e) {
+    console.error('Add employee error:', e);
+    showToast('登録エラー: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '➕ 登録';
   }
 }
 
