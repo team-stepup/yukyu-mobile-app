@@ -1250,7 +1250,17 @@ body {
   <div class="screen" id="hakenListScreen">
     <div id="hakenListHeader" style="padding:8px 0;"></div>
     <div id="hakenFilterBtns" style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;"></div>
-    <div id="hakenListBody"></div>
+    <div class="card" style="padding:8px 12px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:6px;cursor:pointer;" onclick="toggleHakenColumns()">
+        <span style="font-size:13px;font-weight:600;">📋 表示項目</span>
+        <span id="hakenColToggle" style="font-size:10px;color:var(--text-light);">▼</span>
+        <span id="hakenColCount" style="font-size:11px;color:var(--primary);margin-left:auto;"></span>
+      </div>
+      <div id="hakenColSelector" style="display:none;margin-top:8px;">
+        <div id="hakenColCheckboxes" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+    </div>
+    <div id="hakenListBody" style="overflow-x:auto;"></div>
   </div>
 
   <!-- Screen: 前払い一覧 -->
@@ -1581,6 +1591,8 @@ function resetSearch() {
   document.getElementById('searchInput').value = '';
   document.getElementById('searchResults').innerHTML = '';
   document.getElementById('searchClearBtn').style.display = 'none';
+  document.getElementById('hakenSelect').value = '';
+  document.getElementById('hakenIncludeRetired').checked = false;
 }
 
 function goBack() {
@@ -4212,6 +4224,8 @@ async function deleteLeaveRecord(itemId, dateStr) {
 // ============================================================
 let hakenEmployeesCache = [];
 let hakenCurrentFilter = 'all';
+let hakenSelectedCols = []; // selected PROFILE_CATEGORIES ids
+let hakenKeyMap = null; // field key map for column display
 
 let bukaODataKey = null;
 
@@ -4283,7 +4297,9 @@ async function openHakenList() {
     }
     hakenEmployeesCache = filtered;
     hakenCurrentFilter = 'all';
+    await ensureHakenKeyMap();
     switchScreen('hakenListScreen');
+    initHakenColumnSelector();
     renderHakenList(buka, filtered);
   } catch (e) {
     console.error('Haken list error:', e);
@@ -4343,14 +4359,113 @@ function applyHakenFilter(filter, btn) {
   renderHakenTable(filtered, document.getElementById('hakenListBody'));
 }
 
+function toggleHakenColumns() {
+  const sel = document.getElementById('hakenColSelector');
+  const tog = document.getElementById('hakenColToggle');
+  const open = sel.style.display === 'none';
+  sel.style.display = open ? 'block' : 'none';
+  tog.textContent = open ? '▲' : '▼';
+}
+
+function initHakenColumnSelector() {
+  const container = document.getElementById('hakenColCheckboxes');
+  // Filter out calc-only categories, show selectable ones
+  const cats = PROFILE_CATEGORIES.filter(c => c.id !== 'emergency'); // skip rarely needed
+  container.innerHTML = cats.map(cat => {
+    const checked = hakenSelectedCols.includes(cat.id) ? 'checked' : '';
+    return '<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;white-space:nowrap;background:' + (checked ? '#e8e8f5' : '#fff') + ';">' +
+      '<input type="checkbox" value="' + cat.id + '" ' + checked + ' onchange="onHakenColChange(this)"> ' + cat.icon + ' ' + cat.label +
+      '</label>';
+  }).join('');
+  updateHakenColCount();
+}
+
+function onHakenColChange(cb) {
+  if (cb.checked) {
+    if (!hakenSelectedCols.includes(cb.value)) hakenSelectedCols.push(cb.value);
+  } else {
+    hakenSelectedCols = hakenSelectedCols.filter(id => id !== cb.value);
+  }
+  // Update label style
+  cb.parentElement.style.background = cb.checked ? '#e8e8f5' : '#fff';
+  updateHakenColCount();
+  // Re-render table with current filter
+  const btn = document.querySelector('#hakenFilterBtns .haken-filter-btn.active');
+  const filter = btn ? btn.dataset.filter : 'all';
+  let data = hakenEmployeesCache;
+  if (filter === 'sougei') data = data.filter(e => getTsukinValue(e).indexOf('送迎') >= 0);
+  else if (filter === 'other') data = data.filter(e => { const t = getTsukinValue(e); return t && t.indexOf('送迎') < 0; });
+  else if (filter === 'empty') data = data.filter(e => !getTsukinValue(e));
+  renderHakenTable(data, document.getElementById('hakenListBody'));
+}
+
+function updateHakenColCount() {
+  const el = document.getElementById('hakenColCount');
+  el.textContent = hakenSelectedCols.length > 0 ? hakenSelectedCols.length + '項目選択中' : '';
+}
+
+async function ensureHakenKeyMap() {
+  if (hakenKeyMap) return hakenKeyMap;
+  const meta = await fetchEmployeeFields();
+  if (meta) {
+    hakenKeyMap = buildFieldKeyMap(meta);
+  }
+  return hakenKeyMap;
+}
+
+function getFieldValueForTable(emp, field, keyMap) {
+  // Handle calc fields
+  if (field.key === '_calcAge') {
+    const bdKey = keyMap['birthday'];
+    if (!bdKey || !emp[bdKey]) return '';
+    const bd = new Date(emp[bdKey]);
+    const now = new Date();
+    let age = now.getFullYear() - bd.getFullYear();
+    const m = now.getMonth() - bd.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < bd.getDate())) age--;
+    return age + '歳';
+  }
+  if (field.key === '_calcTenure') return ''; // skip complex calc in table
+  const odataKey = keyMap[field.key];
+  if (!odataKey) return '';
+  const val = emp[odataKey];
+  if (val === null || val === undefined || val === '') return '';
+  // Plain text for table (strip HTML)
+  if (field.format === 'date' || field.format === 'dateExpiry') return formatDate(val);
+  if (field.format === 'currency') {
+    const num = parseFloat(val);
+    return isNaN(num) ? String(val) : '¥' + Math.round(num).toLocaleString();
+  }
+  if (field.format === 'spUrl' && typeof val === 'object' && val.Url) return val.Description || val.Url;
+  return String(val);
+}
+
 function renderHakenTable(employees, container) {
   if (employees.length === 0) {
     container.innerHTML = '<div class="empty-state"><p>該当する社員がいません</p></div>';
     return;
   }
+
+  // Build extra columns from selected categories
+  const extraCols = [];
+  if (hakenSelectedCols.length > 0 && hakenKeyMap) {
+    hakenSelectedCols.forEach(catId => {
+      const cat = PROFILE_CATEGORIES.find(c => c.id === catId);
+      if (!cat) return;
+      cat.fields.forEach(f => {
+        if (f.key === '_calcTenure') return; // skip
+        extraCols.push({ catId, field: f });
+      });
+    });
+  }
+
   let html = '<table class="haken-table"><thead><tr>' +
-    '<th>氏名</th><th>社番</th><th>通勤方法</th><th>在職</th>' +
-    '</tr></thead><tbody>';
+    '<th>氏名</th><th>社番</th><th>通勤方法</th><th>在職</th>';
+  extraCols.forEach(col => {
+    html += '<th>' + escHtml(col.field.label) + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
   employees.forEach(emp => {
     const tsukin = getTsukinValue(emp);
     const resigned = isResigned(emp);
@@ -4360,8 +4475,11 @@ function renderHakenTable(employees, container) {
       '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
       '<td>' + (emp[F.syainNo] || '') + '</td>' +
       '<td>' + tsukinDisplay + '</td>' +
-      '<td>' + statusDisplay + '</td>' +
-      '</tr>';
+      '<td>' + statusDisplay + '</td>';
+    extraCols.forEach(col => {
+      html += '<td>' + escHtml(getFieldValueForTable(emp, col.field, hakenKeyMap)) + '</td>';
+    });
+    html += '</tr>';
   });
   html += '</tbody></table>';
   container.innerHTML = html;
@@ -4407,19 +4525,38 @@ function downloadHakenExcel() {
 
   const buka = document.getElementById('hakenSelect').value || '部課';
 
+  // Build extra columns from selected categories
+  const extraCols = [];
+  if (hakenSelectedCols.length > 0 && hakenKeyMap) {
+    hakenSelectedCols.forEach(catId => {
+      const cat = PROFILE_CATEGORIES.find(c => c.id === catId);
+      if (!cat) return;
+      cat.fields.forEach(f => {
+        if (f.key === '_calcTenure') return;
+        extraCols.push({ field: f });
+      });
+    });
+  }
+
   // Build CSV with BOM for Excel Japanese support
   const BOM = '\uFEFF';
   const headers = ['氏名', '社員番号', '通勤方法', '在職状態', '部課'];
+  extraCols.forEach(col => headers.push(col.field.label));
   const rows = data.map(emp => {
     const tsukin = getTsukinValue(emp);
     const status = isResigned(emp) ? '退社' : '在職';
-    return [
+    const base = [
       '"' + (emp.Title || '').replace(/"/g, '""') + '"',
       emp[F.syainNo] || '',
       '"' + tsukin.replace(/"/g, '""') + '"',
       status,
       '"' + buka.replace(/"/g, '""') + '"'
-    ].join(',');
+    ];
+    extraCols.forEach(col => {
+      const val = hakenKeyMap ? getFieldValueForTable(emp, col.field, hakenKeyMap) : '';
+      base.push('"' + val.replace(/"/g, '""') + '"');
+    });
+    return base.join(',');
   });
 
   const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
