@@ -3145,6 +3145,12 @@ function buildFieldKeyMap(fieldsMeta) {
     rishokuWatashi: '離職票渡し方risyokuhyou watashikata',
     taisyokuRiyuu: '退職理由',
     jikaiSaiyou: '次回の採用',
+    shahoKanyuubi: '加入日kanyuubi',
+    shahoHuyou: '扶養huyou',
+    shahoHuyouBaai: '扶養がある場合huyouga aru baai',
+    shahoZairyuCard: '扶養者在留カード',
+    shahoMyNumber: '扶養者マイナンバー',
+    shahoFurigana: '扶養者フリガナ',
     tokki1: '特記事項１',
     syainFile: '社員ファイル',
   };
@@ -6174,8 +6180,9 @@ function startProcedure(type) {
   const emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
 
-  // Taisha has its own dedicated form
+  // Dedicated forms
   if (type === 'taisha') { openTaishaForm(); return; }
+  if (type === 'shaho') { openShahoForm(); return; }
 
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -6428,6 +6435,193 @@ async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, risho
     showToast('送信に失敗しました: ' + e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '📤 退社報告を送信'; }
+  }
+}
+
+// ============================================================
+// 社保加入申請 Form
+// ============================================================
+async function openShahoForm() {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const name = emp.Title || '';
+  const no = emp[F.syainNo] || '';
+  const today = toLocalDateStr(new Date());
+
+  const fieldsMeta = await fetchEmployeeFields();
+  const keyMap = buildFieldKeyMap(fieldsMeta);
+
+  // Employee info
+  const buka = emp[keyMap['buka']] || '';
+  const nyushaDate = emp[F.nyushaDate] ? emp[F.nyushaDate].substring(0, 10) : '';
+
+  // 加入予定日: next month 1st
+  const now = new Date();
+  const kanyuYotei = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const kanyuYoteiStr = toLocalDateStr(kanyuYotei);
+
+  function buildOpts(choices) {
+    return choices.map(function(c) {
+      return '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>';
+    }).join('');
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'taisha-overlay';
+  overlay.id = 'shahoOverlay';
+  overlay.innerHTML =
+    '<div class="taisha-panel">' +
+      '<div class="taisha-header">' +
+        '<div class="taisha-header-bar">' +
+          '<span class="taisha-title">🏥 社保加入申請</span>' +
+          '<button class="taisha-close" onclick="closeShahoForm()">✕</button>' +
+        '</div>' +
+        '<div class="taisha-emp-info">' +
+          '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
+          '<span>部課: ' + escHtml(buka) + '</span>' +
+          '<span>入社日: ' + escHtml(nyushaDate) + '</span>' +
+          '<span>加入予定日: ' + escHtml(kanyuYoteiStr) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="taisha-body">' +
+        '<div class="taisha-field">' +
+          '<label>加入日</label>' +
+          '<input type="date" id="shaho_kanyuubi" value="' + today + '">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>扶養</label>' +
+          '<select id="shaho_huyou">' +
+            '<option value="">選択してください</option>' +
+            buildOpts(['ふようあり', 'なし', 'ふようのみ']) +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>扶養がある場合</label>' +
+          '<select id="shaho_huyouBaai">' +
+            '<option value="">選択してください</option>' +
+            buildOpts(['なし', '1人', '2人', '3人', '4人', '5人以上']) +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>扶養者 在留カード</label>' +
+          '<select id="shaho_zairyuCard">' +
+            '<option value="">選択してください</option>' +
+            buildOpts(['あり', 'なし', 'フョウなし']) +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>扶養者 マイナンバー</label>' +
+          '<select id="shaho_myNumber">' +
+            '<option value="">選択してください</option>' +
+            buildOpts(['フョウなし', 'あり', 'なし']) +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>扶養者 フリガナ</label>' +
+          '<input type="text" id="shaho_furigana" placeholder="フリガナを入力" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+        '</div>' +
+      '</div>' +
+      '<div class="taisha-footer">' +
+        '<button class="taisha-submit-btn" id="shahoSubmitBtn" onclick="submitShahoForm()" style="background:linear-gradient(135deg,#43a047,#2e7d32);">🏥 社保加入申請を送信</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+function closeShahoForm() {
+  const el = document.getElementById('shahoOverlay');
+  if (el) el.remove();
+}
+
+async function submitShahoForm() {
+  const emp = currentEmployee;
+  if (!emp) return;
+
+  const kanyuubi = document.getElementById('shaho_kanyuubi').value;
+  const huyou = document.getElementById('shaho_huyou').value;
+  const huyouBaai = document.getElementById('shaho_huyouBaai').value;
+  const zairyuCard = document.getElementById('shaho_zairyuCard').value;
+  const myNumber = document.getElementById('shaho_myNumber').value;
+  const furigana = document.getElementById('shaho_furigana').value;
+
+  if (!kanyuubi) { showToast('加入日を入力してください', 'error'); return; }
+  if (!huyou) { showToast('扶養を選択してください', 'error'); return; }
+
+  // Confirm
+  const overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.style.zIndex = '99999';
+  const name = emp.Title || '';
+  const no = emp[F.syainNo] || '';
+  overlay.innerHTML = '<div class="confirm-box">' +
+    '<div class="confirm-title">🏥 社保加入申請確認</div>' +
+    '<div class="confirm-msg" style="text-align:left;">' +
+    '<strong>' + escHtml(no + ' ' + name) + '</strong><br>' +
+    '加入日: ' + escHtml(kanyuubi) + '<br>' +
+    '扶養: ' + escHtml(huyou) + '<br>' +
+    (huyouBaai ? '扶養がある場合: ' + escHtml(huyouBaai) + '<br>' : '') +
+    (zairyuCard ? '在留カード: ' + escHtml(zairyuCard) + '<br>' : '') +
+    (myNumber ? 'マイナンバー: ' + escHtml(myNumber) + '<br>' : '') +
+    (furigana ? 'フリガナ: ' + escHtml(furigana) : '') +
+    '</div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
+    '<button class="btn-ok" id="shahoConfirmOk" style="background:linear-gradient(135deg,#43a047,#2e7d32);">送信する</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  document.getElementById('shahoConfirmOk').onclick = async function() {
+    overlay.remove();
+    await executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana);
+  };
+}
+
+async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana) {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const btn = document.getElementById('shahoSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '送信中...'; }
+
+  try {
+    const fieldsMeta = await fetchEmployeeFields();
+    const keyMap = buildFieldKeyMap(fieldsMeta);
+    const body = {};
+
+    function setField(fieldKey, value) {
+      const odataKey = keyMap[fieldKey];
+      if (!odataKey) { console.warn('No mapping for', fieldKey); return; }
+      const internalName = odataKey.replace(/^OData_/, '');
+      body[internalName] = value;
+    }
+
+    // Date
+    setField('shahoKanyuubi', kanyuubi + 'T00:00:00Z');
+    // Also set 健保：資格取得日
+    setField('kenpoShutoku', kanyuubi + 'T00:00:00Z');
+
+    // Choice fields
+    if (huyou) setField('shahoHuyou', huyou);
+    if (huyouBaai) setField('shahoHuyouBaai', huyouBaai);
+    if (zairyuCard) setField('shahoZairyuCard', zairyuCard);
+    if (myNumber) setField('shahoMyNumber', myNumber);
+    if (furigana) setField('shahoFurigana', furigana);
+
+    await spPatchEmployee(emp.Id, body);
+    showToast('🏥 社保加入申請を送信しました', 'success');
+    closeShahoForm();
+
+    const updated = await fetchFullEmployee(emp[F.syainNo]);
+    if (updated) {
+      currentEmployee = updated;
+      loadLeaveDetails();
+    }
+  } catch (e) {
+    console.error('Shaho submit error:', e);
+    showToast('送信に失敗しました: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🏥 社保加入申請を送信'; }
   }
 }
 
