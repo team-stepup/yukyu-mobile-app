@@ -6194,12 +6194,20 @@ async function openTaishaForm() {
   const jikaiSaiyouChoices = getChoicesFor('jikaiSaiyou') || ['採用する', 'しない', '条件付き'];
 
   // Get existing values from employee record
-  const hakensaki = emp.Title || '';
+  const buka = emp[keyMap['buka']] || '';
   const nyushaDate = emp[F.nyushaDate] ? emp[F.nyushaDate].substring(0, 10) : '';
   const kyuryo = emp[keyMap['seikyu']] || '';
   const hakenTaishaVal = emp[F.hakenTaisha] ? emp[F.hakenTaisha].substring(0, 10) : today;
   const yukyuTaishaVal = emp[F.yukyuTaisha] ? emp[F.yukyuTaisha].substring(0, 10) : today;
   const shahoVal = emp[keyMap['shahoSoushitsu']] ? String(emp[keyMap['shahoSoushitsu']]).substring(0, 10) : today;
+
+  // Additional info for header
+  const kenpoShutoku = emp[keyMap['kenpoShutoku']] ? String(emp[keyMap['kenpoShutoku']]).substring(0, 10) : '';
+  const zairyuKigenCard = emp[keyMap['zairyuKigenCard']] ? String(emp[keyMap['zairyuKigenCard']]).substring(0, 10) : '';
+  const zairyuShikaku = emp[keyMap['zairyuShikaku']] || '';
+
+  // Default rishoku value
+  const defaultRishoku = 'いらないiranai';
 
   function buildOptions(choices, selected) {
     return choices.map(function(c) {
@@ -6219,9 +6227,12 @@ async function openTaishaForm() {
         '</div>' +
         '<div class="taisha-emp-info">' +
           '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
-          '<span>派遣先: ' + escHtml(hakensaki) + '</span>' +
+          '<span>部課: ' + escHtml(buka) + '</span>' +
           '<span>入社日: ' + escHtml(nyushaDate) + '</span>' +
           (kyuryo ? '<span>請求: ' + escHtml(kyuryo) + '</span>' : '') +
+          (kenpoShutoku ? '<span>社保取得日: ' + escHtml(kenpoShutoku) + '</span>' : '') +
+          (zairyuKigenCard ? '<span>在留カード期限: ' + escHtml(zairyuKigenCard) + '</span>' : '') +
+          (zairyuShikaku ? '<span>在留資格: ' + escHtml(zairyuShikaku) + '</span>' : '') +
         '</div>' +
       '</div>' +
       '<div class="taisha-body">' +
@@ -6247,7 +6258,7 @@ async function openTaishaForm() {
         '<div class="taisha-field">' +
           '<label>離職票</label>' +
           '<select id="taisha_rishoku">' +
-            buildOptions(rishokuhyouChoices, '') +
+            buildOptions(rishokuhyouChoices, defaultRishoku) +
           '</select>' +
         '</div>' +
         '<div class="taisha-field">' +
