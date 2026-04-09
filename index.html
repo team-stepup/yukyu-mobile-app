@@ -6661,7 +6661,10 @@ async function openDattaiForm() {
     document.body.appendChild(alertOv);
     alertOv.addEventListener('click', function(e) { if (e.target === alertOv) alertOv.remove(); });
     return;
-  }  var no = emp[F.syainNo] || '';
+  }
+
+  var name = emp.Title || '';
+  var no = emp[F.syainNo] || '';
   var today = toLocalDateStr(new Date());
 
   var fieldsMeta = await fetchEmployeeFields();
@@ -6731,33 +6734,22 @@ async function openDattaiForm() {
         '<div class="dattai-section-title">\ud83d\udcc4 被保険者情報</div>' +
         '<div class="taisha-field">' +
           '<label>記号</label>' +
-          '<input type="text" id="dattai_kigou" value="' + escHtml(kigou) + '" placeholder="健保記号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+          '<input type="text" id="dattai_kigou" value="32470247" readonly style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#f0f0f0;color:#666;">' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>番号</label>' +
-          '<input type="text" id="dattai_bangou" value="32470247" readonly style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#f0f0f0;color:#666;">' +
+          '<input type="text" id="dattai_bangou" value="' + escHtml(seiriNo) + '" placeholder="整理番号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
         '</div>' +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
-          '<div class="taisha-field">' +
-            '<label>枝番</label>' +
-            '<input type="text" id="dattai_edaban" value="" placeholder="枝番" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
-          '</div>' +
-          '<div class="taisha-field">' +
-            '<label>保険者番号</label>' +
-            '<input type="text" id="dattai_hokenshaNo" value="" placeholder="保険者番号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
-          '</div>' +
+        '<div class="taisha-field">' +
+          '<label>保険者番号</label>' +
+          '<input type="text" id="dattai_hokenshaNo" value="01220011" readonly style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#f0f0f0;color:#666;">' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>保険者名</label>' +
-          '<select id="dattai_hokenshaType" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#fff;appearance:none;">' +
-            '<option value="全国健康保険協会" selected>全国健康保険協会</option>' +
-            '<option value="健康保険組合">健康保険組合</option>' +
-            '<option value="共済組合">共済組合</option>' +
-            '<option value="国民健康保険組合">国民健康保険組合</option>' +
-          '</select>' +
+          '<input type="text" id="dattai_hokenshaType" value="全国健康保険協会" readonly style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#f0f0f0;color:#666;">' +
         '</div>' +
         '<div class="taisha-field">' +
-          '<label>事業所名</label>' +
+          '<label>事業所名（支部）</label>' +
           '<input type="text" id="dattai_jigyousho" value="静岡" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
         '</div>' +
         '<div class="taisha-field">' +
@@ -6864,7 +6856,6 @@ var STAMP_IMG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAACWCAYAAAA8A
 function generateDattaiDocument() {
   var kigou = document.getElementById('dattai_kigou').value;
   var bangou = document.getElementById('dattai_bangou').value;
-  var edaban = document.getElementById('dattai_edaban').value;
   var hokenshaNo = document.getElementById('dattai_hokenshaNo').value;
   var hokenshaType = document.getElementById('dattai_hokenshaType').value;
   var jigyousho = document.getElementById('dattai_jigyousho').value;
@@ -6895,10 +6886,7 @@ function generateDattaiDocument() {
   var todayW = toWareki(toLocalDateStr(new Date()));
 
   // 保険者名チェックボックス
-  var hTypes = ['健康保険組合', '全国健康保険協会', '共済組合', '国民健康保険組合'];
-  var hokenshaCheckHtml = hTypes.map(function(t) {
-    return '<span class="hk-cb">' + (t === hokenshaType ? '☑' : '☐') + ' ' + t + '</span>';
-  }).join('');
+  var hokenshaCheckHtml = '☑ ' + escHtml(hokenshaType) + '　' + escHtml(jigyousho) + '支部';
 
   // 扶養者行HTML（4行分）
   var fuyouTableHtml = '';
@@ -6951,7 +6939,6 @@ function generateDattaiDocument() {
     '.row-kigou .lbl-sub { font-size: 7pt; display: block; }' +
     '.kigou-val { font-size: 13pt; font-weight: bold; letter-spacing: 3px; text-align: center; min-width: 120px; }' +
     '.bangou-val { font-size: 13pt; font-weight: bold; letter-spacing: 2px; text-align: center; }' +
-    '.edaban-val { text-align: center; width: 40px; }' +
     '.hokensha-no { text-align: center; }' +
     '.stamp-cell { width: 55px; text-align: center; font-size: 7pt; border-left: 2px solid #000 !important; }' +
     '.stamp-inner { width: 50px; height: 50px; margin: 2px auto; }' + '.stamp-inner img { width: 100%; height: 100%; object-fit: contain; }' +
@@ -7036,8 +7023,7 @@ function generateDattaiDocument() {
       '<td class="kigou-val">' + escHtml(kigou) + '</td>' +
       '<th>番号</th>' +
       '<td class="bangou-val">' + escHtml(bangou) + '</td>' +
-      '<th>枝番</th>' +
-      '<td class="edaban-val">' + escHtml(edaban) + '</td>' +
+      
       '<th>保険者番号</th>' +
       '<td class="hokensha-no">' + escHtml(hokenshaNo) + '</td>' +
       '<td class="stamp-cell" rowspan="4"><div class="stamp-inner"><img src="' + STAMP_IMG + '" alt="角印"></div></td>' +
