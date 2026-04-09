@@ -6890,16 +6890,10 @@ function generateDattaiDocument() {
     var taW = wD(taishaDate);
     var shW = wD(shutoku);
 
-    // 和暦の年号表示（選択されたものを丸で囲む）
-    function eraSpan(w, eras) {
-      if (!w) return eras.join(' <span class="edot">・</span> ') + '&emsp;<span class="vbox"></span>年<span class="vbox"></span>月<span class="vbox"></span>日';
-      var parts = [];
-      for (var i = 0; i < eras.length; i++) {
-        if (w.era === eras[i]) parts.push('<span class="esel">' + eras[i] + '</span>');
-        else parts.push(eras[i]);
-        if (i < eras.length - 1) parts.push(' <span class="edot">・</span> ');
-      }
-      return parts.join('') + '&emsp;<span class="vbox">' + w.year + '</span>年<span class="vbox">' + w.month + '</span>月<span class="vbox">' + w.day + '</span>日';
+    // 和暦日付: データありなら「令和8年2月6日」、なしなら「　年　月　日」
+    function wStr(w) {
+      if (!w) return '<span class="vbox"></span>年<span class="vbox"></span>月<span class="vbox"></span>日';
+      return w.era + '<span class="vbox">' + w.year + '</span>年<span class="vbox">' + w.month + '</span>月<span class="vbox">' + w.day + '</span>日';
     }
 
     // 保険者番号ボックス
@@ -6916,12 +6910,12 @@ function generateDattaiDocument() {
       var fBd = f ? wD(f.birthday) : null;
       var fSo = f ? wD(f.soushitsu) : null;
       fuyouHTML += '<tr>' +
-        '<td class="cc">' + (f ? '' : '') + '</td>' +
-        '<td class="nm">' + (f ? escHtml(f.name) : '') + '</td>' +
-        '<td class="dt">' + eraSpan(fBd, ['昭和','平成','令和']) + '</td>' +
         '<td class="cc"></td>' +
-        '<td class="dt sm">★</td>' +
-        '<td class="dt">' + eraSpan(fSo, ['平成','令和']) + '</td>' +
+        '<td class="nm">' + (f ? escHtml(f.name) : '') + '</td>' +
+        '<td class="dt">' + wStr(fBd) + '</td>' +
+        '<td class="cc"></td>' +
+        '<td class="dt">★</td>' +
+        '<td class="dt">' + wStr(fSo) + '</td>' +
         '</tr>';
     }
 
@@ -6953,9 +6947,7 @@ function generateDattaiDocument() {
       'table.ct th.sl { text-align:center; font-size:6.5pt; background:none; width:5%; }',
       'table.ct td.dc { text-align:center; font-size:9pt; letter-spacing:0.5pt; }',
 
-      '.esel { display:inline-block; border:1pt solid #000; border-radius:50%; padding:0 1.5mm; line-height:1.2; }',
-      '.edot { color:#000; }',
-      '.vbox { display:inline-block; min-width:4mm; text-align:center; }',
+      '.vbox { display:inline-block; min-width:3.5mm; text-align:center; }',
 
       '.ocirc { display:inline-block; border:1.5pt solid #000; border-radius:50%; padding:0 3mm; }',
 
@@ -7021,31 +7013,29 @@ function generateDattaiDocument() {
 
       // 保険者名
       '<tr>' +
-        '<th class="rl" rowspan="4">保険者名</th>' +
-        '<td colspan="5" style="border-right:none;">' +
+        '<th class="rl" rowspan="2">保険者名</th>' +
+        '<td colspan="5" style="border-right:none;padding:0.5mm 1.5mm;">' +
           '<span class="ocirc">全国健康保険協会</span>' +
-          '&emsp;' + escHtml(jigyousho) + '　支部' +
+          '&ensp;' + escHtml(jigyousho) + '支部 ／ 健康保険組合 ／ 共済組合 ／ 国民健康保険組合' +
         '</td>' +
-        '<th class="sl" rowspan="4" style="border-left:none;border-right:none;writing-mode:vertical-rl;letter-spacing:1pt;font-size:6pt;">保険者番号</th>' +
-        '<td rowspan="4" style="border-left:none;vertical-align:middle;text-align:center;">' +
+        '<th class="sl" rowspan="2" style="border-left:none;border-right:none;writing-mode:vertical-rl;letter-spacing:1pt;font-size:5.5pt;">保険者番号</th>' +
+        '<td rowspan="2" style="border-left:none;vertical-align:middle;text-align:center;">' +
           '<table class="hnt"><tr>' + hNoBoxes + '</tr></table>' +
         '</td>' +
       '</tr>' +
-      '<tr><td colspan="5" style="padding:0.3mm 1.5mm;">　健康保険組合</td></tr>' +
-      '<tr><td colspan="5" style="padding:0.3mm 1.5mm;">　共済組合</td></tr>' +
-      '<tr><td colspan="5" style="padding:0.3mm 1.5mm;">　国民健康保険組合</td></tr>' +
+      '<tr><td colspan="5" style="padding:0.3mm 1.5mm;font-size:5.5pt;color:#666;">※該当する保険者名に○を付けてください</td></tr>' +
 
       // 被保険者
       '<tr>' +
         '<th class="rl" rowspan="2">被保険者<br>(組合員)</th>' +
         '<th class="sl">氏名</th>' +
         '<td class="nm" style="width:22%;">' + escHtml(shimei) + '</td>' +
-        '<td style="text-align:center;font-size:6.5pt;width:25%;">生 年 月 日<br>' + eraSpan(bdW, ['昭和','平成','令和']) + '</td>' +
-        '<td colspan="3" style="text-align:center;font-size:6.5pt;">資格取得年月日<br>' + eraSpan(shW, ['平成','令和']) + '</td>' +
+        '<td style="text-align:center;font-size:6.5pt;width:25%;">生年月日：' + wStr(bdW) + '</td>' +
+        '<td colspan="3" style="text-align:center;font-size:6.5pt;">資格取得：' + wStr(shW) + '</td>' +
       '</tr>' +
       '<tr>' +
-        '<td colspan="3" style="border-top:none;padding:0;height:0;"></td>' +
-        '<td colspan="3" style="text-align:center;font-size:6.5pt;">資格喪失年月日<br>' + eraSpan(soW, ['平成','令和']) + '</td>' +
+        '<td colspan="3"></td>' +
+        '<td colspan="3" style="text-align:center;font-size:6.5pt;">資格喪失：' + wStr(soW) + '</td>' +
       '</tr>' +
 
       // 被扶養者ヘッダー
@@ -7064,7 +7054,7 @@ function generateDattaiDocument() {
       '<tr class="reason">' +
         '<th class="rl" rowspan="4" style="font-size:5.5pt;">資格喪失<br>又は<br>認定除外<br>の理由</th>' +
         '<td colspan="6">１ <strong>☑</strong> 被保険者の退職（退職日：' +
-          (taW ? eraSpan(taW, ['平成','令和']) : '平成 <span class="edot">・</span> 令和 <span class="vbox"></span>年<span class="vbox"></span>月<span class="vbox"></span>日') +
+          wStr(taW) +
           '）<span style="font-size:5.5pt;margin-left:2mm;">※資格喪失年月日は退職日の翌日</span></td>' +
       '</tr>' +
       '<tr class="reason"><td colspan="6">２　被保険者が後期高齢者医療制度へ加入</td></tr>' +
