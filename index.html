@@ -3526,14 +3526,22 @@ function getNextFridayAfter(baseDate, daysAhead) {
 }
 
 // Get next Friday from today (including today if Friday)
+// Returns local date string 'YYYY-MM-DD' to avoid timezone issues with toISOString()
 function getNextFriday() {
   const today = new Date();
   today.setHours(0,0,0,0);
   const dow = today.getDay();
-  if (dow === 5) return today; // Today is Friday
-  const diff = (5 - dow + 7) % 7;
-  today.setDate(today.getDate() + diff);
+  if (dow !== 5) {
+    const diff = (5 - dow + 7) % 7;
+    today.setDate(today.getDate() + diff);
+  }
   return today;
+}
+function toLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
 }
 
 function toggleMaebariCalendar() {
@@ -3825,7 +3833,7 @@ function initMaebariListDate() {
   const inp = document.getElementById('maebariListDate');
   // Always reset to next Friday when entering the page
   const fri = getNextFriday();
-  inp.value = fri.toISOString().slice(0, 10);
+  inp.value = toLocalDateStr(fri);
   onDateInputChange('maebariListDate', 'maebariListDateDisplay');
   loadMaebariList();
 }
@@ -4124,7 +4132,7 @@ function initYukyuListDate() {
   const fromInp = document.getElementById('yukyuListDateFrom');
   const toInp = document.getElementById('yukyuListDateTo');
   if (!fromInp.value) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toLocalDateStr(new Date());
     fromInp.value = today;
     toInp.value = today;
   }
