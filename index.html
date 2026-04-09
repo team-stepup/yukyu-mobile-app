@@ -1828,8 +1828,9 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // ============================================================
 // App Version & Update Check (version.json based)
 // ============================================================
-// This version is embedded at build time; GitHub Actions updates version.json on each deploy
-const APP_VERSION = 'afe5c62';
+// On first load: fetch version.json and store as current version in localStorage
+// On return to app: fetch version.json and compare with stored version
+// If different → show update badge → user taps → clear stored → reload → new version stored
 
 async function checkForUpdate() {
   try {
@@ -1837,13 +1838,21 @@ async function checkForUpdate() {
     const resp = await fetch(base + 'version.json?_=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) return;
     const data = await resp.json();
-    if (data.version && data.version !== APP_VERSION) {
+    if (!data.version) return;
+    const stored = localStorage.getItem('app_current_version');
+    if (!stored) {
+      // First visit or after update: remember this version
+      localStorage.setItem('app_current_version', data.version);
+    } else if (stored !== data.version) {
+      // New version available
       document.getElementById('updateBadge').style.display = 'flex';
     }
   } catch (e) { /* silently ignore */ }
 }
 
 function applyUpdate() {
+  // Clear stored version so after reload the new version gets stored
+  localStorage.removeItem('app_current_version');
   location.reload(true);
 }
 
