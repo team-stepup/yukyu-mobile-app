@@ -1826,35 +1826,37 @@ let appliedDatesCache = [];
 let employeeFieldsCache = null; // cached field metadata {internalName: title}
 
 // ============================================================
-// App Version & Update Check
+// App Version & Update Check (version.json based)
 // ============================================================
-const APP_VERSION = 'v20260408a';
+// This version is embedded at build time; GitHub Actions updates version.json on each deploy
+const APP_VERSION = 'afe5c62';
 
 async function checkForUpdate() {
   try {
-    const resp = await fetch(window.location.href + '?_nocache=' + Date.now(), { method: 'HEAD', cache: 'no-store' });
-    const lastMod = resp.headers.get('last-modified');
-    const etag = resp.headers.get('etag');
-    const storedVer = localStorage.getItem('app_version');
-    const currentSig = lastMod || etag || '';
-    if (storedVer && storedVer !== currentSig && currentSig) {
-      // Update available
+    const base = window.location.href.replace(/\/[^\/]*$/, '/');
+    const resp = await fetch(base + 'version.json?_=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.version && data.version !== APP_VERSION) {
       document.getElementById('updateBadge').style.display = 'flex';
-    } else if (currentSig) {
-      localStorage.setItem('app_version', currentSig);
     }
   } catch (e) { /* silently ignore */ }
 }
 
 function applyUpdate() {
-  localStorage.removeItem('app_version');
   location.reload(true);
 }
 
-// Check every 5 minutes
-setInterval(checkForUpdate, 5 * 60 * 1000);
-// Initial check after 10 seconds
-setTimeout(checkForUpdate, 10000);
+// Check when user returns to the app (visibilitychange)
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') {
+    checkForUpdate();
+  }
+});
+// Also check on window focus (covers more cases on mobile)
+window.addEventListener('focus', checkForUpdate);
+// Initial check after 5 seconds
+setTimeout(checkForUpdate, 5000);
 
 // ============================================================
 // Initialize MSAL
