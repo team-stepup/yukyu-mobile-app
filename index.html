@@ -6642,6 +6642,26 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
 async function openDattaiForm() {
   var emp = currentEmployee;
   if (!emp) return;
+
+  // 在職中チェック
+  if (!isResigned(emp)) {
+    var alertOv = document.createElement('div');
+    alertOv.className = 'confirm-overlay';
+    alertOv.innerHTML = '<div class="confirm-box">' +
+      '<div class="confirm-title" style="color:var(--warning);">⚠️ 作成できません</div>' +
+      '<div class="confirm-msg">' +
+        '<strong>' + escHtml((emp[F.syainNo] || '') + ' ' + (emp.Title || '')) + '</strong><br><br>' +
+        'この社員は<span style="color:var(--danger);font-weight:700;">在職中</span>のため、脱退連絡票を作成できません。<br><br>' +
+        '退社報告が完了してから作成してください。' +
+      '</div>' +
+      '<div class="confirm-btns">' +
+        '<button class="btn-ok" onclick="this.closest(\'.confirm-overlay\').remove()">OK</button>' +
+      '</div></div>';
+    document.body.appendChild(alertOv);
+    alertOv.addEventListener('click', function(e) { if (e.target === alertOv) alertOv.remove(); });
+    return;
+  }
+
   var name = emp.Title || '';
   var no = emp[F.syainNo] || '';
   var today = toLocalDateStr(new Date());
@@ -6653,14 +6673,39 @@ async function openDattaiForm() {
   var birthday = emp[keyMap['birthday']] ? String(emp[keyMap['birthday']]).substring(0, 10) : '';
   var kenpoHihokensha = emp[keyMap['kenpoHihokensha']] || '';
   var kenpoShutoku = emp[keyMap['kenpoShutoku']] ? String(emp[keyMap['kenpoShutoku']]).substring(0, 10) : '';
-  var shahoSoushitsu = emp[keyMap['shahoSoushitsu']] ? String(emp[keyMap['shahoSoushitsu']]).substring(0, 10) : today;
+  var shahoSoushitsu = emp[keyMap['shahoSoushitsu']] ? String(emp[keyMap['shahoSoushitsu']]).substring(0, 10) : '';
   var seiriNo = emp[keyMap['seiriNo']] || '';
 
-  var kigou = '', bangou = '';
+  // 扶養情報を社員データから取得
+  var huyouStatus = emp[keyMap['shahoHuyou']] || '';
+  var huyouBaai = emp[keyMap['shahoHuyouBaai']] || '';
+  var huyouFurigana = emp[keyMap['shahoFurigana']] || '';
+  var hasFuyou = huyouStatus && huyouStatus.indexOf('あり') >= 0;
+
+  // 記号は健保被保険者から取得
+  var kigou = '';
   if (kenpoHihokensha) {
     var parts = String(kenpoHihokensha).split(/[-\s\/]+/);
-    if (parts.length >= 2) { kigou = parts[0]; bangou = parts[1]; }
-    else { kigou = kenpoHihokensha; }
+    kigou = parts[0] || kenpoHihokensha;
+  }
+
+  // 喪失日の警告メッセージ
+  var soushitsuWarning = '';
+  if (!shahoSoushitsu) {
+    soushitsuWarning =
+      '<div class="taisha-notice" style="background:#fff3e0;border-color:#ffe0b2;color:#e65100;">' +
+        '⚠️ 社保喪失日が未登録です。総務に確認の上、下のカレンダーから入力してください。' +
+      '</div>';
+  }
+
+  // 扶養者セクション：社員データから取得できた場合はプリセット
+  var fuyouPresetHtml = '';
+  if (hasFuyou && huyouFurigana) {
+    // フリガナをカンマまたは改行で分割して扶養者として表示
+    var fNames = huyouFurigana.split(/[,、\n\r]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s; });
+    fuyouPresetHtml = '<div class="dattai-fuyou-preset-info" style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#2e7d32;">' +
+      '✅ 社員データから扶養情報を取得しました（' + escHtml(huyouBaai || huyouStatus) + '）' +
+    '</div>';
   }
 
   var overlay = document.createElement('div');
@@ -6678,7 +6723,7 @@ async function openDattaiForm() {
           '<span>部課: ' + escHtml(buka) + '</span>' +
           (birthday ? '<span>生年月日: ' + escHtml(birthday) + '</span>' : '') +
           (kenpoShutoku ? '<span>資格取得日: ' + escHtml(kenpoShutoku) + '</span>' : '') +
-          (shahoSoushitsu !== today ? '<span>喪失日: ' + escHtml(shahoSoushitsu) + '</span>' : '') +
+          (shahoSoushitsu ? '<span>喪失日: ' + escHtml(shahoSoushitsu) + '</span>' : '<span style="color:#e65100;">喪失日: 未登録</span>') +
         '</div>' +
       '</div>' +
       '<div class="taisha-body">' +
@@ -6689,7 +6734,7 @@ async function openDattaiForm() {
         '</div>' +
         '<div class="taisha-field">' +
           '<label>番号</label>' +
-          '<input type="text" id="dattai_bangou" value="' + escHtml(bangou) + '" placeholder="健保番号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+          '<input type="text" id="dattai_bangou" value="32470247" readonly style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#f0f0f0;color:#666;">' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>整理番号</label>' +
@@ -6711,11 +6756,13 @@ async function openDattaiForm() {
           '<label>資格取得年月日</label>' +
           '<input type="date" id="dattai_shutoku" value="' + kenpoShutoku + '">' +
         '</div>' +
+        soushitsuWarning +
         '<div class="taisha-field">' +
           '<label>資格喪失年月日</label>' +
-          '<input type="date" id="dattai_soushitsu" value="' + shahoSoushitsu + '">' +
+          '<input type="date" id="dattai_soushitsu" value="' + shahoSoushitsu + '"' + (shahoSoushitsu ? '' : ' style="border-color:var(--warning);"') + '>' +
         '</div>' +
         '<div class="dattai-section-title" style="margin-top:20px;">扶養家族（該当者がいる場合）</div>' +
+        fuyouPresetHtml +
         '<div id="dattai_fuyou_list"></div>' +
         '<button class="dattai-add-fuyou-btn" onclick="addDattaiFuyouRow()" type="button">＋ 扶養者を追加</button>' +
       '</div>' +
@@ -6725,8 +6772,32 @@ async function openDattaiForm() {
     '</div>';
 
   document.body.appendChild(overlay);
-}
 
+  // 扶養者データがある場合、自動で行を追加
+  if (hasFuyou && huyouFurigana) {
+    var fNames = huyouFurigana.split(/[,、\n\r]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s; });
+    fNames.forEach(function(fname) {
+      var list = document.getElementById('dattai_fuyou_list');
+      if (!list) return;
+      var idx = list.children.length;
+      var soushitsuVal = document.getElementById('dattai_soushitsu') ? document.getElementById('dattai_soushitsu').value : '';
+      var row = document.createElement('div');
+      row.className = 'dattai-fuyou-row';
+      row.innerHTML =
+        '<div class="dattai-fuyou-header">' +
+          '<span>扶養者 ' + (idx + 1) + '</span>' +
+          '<button class="dattai-fuyou-remove" onclick="this.closest(\x27.dattai-fuyou-row\x27).remove()" type="button">\u2715</button>' +
+        '</div>' +
+        '<div class="dattai-fuyou-fields">' +
+          '<input type="text" placeholder="氏名" class="dattai-fuyou-name" value="' + escHtml(fname) + '">' +
+          '<input type="date" class="dattai-fuyou-bd" title="生年月日">' +
+          '<input type="date" class="dattai-fuyou-shutoku" title="資格取得日">' +
+          '<input type="date" class="dattai-fuyou-soushitsu" title="喪失日" value="' + soushitsuVal + '">' +
+        '</div>';
+      list.appendChild(row);
+    });
+  }
+}
 function closeDattaiForm() {
   var el = document.getElementById('dattaiOverlay');
   if (el) el.remove();
