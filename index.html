@@ -6870,182 +6870,116 @@ function generateDattaiDocument() {
     var yukyuTD = emp && emp[F.yukyuTaisha] ? emp[F.yukyuTaisha].substring(0, 10) : '';
     var hakenTD = emp && emp[F.hakenTaisha] ? emp[F.hakenTaisha].substring(0, 10) : '';
     var taishaDate = yukyuTD || hakenTD;
-
     if (!shimei) { showToast('氏名を入力してください', 'error'); return; }
     if (!soushitsu) { showToast('資格喪失年月日を入力してください', 'error'); return; }
-
-    var fuyouRows = document.querySelectorAll('.dattai-fuyou-row');
+    var fuyouRowEls = document.querySelectorAll('.dattai-fuyou-row');
     var fuyouList = [];
-    fuyouRows.forEach(function(row) {
+    fuyouRowEls.forEach(function(row) {
       var fn = row.querySelector('.dattai-fuyou-name').value || '';
       var fbd = row.querySelector('.dattai-fuyou-bd').value || '';
       var fso = row.querySelector('.dattai-fuyou-soushitsu').value || '';
       if (fn) fuyouList.push({ name: fn, birthday: fbd, soushitsu: fso });
     });
-
     var todayW = toWareki(toLocalDateStr(new Date()));
     function wD(ds) { return ds ? toWareki(ds) : null; }
-    var bdW = wD(birthday);
-    var soW = wD(soushitsu);
-    var taW = wD(taishaDate);
-    var shW = wD(shutoku);
+    var bdW = wD(birthday), soW = wD(soushitsu), taW = wD(taishaDate), shW = wD(shutoku);
 
-    showSpinner();
-
-    // ExcelJS をCDNからロード
-    function loadExcelJS() {
-      return new Promise(function(resolve, reject) {
-        if (window.ExcelJS) { resolve(); return; }
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
-        s.onload = function() {
-          if (window.ExcelJS) resolve();
-          else reject(new Error('ExcelJS loaded but not available'));
-        };
-        s.onerror = function() { reject(new Error('ExcelJSの読み込みに失敗しました')); };
-        document.head.appendChild(s);
-      });
+    // 和暦（○で囲む版）: 昭和・(平成)・令和 7年8月2日
+    function eraC(w, eras) {
+      var v = function(n) { return '<span class="v">' + (n||'') + '</span>'; };
+      if (!w) return eras.join('・') + ' ' + v('') + '年' + v('') + '月' + v('') + '日';
+      return eras.map(function(e) { return w.era === e ? '<span class="ec">' + e + '</span>' : e; }).join('・') + ' ' + v(w.year) + '年' + v(w.month) + '月' + v(w.day) + '日';
+    }
+    // 和暦コンパクト版（扶養者用）: 平成7年8月2日
+    function wS(w) {
+      var v = function(n) { return '<span class="v">' + (n||'') + '</span>'; };
+      if (!w) return v('') + '年' + v('') + '月' + v('') + '日';
+      return w.era + v(w.year) + '年' + v(w.month) + '月' + v(w.day) + '日';
     }
 
-    // フォント設定ヘルパー
-    var yuFont = { name: '游ゴシック', size: 10, color: { argb: 'FF000000' } };
-    var yuFontS = { name: '游ゴシック', size: 8, color: { argb: 'FF000000' } };
+    // 保険者番号
+    var hNo = hokenshaNo || '', hB = '';
+    for (var hi = 0; hi < 8; hi++) hB += '<td class="hn">' + (hNo[hi]||'') + '</td>';
 
-    loadExcelJS().then(function() {
-      var workbook = new ExcelJS.Workbook();
-      var b64 = DATTAI_XLSX_B64;
-      var binary = atob(b64);
-      var bytes = new Uint8Array(binary.length);
-      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    // 扶養者
+    var fH = '';
+    for (var fi = 0; fi < 4; fi++) {
+      var f = fuyouList[fi]||null, fb = f?wD(f.birthday):null, fs = f?wD(f.soushitsu):null;
+      fH += '<tr><td class="c"></td><td class="fn">' + (f?escHtml(f.name):'') + '</td><td class="d">' + wS(fb) + '</td><td class="c"></td><td class="d">★</td><td class="d">' + wS(fs) + '</td></tr>';
+    }
 
-      return workbook.xlsx.load(bytes.buffer).then(function() {
-        var ws = workbook.worksheets[0];
-        if (!ws) throw new Error('ワークシートが見つかりません');
+    var css = '*, *::before, *::after{margin:0;padding:0;box-sizing:border-box}' +
+      '@page{size:A4;margin:5mm 7mm}' +
+      'body{font-family:"游ゴシック Medium","Yu Gothic Medium","游ゴシック","Yu Gothic",YuGothic,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:6.5pt;color:#000;line-height:1.25;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      'h2{text-align:center;font-size:10pt;font-weight:bold;margin:0.5mm 0 1mm;letter-spacing:1pt}' +
+      '.fl{text-align:right;font-size:5.5pt;margin-bottom:0.3mm}' +
+      '.ck{margin:0.5mm 0 0.5mm 1mm;font-size:7pt;line-height:1.4}.ck .b{font-size:9pt;vertical-align:middle}' +
+      '.nt{margin:0 0 0 1mm;font-size:6pt}' +
+      '.inf{margin:0 0 0 1mm;font-size:5.5pt;line-height:1.3}.inf .s{padding-left:7mm}.inf .s2{padding-left:12mm}' +
+      'hr.sp{border:none;border-top:1.5px solid #000;margin:1.5mm 0 0.5mm}' +
+      'table.t{width:100%;border-collapse:collapse;border:1.5px solid #000}' +
+      'table.t th,table.t td{border:0.5px solid #000;padding:0.3mm 1mm;vertical-align:middle;font-size:6.5pt;font-weight:normal}' +
+      'th.r{width:8%;text-align:center;font-size:5.5pt}th.s{text-align:center;font-size:5.5pt;width:4%}' +
+      'td.dc{text-align:center;font-size:8.5pt;letter-spacing:0.3pt}' +
+      '.ec{display:inline-block;border:1.5pt solid #000;border-radius:50%;padding:0 1.5mm;line-height:1.15}' +
+      '.oc{display:inline-block;border:1.5pt solid #000;border-radius:50%;padding:0 3mm}' +
+      '.v{display:inline-block;min-width:3mm;text-align:center}' +
+      'table.hh{border-collapse:collapse;display:inline-table}table.hh td.hn{border:0.5px solid #000;width:3.5mm;height:4.5mm;text-align:center;font-size:7pt;padding:0}' +
+      '.fn{font-size:8pt}.d{font-size:5.5pt}.c{text-align:center;width:3%}' +
+      '.rs td{font-size:6pt;padding:0.2mm 1.5mm}' +
+      '.bz td{border:none;padding:0.2mm 1mm;font-size:7pt}.bz th{border:none;padding:0.2mm 1mm;font-size:6pt;text-align:left;width:14%;font-weight:normal}' +
+      '.np{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.95);padding:8px;text-align:center;z-index:9999;box-shadow:0 -2px 8px rgba(0,0,0,.15)}' +
+      '.np button{font-size:15px;padding:8px 20px;margin:0 6px;border:none;border-radius:8px;cursor:pointer;font-weight:bold}' +
+      '.np .pb{background:#1565c0;color:#fff}.np .cb{background:#757575;color:#fff}' +
+      '@media print{.np{display:none!important}}' +
+      '@media screen{body{background:#e0e0e0;padding-bottom:60px}.pg{background:#fff;width:210mm;margin:8px auto;padding:5mm 7mm;box-shadow:0 2px 8px rgba(0,0,0,.2);min-height:297mm}}';
 
-        // セルに値とフォントを設定するヘルパー
-        function setCell(addr, val, font) {
-          var c = ws.getCell(addr);
-          c.value = val;
-          if (font) c.font = font;
-        }
+    var html = '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>脱退連絡票 - ' + escHtml(shimei) + '</title><style>' + css + '</style></head><body><div class="pg">' +
+      '<div class="fl">事業所 → 被保険者 → 市町村</div>' +
+      '<h2>健康保険・共済組合等　脱退連絡票</h2>' +
+      '<div class="ck"><span class="b">☑</span> 健康保険（共済組合）の資格を喪失したため、<br>' +
+      '<span class="b">□</span> 健康保険（共済組合）の被扶養者の認定を除外されたため、</div>' +
+      '<p class="nt">国民健康保険などの保険に加入することになります。【該当の□欄にレを付けてください。】</p>' +
+      '<div class="inf">' +
+      '<p>また、国民健康保険に加入するためには届出が必要です。この連絡票に加え下記の持ち物を持参して、お住まいの市町村役場の国民健康保険担当課に１４日以内に届け出てください。届出が遅れた場合、国民健康保険の医療給付を受けられないことがありますのでご注意ください。</p>' +
+      '<p>《持ち物》①身元確認ができるもの（マイナンバーカード、運転免許証等）②代理人の場合は委任状等 ③世帯主と該当者のマイナンバー確認書類 ④口座振替の場合は預貯金通帳及び届出印</p>' +
+      '<p class="s">※詳しくはお住まいの市町村役場の国民健康保険担当課へ確認してください。</p>' +
+      '</div>' +
+      '<hr class="sp">' +
+      '<h2 style="margin:0.5mm 0 0.5mm">健康保険・共済組合等　資格喪失証明書</h2>' +
+      '<table class="t">' +
+      '<tr><th class="r">被保険者<br>記号番号</th><th class="s">記号</th><td class="dc" colspan="2">' + escHtml(kigou) + '</td><th class="s">番号</th><td class="dc">' + escHtml(bangou) + '</td><th class="s">枝番</th><td class="dc" style="width:6%"></td></tr>' +
+      '<tr><th class="r" rowspan="2">保険者名</th>' +
+        '<td colspan="5" style="border-right:none;padding:0.3mm 1mm"><span class="oc">全国健康保険協会</span> ' + escHtml(jigyousho) + '支部 ／ 健康保険組合 ／ 共済組合 ／ 国民健康保険組合</td>' +
+        '<th class="s" rowspan="2" style="border-left:none;border-right:none;writing-mode:vertical-rl;font-size:5pt;letter-spacing:0.5pt">保険者番号</th>' +
+        '<td rowspan="2" style="border-left:none;text-align:center"><table class="hh"><tr>' + hB + '</tr></table></td></tr>' +
+      '<tr><td colspan="5" style="font-size:4.5pt;color:#666;padding:0.2mm 1mm">※該当する保険者名に○を付けてください</td></tr>' +
+      '<tr><th class="r" rowspan="2">被保険者<br>(組合員)</th><th class="s">氏名</th><td class="fn" style="width:20%">' + escHtml(shimei) + '</td>' +
+        '<td style="text-align:center;font-size:6pt;width:24%">生年月日 ' + eraC(bdW,['昭和','平成','令和']) + '</td>' +
+        '<td colspan="3" style="text-align:center;font-size:6pt">資格取得 ' + eraC(shW,['平成','令和']) + '</td></tr>' +
+      '<tr><td colspan="3"></td><td colspan="3" style="text-align:center;font-size:6pt">資格喪失 ' + eraC(soW,['平成','令和']) + '</td></tr>' +
+      '<tr style="font-size:5pt;text-align:center"><th class="r" rowspan="5">被扶養者</th><th class="s" style="font-size:4.5pt">枝番</th><th>氏名</th><th>生年月日</th><th style="width:3%;font-size:4.5pt">続柄</th><th style="font-size:4.5pt">認定日★</th><th style="font-size:4.5pt">除外日</th></tr>' +
+      fH +
+      '<tr class="rs"><th class="r" rowspan="4" style="font-size:5pt">資格喪失<br>又は<br>認定除外<br>の理由</th>' +
+        '<td colspan="6">１ <b>☑</b> 被保険者の退職（退職日：' + eraC(taW,['平成','令和']) + '）<span style="font-size:5pt;margin-left:1mm">※資格喪失年月日は退職日の翌日</span></td></tr>' +
+      '<tr class="rs"><td colspan="6">２ 被保険者が後期高齢者医療制度へ加入</td></tr>' +
+      '<tr class="rs"><td colspan="6">３ 扶養非該当（理由：　　　　　　　　　　　　　　　　　　　　　　　）</td></tr>' +
+      '<tr class="rs"><td colspan="6">４ その他（理由：　　　　　　　　　　　　　　　　　　　　　　　）</td></tr>' +
+      '<tr><td colspan="7" style="font-size:4.5pt;text-align:center;padding:0.2mm">★印の欄（網掛け部分）は省略可能です</td></tr>' +
+      '<tr><td colspan="7" style="padding:1mm 2.5mm">' +
+        '<div style="text-align:center;margin-bottom:1mm;font-size:7.5pt">上記のとおり相違ないことを証明します。</div>' +
+        '<div style="text-align:right;margin-bottom:1.5mm;font-size:7.5pt">令和 <span class="v">' + todayW.year + '</span>年 <span class="v">' + todayW.month + '</span>月 <span class="v">' + todayW.day + '</span>日</div>' +
+        '<table class="bz" style="width:100%"><tr><th>事業所所在地</th><td>静岡県磐田市上本郷1006-7</td></tr><tr><th>名称</th><td>有限会社ステップ・アップ</td></tr><tr><th>代表者氏名</th><td>山下　浩俊</td></tr><tr><th>電話</th><td>0538（36）6968</td></tr></table>' +
+      '</td></tr></table></div>' +
+      '<div class="np"><button class="pb" onclick="window.print()">印刷 / PDF保存</button><button class="cb" onclick="window.close()">閉じる</button></div>' +
+      '</body></html>';
 
-        // ☑ 資格喪失チェックボックス（D11のテキストを変更）
-        setCell('D11', '\u3000あなたは、\u3000☑健康保険（共済組合）の資格を喪失したため、', yuFont);
-
-        // 記号・番号
-        setCell('Q52', kigou, yuFont);
-        setCell('AY52', bangou, yuFont);
-
-        // 保険者番号（8桁を個別セルに）
-        var hNo = hokenshaNo || '';
-        var hnCols = ['BO','BR','BU','BX','CA','CD','CG','CJ'];
-        for (var hi = 0; hi < 8; hi++) {
-          if (hNo[hi]) setCell(hnCols[hi] + '61', hNo[hi], yuFontS);
-        }
-
-        // 保険者名チェック
-        setCell('N58', '☑', yuFont);
-
-        // 静岡を支部の左のセルに
-        setCell('AT58', jigyousho, yuFont);
-
-        // 被保険者 氏名
-        setCell('O69', shimei, yuFont);
-
-        // 被保険者 生年月日
-        if (bdW) {
-          var bdEraRow = bdW.era === '昭和' ? 69 : (bdW.era === '平成' ? 71 : 73);
-          setCell('BA' + bdEraRow, Number(bdW.year), yuFontS);
-          setCell('BF' + bdEraRow, Number(bdW.month), yuFontS);
-          setCell('BK' + bdEraRow, Number(bdW.day), yuFontS);
-        }
-
-        // 資格取得年月日
-        if (shW) {
-          var shEraRow = shW.era === '平成' ? 67 : 69;
-          setCell('CA' + shEraRow, Number(shW.year), yuFontS);
-          setCell('CF' + shEraRow, Number(shW.month), yuFontS);
-          setCell('CK' + shEraRow, Number(shW.day), yuFontS);
-        }
-
-        // 資格喪失年月日
-        if (soW) {
-          var soEraRow = soW.era === '平成' ? 71 : 73;
-          setCell('CA' + soEraRow, Number(soW.year), yuFontS);
-          setCell('CF' + soEraRow, Number(soW.month), yuFontS);
-          setCell('CK' + soEraRow, Number(soW.day), yuFontS);
-        }
-
-        // 被扶養者
-        var fuyouBaseRows = [79, 85, 91, 97];
-        for (var fi = 0; fi < fuyouList.length && fi < 4; fi++) {
-          var f = fuyouList[fi];
-          var fRow = fuyouBaseRows[fi];
-          setCell('O' + fRow, f.name, yuFont);
-
-          var fBdW = wD(f.birthday);
-          if (fBdW) {
-            var fbEraRow = fBdW.era === '昭和' ? fRow : (fBdW.era === '平成' ? (fRow + 2) : (fRow + 4));
-            setCell('BA' + fbEraRow, Number(fBdW.year), yuFontS);
-            setCell('BF' + fbEraRow, Number(fBdW.month), yuFontS);
-            setCell('BK' + fbEraRow, Number(fBdW.day), yuFontS);
-          }
-
-          var fSoW = wD(f.soushitsu);
-          if (fSoW) {
-            var fsEraRow = fSoW.era === '平成' ? fRow : (fRow + 2);
-            setCell('CA' + fsEraRow, Number(fSoW.year), yuFontS);
-            setCell('CF' + fsEraRow, Number(fSoW.month), yuFontS);
-            setCell('CK' + fsEraRow, Number(fSoW.day), yuFontS);
-          }
-        }
-
-        // 退職理由（1: 被保険者の退職 ☑）
-        setCell('N103', '☑', yuFont);
-        if (taW) {
-          setCell('AJ103', (taW.era === '平成' ? '平成' : '令和'), yuFontS);
-          setCell('AQ103', Number(taW.year), yuFontS);
-          setCell('AV103', Number(taW.month), yuFontS);
-          setCell('BA103', Number(taW.day), yuFontS);
-        }
-
-        // 証明日（今日）
-        setCell('BG115', Number(todayW.year), yuFontS);
-        setCell('BM115', Number(todayW.month), yuFontS);
-        setCell('BS115', Number(todayW.day), yuFontS);
-
-        // 事業所情報
-        setCell('AK119', '静岡県磐田市上本郷1006-7', yuFontS);
-        setCell('AK122', '有限会社ステップ・アップ', yuFontS);
-        setCell('AK125', '山下　浩俊', yuFontS);
-        setCell('AN128', '0538', yuFontS);
-        setCell('AY128', '36', yuFontS);
-        setCell('BK128', '6968', yuFontS);
-
-        return workbook.xlsx.writeBuffer();
-      });
-    }).then(function(buffer) {
-      hideSpinner();
-      var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      var fname = '脱退連絡票_' + shimei + '.xlsx';
-      var file = new File([blob], fname, { type: blob.type });
-
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ title: '脱退連絡票', files: [file] }).catch(function() {});
-      } else {
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = fname;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      }
-      showToast('脱退連絡票を生成しました。Excelで開いてPDF保存してください。');
-      closeDattaiForm();
-    }).catch(function(e) {
-      hideSpinner();
-      console.error('Excel generation error:', e);
-      showToast('生成に失敗しました: ' + (e.message || e), 'error');
-    });
+    var pw = window.open('', '_blank');
+    if (!pw) { showToast('ポップアップがブロックされました', 'error'); return; }
+    pw.document.write(html);
+    pw.document.close();
+    showToast('脱退連絡票を生成しました');
+    closeDattaiForm();
   } catch(e) {
     console.error('脱退連絡票エラー:', e);
     showToast('エラー: ' + (e.message || e), 'error');
