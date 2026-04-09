@@ -536,6 +536,22 @@ body {
 .update-panel-btns .btn-later { background:#f0f0f0; color:var(--text); }
 .update-panel-btns .btn-update { background:linear-gradient(135deg,var(--primary),var(--primary-dark)); color:#fff; }
 
+/* Header cache clear button */
+.header-cache-btn {
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: #fff;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  font-size: 13px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.header-cache-btn:active { background: rgba(255,255,255,0.3); }
+
 /* Logout small */
 .header-logout-sm {
   background: none;
@@ -1536,6 +1552,7 @@ body {
   <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo">
   <h1 id="headerTitle" style="display:none;">ホーム</h1>
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
+  <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
   <button class="update-badge" id="updateBadge" onclick="showUpdatePanel()" title="更新あり">⟳</button>
   <button class="header-logout-sm" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
@@ -1926,7 +1943,27 @@ function closeUpdatePanel() {
 }
 
 function applyUpdate() {
-  location.reload(true);
+  clearCacheAndReload();
+}
+
+async function clearCacheAndReload() {
+  // Clear all caches (Service Worker Cache API)
+  if ('caches' in window) {
+    try {
+      const names = await caches.keys();
+      await Promise.all(names.map(n => caches.delete(n)));
+    } catch(e) {}
+  }
+  // Clear localStorage app data (keep auth)
+  const msalKeys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.indexOf('msal') >= 0) msalKeys.push({ k: k, v: localStorage.getItem(k) });
+  }
+  localStorage.clear();
+  msalKeys.forEach(function(item) { localStorage.setItem(item.k, item.v); });
+  // Force reload bypassing cache
+  location.href = location.href.split('?')[0] + '?_=' + Date.now();
 }
 
 // Check when user returns to the app (tab switch, phone unlock)
@@ -2192,6 +2229,9 @@ function switchScreen(screenId, skipHistory) {
   } else if (screenId !== 'detailScreen') {
     hrb.style.display = 'none';
   }
+
+  // Cache clear button: show on home screen only
+  document.getElementById('headerCacheBtn').style.display = isHome ? 'flex' : 'none';
 
   // FAB: show only on detailScreen
   document.getElementById('fabBtn').style.display = screenId === 'detailScreen' ? 'flex' : 'none';
