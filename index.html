@@ -6206,9 +6206,9 @@ async function openTaishaForm() {
   const zairyuKigenCard = emp[keyMap['zairyuKigenCard']] ? String(emp[keyMap['zairyuKigenCard']]).substring(0, 10) : '';
   const zairyuShikaku = emp[keyMap['zairyuShikaku']] || '';
 
-  function buildOptions(choices, selectedIdx) {
-    return choices.map(function(c, i) {
-      return '<option value="' + escHtml(c) + '"' + (i === selectedIdx ? ' selected' : '') + '>' + escHtml(c) + '</option>';
+  function buildOptions(choices) {
+    return choices.map(function(c) {
+      return '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>';
     }).join('');
   }
 
@@ -6237,7 +6237,7 @@ async function openTaishaForm() {
           '<label>退職理由</label>' +
           '<select id="taisha_riyuu">' +
             '<option value="">選択してください</option>' +
-            buildOptions(taisyokuRiyuuChoices, -1) +
+            buildOptions(taisyokuRiyuuChoices) +
           '</select>' +
         '</div>' +
         '<div class="taisha-field">' +
@@ -6255,21 +6255,21 @@ async function openTaishaForm() {
         '<div class="taisha-field">' +
           '<label>離職票</label>' +
           '<select id="taisha_rishoku">' +
-            buildOptions(rishokuhyouChoices, 0) +
+            buildOptions(rishokuhyouChoices) +
           '</select>' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>離職票渡し方</label>' +
           '<select id="taisha_watashi">' +
             '<option value="">選択してください</option>' +
-            buildOptions(rishokuWatashiChoices, -1) +
+            buildOptions(rishokuWatashiChoices) +
           '</select>' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>次回の採用</label>' +
           '<select id="taisha_jikai">' +
             '<option value="">選択してください</option>' +
-            buildOptions(jikaiSaiyouChoices, -1) +
+            buildOptions(jikaiSaiyouChoices) +
           '</select>' +
         '</div>' +
         '<div class="taisha-notice">⚠️ 健康保険証を回収して下さい。</div>' +
@@ -6284,6 +6284,12 @@ async function openTaishaForm() {
     '</div>';
 
   document.body.appendChild(overlay);
+
+  // Force set 離職票 default to first option (いらないiranai)
+  var rishokuSel = document.getElementById('taisha_rishoku');
+  if (rishokuSel && rishokuSel.options.length > 0) {
+    rishokuSel.selectedIndex = 0;
+  }
 }
 
 function closeTaishaForm() {
