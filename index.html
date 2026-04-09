@@ -524,6 +524,18 @@ body {
   50% { transform: scale(1.3); }
 }
 
+/* Update Info Panel */
+.update-panel-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.45); z-index:10000; display:flex; align-items:flex-end; justify-content:center; }
+.update-panel { background:#fff; border-radius:20px 20px 0 0; max-width:500px; width:100%; padding:24px 20px calc(20px + env(safe-area-inset-bottom)); animation:slideUp .3s ease; }
+.update-panel-icon { text-align:center; font-size:40px; margin-bottom:8px; }
+.update-panel-title { text-align:center; font-size:17px; font-weight:800; color:var(--text); margin-bottom:4px; }
+.update-panel-time { text-align:center; font-size:11px; color:var(--text-light); margin-bottom:16px; }
+.update-panel-msg { background:#f8f8fc; border-radius:12px; padding:14px 16px; font-size:14px; color:var(--text); line-height:1.7; margin-bottom:20px; border-left:4px solid var(--primary); }
+.update-panel-btns { display:flex; gap:10px; }
+.update-panel-btns button { flex:1; padding:13px; border-radius:12px; font-size:15px; font-weight:700; border:none; cursor:pointer; }
+.update-panel-btns .btn-later { background:#f0f0f0; color:var(--text); }
+.update-panel-btns .btn-update { background:linear-gradient(135deg,var(--primary),var(--primary-dark)); color:#fff; }
+
 /* Logout small */
 .header-logout-sm {
   background: none;
@@ -1524,7 +1536,7 @@ body {
   <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo">
   <h1 id="headerTitle" style="display:none;">ホーム</h1>
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
-  <button class="update-badge" id="updateBadge" onclick="applyUpdate()" title="更新あり">⟳</button>
+  <button class="update-badge" id="updateBadge" onclick="showUpdatePanel()" title="更新あり">⟳</button>
   <button class="header-logout-sm" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
 
@@ -1856,6 +1868,8 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // On return to app: fetch version.json and compare with stored version
 // If different → show update badge → user taps → clear stored → reload → new version stored
 
+let latestVersionData = null; // Stores fetched version.json data
+
 async function checkForUpdate() {
   try {
     const base = window.location.href.replace(/\/[^\/]*$/, '/');
@@ -1865,17 +1879,51 @@ async function checkForUpdate() {
     if (!data.version) return;
     const stored = localStorage.getItem('app_current_version');
     if (!stored) {
-      // First visit or after update: remember this version
       localStorage.setItem('app_current_version', data.version);
     } else if (stored !== data.version) {
-      // New version available
+      latestVersionData = data;
       document.getElementById('updateBadge').style.display = 'flex';
     }
   } catch (e) { /* silently ignore */ }
 }
 
+function showUpdatePanel() {
+  const data = latestVersionData || {};
+  const msg = data.message || '新しいバージョンが利用可能です';
+  const ts = data.timestamp || '';
+  let timeStr = '';
+  if (ts) {
+    try {
+      const d = new Date(ts);
+      timeStr = d.getFullYear() + '/' + (d.getMonth()+1) + '/' + d.getDate() + ' ' +
+                String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    } catch(e) {}
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'update-panel-overlay';
+  overlay.id = 'updatePanelOverlay';
+  overlay.innerHTML =
+    '<div class="update-panel">' +
+      '<div class="update-panel-icon">🎉</div>' +
+      '<div class="update-panel-title">アップデートがあります</div>' +
+      (timeStr ? '<div class="update-panel-time">' + escHtml(timeStr) + ' 更新</div>' : '') +
+      '<div class="update-panel-msg">' + escHtml(msg) + '</div>' +
+      '<div class="update-panel-btns">' +
+        '<button class="btn-later" onclick="closeUpdatePanel()">あとで</button>' +
+        '<button class="btn-update" onclick="applyUpdate()">⟳ 更新する</button>' +
+      '</div>' +
+    '</div>';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) closeUpdatePanel(); });
+  document.body.appendChild(overlay);
+}
+
+function closeUpdatePanel() {
+  const el = document.getElementById('updatePanelOverlay');
+  if (el) el.remove();
+}
+
 function applyUpdate() {
-  // Clear stored version so after reload the new version gets stored
   localStorage.removeItem('app_current_version');
   location.reload(true);
 }
