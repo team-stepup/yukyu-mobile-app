@@ -1633,12 +1633,12 @@ body {
       <div class="list-date-row">
         <label>前払日</label>
         <div class="date-display-wrap">
-          <span class="date-display-text" id="maebariListDateDisplay" onclick="document.getElementById('maebariListDate').showPicker()"></span>
-          <input type="date" id="maebariListDate" class="date-hidden-input" onchange="onDateInputChange('maebariListDate','maebariListDateDisplay');loadMaebariList()">
+          <span class="date-display-text" id="maebariListDateDisplay" onclick="document.getElementById('maebariListDate').showPicker()" style="font-weight:700;color:var(--primary);"></span>
+          <input type="date" id="maebariListDate" class="date-hidden-input" onchange="onMaebariListDateChange()">
         </div>
       </div>
     </div>
-    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:4px 8px;"><span id="maebariListCount" style="font-size:13px;color:var(--text-light);"></span><button class="refresh-btn" onclick="loadMaebariList()">&#x21bb; 更新</button></div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:4px 8px;"><span id="maebariListCount" style="font-size:13px;color:var(--text-light);"></span></div>
     <div id="maebariListBody"></div>
     <div id="maebariListFooter" class="list-footer" style="display:none;"></div>
   </div>
@@ -2101,8 +2101,14 @@ function switchScreen(screenId, skipHistory) {
   // Back button: show when there is history and not on home/login
   document.getElementById('backBtn').style.display = (screenHistory.length > 0 && screenId !== 'searchScreen' && screenId !== 'loginScreen') ? 'flex' : 'none';
 
-  // Header refresh button: hide when leaving detailScreen
-  if (screenId !== 'detailScreen') document.getElementById('headerRefreshBtn').style.display = 'none';
+  // Header refresh button: show on detailScreen and maebariListScreen
+  const hrb = document.getElementById('headerRefreshBtn');
+  if (screenId === 'maebariListScreen') {
+    hrb.style.display = 'block';
+    hrb.onclick = function() { loadMaebariList(); };
+  } else if (screenId !== 'detailScreen') {
+    hrb.style.display = 'none';
+  }
 
   // FAB: show only on detailScreen
   document.getElementById('fabBtn').style.display = screenId === 'detailScreen' ? 'flex' : 'none';
@@ -3806,11 +3812,25 @@ function onDateInputChange(inputId, displayId) {
 
 function initMaebariListDate() {
   const inp = document.getElementById('maebariListDate');
-  if (!inp.value) {
-    const fri = getThisFriday();
+  // Check localStorage for saved custom date
+  const savedDate = localStorage.getItem('maebariListCustomDate');
+  if (savedDate) {
+    inp.value = savedDate;
+  } else if (!inp.value) {
+    const fri = getNextFriday();
     inp.value = fri.toISOString().slice(0, 10);
   }
   onDateInputChange('maebariListDate', 'maebariListDateDisplay');
+  loadMaebariList();
+}
+
+function onMaebariListDateChange() {
+  const inp = document.getElementById('maebariListDate');
+  onDateInputChange('maebariListDate', 'maebariListDateDisplay');
+  // Save custom date to localStorage
+  if (inp.value) {
+    localStorage.setItem('maebariListCustomDate', inp.value);
+  }
   loadMaebariList();
 }
 
@@ -5368,8 +5388,15 @@ async function renderAddEmployeeForm() {
   html += '</div>';
 
   // Other categories
+  const carSections = ['vehicle', 'license', 'carInsurance'];
+  const hiddenSections = ['insurance']; // 社会保険・雇用は新規登録では非表示
   PROFILE_CATEGORIES.forEach(cat => {
-    html += '<div class="accordion-section open">';
+    // 社会保険・雇用は新規社員登録では表示しない
+    if (hiddenSections.indexOf(cat.id) >= 0) return;
+    // 車両/免許/保険は通勤方法が車/バイクの場合のみ表示
+    const isCarSection = carSections.indexOf(cat.id) >= 0;
+    const displayStyle = isCarSection ? 'display:none;' : '';
+    html += '<div class="accordion-section open add-cat-section" data-cat-id="' + cat.id + '" style="' + displayStyle + '">';
     html += '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
     html += '<span class="acc-icon">' + cat.icon + '</span><span>' + cat.label + '</span>';
     html += '<span class="acc-arrow">&#9654;</span></div>';
@@ -5386,6 +5413,12 @@ async function renderAddEmployeeForm() {
       if (!inputHtml) return;
       // Change id to addField_ prefix
       const addInput = inputHtml.replace('id="editField_', 'id="addField_');
+      // 通勤方法にonchangeイベント追加
+      if (field.key === 'tsukinHouhou') {
+        const addInputWithEvent = addInput.replace('id="addField_tsukinHouhou"', 'id="addField_tsukinHouhou" onchange="onAddTsukinChange()"');
+        html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInputWithEvent + '</td></tr>';
+        return;
+      }
       html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
     });
     html += '</table></div></div>';
@@ -5397,6 +5430,16 @@ async function renderAddEmployeeForm() {
   html += '</div>';
 
   container.innerHTML = html;
+}
+
+function onAddTsukinChange() {
+  const val = (document.getElementById('addField_tsukinHouhou') || {}).value || '';
+  const isCar = val.indexOf('車') >= 0 || val.indexOf('バイク') >= 0 || val.indexOf('自動車') >= 0 || val.indexOf('原付') >= 0;
+  const carSections = ['vehicle', 'license', 'carInsurance'];
+  carSections.forEach(id => {
+    const el = document.querySelector('.add-cat-section[data-cat-id="' + id + '"]');
+    if (el) el.style.display = isCar ? '' : 'none';
+  });
 }
 
 async function autoAssignSyainNo() {
