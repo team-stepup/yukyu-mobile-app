@@ -334,6 +334,15 @@ body {
 .taisha-check-row { display:flex; align-items:center; gap:10px; padding:12px 0; }
 .taisha-check-row input[type="checkbox"] { width:20px; height:20px; accent-color:var(--primary); }
 .taisha-check-row label { font-size:14px; font-weight:600; color:var(--danger); }
+.dattai-section-title { font-size:14px; font-weight:800; color:var(--primary); margin-bottom:12px; }
+.dattai-add-fuyou-btn { width:100%; padding:10px; border:2px dashed var(--border); border-radius:10px; background:none; font-size:14px; color:var(--primary); cursor:pointer; margin-top:8px; }
+.dattai-add-fuyou-btn:active { background:#f0f0ff; }
+.dattai-fuyou-row { background:#f8f8fc; border-radius:10px; padding:12px; margin-bottom:10px; border:1px solid var(--border); }
+.dattai-fuyou-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px; font-weight:700; color:var(--primary); }
+.dattai-fuyou-remove { background:none; border:none; font-size:18px; color:var(--danger); cursor:pointer; padding:2px 6px; }
+.dattai-fuyou-fields { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.dattai-fuyou-fields input { padding:8px 10px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; width:100%; }
+.dattai-fuyou-fields input:focus { border-color:var(--primary); outline:none; }
 /* Document capture styles */
 .doc-capture-card { border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; background:#fff; }
 .doc-capture-card.has-image { border-color: var(--success); background:#f6fff6; }
@@ -6183,6 +6192,7 @@ function startProcedure(type) {
   // Dedicated forms
   if (type === 'taisha') { openTaishaForm(); return; }
   if (type === 'shaho') { openShahoForm(); return; }
+  if (type === 'dattai') { openDattaiForm(); return; }
 
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -6623,6 +6633,250 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🏥 社保加入申請を送信'; }
   }
+}
+
+
+// ============================================================
+// 脱退連絡票作成 Form
+// ============================================================
+async function openDattaiForm() {
+  var emp = currentEmployee;
+  if (!emp) return;
+  var name = emp.Title || '';
+  var no = emp[F.syainNo] || '';
+  var today = toLocalDateStr(new Date());
+
+  var fieldsMeta = await fetchEmployeeFields();
+  var keyMap = buildFieldKeyMap(fieldsMeta);
+
+  var buka = emp[keyMap['buka']] || '';
+  var birthday = emp[keyMap['birthday']] ? String(emp[keyMap['birthday']]).substring(0, 10) : '';
+  var kenpoHihokensha = emp[keyMap['kenpoHihokensha']] || '';
+  var kenpoShutoku = emp[keyMap['kenpoShutoku']] ? String(emp[keyMap['kenpoShutoku']]).substring(0, 10) : '';
+  var shahoSoushitsu = emp[keyMap['shahoSoushitsu']] ? String(emp[keyMap['shahoSoushitsu']]).substring(0, 10) : today;
+  var seiriNo = emp[keyMap['seiriNo']] || '';
+
+  var kigou = '', bangou = '';
+  if (kenpoHihokensha) {
+    var parts = String(kenpoHihokensha).split(/[-\s\/]+/);
+    if (parts.length >= 2) { kigou = parts[0]; bangou = parts[1]; }
+    else { kigou = kenpoHihokensha; }
+  }
+
+  var overlay = document.createElement('div');
+  overlay.className = 'taisha-overlay';
+  overlay.id = 'dattaiOverlay';
+  overlay.innerHTML =
+    '<div class="taisha-panel">' +
+      '<div class="taisha-header">' +
+        '<div class="taisha-header-bar">' +
+          '<span class="taisha-title">\ud83d\udccb 脱退連絡票作成</span>' +
+          '<button class="taisha-close" onclick="closeDattaiForm()">\u2715</button>' +
+        '</div>' +
+        '<div class="taisha-emp-info">' +
+          '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
+          '<span>部課: ' + escHtml(buka) + '</span>' +
+          (birthday ? '<span>生年月日: ' + escHtml(birthday) + '</span>' : '') +
+          (kenpoShutoku ? '<span>資格取得日: ' + escHtml(kenpoShutoku) + '</span>' : '') +
+          (shahoSoushitsu !== today ? '<span>喪失日: ' + escHtml(shahoSoushitsu) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="taisha-body">' +
+        '<div class="dattai-section-title">\ud83d\udcc4 資格喪失証明書データ</div>' +
+        '<div class="taisha-field">' +
+          '<label>記号</label>' +
+          '<input type="text" id="dattai_kigou" value="' + escHtml(kigou) + '" placeholder="健保記号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>番号</label>' +
+          '<input type="text" id="dattai_bangou" value="' + escHtml(bangou) + '" placeholder="健保番号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>整理番号</label>' +
+          '<input type="text" id="dattai_seiriNo" value="' + escHtml(seiriNo) + '" placeholder="整理番号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>事業所名</label>' +
+          '<input type="text" id="dattai_jigyousho" value="静岡" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>氏名</label>' +
+          '<input type="text" id="dattai_shimei" value="' + escHtml(name) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>生年月日</label>' +
+          '<input type="date" id="dattai_birthday" value="' + birthday + '">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>資格取得年月日</label>' +
+          '<input type="date" id="dattai_shutoku" value="' + kenpoShutoku + '">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>資格喪失年月日</label>' +
+          '<input type="date" id="dattai_soushitsu" value="' + shahoSoushitsu + '">' +
+        '</div>' +
+        '<div class="dattai-section-title" style="margin-top:20px;">扶養家族（該当者がいる場合）</div>' +
+        '<div id="dattai_fuyou_list"></div>' +
+        '<button class="dattai-add-fuyou-btn" onclick="addDattaiFuyouRow()" type="button">＋ 扶養者を追加</button>' +
+      '</div>' +
+      '<div class="taisha-footer">' +
+        '<button class="taisha-submit-btn" onclick="generateDattaiDocument()" style="background:linear-gradient(135deg,#5c6bc0,#3949ab);">\ud83d\udccb 脱退連絡票を生成</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+function closeDattaiForm() {
+  var el = document.getElementById('dattaiOverlay');
+  if (el) el.remove();
+}
+
+function addDattaiFuyouRow() {
+  var list = document.getElementById('dattai_fuyou_list');
+  if (!list) return;
+  var idx = list.children.length;
+  var soushitsuVal = document.getElementById('dattai_soushitsu') ? document.getElementById('dattai_soushitsu').value : '';
+  var row = document.createElement('div');
+  row.className = 'dattai-fuyou-row';
+  row.innerHTML =
+    '<div class="dattai-fuyou-header">' +
+      '<span>扶養者 ' + (idx + 1) + '</span>' +
+      '<button class="dattai-fuyou-remove" onclick="this.closest(\x27.dattai-fuyou-row\x27).remove()" type="button">\u2715</button>' +
+    '</div>' +
+    '<div class="dattai-fuyou-fields">' +
+      '<input type="text" placeholder="氏名" class="dattai-fuyou-name">' +
+      '<input type="date" class="dattai-fuyou-bd" title="生年月日">' +
+      '<input type="date" class="dattai-fuyou-shutoku" title="資格取得日">' +
+      '<input type="date" class="dattai-fuyou-soushitsu" title="喪失日" value="' + soushitsuVal + '">' +
+    '</div>';
+  list.appendChild(row);
+}
+
+function toWareki(dateStr) {
+  if (!dateStr) return '';
+  var d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+  var era = '', ey = 0;
+  if (y >= 2019) { era = '令和'; ey = y - 2018; }
+  else if (y >= 1989) { era = '平成'; ey = y - 1988; }
+  else if (y >= 1926) { era = '昭和'; ey = y - 1925; }
+  else if (y >= 1912) { era = '大正'; ey = y - 1911; }
+  else { era = '明治'; ey = y - 1867; }
+  return era + (ey === 1 ? '元' : ey) + '年' + m + '月' + day + '日';
+}
+
+function generateDattaiDocument() {
+  var kigou = document.getElementById('dattai_kigou').value;
+  var bangou = document.getElementById('dattai_bangou').value;
+  var seiriNo = document.getElementById('dattai_seiriNo').value;
+  var jigyousho = document.getElementById('dattai_jigyousho').value;
+  var shimei = document.getElementById('dattai_shimei').value;
+  var birthday = document.getElementById('dattai_birthday').value;
+  var shutoku = document.getElementById('dattai_shutoku').value;
+  var soushitsu = document.getElementById('dattai_soushitsu').value;
+
+  if (!shimei) { showToast('氏名を入力してください', 'error'); return; }
+  if (!soushitsu) { showToast('資格喪失年月日を入力してください', 'error'); return; }
+
+  var fuyouRows = document.querySelectorAll('.dattai-fuyou-row');
+  var fuyouList = [];
+  fuyouRows.forEach(function(row) {
+    var fn = row.querySelector('.dattai-fuyou-name').value || '';
+    var fbd = row.querySelector('.dattai-fuyou-bd').value || '';
+    var fsh = row.querySelector('.dattai-fuyou-shutoku').value || '';
+    var fso = row.querySelector('.dattai-fuyou-soushitsu').value || '';
+    if (fn) fuyouList.push({ name: fn, birthday: fbd, shutoku: fsh, soushitsu: fso });
+  });
+
+  var todayStr = toWareki(toLocalDateStr(new Date()));
+  var fuyouHtml = '';
+  for (var i = 0; i < 5; i++) {
+    var f = fuyouList[i] || {};
+    fuyouHtml +=
+      '<tr>' +
+        '<td class="cell">' + escHtml(f.name || '') + '</td>' +
+        '<td class="cell">' + (f.birthday ? toWareki(f.birthday) : '') + '</td>' +
+        '<td class="cell">' + (f.shutoku ? toWareki(f.shutoku) : '') + '</td>' +
+        '<td class="cell">' + (f.soushitsu ? toWareki(f.soushitsu) : '') + '</td>' +
+      '</tr>';
+  }
+
+  var printWin = window.open('', '_blank');
+  if (!printWin) { showToast('ポップアップがブロックされました', 'error'); return; }
+
+  var html = '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
+    '<title>脱退連絡票 - ' + escHtml(shimei) + '</title>' +
+    '<style>' +
+    '@page { size: A4; margin: 15mm; }' +
+    'body { font-family: "Yu Mincho", "Hiragino Mincho ProN", "MS PMincho", serif; font-size: 11pt; color: #000; margin: 0; padding: 20px; }' +
+    '.doc { max-width: 700px; margin: 0 auto; }' +
+    '.section { border: 2px solid #000; margin-bottom: 20px; }' +
+    '.section-title { text-align: center; font-size: 14pt; font-weight: bold; padding: 6px; border-bottom: 2px solid #000; background: #f5f5f5; }' +
+    'table { width: 100%; border-collapse: collapse; }' +
+    'th, td { border: 1px solid #000; padding: 6px 8px; font-size: 10pt; }' +
+    'th { background: #f5f5f5; font-weight: normal; text-align: left; white-space: nowrap; width: 130px; }' +
+    '.cell { text-align: center; min-height: 20px; }' +
+    '.cb { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #000; margin-right: 4px; vertical-align: middle; text-align: center; font-size: 10pt; line-height: 13px; }' +
+    '.stamp-area { text-align: right; margin-top: 30px; font-size: 10pt; }' +
+    '.stamp-box { display: inline-block; width: 70px; height: 70px; border: 1px solid #000; margin-left: 10px; vertical-align: top; }' +
+    '.company-info { margin-top: 20px; font-size: 10pt; line-height: 1.8; }' +
+    '.date-line { text-align: right; margin: 10px 0; font-size: 10pt; }' +
+    '.notice { padding: 12px; font-size: 10pt; line-height: 1.7; }' +
+    '.notice p { margin: 4px 0; }' +
+    '@media print { body { padding: 0; } .no-print { display: none !important; } }' +
+    '</style></head><body>' +
+    '<div class="no-print" style="text-align:center;padding:10px;margin-bottom:15px;background:#e8e8f5;border-radius:8px;">' +
+      '<button onclick="window.print()" style="padding:10px 30px;font-size:14pt;cursor:pointer;border:none;background:#6264A7;color:#fff;border-radius:8px;">印刷する</button>' +
+      '\u3000' +
+      '<button onclick="window.close()" style="padding:10px 20px;font-size:14pt;cursor:pointer;border:1px solid #999;background:#fff;border-radius:8px;">閉じる</button>' +
+    '</div>' +
+    '<div class="doc">' +
+    '<div class="section">' +
+      '<div class="section-title">健康保険・共済組合等　脱退連絡票</div>' +
+      '<div class="notice">' +
+        '<p>あなたは、<span class="cb">✓</span>健康保険（共済組合）の資格を喪失したので届け出します。</p>' +
+        '<p>国民健康保険などの他の保険に加入する手続きの資料として使用してください。</p>' +
+        '<p style="margin-top:8px;">■ <strong>資格喪失していることを証明</strong>するためにこの連絡票を使用できます。</p>' +
+        '<p>■ 国民健康保険に加入するためにこの連絡票を市区町村窓口に提出してください。</p>' +
+      '</div>' +
+    '</div>' +
+    '<div class="section">' +
+      '<div class="section-title">健康保険・共済組合等　資格喪失証明書</div>' +
+      '<table>' +
+        '<tr><th>記号</th><td style="font-size:14pt;font-weight:bold;letter-spacing:2px;">' + escHtml(kigou) + '</td>' +
+        '<th>番号</th><td style="font-size:14pt;font-weight:bold;letter-spacing:2px;">' + escHtml(bangou) + '</td></tr>' +
+        '<tr><th>事業所名</th><td colspan="3" style="font-size:13pt;font-weight:bold;">' + escHtml(jigyousho) + '</td></tr>' +
+        '<tr><th>資格取得年月日</th><td colspan="3">' + toWareki(shutoku) + '</td></tr>' +
+        '<tr><th>氏名</th><td colspan="3" style="font-size:13pt;">' + escHtml(shimei) + '</td></tr>' +
+        '<tr><th>生年月日</th><td colspan="3">' + toWareki(birthday) + '</td></tr>' +
+        '<tr><th>資格喪失年月日</th><td colspan="3" style="font-weight:bold;color:#c00;">' + toWareki(soushitsu) + '</td></tr>' +
+      '</table>' +
+      '<table style="margin-top:0;">' +
+        '<tr style="background:#f5f5f5;">' +
+          '<th style="text-align:center;width:25%;">扶養者 氏名</th>' +
+          '<th style="text-align:center;width:25%;">生年月日</th>' +
+          '<th style="text-align:center;width:25%;">資格取得日</th>' +
+          '<th style="text-align:center;width:25%;">喪失年月日</th>' +
+        '</tr>' +
+        fuyouHtml +
+      '</table>' +
+    '</div>' +
+    '<div class="date-line">' + todayStr + '</div>' +
+    '<div class="company-info">' +
+      '<div>事業所名称　有限会社ステップ・アップ</div>' +
+      '<div>事業所所在地　静岡県磐田市上大之郷485-7</div>' +
+      '<div>代表者名　山下　浩俊</div>' +
+      '<div>電話　0538　36-0368</div>' +
+    '</div>' +
+    '<div class="stamp-area">' +
+      '事業主印<div class="stamp-box"></div>' +
+    '</div>' +
+    '</div></body></html>';
+
+  printWin.document.write(html);
+  printWin.document.close();
 }
 
 async function openNyutaiEmployee(empId) {
