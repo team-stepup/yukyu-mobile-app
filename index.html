@@ -1864,11 +1864,12 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // ============================================================
 // App Version & Update Check (version.json based)
 // ============================================================
-// On first load: fetch version.json and store as current version in localStorage
-// On return to app: fetch version.json and compare with stored version
-// If different → show update badge → user taps → clear stored → reload → new version stored
+// On page load: fetch version.json and remember as baseline (in memory)
+// On visibility/focus: re-fetch and compare with baseline
+// If version changed → show update badge + panel
 
-let latestVersionData = null; // Stores fetched version.json data
+let initialVersion = null;  // Version at page load time (in memory only)
+let latestVersionData = null;
 
 async function checkForUpdate() {
   try {
@@ -1877,10 +1878,11 @@ async function checkForUpdate() {
     if (!resp.ok) return;
     const data = await resp.json();
     if (!data.version) return;
-    const stored = localStorage.getItem('app_current_version');
-    if (!stored) {
-      localStorage.setItem('app_current_version', data.version);
-    } else if (stored !== data.version) {
+    if (!initialVersion) {
+      // First fetch after page load: store as baseline
+      initialVersion = data.version;
+    } else if (initialVersion !== data.version) {
+      // Version changed since page was loaded → update available
       latestVersionData = data;
       document.getElementById('updateBadge').style.display = 'flex';
     }
@@ -1924,20 +1926,18 @@ function closeUpdatePanel() {
 }
 
 function applyUpdate() {
-  localStorage.removeItem('app_current_version');
   location.reload(true);
 }
 
-// Check when user returns to the app (visibilitychange)
+// Check when user returns to the app (tab switch, phone unlock)
 document.addEventListener('visibilitychange', function() {
-  if (document.visibilityState === 'visible') {
-    checkForUpdate();
-  }
+  if (document.visibilityState === 'visible') checkForUpdate();
 });
-// Also check on window focus (covers more cases on mobile)
 window.addEventListener('focus', checkForUpdate);
-// Initial check after 5 seconds
-setTimeout(checkForUpdate, 5000);
+// Initial baseline fetch after 3 seconds
+setTimeout(checkForUpdate, 3000);
+// Also poll every 3 minutes as fallback
+setInterval(checkForUpdate, 3 * 60 * 1000);
 
 // ============================================================
 // Initialize MSAL
