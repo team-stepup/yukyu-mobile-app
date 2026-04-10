@@ -7085,34 +7085,57 @@ async function generateDattaiDocument() {
     var pdfBytes = await pdfDoc.save();
     var fileName = '脱退連絡票_' + shimei + '.pdf';
     var blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    var url = URL.createObjectURL(blob);
 
-    // Mobile: use Web Share API (blob URLs don't support share on iOS)
-    var isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-    var shared = false;
+    // Show preview overlay with share button
+    var overlay = document.createElement('div');
+    overlay.id = 'dattai-preview-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#000;display:flex;flex-direction:column;';
 
-    if (isMobile && navigator.share && navigator.canShare) {
+    // PDF preview iframe
+    var iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.cssText = 'flex:1;border:none;width:100%;background:#fff;';
+    overlay.appendChild(iframe);
+
+    // Bottom button bar
+    var bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:8px;padding:10px 12px;background:#1a1a1a;justify-content:center;flex-shrink:0;padding-bottom:max(10px,env(safe-area-inset-bottom));';
+
+    // Share button
+    var shareBtn = document.createElement('button');
+    shareBtn.textContent = '共有';
+    shareBtn.style.cssText = 'flex:1;padding:12px;font-size:16px;font-weight:bold;border:none;border-radius:10px;background:#007AFF;color:#fff;cursor:pointer;max-width:200px;';
+    shareBtn.onclick = async function() {
       try {
         var file = new File([pdfBytes], fileName, { type: 'application/pdf' });
-        if (navigator.canShare({ files: [file] })) {
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
           await navigator.share({ files: [file], title: '脱退連絡票 - ' + shimei });
-          shared = true;
+        } else {
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          a.click();
+          showToast('PDFをダウンロードしました');
         }
-      } catch(shareErr) {
-        if (shareErr.name !== 'AbortError') console.error('Share error:', shareErr);
+      } catch(e) {
+        if (e.name !== 'AbortError') showToast('共有エラー: ' + e.message, 'error');
       }
-    }
+    };
+    bar.appendChild(shareBtn);
 
-    if (!shared) {
-      // Desktop or share not available: open in new window
-      var url = URL.createObjectURL(blob);
-      var pw = window.open(url, '_blank');
-      if (!pw) {
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.click();
-      }
-    }
+    // Close button
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '閉じる';
+    closeBtn.style.cssText = 'flex:1;padding:12px;font-size:16px;font-weight:bold;border:none;border-radius:10px;background:#555;color:#fff;cursor:pointer;max-width:200px;';
+    closeBtn.onclick = function() {
+      document.body.removeChild(overlay);
+      URL.revokeObjectURL(url);
+    };
+    bar.appendChild(closeBtn);
+
+    overlay.appendChild(bar);
+    document.body.appendChild(overlay);
 
     showToast('脱退連絡票PDFを生成しました');
     closeDattaiForm();
