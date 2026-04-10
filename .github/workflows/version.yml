@@ -23,10 +23,16 @@ jobs:
           MSG=$(git log -1 --pretty=%s | sed 's/"/\\"/g' | head -c 200)
           echo "{\"version\":\"${VERSION}\",\"timestamp\":\"${TIMESTAMP}\",\"message\":\"${MSG}\"}" > version.json
 
-      - name: Commit version.json
+      - name: Inject build version into index.html
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          # Replace the placeholder string with the actual short SHA
+          sed -i "s/__APP_BUILD_VERSION__/${VERSION}/g" index.html
+
+      - name: Commit version.json and index.html
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add version.json
+          git add version.json index.html
           git diff --cached --quiet || git commit -m "auto: update version.json [skip ci]"
           git push

@@ -1933,7 +1933,12 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // On visibility/focus: re-fetch and compare with baseline
 // If version changed → show update badge + panel
 
-let initialVersion = null;  // Version at page load time (in memory only)
+// APP_BUILD_VERSION is replaced at deploy time by GitHub Actions with the short SHA.
+// Using a baked-in constant ensures we detect updates even when the HTML itself is
+// served from browser cache (a fresh version.json fetch would otherwise overwrite
+// the baseline and hide the update badge).
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
+let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 let latestVersionData = null;
 
 async function checkForUpdate() {
@@ -1944,10 +1949,10 @@ async function checkForUpdate() {
     const data = await resp.json();
     if (!data.version) return;
     if (!initialVersion) {
-      // First fetch after page load: store as baseline
+      // No baked-in version (local dev) → first fetch becomes baseline
       initialVersion = data.version;
     } else if (initialVersion !== data.version) {
-      // Version changed since page was loaded → update available
+      // Version changed since this HTML was built → update available
       latestVersionData = data;
       document.getElementById('updateBadge').style.display = 'flex';
     }
