@@ -2130,6 +2130,8 @@ async function spPatchEmployee(itemId, body) {
   const token = await getToken();
   if (!token) { showToast('認証エラー', 'error'); throw new Error('No token'); }
   const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
+  // Ensure __metadata is set for odata=verbose
+  if (!body['__metadata']) body['__metadata'] = { type: LIST_ITEM_ENTITY };
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
