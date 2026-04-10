@@ -2192,6 +2192,18 @@ async function spPatchEmployee(itemId, body) {
   // Always fetch the correct entity type from SharePoint metadata (overrides any stale type set by callers)
   const entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
   body['__metadata'] = { type: entityType };
+  // Drop any field keys not present in the cached field metadata to avoid 400s on bogus internal names
+  if (employeeFieldsCache) {
+    const dropped = [];
+    Object.keys(body).forEach(k => {
+      if (k === '__metadata' || k === 'Title' || k === 'Id') return;
+      if (!employeeFieldsCache[k]) {
+        dropped.push(k);
+        delete body[k];
+      }
+    });
+    if (dropped.length) console.warn('spPatchEmployee dropped unknown fields:', dropped);
+  }
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
@@ -5359,6 +5371,12 @@ async function saveEditSection(catId) {
       }
 
       if (changed) {
+        // Validate that internalName actually exists in the cached field metadata
+        // (prevents sending bogus _x...._ encoded names that SharePoint will reject)
+        if (employeeFieldsCache && !employeeFieldsCache[internalName]) {
+          console.warn('Skipping unknown field:', field.key, '→', internalName);
+          return;
+        }
         body[internalName] = newVal;
         hasChanges = true;
       }
