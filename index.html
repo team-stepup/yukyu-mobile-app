@@ -2216,15 +2216,25 @@ async function spPatchEmployee(itemId, body) {
     });
   }
 
-  // Try up to 5 times, parsing each "プロパティ 'X' は型 ... に存在しません" error
+  // Try up to 10 times, parsing each "プロパティ 'X' は型 ... に存在しません" error
   // and removing the offending field before retrying.
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 10; i++) {
     const resp = await attempt();
     if (resp.ok) return true;
     const errText = await resp.text();
     console.error('SP PATCH Employee Error (attempt ' + (i + 1) + '):', errText);
-    // Match: プロパティ '_x...._' (Japanese) or property 'X' (English)
-    const m = errText.match(/プロパティ\s*'([^']+)'/) || errText.match(/property\s*'([^']+)'/i);
+    // SharePoint returns the message as JSON with the value already decoded to actual
+    // Japanese chars (e.g. プロパティ '_x...' は型 ... に存在しません). Parse JSON first
+    // to get the cleanest possible string, then match the property name in single quotes.
+    let msgValue = errText;
+    try {
+      const errJson = JSON.parse(errText);
+      msgValue = (errJson && errJson.error && errJson.error.message && errJson.error.message.value) || errText;
+    } catch(e) { /* not JSON, keep raw */ }
+    // Match: プロパティ 'X' (Japanese) or property 'X' (English) — also fall back to
+    // any single-quoted token starting with _x (encoded internal name).
+    let m = msgValue.match(/プロパティ\s*'([^']+)'/) || msgValue.match(/property\s*'([^']+)'/i);
+    if (!m) m = msgValue.match(/'(_x[0-9a-fA-F_]+)'/);
     if (m && m[1] && body[m[1]] !== undefined) {
       console.warn('Removing unwritable field and retrying:', m[1]);
       _badEmployeeFields.add(m[1]);
@@ -2234,7 +2244,7 @@ async function spPatchEmployee(itemId, body) {
       if (remaining.length === 0) throw new Error('書き込み可能なフィールドがありません');
       continue;
     }
-    throw new Error('更新失敗: ' + resp.status + ' ' + errText);
+    throw new Error('更新失敗: ' + resp.status + ' ' + msgValue);
   }
   throw new Error('更新失敗: リトライ上限');
 }
