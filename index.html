@@ -799,6 +799,9 @@ body {
 .fee-btn-440 { color: #e65100; border-color: #ffcc80; background: #fff3e0; }
 .fee-btn-440.selected { background: #e65100; color: #fff; border-color: #e65100; box-shadow: 0 2px 6px rgba(230,81,0,0.4); }
 .fee-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.fee-locked-display { padding: 14px 18px; font-size: 18px; font-weight: 700; border-radius: 10px; text-align: center; border: 2px solid var(--border); background: #f5f5f5; }
+.fee-locked-display.fee-locked-275 { color: #1976d2; border-color: #1976d2; background: #e3f2fd; }
+.fee-locked-display.fee-locked-440 { color: #e65100; border-color: #e65100; background: #fff3e0; }
 
 /* 一覧の前払日変更ボタン */
 .row-date-btn {
@@ -2141,6 +2144,11 @@ async function spGetAll(listGuid, query) {
 async function spPost(listName, body) {
   const token = await getToken();
   if (!token) { showToast('認証エラー: 再ログインしてください', 'error'); return null; }
+  // Auto-set the correct entity type from SharePoint metadata
+  try {
+    const t = await getListItemEntityType(listName);
+    body['__metadata'] = { type: t };
+  } catch(e) { console.warn('entity type fetch failed', e); }
   const url = SP_SITE_URL + "/_api/web/lists(guid'" + listName + "')/items";
   const resp = await fetch(url, {
     method: 'POST',
@@ -2159,13 +2167,31 @@ async function spPost(listName, body) {
   return await resp.json();
 }
 
+// Cache for ListItemEntityTypeFullName fetched from SharePoint metadata
+const _entityTypeCache = {};
+async function getListItemEntityType(listGuid) {
+  if (_entityTypeCache[listGuid]) return _entityTypeCache[listGuid];
+  const token = await getToken();
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')?$select=ListItemEntityTypeFullName";
+  const resp = await fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+  });
+  if (!resp.ok) throw new Error('Entity type fetch failed: ' + resp.status);
+  const data = await resp.json();
+  const t = data.d.ListItemEntityTypeFullName;
+  _entityTypeCache[listGuid] = t;
+  console.log('Entity type for', listGuid, '=', t);
+  return t;
+}
+
 // Update employee record (MERGE)
 async function spPatchEmployee(itemId, body) {
   const token = await getToken();
   if (!token) { showToast('認証エラー', 'error'); throw new Error('No token'); }
   const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
-  // Ensure __metadata is set for odata=verbose
-  if (!body['__metadata']) body['__metadata'] = { type: LIST_ITEM_ENTITY };
+  // Always fetch the correct entity type from SharePoint metadata (overrides any stale type set by callers)
+  const entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+  body['__metadata'] = { type: entityType };
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
@@ -3621,6 +3647,11 @@ async function loadMaebariData() {
 
       <button class="copy-btn" onclick="copyMaebariSummary()">📋 この画面をコピー</button>
 
+      ${isEmployeeRetired(emp) ? `
+      <div class="card" style="margin-top:16px;border:2px solid var(--danger);background:#fff5f5;">
+        <div style="text-align:center;color:var(--danger);font-weight:700;font-size:15px;padding:12px;">⚠ 退社済みの社員のため前払い申請はできません</div>
+      </div>
+      ` : `
       <div class="card" style="margin-top:16px;border:2px solid var(--primary);">
         <div class="section-title" style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:12px;">前払い申請</div>
 
@@ -3655,17 +3686,20 @@ async function loadMaebariData() {
 
         <button class="btn btn-primary btn-block btn-lg" id="maebariSubmitBtn" onclick="confirmMaebari()" style="margin-top:12px;" disabled>前払い申請</button>
       </div>
+      `}
     `;
 
-    // Initialize calendar
-    maebariCalYear = new Date().getFullYear();
-    maebariCalMonth = new Date().getMonth();
-    maebariSelectedAmount = null;
-    // Auto-select next Friday as default pay date (including today if Friday)
-    maebariSelectedPayDate = defaultPayDay;
-    const days = ['日','月','火','水','木','金','土'];
-    document.getElementById('maebariSelectedDate').textContent = formatDateShort(maebariSelectedPayDate) + '（' + days[maebariSelectedPayDate.getDay()] + '）';
-    renderMaebariCalendar();
+    // Initialize calendar (skip if retired - form is hidden)
+    if (!isEmployeeRetired(emp)) {
+      maebariCalYear = new Date().getFullYear();
+      maebariCalMonth = new Date().getMonth();
+      maebariSelectedAmount = null;
+      // Auto-select next Friday as default pay date (including today if Friday)
+      maebariSelectedPayDate = defaultPayDay;
+      const days = ['日','月','火','水','木','金','土'];
+      document.getElementById('maebariSelectedDate').textContent = formatDateShort(maebariSelectedPayDate) + '（' + days[maebariSelectedPayDate.getDay()] + '）';
+      renderMaebariCalendar();
+    }
   } catch (e) {
     console.error('Maebari fetch error:', e);
     container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">前払いデータの取得に失敗しました</div>';
@@ -3850,6 +3884,11 @@ function updateMaebariConfirm() {
 async function confirmMaebari() {
   if (!maebariSelectedPayDate || !maebariSelectedAmount || !currentEmployee) return;
 
+  if (isEmployeeRetired(currentEmployee)) {
+    showToast('退社済みの社員のため前払い申請はできません', 'error');
+    return;
+  }
+
   const btn = document.getElementById('maebariSubmitBtn');
   btn.disabled = true;
   btn.textContent = '確認中...';
@@ -3921,8 +3960,9 @@ async function submitMaebari() {
 
     const hakensaki = getHakensakiCode(emp);
     const bankInfo = getEmployeeBankInfo(emp);
+    const maebariType = await getListItemEntityType(LIST_MAEBARI_GUID);
     const body = {
-      '__metadata': { 'type': LIST_MAEBARI_ENTITY },
+      '__metadata': { 'type': maebariType },
       'Title': String(emp[F.syainNo] || ''),
       'NO_x002e_': String(emp[F.syainNo] || ''),
       'OData__x652f__x6255__x65e5_': maebariSelectedPayDate.toISOString(),
@@ -4150,10 +4190,14 @@ function openMaebariEdit(itemId) {
 
     <div class="edit-field">
       <div class="edit-field-label">手数料</div>
-      <div class="fee-button-group">
-        <button type="button" class="fee-btn fee-btn-275${fee === '275' ? ' selected' : ''}" data-fee="275" onclick="selectMaebariFee('275')" ${isLocked ? 'disabled' : ''}>275円</button>
-        <button type="button" class="fee-btn fee-btn-440${fee === '440' ? ' selected' : ''}" data-fee="440" onclick="selectMaebariFee('440')" ${isLocked ? 'disabled' : ''}>440円</button>
-      </div>
+      ${isLocked
+        ? (fee
+            ? '<div class="fee-locked-display fee-locked-' + escHtml(fee) + '">' + escHtml(fee) + '円</div>'
+            : '<div class="fee-locked-display" style="color:var(--text-light);">未設定</div>')
+        : `<div class="fee-button-group">
+            <button type="button" class="fee-btn fee-btn-275${fee === '275' ? ' selected' : ''}" data-fee="275" onclick="selectMaebariFee('275')">275円</button>
+            <button type="button" class="fee-btn fee-btn-440${fee === '440' ? ' selected' : ''}" data-fee="440" onclick="selectMaebariFee('440')">440円</button>
+          </div>`}
       <input type="hidden" id="editMaebariFee" value="${escHtml(fee)}">
     </div>
 
@@ -4207,7 +4251,8 @@ async function changeRowPayDate(itemId, btn) {
       const token = await getToken();
       if (!token) { showToast('認証エラー', 'error'); return; }
       const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + itemId + ")";
-      const body = { '__metadata': { type: LIST_MAEBARI_ENTITY } };
+      const maebariType = await getListItemEntityType(LIST_MAEBARI_GUID);
+      const body = { '__metadata': { type: maebariType } };
       body[MF.payDate] = newDate + 'T00:00:00Z';
       const resp = await fetch(url, {
         method: 'POST',
@@ -4267,8 +4312,9 @@ async function saveMaebariEdit() {
 
     const itemId = editingMaebariRecord.Id;
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + itemId + ")";
+    const maebariType = await getListItemEntityType(LIST_MAEBARI_GUID);
     const body = {
-      '__metadata': { 'type': LIST_MAEBARI_ENTITY },
+      '__metadata': { 'type': maebariType },
     };
     body[MF.amount] = amount;
     if (fee) body[MF.fee] = fee;
@@ -4499,8 +4545,9 @@ async function saveYukyuEdit() {
 
     const itemId = editingYukyuRecord.Id;
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_LEAVE_GUID + "')/items(" + itemId + ")";
+    const leaveEntityType = await getListItemEntityType(LIST_LEAVE_GUID);
     const body = {
-      '__metadata': { 'type': LIST_ITEM_ENTITY },
+      '__metadata': { 'type': leaveEntityType },
     };
     body[F.leaveDate] = newDate + 'T00:00:00Z';
     body[F.leaveType] = leaveType;
@@ -4890,11 +4937,12 @@ async function submitLeaveApplication() {
   let successCount = 0;
   let errorCount = 0;
 
+  const leaveEntityType = await getListItemEntityType(LIST_LEAVE_GUID);
   for (const dateStr of selectedDates) {
     try {
       const amount = Math.round(hourlyRate * hoursPerDate);
       const body = {
-        __metadata: { type: LIST_ITEM_ENTITY },
+        __metadata: { type: leaveEntityType },
         [F.syainNo]: emp[F.syainNo],
         Title: emp.Title || '',
         [F.shimei]: emp.Title || '',
@@ -4975,6 +5023,19 @@ function getRetireDateStr(emp) {
   const d = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
   if (!d) return '';
   return formatDate(d);
+}
+
+// 退社済み判定: 退社日が設定されており、その日付が今日以前であれば true
+function isEmployeeRetired(emp) {
+  if (!emp) return false;
+  const d = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+  if (!d) return false;
+  const retire = new Date(d);
+  if (isNaN(retire.getTime())) return false;
+  retire.setHours(0,0,0,0);
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  return retire.getTime() <= today.getTime();
 }
 
 async function spDelete(itemId) {
@@ -6324,6 +6385,10 @@ function executeProcedure(type) {
 async function openTaishaForm() {
   const emp = currentEmployee;
   if (!emp) return;
+  if (isEmployeeRetired(emp)) {
+    showToast('退社済みの社員のため退社報告はできません', 'error');
+    return;
+  }
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
   const today = toLocalDateStr(new Date());
@@ -6552,6 +6617,10 @@ async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, risho
 async function openShahoForm() {
   const emp = currentEmployee;
   if (!emp) return;
+  if (isEmployeeRetired(emp)) {
+    showToast('退社済みの社員のため社保加入申請はできません', 'error');
+    return;
+  }
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
   const today = toLocalDateStr(new Date());
