@@ -7083,29 +7083,34 @@ async function generateDattaiDocument() {
 
     // === Generate PDF ===
     var pdfBytes = await pdfDoc.save();
+    var fileName = '脱退連絡票_' + shimei + '.pdf';
     var blob = new Blob([pdfBytes], { type: 'application/pdf' });
-    var url = URL.createObjectURL(blob);
 
-    // Open in new window for preview
-    var pw = window.open(url, '_blank');
-    if (!pw) {
-      // Fallback: create download link
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = '脱退連絡票_' + shimei + '.pdf';
-      a.click();
+    // Mobile: use Web Share API (blob URLs don't support share on iOS)
+    var isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+    var shared = false;
+
+    if (isMobile && navigator.share && navigator.canShare) {
+      try {
+        var file = new File([pdfBytes], fileName, { type: 'application/pdf' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: '脱退連絡票 - ' + shimei });
+          shared = true;
+        }
+      } catch(shareErr) {
+        if (shareErr.name !== 'AbortError') console.error('Share error:', shareErr);
+      }
     }
 
-    // Also try Web Share API for mobile
-    if (navigator.share && navigator.canShare) {
-      var file = new File([pdfBytes], '脱退連絡票_' + shimei + '.pdf', { type: 'application/pdf' });
-      if (navigator.canShare({ files: [file] })) {
-        // Show share button
-        setTimeout(function() {
-          if (confirm('PDFを共有しますか？')) {
-            navigator.share({ files: [file], title: '脱退連絡票 - ' + shimei });
-          }
-        }, 1000);
+    if (!shared) {
+      // Desktop or share not available: open in new window
+      var url = URL.createObjectURL(blob);
+      var pw = window.open(url, '_blank');
+      if (!pw) {
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
       }
     }
 
