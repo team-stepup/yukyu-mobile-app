@@ -778,6 +778,40 @@ body {
   opacity: 0;
   cursor: pointer;
 }
+/* 手数料ボタン選択 */
+.fee-button-group {
+  display: flex;
+  gap: 10px;
+}
+.fee-btn {
+  flex: 1;
+  padding: 14px 0;
+  font-size: 18px;
+  font-weight: 700;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.fee-btn-275 { color: #1976d2; border-color: #90caf9; background: #e3f2fd; }
+.fee-btn-275.selected { background: #1976d2; color: #fff; border-color: #1976d2; box-shadow: 0 2px 6px rgba(25,118,210,0.4); }
+.fee-btn-440 { color: #e65100; border-color: #ffcc80; background: #fff3e0; }
+.fee-btn-440.selected { background: #e65100; color: #fff; border-color: #e65100; box-shadow: 0 2px 6px rgba(230,81,0,0.4); }
+.fee-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 一覧の前払日変更ボタン */
+.row-date-btn {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+}
+.row-date-btn:active { background: #ffc107; }
+
 /* 前払い編集画面 */
 .edit-header {
   background: var(--primary-dark);
@@ -4004,7 +4038,7 @@ async function loadMaebariList() {
     }
 
     let totalAmount = 0;
-    let html = '<div class="maebari-scroll-wrap"><table class="list-table maebari-fit"><thead><tr><th>No.</th><th>派遣先</th><th>氏名</th><th>金額</th><th>登録者</th><th>登録日時</th></tr></thead><tbody>';
+    let html = '<div class="maebari-scroll-wrap"><table class="list-table maebari-fit"><thead><tr><th>No.</th><th>派遣先</th><th>氏名</th><th>金額</th><th>登録者</th><th>📅</th></tr></thead><tbody>';
     records.forEach(r => {
       const amt = parseInt(String(r[MF.amount] || '0').replace(/,/g, '')) || 0;
       const fee = parseInt(String(r[MF.fee] || '0').replace(/,/g, '')) || 0;
@@ -4015,15 +4049,19 @@ async function loadMaebariList() {
       const colonIdx = haken.indexOf(':');
       if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
       const author = r.Author ? r.Author.Title : '';
-      const created = r.Created ? formatTimeShort(r.Created) : '';
       const feeHtml = fee ? '<span class="fee-sub">+' + fee.toLocaleString() + '</span>' : '';
+      const hasFeeForRow = !!(r[MF.fee] && String(r[MF.fee]).trim());
+      const payDateRaw = r[MF.payDate] ? new Date(r[MF.payDate]).toISOString().substring(0,10) : '';
+      const dateBtn = hasFeeForRow
+        ? '<span style="color:#bbb;font-size:18px;">🔒</span>'
+        : '<button type="button" class="row-date-btn" onclick="event.stopPropagation();changeRowPayDate(' + r.Id + ',this)" data-current="' + payDateRaw + '">📅</button>';
       html += '<tr style="cursor:pointer;" onclick="openMaebariEdit(' + r.Id + ')">'
         + '<td>' + escHtml(String(r[MF.syainNo] || '')) + '</td>'
         + '<td>' + escHtml(haken) + '</td>'
         + '<td>' + escHtml(r[MF.name] || '') + '</td>'
         + '<td style="text-align:right;white-space:normal;line-height:1.3;">' + amt.toLocaleString() + feeHtml + '</td>'
         + '<td>' + escHtml(author) + '</td>'
-        + '<td>' + created + '</td>'
+        + '<td style="text-align:center;">' + dateBtn + '</td>'
         + '</tr>';
     });
     html += '</tbody></table></div><div style="height:50px;"></div>';
@@ -4112,11 +4150,11 @@ function openMaebariEdit(itemId) {
 
     <div class="edit-field">
       <div class="edit-field-label">手数料</div>
-      <select id="editMaebariFee" ${isLocked ? 'disabled' : ''}>
-        <option value="">選択してください</option>
-        <option value="275"${fee === '275' ? ' selected' : ''}>275</option>
-        <option value="440"${fee === '440' ? ' selected' : ''}>440</option>
-      </select>
+      <div class="fee-button-group">
+        <button type="button" class="fee-btn fee-btn-275${fee === '275' ? ' selected' : ''}" data-fee="275" onclick="selectMaebariFee('275')" ${isLocked ? 'disabled' : ''}>275円</button>
+        <button type="button" class="fee-btn fee-btn-440${fee === '440' ? ' selected' : ''}" data-fee="440" onclick="selectMaebariFee('440')" ${isLocked ? 'disabled' : ''}>440円</button>
+      </div>
+      <input type="hidden" id="editMaebariFee" value="${escHtml(fee)}">
     </div>
 
     <div class="edit-bank-info">
@@ -4145,6 +4183,58 @@ function onEditAmountChange() {
   } else {
     wrap.style.display = 'none';
   }
+}
+
+function selectMaebariFee(fee) {
+  document.getElementById('editMaebariFee').value = fee;
+  document.querySelectorAll('.fee-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelector('.fee-btn[data-fee="' + fee + '"]').classList.add('selected');
+}
+
+async function changeRowPayDate(itemId, btn) {
+  // Create hidden date input, open picker, on change → save
+  const current = btn.getAttribute('data-current') || '';
+  const inp = document.createElement('input');
+  inp.type = 'date';
+  inp.value = current;
+  inp.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+  document.body.appendChild(inp);
+  inp.onchange = async function() {
+    const newDate = inp.value;
+    document.body.removeChild(inp);
+    if (!newDate || newDate === current) return;
+    try {
+      const token = await getToken();
+      if (!token) { showToast('認証エラー', 'error'); return; }
+      const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + itemId + ")";
+      const body = { '__metadata': { type: LIST_MAEBARI_ENTITY } };
+      body[MF.payDate] = newDate + 'T00:00:00Z';
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Accept': 'application/json;odata=verbose',
+          'Content-Type': 'application/json;odata=verbose',
+          'IF-MATCH': '*',
+          'X-HTTP-Method': 'MERGE',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(resp.status + ' ' + err);
+      }
+      showToast('前払日を変更しました', 'success');
+      loadMaebariList();
+    } catch(e) {
+      console.error('changeRowPayDate error:', e);
+      showToast('変更エラー: ' + e.message, 'error');
+    }
+  };
+  setTimeout(function() {
+    if (inp.showPicker) inp.showPicker();
+    else inp.click();
+  }, 50);
 }
 
 function copyAccountNumber() {
