@@ -7556,6 +7556,10 @@ async function openZaishokuForm() {
   var nyushaDate = emp[keyMap['nyushaDate']] ? String(emp[keyMap['nyushaDate']]).substring(0,10) : '';
   var zairyuBikou = emp[keyMap['zairyuBikou']] || findEmpValueByTitle('在留：備考') || findEmpValueByTitle('備考');
   var tokki1 = emp[keyMap['tokki1']] || findEmpValueByTitle('特記') || '';
+  // Romaji name from residence card — search broadly
+  var romajiName = findEmpValueByTitle('ローマ字氏名') || findEmpValueByTitle('ローマ字') ||
+                   findEmpValueByTitle('英字氏名') || findEmpValueByTitle('英字') ||
+                   findEmpValueByTitle('在留：氏名') || findEmpValueByTitle('在留氏名') || '';
 
   var overlay = document.createElement('div');
   overlay.className = 'taisha-overlay';
@@ -7575,8 +7579,8 @@ async function openZaishokuForm() {
         '<div class="dattai-section-title">\ud83d\udcdd 証明内容</div>' +
         '<div class="taisha-field"><label>氏名（漢字／カナ）</label>' +
           '<input type="text" id="zai_name" value="' + escHtml(name) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
-        '<div class="taisha-field"><label>氏名（在留カード備考・ローマ字／PT下段用）</label>' +
-          '<input type="text" id="zai_name_alt" value="' + escHtml(zairyuBikou || tokki1) + '" placeholder="例: SILVA YAMASHITA HIROSHI" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>氏名（在留カード ローマ字氏名）</label>' +
+          '<input type="text" id="zai_name_alt" value="' + escHtml(romajiName) + '" placeholder="例: SILVA YAMASHITA HIROSHI" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
         '<div class="taisha-field"><label>現住所（日本語）</label>' +
           '<input type="text" id="zai_address" value="' + escHtml(address) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
         '<div class="taisha-field"><label>現住所（ローマ字／PT下段用）</label>' +
@@ -7882,43 +7886,73 @@ async function generateZaishokuDocument(lang) {
       // === JP version ===
       // All data values aligned to x=170 (start of 静 in 静岡県... of 現住所)
       var DATA_X = 170;
-      var DATA_RIGHT = 410; // underline right edge
+      var LINE_LEN = 145; // unified underline length (matches original 日付 line)
+      var LINE_RIGHT = DATA_X + LINE_LEN; // = 315
 
       // 現住所: handle long addresses (apartment names) — wrap to 2 lines or shrink
       if (address && address.length > 22) {
-        drawTextWrap(DATA_X, 200, address, 13, DATA_RIGHT - DATA_X, 7);
+        drawTextWrap(DATA_X, 200, address, 13, 380, 7);
       } else {
-        drawTextFit(DATA_X, 200, address, 14, DATA_RIGHT - DATA_X);
+        drawTextFit(DATA_X, 200, address, 14, 380);
       }
 
-      // 氏名
-      drawTextFit(DATA_X, 258, name, 14, DATA_RIGHT - DATA_X);
+      // === 氏名 (在留カードのローマ字氏名のみ) ===
+      var romajiAlt = (document.getElementById('zai_name_alt').value || '').trim();
+      if (romajiAlt && /^[A-Z]{2}\d/.test(romajiAlt)) romajiAlt = '';
+      drawTextFit(DATA_X, 264, romajiAlt || name, 13, 380);
 
-      // === 生年月日 ===
-      // Whiteout existing underline + any text to its left, redraw aligned to 静
-      whiteRect(135, 318, 280, 8);
-      drawLine(DATA_X, 324, DATA_RIGHT, 324, 1.2);
+      // === Whiteout original 4 underlines (生年月日/国籍/採用年月日/日付) ===
+      whiteRect(180, 320, 160, 8);   // 生年月日 line
+      whiteRect(180, 379, 160, 8);   // 国籍 line
+      whiteRect(180, 437, 160, 8);   // 採用年月日 line
+      whiteRect(180, 623, 160, 8);   // 日付 line
+
+      // === 4 unified underlines (length 145pt, start x=170) ===
+      drawLine(DATA_X, 324, LINE_RIGHT, 324, 1.2); // 生年月日
+      drawLine(DATA_X, 383, LINE_RIGHT, 383, 1.2); // 国籍
+      drawLine(DATA_X, 441, LINE_RIGHT, 441, 1.2); // 採用年月日
+
+      // === Data text on the new lines ===
       drawText(DATA_X, 318, fmtDateJP(birthday), 13);
-
-      // 国籍
-      drawTextFit(DATA_X, 377, nationality, 14, DATA_RIGHT - DATA_X);
-
-      // === 採用年月日 ===
-      whiteRect(135, 435, 280, 8);
-      drawLine(DATA_X, 441, DATA_RIGHT, 441, 1.2);
+      drawTextFit(DATA_X, 377, nationality, 14, LINE_LEN);
       drawText(DATA_X, 435, fmtDateJP(nyushaDate), 13);
 
-      // 日付（文末・証明日）
-      drawText(185, 622, fmtDateJP(todayStr), 12);
+      // 日付 (文末・証明日) — also start at DATA_X with same length line
+      drawLine(DATA_X, 627, LINE_RIGHT, 627, 1.2);
+      drawText(DATA_X, 622, fmtDateJP(todayStr), 12);
 
-      // === Replace baked black seal with red seal ===
-      // Detected black seal bbox: pt x=425-492, y=671-738 (67x67), center (458,704)
-      whiteRect(424, 670, 70, 70);
-      drawRedSeal(458, 704, 67);
+      // === Replace baked black seal with red seal (wider whiteout, larger seal) ===
+      whiteRect(415, 662, 90, 86);
+      drawRedSeal(458, 704, 80);
 
-      // Add 電話番号 row in case it was cut off the template
-      drawText(160, 802, '電話番号', 10);
-      drawText(235, 802, COMPANY_TEL, 11);
+      // === Whiteout the bottom company labels area and redraw cleanly ===
+      // Original labels at y=694 (事業所所在地), y=730 (事業所名称), y=766 (代表者)
+      // are missing the leading 事/代 char. Redraw labels right-aligned to colon at x=165.
+      whiteRect(50, 684, 168, 130);
+
+      function drawSpacedLabel(rightX, y, text, sz) {
+        // Render with the visual style "X X X" (character spacing similar to template)
+        ctx.fillStyle = '#000000';
+        setFont(sz);
+        var spacing = sz * 1.6; // pt between char centers
+        var w = (text.length - 1) * spacing;
+        var startX = rightX - w;
+        for (var i = 0; i < text.length; i++) {
+          var ch = text.charAt(i);
+          var chW = ctx.measureText(ch).width / SCALE;
+          ctx.fillText(ch, (startX + i * spacing - chW / 2) * SCALE, y * SCALE);
+        }
+        // Colon
+        ctx.fillText('：', (rightX + 2) * SCALE, y * SCALE);
+      }
+
+      drawSpacedLabel(165, 698, '事業所所在地', 10);
+      drawSpacedLabel(165, 734, '事業所名称', 10);
+      drawSpacedLabel(165, 770, '代表者', 10);
+      drawSpacedLabel(165, 806, '電話番号', 10);
+
+      // 電話番号 value (同じ列、山下の真下から)
+      drawText(235, 806, COMPANY_TEL, 11);
     }
 
     // Convert canvas to PNG bytes, embed via pdf-lib
