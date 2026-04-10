@@ -7096,7 +7096,7 @@ async function generateDattaiDocument() {
 
     // PDF preview as image (render page 1 with pdf.js for screen-fit)
     var previewArea = document.createElement('div');
-    previewArea.style.cssText = 'flex:1;overflow:hidden;display:flex;justify-content:center;align-items:center;padding:4px;';
+    previewArea.style.cssText = 'flex:1;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;justify-content:center;align-items:center;padding:4px;position:relative;';
 
     // Use pdf.js to render PDF to canvas at screen width
     var pdfjsLib = await (async function() {
@@ -7140,8 +7140,70 @@ async function generateDattaiDocument() {
       var canvas = document.createElement('canvas');
       canvas.width = scaledVP.width;
       canvas.height = scaledVP.height;
-      canvas.style.cssText = 'max-width:100%;max-height:100%;box-shadow:0 2px 8px rgba(0,0,0,.3);background:#fff;object-fit:contain;';
+      canvas.style.cssText = 'max-width:100%;max-height:100%;box-shadow:0 2px 8px rgba(0,0,0,.3);background:#fff;object-fit:contain;transform-origin:0 0;';
       await pg.render({ canvasContext: canvas.getContext('2d'), viewport: scaledVP }).promise;
+
+      // Pinch-to-zoom support
+      var zoomState = { scale: 1, minScale: 1, maxScale: 4, startDist: 0, startScale: 1, translateX: 0, translateY: 0, startX: 0, startY: 0, lastTouchX: 0, lastTouchY: 0, isPinching: false, isPanning: false };
+      function applyTransform() {
+        canvas.style.transform = 'translate(' + zoomState.translateX + 'px,' + zoomState.translateY + 'px) scale(' + zoomState.scale + ')';
+      }
+      function getTouchDist(e) {
+        var dx = e.touches[0].clientX - e.touches[1].clientX;
+        var dy = e.touches[0].clientY - e.touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+      previewArea.addEventListener('touchstart', function(e) {
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          zoomState.isPinching = true;
+          zoomState.startDist = getTouchDist(e);
+          zoomState.startScale = zoomState.scale;
+        } else if (e.touches.length === 1 && zoomState.scale > 1) {
+          zoomState.isPanning = true;
+          zoomState.startX = zoomState.translateX;
+          zoomState.startY = zoomState.translateY;
+          zoomState.lastTouchX = e.touches[0].clientX;
+          zoomState.lastTouchY = e.touches[0].clientY;
+        }
+      }, { passive: false });
+      previewArea.addEventListener('touchmove', function(e) {
+        if (zoomState.isPinching && e.touches.length === 2) {
+          e.preventDefault();
+          var dist = getTouchDist(e);
+          var newScale = Math.min(zoomState.maxScale, Math.max(zoomState.minScale, zoomState.startScale * (dist / zoomState.startDist)));
+          zoomState.scale = newScale;
+          if (newScale <= 1) { zoomState.translateX = 0; zoomState.translateY = 0; }
+          applyTransform();
+        } else if (zoomState.isPanning && e.touches.length === 1 && zoomState.scale > 1) {
+          e.preventDefault();
+          var dx = e.touches[0].clientX - zoomState.lastTouchX;
+          var dy = e.touches[0].clientY - zoomState.lastTouchY;
+          zoomState.translateX = zoomState.startX + dx;
+          zoomState.translateY = zoomState.startY + dy;
+          applyTransform();
+        }
+      }, { passive: false });
+      previewArea.addEventListener('touchend', function(e) {
+        if (e.touches.length < 2) zoomState.isPinching = false;
+        if (e.touches.length < 1) zoomState.isPanning = false;
+        if (zoomState.scale <= 1) { zoomState.scale = 1; zoomState.translateX = 0; zoomState.translateY = 0; applyTransform(); }
+      });
+      // Double-tap to toggle zoom
+      var lastTap = 0;
+      previewArea.addEventListener('touchend', function(e) {
+        if (e.touches.length === 0 && !zoomState.isPinching) {
+          var now = Date.now();
+          if (now - lastTap < 300) {
+            e.preventDefault();
+            if (zoomState.scale > 1) { zoomState.scale = 1; zoomState.translateX = 0; zoomState.translateY = 0; }
+            else { zoomState.scale = 2.5; }
+            applyTransform();
+          }
+          lastTap = now;
+        }
+      });
+
       previewArea.appendChild(canvas);
       useCanvas = true;
     } catch(renderErr) {
