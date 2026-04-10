@@ -6942,70 +6942,64 @@ async function generateDattaiDocument() {
     }
 
     // === 保険者番号 8桁 ===
-    // Boxes at right side of header, approx x=484-538, y=363-420 area
-    // From the PDF image: 2 boxes visible at far right of 保険者名 row
-    // The 保険者番号 digit boxes span across the top-right area
-    // Looking at rects: vertical lines at x=504, 521 in header (y=336-363)
-    // But actual digit positions are in the 保険者名 area
+    // Boxes at y=385-413, 8 cells with dividers at:
+    // x= 405, 422, 438, 454.6, 472.6, 487.7, 504.2, 522.2, 537.8
+    // Cell centers: 413.5, 430, 446.3, 462.2, 480.2, 496.0, 511.8, 530.0
     if (hokenshaNo) {
-      // 8 digit boxes - positioned based on the PDF template structure
-      // The boxes appear to be around x=439-537 in the 保険者番号 column
       var hDigits = hokenshaNo.replace(/[^0-9]/g, '');
-      var hStartX = 440;
-      var hSpacing = 12.2;
-      var hY = 370;
+      var hCenters = [413.5, 430, 446.3, 462.2, 480.2, 496.0, 511.8, 530.0];
+      var hY = 403;
       for (var hi = 0; hi < Math.min(hDigits.length, 8); hi++) {
-        txt(hStartX + hi * hSpacing, hY, hDigits[hi], 7);
+        var dw = font.widthOfTextAtSize(hDigits[hi], 8);
+        txt(hCenters[hi] - dw / 2, hY, hDigits[hi], 8);
       }
     }
 
     // === 保険者名 SECTION (y=363-420) ===
     // Circle 全国健康保険協会 (text at ~229,370)
     oval(225, 366, 292, 382, 1.5, red);
-    // 支部名 - centered in the blank space between 協会 and 支部 label
-    // The blank area is roughly x=292-380
+    // 支部名 - centered in the blank space, lower position
+    // The blank area is roughly x=292-380, vertical center ~y=398
     if (jigyousho) {
       var jw = font.widthOfTextAtSize(jigyousho, 7);
-      txt((292 + 380 - jw) / 2, 378, jigyousho, 7);
+      txt((292 + 380 - jw) / 2, 400, jigyousho, 7);
     }
 
     // === 被保険者 SECTION (y=420-464) ===
-    // 氏名 (x=107-289, y=420-464) - centered both horizontally and vertically
+    // 氏名 (x=107-289, y=420-464) - centered horizontally, vertical center ~y=453
     if (shimei) {
       var sw = font.widthOfTextAtSize(shimei, 9);
-      txt((107 + 289 - sw) / 2, 448, shimei, 9);
+      txt((107 + 289 - sw) / 2, 453, shimei, 9);
     }
 
     // 生年月日 (x=289-394)
+    // Era labels: 昭和 y≈432, 平成 y≈443, 令和 y≈454
+    // 年 at x=329, 月 at x=357, 日 at x=385 - numbers aligned with labels
     if (bdW && bdW.era) {
-      // Circle the matching era
-      // 昭和 at y≈432, 平成 at y≈443, 令和 at y≈454
       var eraMap = { '昭和': 429, '平成': 440, '令和': 451 };
       var ey = eraMap[bdW.era];
       if (ey) oval(290, ey, 312, ey + 13, 1.2, red);
-      // Year/Month/Day values next to 年/月/日 labels
-      // 年 label at x≈329, 月 at x≈357, 日 at x≈385
-      txt(318, ey + 8, bdW.year, 7);
-      txt(348, ey + 8, bdW.month, 7);
-      txt(377, ey + 8, bdW.day, 7);
+      // Place numbers at the era's row, aligned with 年月日 labels (y+11 for baseline)
+      txt(318, ey + 11, bdW.year, 7);
+      txt(348, ey + 11, bdW.month, 7);
+      txt(377, ey + 11, bdW.day, 7);
     }
 
     // 資格取得 (x=394-538, y=420-441)
+    // Eras: 平成 at y≈422, 令和 at y≈432. Keep circles within y=420-441
     if (shW && shW.era) {
-      // Era labels: 昭和 at y≈421, 平成 at y≈432
-      // For 取得, eras are in the upper sub-row
-      var shutokuEraMap = { '昭和': 421, '平成': 429, '令和': 437 };
-      var sey = shutokuEraMap[shW.era] || 429;
-      oval(434, sey, 454, sey + 12, 1.0, red);
-      txt(460, 438, shW.year, 7);
-      txt(490, 438, shW.month, 7);
-      txt(518, 438, shW.day, 7);
+      var shutokuEraMap = { '平成': 420, '令和': 430 };
+      var sey = shutokuEraMap[shW.era] || 420;
+      oval(434, sey, 454, sey + 11, 1.0, red);
+      txt(460, 436, shW.year, 7);
+      txt(490, 436, shW.month, 7);
+      txt(518, 436, shW.day, 7);
     }
 
     // 資格喪失 (x=394-538, y=441-464)
-    // Always circle 令和 (fixed)
+    // Always circle 令和 ONLY (fixed, no 平成 circle)
     if (soW && soW.era) {
-      oval(434, 450, 454, 462, 1.0, red); // 令和 fixed
+      oval(434, 452, 454, 463, 1.0, red); // 令和 only
       txt(460, 459, soW.year, 7);
       txt(490, 459, soW.month, 7);
       txt(518, 459, soW.day, 7);
@@ -7053,8 +7047,8 @@ async function generateDattaiDocument() {
     if (taW && taW.era) {
       // Circle the era: 平成 or 令和 in the reason text
       // '平成・令和' text at x≈236, y≈616
-      if (taW.era === '平成') oval(234, 613, 258, 626, 1.0, red);
-      else if (taW.era === '令和') oval(259, 613, 278, 626, 1.0, red);
+      if (taW.era === '平成') oval(232, 613, 256, 626, 1.0, red);
+      else if (taW.era === '令和') oval(255, 613, 274, 626, 1.0, red);
       // 年 at x≈291, 月 at x≈319, 日 at x≈347
       txt(281, 623, taW.year, 7);
       txt(310, 623, taW.month, 7);
@@ -7069,14 +7063,14 @@ async function generateDattaiDocument() {
       txt(433, 692, todayW.day, 9);
     }
 
-    // 事業所所在地 (label at x=169, y=703) - shifted right
-    txt(265, 711, '静岡県磐田市上本郷1006-7', 8);
-    // 名称 (y=720)
-    txt(265, 728, '有限会社ステップ・アップ', 8);
-    // 代表者氏名 (y=736)
-    txt(265, 744, '山下　浩俊', 8);
-    // 電話 (y=752) - remove （）－
-    txt(265, 760, '0538-36-6968', 8);
+    // 事業所所在地 - aligned with label end (~x=280)
+    txt(280, 711, '静岡県磐田市上本郷1006-7', 8);
+    // 名称
+    txt(280, 728, '有限会社　ステップ・アップ', 8);
+    // 代表者氏名
+    txt(280, 744, '山下　浩俊', 8);
+    // 電話
+    txt(280, 760, '0538-36-6968', 8);
 
     // Remove page 2 if exists
     var pageCount = pdfDoc.getPageCount();
