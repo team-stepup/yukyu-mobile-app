@@ -537,6 +537,9 @@ body {
 
 /* Update Info Panel */
 .update-panel-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.45); z-index:10000; display:flex; align-items:flex-end; justify-content:center; }
+.version-display { text-align:center; font-size:11px; color:var(--text-light); padding:6px 0 2px; cursor:pointer; user-select:none; }
+.version-display .ver-latest { color:#2e7d32; font-weight:600; }
+.version-display .ver-update { color:#e65100; font-weight:700; }
 .update-panel { background:#fff; border-radius:20px 20px 0 0; max-width:500px; width:100%; padding:24px 20px calc(20px + env(safe-area-inset-bottom)); animation:slideUp .3s ease; }
 .update-panel-icon { text-align:center; font-size:40px; margin-bottom:8px; }
 .update-panel-title { text-align:center; font-size:17px; font-weight:800; color:var(--text); margin-bottom:4px; }
@@ -1634,6 +1637,9 @@ body {
 
   <!-- Screen 1: Employee Search -->
   <div class="screen" id="searchScreen">
+    <div class="version-display" id="versionDisplay" onclick="onVersionClick()">
+      <span id="versionText">バージョン確認中...</span>
+    </div>
     <div class="quick-links">
       <button class="quick-link-btn" onclick="switchScreen('maebariListScreen')">
         <span class="ql-icon">💰</span>
@@ -1937,9 +1943,29 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'c00baa4';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 let latestVersionData = null;
+
+function updateVersionDisplay() {
+  const el = document.getElementById('versionText');
+  if (!el) return;
+  const cur = initialVersion || '(dev)';
+  if (latestVersionData && latestVersionData.version && latestVersionData.version !== initialVersion) {
+    el.innerHTML = 'v' + escHtml(cur) + ' <span class="ver-update">→ 新バージョンあり (v' + escHtml(latestVersionData.version) + ')</span>';
+  } else {
+    el.innerHTML = 'v' + escHtml(cur) + ' <span class="ver-latest">最新</span>';
+  }
+}
+
+function onVersionClick() {
+  if (latestVersionData && latestVersionData.version && latestVersionData.version !== initialVersion) {
+    showUpdatePanel();
+  } else {
+    // Force a fresh check
+    checkForUpdate().then(updateVersionDisplay);
+  }
+}
 
 async function checkForUpdate() {
   try {
@@ -1948,14 +1974,15 @@ async function checkForUpdate() {
     if (!resp.ok) return;
     const data = await resp.json();
     if (!data.version) return;
+    latestVersionData = data;
     if (!initialVersion) {
       // No baked-in version (local dev) → first fetch becomes baseline
       initialVersion = data.version;
     } else if (initialVersion !== data.version) {
       // Version changed since this HTML was built → update available
-      latestVersionData = data;
       document.getElementById('updateBadge').style.display = 'flex';
     }
+    updateVersionDisplay();
   } catch (e) { /* silently ignore */ }
 }
 
@@ -1972,6 +1999,10 @@ function showUpdatePanel() {
     } catch(e) {}
   }
 
+  // Hide the floating ⚡ FAB while the panel is shown so it can't intercept taps
+  const fab = document.querySelector('.fab-btn');
+  if (fab) fab.style.display = 'none';
+
   const overlay = document.createElement('div');
   overlay.className = 'update-panel-overlay';
   overlay.id = 'updatePanelOverlay';
@@ -1982,17 +2013,29 @@ function showUpdatePanel() {
       (timeStr ? '<div class="update-panel-time">' + escHtml(timeStr) + ' 更新</div>' : '') +
       '<div class="update-panel-msg">' + escHtml(msg) + '</div>' +
       '<div class="update-panel-btns">' +
-        '<button class="btn-later" onclick="closeUpdatePanel()">あとで</button>' +
-        '<button class="btn-update" onclick="applyUpdate()">⟳ 更新する</button>' +
+        '<button type="button" class="btn-later" id="updateBtnLater">あとで</button>' +
+        '<button type="button" class="btn-update" id="updateBtnApply">⟳ 更新する</button>' +
       '</div>' +
     '</div>';
   overlay.addEventListener('click', function(e) { if (e.target === overlay) closeUpdatePanel(); });
   document.body.appendChild(overlay);
+  // Bind via addEventListener (and touchend for iOS reliability)
+  const laterBtn = document.getElementById('updateBtnLater');
+  const applyBtn = document.getElementById('updateBtnApply');
+  if (laterBtn) {
+    laterBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); closeUpdatePanel(); });
+  }
+  if (applyBtn) {
+    applyBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); applyUpdate(); });
+  }
 }
 
 function closeUpdatePanel() {
   const el = document.getElementById('updatePanelOverlay');
   if (el) el.remove();
+  // Restore FAB
+  const fab = document.querySelector('.fab-btn');
+  if (fab) fab.style.display = '';
 }
 
 function applyUpdate() {
