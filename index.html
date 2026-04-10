@@ -7435,12 +7435,26 @@ async function openZaishokuForm() {
   var fieldsMeta = await fetchEmployeeFields();
   var keyMap = buildFieldKeyMap(fieldsMeta);
 
+  // Robust nationality lookup: try keyMap, then scan all fields for any title containing 国籍
+  function findEmpValueByTitle(titleSubstr) {
+    if (!fieldsMeta) return '';
+    var hit = Object.keys(fieldsMeta).find(function(k) {
+      var t = fieldsMeta[k] && fieldsMeta[k].title;
+      return t && t.indexOf(titleSubstr) >= 0;
+    });
+    if (!hit) return '';
+    var odataKey = (hit === 'Title' || hit === 'Id') ? hit : (hit.indexOf('_') === 0 ? 'OData_' + hit : hit);
+    return emp[odataKey] || '';
+  }
+
   var name = emp.Title || '';
   var no = emp[F.syainNo] || '';
   var address = emp[keyMap['address']] || '';
   var birthday = emp[keyMap['birthday']] ? String(emp[keyMap['birthday']]).substring(0,10) : '';
-  var nationality = emp[keyMap['nationality']] || '';
+  var nationality = emp[keyMap['nationality']] || findEmpValueByTitle('国籍') || findEmpValueByTitle('本籍');
   var nyushaDate = emp[keyMap['nyushaDate']] ? String(emp[keyMap['nyushaDate']]).substring(0,10) : '';
+  var zairyuBikou = emp[keyMap['zairyuBikou']] || findEmpValueByTitle('在留：備考') || findEmpValueByTitle('備考');
+  var tokki1 = emp[keyMap['tokki1']] || findEmpValueByTitle('特記') || '';
 
   var overlay = document.createElement('div');
   overlay.className = 'taisha-overlay';
@@ -7458,18 +7472,24 @@ async function openZaishokuForm() {
       '</div>' +
       '<div class="taisha-body">' +
         '<div class="dattai-section-title">\ud83d\udcdd 証明内容</div>' +
-        '<div class="taisha-field"><label>氏名</label>' +
+        '<div class="taisha-field"><label>氏名（漢字／カナ）</label>' +
           '<input type="text" id="zai_name" value="' + escHtml(name) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
-        '<div class="taisha-field"><label>現住所</label>' +
+        '<div class="taisha-field"><label>氏名（在留カード備考・ローマ字／PT下段用）</label>' +
+          '<input type="text" id="zai_name_alt" value="' + escHtml(zairyuBikou || tokki1) + '" placeholder="例: SILVA YAMASHITA HIROSHI" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>現住所（日本語）</label>' +
           '<input type="text" id="zai_address" value="' + escHtml(address) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>現住所（ローマ字／PT下段用）</label>' +
+          '<input type="text" id="zai_address_romaji" value="" placeholder="例: 1006-7 Kamihongo, Iwata-shi, Shizuoka-ken" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
         '<div class="taisha-field"><label>生年月日</label>' +
           '<input type="date" id="zai_birthday" value="' + birthday + '"></div>' +
-        '<div class="taisha-field"><label>国籍</label>' +
-          '<input type="text" id="zai_nationality" value="' + escHtml(nationality) + '" placeholder="日本 / Brasileira など" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>国籍（日本語）</label>' +
+          '<input type="text" id="zai_nationality" value="' + escHtml(nationality) + '" placeholder="例: ブラジル" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>国籍（ポルトガル語／PT下段用）</label>' +
+          '<input type="text" id="zai_nationality_pt" value="" placeholder="例: Brasileira" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
         '<div class="taisha-field"><label>採用年月日</label>' +
           '<input type="date" id="zai_nyusha" value="' + nyushaDate + '"></div>' +
         '<div class="taisha-notice" style="background:#e3f2fd;border-color:#bbdefb;color:#1565c0;margin-top:12px;">' +
-          '\ud83d\udca1 言語を選んで PDF を生成してください。' +
+          '\ud83d\udca1 PT版は上段に日本語、下段にポルトガル語/ローマ字が出力されます。' +
         '</div>' +
       '</div>' +
       '<div class="taisha-footer" style="display:flex;gap:8px;">' +
@@ -7488,9 +7508,12 @@ function closeZaishokuForm() {
 async function generateZaishokuDocument(lang) {
   try {
     var name = document.getElementById('zai_name').value.trim();
+    var nameAlt = (document.getElementById('zai_name_alt').value || '').trim();
     var address = document.getElementById('zai_address').value.trim();
+    var addressRomaji = (document.getElementById('zai_address_romaji').value || '').trim();
     var birthday = document.getElementById('zai_birthday').value;
     var nationality = document.getElementById('zai_nationality').value.trim();
+    var nationalityPt = (document.getElementById('zai_nationality_pt').value || '').trim();
     var nyushaDate = document.getElementById('zai_nyusha').value;
 
     if (!name) { showToast('氏名を入力してください', 'error'); return; }
@@ -7518,25 +7541,86 @@ async function generateZaishokuDocument(lang) {
     // Page is A4 (595 x 842 pt). Scale = px per pt
     var SCALE = canvas.width / 595;
 
-    // Whiteout PT placeholder text already baked into the template
-    if (lang === 'pt') {
-      ctx.fillStyle = '#ffffff';
-      // 生年月日 placeholder
-      ctx.fillRect(248 * SCALE, 316 * SCALE, 75 * SCALE, 25 * SCALE);
-      // 国籍 placeholder
-      ctx.fillRect(255 * SCALE, 374 * SCALE, 60 * SCALE, 25 * SCALE);
-      // 採用年月日 placeholder
-      ctx.fillRect(248 * SCALE, 432 * SCALE, 75 * SCALE, 25 * SCALE);
-    }
-
-    // Draw text using browser system fonts (no font embedding needed)
-    ctx.fillStyle = '#000000';
+    // Helpers ------------------------------------------------------------
     ctx.textBaseline = 'alphabetic';
-    function drawText(x, y, text, sizeP) {
+    function setFont(sizeP) {
+      ctx.font = (sizeP * SCALE) + 'px "Noto Sans JP","Hiragino Sans","Yu Gothic","Meiryo",sans-serif';
+    }
+    function drawText(x, y, text, sizeP, color) {
       if (!text && text !== 0) return;
-      var sizePx = (sizeP || 12) * SCALE;
-      ctx.font = sizePx + 'px "Noto Sans JP","Hiragino Sans","Yu Gothic","Meiryo",sans-serif';
+      ctx.fillStyle = color || '#000000';
+      setFont(sizeP || 12);
       ctx.fillText(String(text), x * SCALE, y * SCALE);
+    }
+    // Draw text auto-shrinking to fit within maxWidthP (points). Returns final size.
+    function drawTextFit(x, y, text, sizeP, maxWidthP, color) {
+      if (!text && text !== 0) return sizeP;
+      ctx.fillStyle = color || '#000000';
+      var sz = sizeP;
+      setFont(sz);
+      while (ctx.measureText(String(text)).width > maxWidthP * SCALE && sz > 6) {
+        sz -= 0.5;
+        setFont(sz);
+      }
+      ctx.fillText(String(text), x * SCALE, y * SCALE);
+      return sz;
+    }
+    // Try to draw on one line; if too long, split into 2 rows (size-shrunk)
+    function drawTextWrap(x, y, text, sizeP, maxWidthP, lineGapP) {
+      if (!text) return;
+      ctx.fillStyle = '#000000';
+      setFont(sizeP);
+      if (ctx.measureText(String(text)).width <= maxWidthP * SCALE) {
+        ctx.fillText(String(text), x * SCALE, y * SCALE);
+        return;
+      }
+      // Find a good split point near the middle (prefer space, comma, or 番地 markers)
+      var s = String(text);
+      var splitIdx = -1;
+      var mid = Math.floor(s.length / 2);
+      var markers = [' ', '　', ',', '、'];
+      for (var off = 0; off < mid; off++) {
+        for (var m = 0; m < markers.length; m++) {
+          if (s.charAt(mid + off) === markers[m]) { splitIdx = mid + off + 1; break; }
+          if (s.charAt(mid - off) === markers[m]) { splitIdx = mid - off + 1; break; }
+        }
+        if (splitIdx > 0) break;
+      }
+      if (splitIdx <= 0) splitIdx = mid;
+      var line1 = s.substring(0, splitIdx).trim();
+      var line2 = s.substring(splitIdx).trim();
+      var smallSize = sizeP - 1.5;
+      drawTextFit(x, y - (lineGapP || 6), line1, smallSize, maxWidthP);
+      drawTextFit(x, y + (lineGapP || 6), line2, smallSize, maxWidthP);
+    }
+    function whiteRect(xP, yP, wP, hP) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(xP * SCALE, yP * SCALE, wP * SCALE, hP * SCALE);
+    }
+    function drawLine(x0, y0, x1, y1, widthPx, color) {
+      ctx.strokeStyle = color || '#000000';
+      ctx.lineWidth = (widthPx || 1) * SCALE;
+      ctx.beginPath();
+      ctx.moveTo(x0 * SCALE, y0 * SCALE);
+      ctx.lineTo(x1 * SCALE, y1 * SCALE);
+      ctx.stroke();
+    }
+    // Load real red company seal (角印) PNG once
+    var sealImg = null;
+    try {
+      sealImg = await new Promise(function(res) {
+        var im = new Image();
+        im.crossOrigin = 'anonymous';
+        im.onload = function() { res(im); };
+        im.onerror = function() { res(null); };
+        im.src = 'seal_stepup.png?_=' + Date.now();
+      });
+    } catch(_) { sealImg = null; }
+    function drawRedSeal(cx, cy, sizeP) {
+      if (!sealImg) return;
+      var s = sizeP || 56;
+      var half = s / 2;
+      ctx.drawImage(sealImg, (cx - half) * SCALE, (cy - half) * SCALE, s * SCALE, s * SCALE);
     }
 
     function fmtDateJP(d) {
@@ -7553,20 +7637,109 @@ async function generateZaishokuDocument(lang) {
     }
     var todayStr = toLocalDateStr(new Date());
 
+    // Company info
+    var COMPANY_ADDR_JP = '静岡県磐田市上本郷1006-7';
+    var COMPANY_ADDR_RM = '1006-7 Kamihongo, Iwata-shi, Shizuoka-ken';
+    var COMPANY_NAME_JP = '有限会社ステップ・アップ';
+    var COMPANY_NAME_PT = 'STEP UP Ltda.';
+    var COMPANY_REP_JP = '代表取締役　山下　浩俊';
+    var COMPANY_REP_PT = 'Diretor Representante: Hirotoshi Yamashita';
+    var COMPANY_TEL = '0538-36-6968';
+
     if (lang === 'pt') {
-      drawText(170, 213, address, 11);
-      drawText(170, 273, name, 11);
-      drawText(255, 333, fmtDatePT(birthday), 12);
-      drawText(260, 391, nationality, 12);
-      drawText(255, 449, fmtDatePT(nyushaDate), 12);
-      drawText(218, 600, fmtDatePT(todayStr), 12);
+      // Whiteout PT placeholder text baked into the template
+      whiteRect(245, 313, 80, 14); // 生年月日 placeholder
+      whiteRect(252, 371, 65, 14); // 国籍 placeholder
+      whiteRect(245, 429, 80, 14); // 採用年月日 placeholder
+
+      // === 現住所 / Endereço ===
+      // Upper row (JP label row): Japanese address — fit/wrap if too long
+      drawTextFit(170, 200, address, 11, 380);
+      // Lower row (PT label row): romaji
+      drawTextFit(170, 220, addressRomaji, 10, 380);
+
+      // === 氏名 / Nome ===
+      // Upper: kanji name; Lower: zairyu bikou / romaji
+      drawTextFit(170, 258, name, 11, 380);
+      drawTextFit(170, 278, nameAlt, 10, 380);
+
+      // === 生年月日 / Data de Nascimento ===
+      // Upper (JP row): wareki
+      drawTextFit(170, 316, fmtDateJP(birthday), 11, 380);
+      // Lower (PT row): dd/mm/yyyy
+      drawTextFit(170, 336, fmtDatePT(birthday), 10, 380);
+
+      // === 国籍 / Nacionalidade ===
+      drawTextFit(170, 374, nationality, 11, 380);
+      drawTextFit(170, 394, nationalityPt, 10, 380);
+
+      // === 採用年月日 / Data de inclusão na empresa ===
+      drawTextFit(170, 432, fmtDateJP(nyushaDate), 11, 380);
+      drawTextFit(170, 452, fmtDatePT(nyushaDate), 10, 380);
+
+      // === 日付 / Data ===
+      drawTextFit(170, 580, fmtDateJP(todayStr), 11, 380);
+      drawTextFit(170, 600, fmtDatePT(todayStr), 10, 380);
+
+      // === 事業所所在地 / Endereço — already baked, but add romaji on lower if missing space ===
+      // Existing rows are at y≈645/666 (JP address baked) and y≈709/728 (JP name baked).
+      // Add romaji address just below baked Japanese address (small font).
+      drawText(235, 680, COMPANY_ADDR_RM, 8);
+      drawText(235, 740, COMPANY_NAME_PT, 8);
+
+      // === 代表者 / Representante (template was cut off) ===
+      drawText(160, 770, '代表者', 9);
+      drawText(160, 786, 'Representante', 8);
+      drawText(235, 770, COMPANY_REP_JP, 9);
+      drawText(235, 786, COMPANY_REP_PT, 8);
+
+      // === 電話番号 / Telefone ===
+      drawText(160, 808, '電話番号', 9);
+      drawText(160, 824, 'Telefone', 8);
+      drawText(235, 808, COMPANY_TEL, 9);
+      drawText(235, 824, COMPANY_TEL, 8);
+
+      // Red company seal next to representative
+      drawRedSeal(465, 788, 50);
+
     } else {
-      drawText(170, 200, address, 14);
-      drawText(170, 258, name, 14);
-      drawText(170, 318, fmtDateJP(birthday), 14);
-      drawText(170, 377, nationality, 14);
-      drawText(170, 435, fmtDateJP(nyushaDate), 14);
+      // === JP version ===
+      // 現住所: handle long addresses (apartment names) — wrap to 2 lines or shrink
+      if (address && address.length > 22) {
+        drawTextWrap(170, 200, address, 13, 360, 7);
+      } else {
+        drawTextFit(170, 200, address, 14, 360);
+      }
+
+      // 氏名
+      drawTextFit(170, 258, name, 14, 360);
+
+      // === 生年月日 ===
+      // Whiteout existing underline and redraw extended to the left so it starts under 元号
+      // Original underline approx y=323, x=185-330
+      whiteRect(140, 320, 220, 6);
+      drawLine(140, 324, 360, 324, 1.2);
+      drawText(145, 318, fmtDateJP(birthday), 13);
+
+      // 国籍
+      drawTextFit(170, 377, nationality, 14, 360);
+
+      // === 採用年月日 ===
+      whiteRect(140, 437, 220, 6);
+      drawLine(140, 441, 360, 441, 1.2);
+      drawText(145, 435, fmtDateJP(nyushaDate), 13);
+
+      // 日付（文末・証明日）
       drawText(185, 622, fmtDateJP(todayStr), 12);
+
+      // 事業所情報 (template baked, but add 電話番号 if missing)
+      // The template likely already has 事業所所在地/名称/代表者 baked.
+      // Add 電話番号 row in case it was cut off:
+      drawText(160, 802, '電話番号', 10);
+      drawText(235, 802, COMPANY_TEL, 11);
+
+      // Red company seal (角印) next to representative signature area
+      drawRedSeal(465, 778, 56);
     }
 
     // Convert canvas to PNG bytes, embed via pdf-lib
