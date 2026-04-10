@@ -7090,13 +7090,64 @@ async function generateDattaiDocument() {
     // Show preview overlay with share button
     var overlay = document.createElement('div');
     overlay.id = 'dattai-preview-overlay';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#000;display:flex;flex-direction:column;';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#f0f0f0;display:flex;flex-direction:column;';
 
-    // PDF preview iframe
-    var iframe = document.createElement('iframe');
-    iframe.src = url;
-    iframe.style.cssText = 'flex:1;border:none;width:100%;background:#fff;';
-    overlay.appendChild(iframe);
+    // PDF preview as image (render page 1 with pdf.js for screen-fit)
+    var previewArea = document.createElement('div');
+    previewArea.style.cssText = 'flex:1;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;justify-content:center;align-items:flex-start;padding:8px;';
+
+    // Use pdf.js to render PDF to canvas at screen width
+    var pdfjsLib = await (async function() {
+      if (window.pdfjsLib) return window.pdfjsLib;
+      await new Promise(function(resolve) {
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs';
+        s.type = 'module';
+        // Use classic script loading for broader compatibility
+        s.onload = resolve;
+        document.head.appendChild(s);
+      });
+      return window.pdfjsLib;
+    })();
+
+    // Fallback: if pdf.js module didn't load, use iframe
+    var useCanvas = false;
+    try {
+      if (!window.pdfjsLib) {
+        // Load pdf.js as classic script
+        await new Promise(function(resolve, reject) {
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+      var pdjsL = window.pdfjsLib;
+      pdjsL.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      var pdfTask = pdjsL.getDocument({ data: pdfBytes });
+      var pdfPreview = await pdfTask.promise;
+      var pg = await pdfPreview.getPage(1);
+      var vw = window.innerWidth - 16;
+      var viewport = pg.getViewport({ scale: 1 });
+      var scale = vw / viewport.width;
+      var scaledVP = pg.getViewport({ scale: scale });
+      var canvas = document.createElement('canvas');
+      canvas.width = scaledVP.width;
+      canvas.height = scaledVP.height;
+      canvas.style.cssText = 'width:100%;height:auto;box-shadow:0 2px 8px rgba(0,0,0,.3);background:#fff;';
+      await pg.render({ canvasContext: canvas.getContext('2d'), viewport: scaledVP }).promise;
+      previewArea.appendChild(canvas);
+      useCanvas = true;
+    } catch(renderErr) {
+      console.error('PDF render fallback to iframe:', renderErr);
+      var iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
+      previewArea.style.cssText = 'flex:1;overflow:hidden;';
+      previewArea.appendChild(iframe);
+    }
+    overlay.appendChild(previewArea);
 
     // Bottom button bar
     var bar = document.createElement('div');
