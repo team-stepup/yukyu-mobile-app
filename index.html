@@ -7589,6 +7589,71 @@ function closeZaishokuForm() {
   if (el) el.remove();
 }
 
+// Basic Japanese address → romaji converter (best-effort, dictionary-based)
+function jpAddressToRomaji(addr) {
+  if (!addr) return '';
+  // Place name dictionary (Shizuoka focus + common neighbors)
+  var dict = {
+    // 都道府県
+    '北海道':'Hokkaido','東京都':'Tokyo','京都府':'Kyoto','大阪府':'Osaka',
+    '静岡県':'Shizuoka','愛知県':'Aichi','神奈川県':'Kanagawa','東京':'Tokyo',
+    '岐阜県':'Gifu','長野県':'Nagano','三重県':'Mie','山梨県':'Yamanashi',
+    // 静岡県内 市区町村
+    '磐田市':'Iwata-shi','浜松市':'Hamamatsu-shi','袋井市':'Fukuroi-shi',
+    '掛川市':'Kakegawa-shi','森町':'Mori-cho','菊川市':'Kikugawa-shi',
+    '御前崎市':'Omaezaki-shi','藤枝市':'Fujieda-shi','焼津市':'Yaizu-shi',
+    '島田市':'Shimada-shi','静岡市':'Shizuoka-shi','富士市':'Fuji-shi',
+    '富士宮市':'Fujinomiya-shi','三島市':'Mishima-shi','沼津市':'Numazu-shi',
+    '湖西市':'Kosai-shi','牧之原市':'Makinohara-shi',
+    // 浜松市の区
+    '中央区':'Chuo-ku','浜名区':'Hamana-ku','天竜区':'Tenryu-ku',
+    '中区':'Naka-ku','東区':'Higashi-ku','西区':'Nishi-ku','南区':'Minami-ku',
+    '北区':'Kita-ku','浜北区':'Hamakita-ku',
+    // 磐田市の主な町名
+    '上本郷':'Kamihongo','豊岡':'Toyooka','見付':'Mitsuke','二之宮':'Ninomiya',
+    '中泉':'Nakaizumi','岩井':'Iwai','森下':'Morishita','上岡田':'Kamiokada',
+    '下岡田':'Shimookada','加茂':'Kamo','東貝塚':'Higashikaizuka',
+    '掛塚':'Kakezuka','福田':'Fukude','竜洋':'Ryuyo','豊田':'Toyoda',
+    '匂坂中':'Sagisakanaka','匂坂上':'Sagisakakami','匂坂新':'Sagisakashin',
+    '高見丘':'Takamigaoka','西貝塚':'Nishikaizuka','池田':'Ikeda',
+    '上岡':'Kamioka','下岡':'Shimooka','社山':'Yashiroyama','前野':'Maeno',
+    '岡':'Oka','南島':'Minamijima','中野':'Nakano','下野部':'Shimonobe',
+    // 浜松市町名（主要）
+    '中央':'Chuo','広沢':'Hirosawa','三方原':'Mikatahara','和合':'Wago',
+    '佐鳴台':'Sanaru-dai','志都呂':'Shitoro','入野':'Irino','蜆塚':'Shijimizuka',
+    // 袋井市
+    '上山梨':'Kamiyamanashi','下山梨':'Shimoyamanashi'
+  };
+  var s = String(addr);
+  // Strip 〒postcode
+  s = s.replace(/^\s*〒?\s*\d{3}-?\d{4}\s*/, '');
+  // Replace dictionary entries (longest first)
+  var keys = Object.keys(dict).sort(function(a,b){ return b.length - a.length; });
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (s.indexOf(k) >= 0) s = s.split(k).join(' ' + dict[k] + ' ');
+  }
+  // Suffix conversions (only if not already converted via dict)
+  s = s.replace(/([一-龥])県/g, '$1-ken');
+  s = s.replace(/([一-龥])府/g, '$1-fu');
+  s = s.replace(/([一-龥])市/g, '$1-shi');
+  s = s.replace(/([一-龥])区/g, '$1-ku');
+  s = s.replace(/([一-龥]+)町/g, '$1-cho');
+  s = s.replace(/([一-龥]+)村/g, '$1-mura');
+  s = s.replace(/([0-9０-９]+)丁目/g, '$1-chome');
+  s = s.replace(/([0-9０-９]+)番地/g, '$1');
+  s = s.replace(/番地/g, '');
+  s = s.replace(/番/g, '-');
+  s = s.replace(/号/g, '');
+  // Convert full-width digits/dash
+  s = s.replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+  s = s.replace(/[ー－]/g, '-');
+  // Collapse spaces
+  s = s.replace(/\s+/g, ' ').trim();
+  // Reorder: Japanese order = country/pref/city/town/number → keep as-is for simplicity
+  return s;
+}
+
 async function generateZaishokuDocument(lang) {
   try {
     var name = document.getElementById('zai_name').value.trim();
@@ -7731,99 +7796,112 @@ async function generateZaishokuDocument(lang) {
     var COMPANY_TEL = '0538-36-6968';
 
     if (lang === 'pt') {
-      // Whiteout PT placeholder text baked into the template
-      whiteRect(245, 313, 80, 14); // 生年月日 placeholder
-      whiteRect(252, 371, 65, 14); // 国籍 placeholder
-      whiteRect(245, 429, 80, 14); // 採用年月日 placeholder
+      // Aggressive whiteout: clear entire data area of every row to wipe baked placeholders.
+      // x range covers from end of label area to right margin
+      var DX = 160, DW = 395;
+      whiteRect(DX, 188, DW, 38);   // 現住所 row
+      whiteRect(DX, 246, DW, 38);   // 氏名 row
+      whiteRect(DX, 304, DW, 38);   // 生年月日 row
+      whiteRect(DX, 362, DW, 38);   // 国籍 row
+      whiteRect(DX, 420, DW, 38);   // 採用年月日 row
+      whiteRect(DX, 568, DW, 38);   // 日付 row
+      // Whiteout baked romaji rows in 事業所 area so we can redraw cleanly
+      whiteRect(225, 658, 330, 18); // baked romaji address
+      whiteRect(225, 720, 330, 18); // baked romaji company name
+
+      // Auto-romaji fallback for address if user didn't provide one
+      var effAddrRomaji = addressRomaji;
+      if (!effAddrRomaji && address) {
+        effAddrRomaji = jpAddressToRomaji(address);
+      }
+      // Don't show 在留: number-style strings as a "name romaji" — it's the card number
+      var effNameAlt = nameAlt;
+      if (effNameAlt && /^[A-Z]{2}\d/.test(effNameAlt)) effNameAlt = '';
 
       // === 現住所 / Endereço ===
-      // Upper row (JP label row): Japanese address — fit/wrap if too long
-      drawTextFit(170, 200, address, 11, 380);
-      // Lower row (PT label row): romaji
-      drawTextFit(170, 220, addressRomaji, 10, 380);
+      drawTextFit(170, 205, address, 11, 380);
+      drawTextFit(170, 222, effAddrRomaji, 9, 380);
 
       // === 氏名 / Nome ===
-      // Upper: kanji name; Lower: zairyu bikou / romaji
-      drawTextFit(170, 258, name, 11, 380);
-      drawTextFit(170, 278, nameAlt, 10, 380);
+      drawTextFit(170, 263, name, 11, 380);
+      drawTextFit(170, 280, effNameAlt, 9, 380);
 
       // === 生年月日 / Data de Nascimento ===
-      // Upper (JP row): wareki
-      drawTextFit(170, 316, fmtDateJP(birthday), 11, 380);
-      // Lower (PT row): dd/mm/yyyy
-      drawTextFit(170, 336, fmtDatePT(birthday), 10, 380);
+      drawTextFit(170, 321, fmtDateJP(birthday), 11, 380);
+      drawTextFit(170, 338, fmtDatePT(birthday), 9, 380);
 
       // === 国籍 / Nacionalidade ===
-      drawTextFit(170, 374, nationality, 11, 380);
-      drawTextFit(170, 394, nationalityPt, 10, 380);
+      drawTextFit(170, 379, nationality, 11, 380);
+      drawTextFit(170, 396, nationalityPt, 9, 380);
 
       // === 採用年月日 / Data de inclusão na empresa ===
-      drawTextFit(170, 432, fmtDateJP(nyushaDate), 11, 380);
-      drawTextFit(170, 452, fmtDatePT(nyushaDate), 10, 380);
+      drawTextFit(170, 437, fmtDateJP(nyushaDate), 11, 380);
+      drawTextFit(170, 454, fmtDatePT(nyushaDate), 9, 380);
 
       // === 日付 / Data ===
-      drawTextFit(170, 580, fmtDateJP(todayStr), 11, 380);
-      drawTextFit(170, 600, fmtDatePT(todayStr), 10, 380);
+      drawTextFit(170, 585, fmtDateJP(todayStr), 11, 380);
+      drawTextFit(170, 602, fmtDatePT(todayStr), 9, 380);
 
-      // === 事業所所在地 / Endereço — already baked, but add romaji on lower if missing space ===
-      // Existing rows are at y≈645/666 (JP address baked) and y≈709/728 (JP name baked).
-      // Add romaji address just below baked Japanese address (small font).
-      drawText(235, 680, COMPANY_ADDR_RM, 8);
-      drawText(235, 740, COMPANY_NAME_PT, 8);
+      // === 事業所所在地 (romaji on lower row) ===
+      drawText(235, 672, COMPANY_ADDR_RM, 8);
+      // === 事業所名称 (romaji on lower row) ===
+      drawText(235, 734, COMPANY_NAME_PT, 8);
 
-      // === 代表者 / Representante (template was cut off) ===
-      drawText(160, 770, '代表者', 9);
-      drawText(160, 786, 'Representante', 8);
-      drawText(235, 770, COMPANY_REP_JP, 9);
-      drawText(235, 786, COMPANY_REP_PT, 8);
+      // === 代表者 / Representante (template cut off below) ===
+      drawText(155, 768, '代表者', 9);
+      drawText(155, 784, 'Representante', 8);
+      drawText(235, 768, COMPANY_REP_JP, 10);
+      drawText(235, 784, COMPANY_REP_PT, 8);
 
       // === 電話番号 / Telefone ===
-      drawText(160, 808, '電話番号', 9);
-      drawText(160, 824, 'Telefone', 8);
-      drawText(235, 808, COMPANY_TEL, 9);
-      drawText(235, 824, COMPANY_TEL, 8);
+      drawText(155, 808, '電話番号', 9);
+      drawText(155, 824, 'Telefone', 8);
+      drawText(235, 814, COMPANY_TEL, 10);
 
       // Red company seal next to representative
-      drawRedSeal(465, 788, 50);
+      drawRedSeal(470, 790, 60);
 
     } else {
       // === JP version ===
+      // All data values aligned to x=170 (start of 静 in 静岡県... of 現住所)
+      var DATA_X = 170;
+      var DATA_RIGHT = 410; // underline right edge
+
       // 現住所: handle long addresses (apartment names) — wrap to 2 lines or shrink
       if (address && address.length > 22) {
-        drawTextWrap(170, 200, address, 13, 360, 7);
+        drawTextWrap(DATA_X, 200, address, 13, DATA_RIGHT - DATA_X, 7);
       } else {
-        drawTextFit(170, 200, address, 14, 360);
+        drawTextFit(DATA_X, 200, address, 14, DATA_RIGHT - DATA_X);
       }
 
       // 氏名
-      drawTextFit(170, 258, name, 14, 360);
+      drawTextFit(DATA_X, 258, name, 14, DATA_RIGHT - DATA_X);
 
       // === 生年月日 ===
-      // Whiteout existing underline and redraw extended to the left so it starts under 元号
-      // Original underline approx y=323, x=185-330
-      whiteRect(140, 320, 220, 6);
-      drawLine(140, 324, 360, 324, 1.2);
-      drawText(145, 318, fmtDateJP(birthday), 13);
+      // Whiteout existing underline + any text to its left, redraw aligned to 静
+      whiteRect(135, 318, 280, 8);
+      drawLine(DATA_X, 324, DATA_RIGHT, 324, 1.2);
+      drawText(DATA_X, 318, fmtDateJP(birthday), 13);
 
       // 国籍
-      drawTextFit(170, 377, nationality, 14, 360);
+      drawTextFit(DATA_X, 377, nationality, 14, DATA_RIGHT - DATA_X);
 
       // === 採用年月日 ===
-      whiteRect(140, 437, 220, 6);
-      drawLine(140, 441, 360, 441, 1.2);
-      drawText(145, 435, fmtDateJP(nyushaDate), 13);
+      whiteRect(135, 435, 280, 8);
+      drawLine(DATA_X, 441, DATA_RIGHT, 441, 1.2);
+      drawText(DATA_X, 435, fmtDateJP(nyushaDate), 13);
 
       // 日付（文末・証明日）
       drawText(185, 622, fmtDateJP(todayStr), 12);
 
-      // 事業所情報 (template baked, but add 電話番号 if missing)
-      // The template likely already has 事業所所在地/名称/代表者 baked.
-      // Add 電話番号 row in case it was cut off:
+      // === Replace baked black seal with red seal ===
+      // Detected black seal bbox: pt x=425-492, y=671-738 (67x67), center (458,704)
+      whiteRect(424, 670, 70, 70);
+      drawRedSeal(458, 704, 67);
+
+      // Add 電話番号 row in case it was cut off the template
       drawText(160, 802, '電話番号', 10);
       drawText(235, 802, COMPANY_TEL, 11);
-
-      // Red company seal (角印) next to representative signature area
-      drawRedSeal(465, 778, 56);
     }
 
     // Convert canvas to PNG bytes, embed via pdf-lib
