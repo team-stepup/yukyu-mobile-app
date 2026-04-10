@@ -4052,7 +4052,7 @@ function openMaebariEdit(itemId) {
   if (!record) { showToast('レコードが見つかりません', 'error'); return; }
   editingMaebariRecord = record;
 
-  // 前払日が今日以前なら修正不可
+  // 前払日が過ぎたら修正不可（当日はOK）、手数料入力済みなら修正不可
   // Convert UTC to JST date string (YYYY-MM-DD)
   let payDateRaw = '';
   if (record[MF.payDate]) {
@@ -4061,7 +4061,9 @@ function openMaebariEdit(itemId) {
   }
   const today = new Date(); today.setHours(0,0,0,0);
   const payDateObj = payDateRaw ? new Date(payDateRaw + 'T00:00:00') : null;
-  const isLocked = payDateObj ? payDateObj.getTime() <= today.getTime() : false;
+  const hasFee = !!(record[MF.fee] && String(record[MF.fee]).trim());
+  const isPastPayDate = payDateObj ? payDateObj.getTime() < today.getTime() : false;
+  const isLocked = isPastPayDate || hasFee;
 
   const payDate = payDateRaw ? formatDateWithDay(payDateRaw) : '';
   let haken = record[MF.hakensaki] || '';
@@ -4089,7 +4091,7 @@ function openMaebariEdit(itemId) {
 
     ${zaiyoku ? '<div class="edit-field"><div class="edit-field-value" style="color:var(--primary);font-weight:700;border-color:var(--primary);">' + escHtml(zaiyoku) + '</div></div>' : ''}
 
-    ${isLocked ? '<div style="background:#fff3e0;border:1px solid var(--warning);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--warning);margin-bottom:12px;text-align:center;font-weight:700;">⚠ 前払日を過ぎているため修正・削除できません</div>' : ''}
+    ${isLocked ? '<div style="background:#fff3e0;border:1px solid var(--warning);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--warning);margin-bottom:12px;text-align:center;font-weight:700;">⚠ ' + (hasFee ? '手数料入力済みのため' : '前払日を過ぎているため') + '修正・削除できません</div>' : ''}
 
     <div class="edit-field">
       <div class="edit-field-label">金額</div>
@@ -5215,7 +5217,7 @@ async function saveEditSection(catId) {
       return;
     }
 
-    body['__metadata'] = { type: 'SP.Data.SyainListItem' };
+    body['__metadata'] = { type: LIST_ITEM_ENTITY };
     console.log('Saving to SP, itemId:', emp.Id, 'body:', JSON.stringify(body));
     await spPatchEmployee(emp.Id, body);
 
@@ -5691,7 +5693,7 @@ async function saveNewEmployee() {
     });
 
     // Add entity type
-    body['__metadata'] = { type: 'SP.Data.SyainListItem' };
+    body['__metadata'] = { type: LIST_ITEM_ENTITY };
 
     console.log('Creating employee:', JSON.stringify(body));
     await spCreateEmployee(body);
@@ -6433,7 +6435,7 @@ async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, risho
     if (watashi) setField('rishokuWatashi', watashi);
     if (jikai) setField('jikaiSaiyou', jikai);
 
-    body['__metadata'] = { type: 'SP.Data.SyainListItem' };
+    body['__metadata'] = { type: LIST_ITEM_ENTITY };
     await spPatchEmployee(emp.Id, body);
     showToast('📤 退社報告を送信しました', 'success');
     closeTaishaForm();
@@ -6622,7 +6624,7 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
     if (myNumber) setField('shahoMyNumber', myNumber);
     if (furigana) setField('shahoFurigana', furigana);
 
-    body['__metadata'] = { type: 'SP.Data.SyainListItem' };
+    body['__metadata'] = { type: LIST_ITEM_ENTITY };
     await spPatchEmployee(emp.Id, body);
     showToast('🏥 社保加入申請を送信しました', 'success');
     closeShahoForm();
