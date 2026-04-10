@@ -2037,27 +2037,41 @@ function closeUpdatePanel() {
 }
 
 function applyUpdate() {
-  clearCacheAndReload();
+  // Ensure we always reload, even if cache cleanup hangs/errors on iOS
+  const reloadUrl = location.href.split('?')[0] + '?_=' + Date.now();
+  // Hard fallback: reload after 1.5s no matter what
+  setTimeout(function() { location.href = reloadUrl; }, 1500);
+  // Try cleanup, then reload immediately on completion
+  clearCacheAndReload(reloadUrl).catch(function() {
+    location.href = reloadUrl;
+  });
 }
 
-async function clearCacheAndReload() {
-  // Clear all caches (Service Worker Cache API)
+async function clearCacheAndReload(reloadUrl) {
+  // Clear all caches (Service Worker Cache API) — wrapped with timeout
   if ('caches' in window) {
     try {
-      const names = await caches.keys();
-      await Promise.all(names.map(n => caches.delete(n)));
+      await Promise.race([
+        (async function() {
+          const names = await caches.keys();
+          await Promise.all(names.map(function(n) { return caches.delete(n); }));
+        })(),
+        new Promise(function(resolve) { setTimeout(resolve, 800); })
+      ]);
     } catch(e) {}
   }
   // Clear localStorage app data (keep auth)
-  const msalKeys = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && k.indexOf('msal') >= 0) msalKeys.push({ k: k, v: localStorage.getItem(k) });
-  }
-  localStorage.clear();
-  msalKeys.forEach(function(item) { localStorage.setItem(item.k, item.v); });
+  try {
+    const msalKeys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('msal') >= 0) msalKeys.push({ k: k, v: localStorage.getItem(k) });
+    }
+    localStorage.clear();
+    msalKeys.forEach(function(item) { localStorage.setItem(item.k, item.v); });
+  } catch(e) {}
   // Force reload bypassing cache
-  location.href = location.href.split('?')[0] + '?_=' + Date.now();
+  location.href = reloadUrl || (location.href.split('?')[0] + '?_=' + Date.now());
 }
 
 // Check when user returns to the app (tab switch, phone unlock)
