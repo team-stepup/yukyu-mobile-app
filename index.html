@@ -5516,10 +5516,11 @@ async function saveEditSection(catId) {
     console.log('Saving to SP, itemId:', emp.Id, 'body:', JSON.stringify(body));
     await spPatchEmployee(emp.Id, body);
 
-    // Reload employee data
+    // Reload employee data — merge into existing to avoid losing fields
+    // not returned by the re-fetch (SharePoint may omit some fields)
     const updated = await fetchFullEmployee(emp[F.syainNo]);
     if (updated) {
-      currentEmployee = updated;
+      currentEmployee = Object.assign({}, currentEmployee, updated);
     }
 
     showToast('保存しました', 'success');
@@ -6493,6 +6494,7 @@ function startProcedure(type) {
   if (type === 'taisha') { openTaishaForm(); return; }
   if (type === 'shaho') { openShahoForm(); return; }
   if (type === 'dattai') { openDattaiForm(); return; }
+  if (type === 'zaishoku') { openZaishokuForm(); return; }
 
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -7422,6 +7424,182 @@ async function generateDattaiDocument() {
 }
 
 
+// ============================================================
+// 在職証明書 (Employment Certificate) — JP / PT bilingual
+// ============================================================
+async function openZaishokuForm() {
+  var emp = currentEmployee;
+  if (!emp) return;
+
+  var fieldsMeta = await fetchEmployeeFields();
+  var keyMap = buildFieldKeyMap(fieldsMeta);
+
+  var name = emp.Title || '';
+  var no = emp[F.syainNo] || '';
+  var address = emp[keyMap['address']] || '';
+  var birthday = emp[keyMap['birthday']] ? String(emp[keyMap['birthday']]).substring(0,10) : '';
+  var nationality = emp[keyMap['nationality']] || '';
+  var nyushaDate = emp[keyMap['nyushaDate']] ? String(emp[keyMap['nyushaDate']]).substring(0,10) : '';
+
+  var overlay = document.createElement('div');
+  overlay.className = 'taisha-overlay';
+  overlay.id = 'zaishokuOverlay';
+  overlay.innerHTML =
+    '<div class="taisha-panel">' +
+      '<div class="taisha-header">' +
+        '<div class="taisha-header-bar">' +
+          '<span class="taisha-title">\ud83d\udcc4 在職証明作成</span>' +
+          '<button class="taisha-close" onclick="closeZaishokuForm()">\u2715</button>' +
+        '</div>' +
+        '<div class="taisha-emp-info">' +
+          '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
+        '</div>' +
+      '</div>' +
+      '<div class="taisha-body">' +
+        '<div class="dattai-section-title">\ud83d\udcdd 証明内容</div>' +
+        '<div class="taisha-field"><label>氏名</label>' +
+          '<input type="text" id="zai_name" value="' + escHtml(name) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>現住所</label>' +
+          '<input type="text" id="zai_address" value="' + escHtml(address) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>生年月日</label>' +
+          '<input type="date" id="zai_birthday" value="' + birthday + '"></div>' +
+        '<div class="taisha-field"><label>国籍</label>' +
+          '<input type="text" id="zai_nationality" value="' + escHtml(nationality) + '" placeholder="日本 / Brasileira など" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>採用年月日</label>' +
+          '<input type="date" id="zai_nyusha" value="' + nyushaDate + '"></div>' +
+        '<div class="taisha-notice" style="background:#e3f2fd;border-color:#bbdefb;color:#1565c0;margin-top:12px;">' +
+          '\ud83d\udca1 言語を選んで PDF を生成してください。' +
+        '</div>' +
+      '</div>' +
+      '<div class="taisha-footer" style="display:flex;gap:8px;">' +
+        '<button class="taisha-submit-btn" onclick="generateZaishokuDocument(\'jp\')" style="flex:1;background:linear-gradient(135deg,#5c6bc0,#3949ab);">\ud83c\uddef\ud83c\uddf5 日本語版</button>' +
+        '<button class="taisha-submit-btn" onclick="generateZaishokuDocument(\'pt\')" style="flex:1;background:linear-gradient(135deg,#43a047,#2e7d32);">\ud83c\udde7\ud83c\uddf7 Português</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function closeZaishokuForm() {
+  var el = document.getElementById('zaishokuOverlay');
+  if (el) el.remove();
+}
+
+async function generateZaishokuDocument(lang) {
+  try {
+    var name = document.getElementById('zai_name').value.trim();
+    var address = document.getElementById('zai_address').value.trim();
+    var birthday = document.getElementById('zai_birthday').value;
+    var nationality = document.getElementById('zai_nationality').value.trim();
+    var nyushaDate = document.getElementById('zai_nyusha').value;
+
+    if (!name) { showToast('氏名を入力してください', 'error'); return; }
+
+    showToast('PDF生成中...', 'info');
+
+    // Load template image (high-res grayscale PNG = exact xlsx layout)
+    var tmplName = lang === 'pt' ? 'zaishoku_pt.png' : 'zaishoku_jp.png';
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = tmplName + '?_=' + Date.now();
+    await new Promise(function(res, rej) {
+      img.onload = res;
+      img.onerror = function() { rej(new Error('テンプレート読込失敗: ' + tmplName)); };
+    });
+
+    var canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+
+    // Page is A4 (595 x 842 pt). Scale = px per pt
+    var SCALE = canvas.width / 595;
+
+    // Whiteout PT placeholder text already baked into the template
+    if (lang === 'pt') {
+      ctx.fillStyle = '#ffffff';
+      // 生年月日 placeholder
+      ctx.fillRect(248 * SCALE, 316 * SCALE, 75 * SCALE, 25 * SCALE);
+      // 国籍 placeholder
+      ctx.fillRect(255 * SCALE, 374 * SCALE, 60 * SCALE, 25 * SCALE);
+      // 採用年月日 placeholder
+      ctx.fillRect(248 * SCALE, 432 * SCALE, 75 * SCALE, 25 * SCALE);
+    }
+
+    // Draw text using browser system fonts (no font embedding needed)
+    ctx.fillStyle = '#000000';
+    ctx.textBaseline = 'alphabetic';
+    function drawText(x, y, text, sizeP) {
+      if (!text && text !== 0) return;
+      var sizePx = (sizeP || 12) * SCALE;
+      ctx.font = sizePx + 'px "Noto Sans JP","Hiragino Sans","Yu Gothic","Meiryo",sans-serif';
+      ctx.fillText(String(text), x * SCALE, y * SCALE);
+    }
+
+    function fmtDateJP(d) {
+      if (!d) return '';
+      var w = toWareki(d);
+      return w.full || '';
+    }
+    function fmtDatePT(d) {
+      if (!d) return '';
+      var dt = new Date(d);
+      if (isNaN(dt.getTime())) return '';
+      return String(dt.getDate()).padStart(2,'0') + '/' +
+             String(dt.getMonth()+1).padStart(2,'0') + '/' + dt.getFullYear();
+    }
+    var todayStr = toLocalDateStr(new Date());
+
+    if (lang === 'pt') {
+      drawText(170, 213, address, 11);
+      drawText(170, 273, name, 11);
+      drawText(255, 333, fmtDatePT(birthday), 12);
+      drawText(260, 391, nationality, 12);
+      drawText(255, 449, fmtDatePT(nyushaDate), 12);
+      drawText(218, 600, fmtDatePT(todayStr), 12);
+    } else {
+      drawText(170, 200, address, 14);
+      drawText(170, 258, name, 14);
+      drawText(170, 318, fmtDateJP(birthday), 14);
+      drawText(170, 377, nationality, 14);
+      drawText(170, 435, fmtDateJP(nyushaDate), 14);
+      drawText(185, 622, fmtDateJP(todayStr), 12);
+    }
+
+    // Convert canvas to PNG bytes, embed via pdf-lib
+    var dataUrl = canvas.toDataURL('image/png');
+    var pngBytes = await (await fetch(dataUrl)).arrayBuffer();
+
+    var PDFLib = window.PDFLib || window['pdf-lib'];
+    var pdfDoc = await PDFLib.PDFDocument.create();
+    var png = await pdfDoc.embedPng(pngBytes);
+    var page = pdfDoc.addPage([595, 842]);
+    page.drawImage(png, { x: 0, y: 0, width: 595, height: 842 });
+
+    var pdfBytes = await pdfDoc.save();
+    var blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    var url = URL.createObjectURL(blob);
+    var fileName = '在職証明書' + (lang === 'pt' ? '_PT' : '_JP') + '_' + name + '.pdf';
+
+    var pw = window.open(url, '_blank');
+    if (!pw) {
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    showToast('在職証明書PDFを生成しました');
+    closeZaishokuForm();
+  } catch (e) {
+    console.error('在職証明書エラー:', e);
+    showToast('エラー: ' + (e.message || e), 'error');
+  }
+}
 
 
 async function openNyutaiEmployee(empId) {
