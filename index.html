@@ -2011,21 +2011,30 @@ function showUpdatePanel() {
       (timeStr ? '<div class="update-panel-time">' + escHtml(timeStr) + ' 更新</div>' : '') +
       '<div class="update-panel-msg">' + escHtml(msg) + '</div>' +
       '<div class="update-panel-btns">' +
-        '<button type="button" class="btn-later" id="updateBtnLater">あとで</button>' +
-        '<button type="button" class="btn-update" id="updateBtnApply">⟳ 更新する</button>' +
+        '<button type="button" class="btn-later" id="updateBtnLater" onclick="closeUpdatePanel()">あとで</button>' +
+        '<button type="button" class="btn-update" id="updateBtnApply" onclick="applyUpdate()">⟳ 更新する</button>' +
       '</div>' +
     '</div>';
   overlay.addEventListener('click', function(e) { if (e.target === overlay) closeUpdatePanel(); });
   document.body.appendChild(overlay);
-  // Bind via addEventListener (and touchend for iOS reliability)
+  // Bind via addEventListener + touchend for iOS reliability
   const laterBtn = document.getElementById('updateBtnLater');
   const applyBtn = document.getElementById('updateBtnApply');
-  if (laterBtn) {
-    laterBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); closeUpdatePanel(); });
+  function bindBtn(btn, fn) {
+    if (!btn) return;
+    let fired = false;
+    function handler(e) {
+      if (fired) return;
+      fired = true;
+      if (e && e.preventDefault) e.preventDefault();
+      if (e && e.stopPropagation) e.stopPropagation();
+      fn();
+    }
+    btn.addEventListener('click', handler);
+    btn.addEventListener('touchend', handler);
   }
-  if (applyBtn) {
-    applyBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); applyUpdate(); });
-  }
+  bindBtn(laterBtn, closeUpdatePanel);
+  bindBtn(applyBtn, applyUpdate);
 }
 
 function closeUpdatePanel() {
