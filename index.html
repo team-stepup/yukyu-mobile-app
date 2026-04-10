@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>STEP・UP Apps</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
@@ -1941,7 +1944,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '2e39d20';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 let latestVersionData = null;
 
@@ -1985,17 +1988,31 @@ async function checkForUpdate() {
 }
 
 function headerUpdateClick() {
-  // No confirm() — iOS Safari consumes the user gesture on confirm,
-  // which then blocks the subsequent navigation. Reload immediately.
+  // Bulletproof reload for iOS Safari: submit a real GET form.
+  // (location.assign/replace can be ignored when Safari serves from cache.)
   try {
     var btn = document.getElementById('updateBadge');
     if (btn) { btn.textContent = '⟳…'; btn.disabled = true; }
   } catch(_) {}
-  var url = location.href.split('?')[0].split('#')[0] + '?v=' + Date.now();
-  // Try assign first (fresh history entry), fall back to replace
-  try { window.location.assign(url); } catch(_) { window.location.replace(url); }
-  // Final fallback in case neither navigated within 300ms
-  setTimeout(function() { window.location.href = url; }, 300);
+  try {
+    var path = location.pathname || '/';
+    var f = document.createElement('form');
+    f.method = 'GET';
+    f.action = path;
+    f.style.display = 'none';
+    var i = document.createElement('input');
+    i.type = 'hidden';
+    i.name = 'v';
+    i.value = String(Date.now());
+    f.appendChild(i);
+    document.body.appendChild(f);
+    f.submit();
+    // Multi-fallback chain
+    setTimeout(function() { window.location.href = path + '?v=' + Date.now(); }, 250);
+    setTimeout(function() { window.location.replace(path + '?v=' + Date.now() + '_2'); }, 600);
+  } catch (e) {
+    window.location.href = location.pathname + '?v=' + Date.now();
+  }
 }
 
 function showUpdatePanel() {
