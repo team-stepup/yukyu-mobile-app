@@ -2192,12 +2192,22 @@ async function spPatchEmployee(itemId, body) {
   // Always fetch the correct entity type from SharePoint metadata (overrides any stale type set by callers)
   const entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
   body['__metadata'] = { type: entityType };
-  // Drop any field keys not present in the cached field metadata to avoid 400s on bogus internal names
-  if (employeeFieldsCache) {
+  // Drop any field keys that don't exist on the actual list item entity.
+  // We check against the keys in currentEmployee (the live record) rather than
+  // /fields metadata, because SharePoint can return stale/renamed InternalNames
+  // from /fields that no longer exist on the entity type.
+  if (currentEmployee) {
+    const validKeys = new Set();
+    Object.keys(currentEmployee).forEach(k => {
+      validKeys.add(k);
+      // Also accept the un-prefixed form (without OData_)
+      if (k.startsWith('OData_')) validKeys.add(k.substring(6));
+    });
     const dropped = [];
     Object.keys(body).forEach(k => {
       if (k === '__metadata' || k === 'Title' || k === 'Id') return;
-      if (!employeeFieldsCache[k]) {
+      // Accept both raw and OData_-prefixed variants
+      if (!validKeys.has(k) && !validKeys.has('OData_' + k)) {
         dropped.push(k);
         delete body[k];
       }
