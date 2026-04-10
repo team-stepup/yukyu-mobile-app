@@ -537,9 +537,9 @@ body {
 
 /* Update Info Panel */
 .update-panel-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.45); z-index:10000; display:flex; align-items:flex-end; justify-content:center; }
-.version-display { text-align:center; font-size:11px; color:var(--text-light); padding:6px 0 2px; cursor:pointer; user-select:none; }
-.version-display .ver-latest { color:#2e7d32; font-weight:600; }
-.version-display .ver-update { color:#e65100; font-weight:700; }
+.header-version { font-size:10px; color:rgba(255,255,255,0.85); margin-right:8px; cursor:pointer; user-select:none; line-height:1.1; text-align:right; max-width:120px; white-space:nowrap; }
+.header-version .ver-latest { color:#a5d6a7; font-weight:600; }
+.header-version .ver-update { color:#ffcc80; font-weight:700; }
 .update-panel { background:#fff; border-radius:20px 20px 0 0; max-width:500px; width:100%; padding:24px 20px calc(20px + env(safe-area-inset-bottom)); animation:slideUp .3s ease; }
 .update-panel-icon { text-align:center; font-size:40px; margin-bottom:8px; }
 .update-panel-title { text-align:center; font-size:17px; font-weight:800; color:var(--text); margin-bottom:4px; }
@@ -1605,6 +1605,7 @@ body {
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
   <button class="update-badge" id="updateBadge" onclick="showUpdatePanel()" title="更新あり">⟳</button>
+  <span class="header-version" id="versionDisplay" onclick="onVersionClick()"><span id="versionText">…</span></span>
   <button class="header-logout-sm" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
 
@@ -1637,9 +1638,6 @@ body {
 
   <!-- Screen 1: Employee Search -->
   <div class="screen" id="searchScreen">
-    <div class="version-display" id="versionDisplay" onclick="onVersionClick()">
-      <span id="versionText">バージョン確認中...</span>
-    </div>
     <div class="quick-links">
       <button class="quick-link-btn" onclick="switchScreen('maebariListScreen')">
         <span class="ql-icon">💰</span>
@@ -2241,6 +2239,21 @@ async function spPatchEmployee(itemId, body) {
   if (!token) { showToast('認証エラー', 'error'); throw new Error('No token'); }
   const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
   const entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+
+  // Translate any keys from InternalName to EntityPropertyName (the name SharePoint
+  // REST writes actually use). This fixes 400s on fields whose display name was
+  // changed after creation, where InternalName ≠ EntityPropertyName.
+  await fetchEmployeeFields();
+  if (employeeFieldsCache) {
+    Object.keys(body).forEach(k => {
+      if (k === '__metadata' || k === 'Title' || k === 'Id') return;
+      const meta = employeeFieldsCache[k];
+      if (meta && meta.entityPropertyName && meta.entityPropertyName !== k) {
+        body[meta.entityPropertyName] = body[k];
+        delete body[k];
+      }
+    });
+  }
 
   async function attempt() {
     body['__metadata'] = { type: entityType };
@@ -3037,12 +3050,23 @@ async function fetchEmployeeFields() {
   try {
     const token = await getToken();
     if (!token) return null;
-    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString,Choices&$top=200";
+    // EntityPropertyName is the actual property name to use in REST writes
+    // (it differs from InternalName for fields with renamed display names).
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,EntityPropertyName,Title,TypeAsString,Choices&$top=300";
     const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     const data = await resp.json();
     const fields = {};
     (data.d.results || []).forEach(f => {
-      fields[f.InternalName] = { title: f.Title, type: f.TypeAsString, choices: f.Choices ? f.Choices.results || f.Choices : null };
+      fields[f.InternalName] = {
+        title: f.Title,
+        type: f.TypeAsString,
+        entityPropertyName: f.EntityPropertyName || f.InternalName,
+        choices: f.Choices ? f.Choices.results || f.Choices : null
+      };
+      // Also index under EntityPropertyName for reverse lookup
+      if (f.EntityPropertyName && f.EntityPropertyName !== f.InternalName) {
+        fields[f.EntityPropertyName] = fields[f.InternalName];
+      }
     });
     employeeFieldsCache = fields;
     return fields;
