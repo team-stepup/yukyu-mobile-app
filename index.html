@@ -6941,17 +6941,39 @@ async function generateDattaiDocument() {
       txt((316 + 482 - bw) / 2, 355, bangou, 11);
     }
 
+    // === 保険者番号 8桁 ===
+    // Boxes at right side of header, approx x=484-538, y=363-420 area
+    // From the PDF image: 2 boxes visible at far right of 保険者名 row
+    // The 保険者番号 digit boxes span across the top-right area
+    // Looking at rects: vertical lines at x=504, 521 in header (y=336-363)
+    // But actual digit positions are in the 保険者名 area
+    if (hokenshaNo) {
+      // 8 digit boxes - positioned based on the PDF template structure
+      // The boxes appear to be around x=439-537 in the 保険者番号 column
+      var hDigits = hokenshaNo.replace(/[^0-9]/g, '');
+      var hStartX = 440;
+      var hSpacing = 12.2;
+      var hY = 370;
+      for (var hi = 0; hi < Math.min(hDigits.length, 8); hi++) {
+        txt(hStartX + hi * hSpacing, hY, hDigits[hi], 7);
+      }
+    }
+
     // === 保険者名 SECTION (y=363-420) ===
     // Circle 全国健康保険協会 (text at ~229,370)
     oval(225, 366, 292, 382, 1.5, red);
-    // 支部名
-    if (jigyousho) txt(300, 378, jigyousho, 7);
+    // 支部名 - centered in the blank space between 協会 and 支部 label
+    // The blank area is roughly x=292-380
+    if (jigyousho) {
+      var jw = font.widthOfTextAtSize(jigyousho, 7);
+      txt((292 + 380 - jw) / 2, 378, jigyousho, 7);
+    }
 
     // === 被保険者 SECTION (y=420-464) ===
-    // 氏名 (x=107-289, y=420-441)
+    // 氏名 (x=107-289, y=420-464) - centered both horizontally and vertically
     if (shimei) {
       var sw = font.widthOfTextAtSize(shimei, 9);
-      txt(Math.max(115, (107 + 289 - sw) / 2), 436, shimei, 9);
+      txt((107 + 289 - sw) / 2, 448, shimei, 9);
     }
 
     // 生年月日 (x=289-394)
@@ -6981,11 +7003,9 @@ async function generateDattaiDocument() {
     }
 
     // 資格喪失 (x=394-538, y=441-464)
+    // Always circle 令和 (fixed)
     if (soW && soW.era) {
-      // Era labels: 平成 at y≈443, 令和 at y≈454
-      var soushitsuEraMap = { '平成': 443, '令和': 450 };
-      var soey = soushitsuEraMap[soW.era] || 450;
-      oval(434, soey, 454, soey + 12, 1.0, red);
+      oval(434, 450, 454, 462, 1.0, red); // 令和 fixed
       txt(460, 459, soW.year, 7);
       txt(490, 459, soW.month, 7);
       txt(518, 459, soW.day, 7);
@@ -7049,14 +7069,22 @@ async function generateDattaiDocument() {
       txt(433, 692, todayW.day, 9);
     }
 
-    // 事業所所在地 (label at x=169, y=703)
-    txt(235, 711, '静岡県磐田市上本郷1006-7', 8);
+    // 事業所所在地 (label at x=169, y=703) - shifted right
+    txt(265, 711, '静岡県磐田市上本郷1006-7', 8);
     // 名称 (y=720)
-    txt(235, 728, '有限会社ステップ・アップ', 8);
+    txt(265, 728, '有限会社ステップ・アップ', 8);
     // 代表者氏名 (y=736)
-    txt(235, 744, '山下　浩俊', 8);
-    // 電話 (y=752)
-    txt(235, 760, '0538（36）6968', 8);
+    txt(265, 744, '山下　浩俊', 8);
+    // 電話 (y=752) - remove （）－
+    txt(265, 760, '0538-36-6968', 8);
+
+    // Remove page 2 if exists
+    var pageCount = pdfDoc.getPageCount();
+    if (pageCount > 1) {
+      for (var pi = pageCount - 1; pi >= 1; pi--) {
+        pdfDoc.removePage(pi);
+      }
+    }
 
     // === Generate PDF ===
     var pdfBytes = await pdfDoc.save();
