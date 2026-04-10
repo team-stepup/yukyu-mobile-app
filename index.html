@@ -1604,7 +1604,7 @@ body {
   <h1 id="headerTitle" style="display:none;">ホーム</h1>
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
-  <button class="update-badge" id="updateBadge" onclick="showUpdatePanel()" title="更新あり">⟳</button>
+  <button class="update-badge" id="updateBadge" onclick="headerUpdateClick()" title="更新する">⟳</button>
   <span class="header-version" id="versionDisplay" onclick="onVersionClick()"><span id="versionText">…</span></span>
   <button class="header-logout-sm" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
@@ -1941,7 +1941,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'cfba2b6';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 let latestVersionData = null;
 
@@ -1982,6 +1982,14 @@ async function checkForUpdate() {
     }
     updateVersionDisplay();
   } catch (e) { /* silently ignore */ }
+}
+
+function headerUpdateClick() {
+  const data = latestVersionData || {};
+  const ver = data.version ? ' (v' + data.version + ')' : '';
+  if (confirm('最新バージョン' + ver + 'に更新しますか？')) {
+    applyUpdate();
+  }
 }
 
 function showUpdatePanel() {
