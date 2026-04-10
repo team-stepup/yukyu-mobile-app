@@ -7089,8 +7089,17 @@ async function generateDattaiDocument() {
     var blob = new Blob([pdfBytes], { type: 'application/pdf' });
     var url = URL.createObjectURL(blob);
 
-    // Open in new tab - iOS Safari shows native PDF viewer with pinch-zoom & share
-    window.open(url, '_blank');
+    // Open PDF: try window.open first, fallback to download link
+    var pw = window.open(url, '_blank');
+    if (!pw) {
+      // Popup blocked (common on iOS after async) - use download link
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
 
     showToast('脱退連絡票PDFを生成しました');
     closeDattaiForm();
