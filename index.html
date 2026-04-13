@@ -1965,7 +1965,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '8ec0580';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2214,6 +2214,7 @@ async function acquireToken() {
     accessToken = resp.accessToken;
     document.getElementById('authBtn').textContent = 'logout';
     switchScreen('searchScreen');
+    loadHomeBadges();
     return resp.accessToken;
   } catch (e) {
     try {
@@ -3521,11 +3522,13 @@ function categoryHasAlert(emp, keyMap, category) {
 // Home badge counts (前払い・入退・期限注意)
 async function loadHomeBadges() {
   try {
-    // 前払い: count today's records
     var today = new Date();
-    var ds = new Date(today); ds.setHours(0,0,0,0);
-    var de = new Date(today); de.setHours(23,59,59,999);
-    var mFilter = "$filter=" + MF.payDate + " ge datetime'" + ds.toISOString() + "' and " + MF.payDate + " le datetime'" + de.toISOString() + "'&$select=Id&$top=500";
+
+    // 前払い: count this Friday's records
+    var fri = getNextFriday();
+    var friStart = new Date(fri); friStart.setHours(0,0,0,0);
+    var friEnd = new Date(fri); friEnd.setHours(23,59,59,999);
+    var mFilter = "$filter=" + MF.payDate + " ge datetime'" + friStart.toISOString() + "' and " + MF.payDate + " le datetime'" + friEnd.toISOString() + "'&$top=500";
     var mRecs = await spGet(LIST_MAEBARI_GUID, mFilter) || [];
     var mBadge = document.getElementById('maebariBadgeCount');
     if (mBadge) {
@@ -3534,15 +3537,13 @@ async function loadHomeBadges() {
     }
 
     // 入退: count current month's 入社 and 退社
-    var mStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    var mEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
-    var allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$select=Id,' + F.nyushaDate + ',' + F.hakenTaisha + ',' + F.yukyuTaisha + '&$top=500');
+    var allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
     var nyuCount = 0, taiCount = 0;
     allEmps.forEach(function(emp) {
       var nd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
-      if (nd && nd >= mStart && nd <= mEnd) nyuCount++;
+      if (nd && nd >= monthStart && nd <= monthEnd) nyuCount++;
       var td = emp[F.yukyuTaisha] ? new Date(emp[F.yukyuTaisha]) : (emp[F.hakenTaisha] ? new Date(emp[F.hakenTaisha]) : null);
-      if (td && td >= mStart && td <= mEnd) taiCount++;
+      if (td && td >= monthStart && td <= monthEnd) taiCount++;
     });
     var nBadgeIn = document.getElementById('nyutaiBadgeIn');
     var nBadgeOut = document.getElementById('nyutaiBadgeOut');
