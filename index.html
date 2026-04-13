@@ -1958,7 +1958,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '38c6208';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6631,6 +6631,7 @@ function startProcedure(type) {
   if (type === 'shaho') { openShahoForm(); return; }
   if (type === 'dattai') { openDattaiForm(); return; }
   if (type === 'zaishoku') { openZaishokuForm(); return; }
+  if (type === 'kyuryo') { openKyuryoForm(); return; }
 
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -7087,6 +7088,198 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
   }
 }
 
+
+// ============================================================
+// 給料精算 Form
+// ============================================================
+async function openKyuryoForm() {
+  var emp = currentEmployee;
+  if (!emp) return;
+
+  var name = emp.Title || '';
+  var no = emp[F.syainNo] || '';
+  var hakensaki = getHakensakiCode(emp) || '';
+  var hakenTaishaVal = emp[F.hakenTaisha] ? emp[F.hakenTaisha].substring(0, 10) : '';
+  var yukyuTaishaVal = emp[F.yukyuTaisha] ? emp[F.yukyuTaisha].substring(0, 10) : '';
+
+  var overlay = document.createElement('div');
+  overlay.className = 'taisha-overlay';
+  overlay.id = 'kyuryoOverlay';
+  overlay.innerHTML =
+    '<div class="taisha-panel">' +
+      '<div class="taisha-header">' +
+        '<div class="taisha-header-bar">' +
+          '<span class="taisha-title">💰 給料精算</span>' +
+          '<button class="taisha-close" onclick="closeKyuryoForm()">✕</button>' +
+        '</div>' +
+        '<div class="taisha-emp-info">' +
+          '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
+          (hakensaki ? '<br><span style="font-size:13px;color:var(--primary);">' + escHtml(hakensaki) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="taisha-body">' +
+        '<div class="dattai-section-title">💰 精算内容</div>' +
+        '<div class="taisha-field"><label>部署 hakensaki</label>' +
+          '<input type="text" id="kyuryo_hakensaki" value="' + escHtml(hakensaki) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>社員番号 No.</label>' +
+          '<input type="text" id="kyuryo_no" value="' + escHtml(no) + '" readonly style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#f5f5f5;"></div>' +
+        '<div class="taisha-field"><label>名前 nome</label>' +
+          '<input type="text" id="kyuryo_name" value="' + escHtml(name) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;"></div>' +
+        '<div class="taisha-field"><label>派遣先退社日</label>' +
+          '<input type="date" id="kyuryo_hakenTaisha" value="' + hakenTaishaVal + '"></div>' +
+        '<div class="taisha-field"><label>有給付与退社日</label>' +
+          '<input type="date" id="kyuryo_yukyuTaisha" value="' + yukyuTaishaVal + '"></div>' +
+        '<div class="taisha-field"><label>精算日（振込日）</label>' +
+          '<input type="date" id="kyuryo_seisanDate" value=""></div>' +
+        '<div class="taisha-field"><label>支払方法</label>' +
+          '<select id="kyuryo_shiharai" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#fff;">' +
+            '<option value="">選択してください</option>' +
+            '<option value="銀行振込">銀行振込</option>' +
+            '<option value="現金">現金</option>' +
+          '</select></div>' +
+        '<div class="taisha-field"><label>その他</label>' +
+          '<textarea id="kyuryo_sonota" rows="3" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;resize:vertical;" placeholder="備考・特記事項"></textarea></div>' +
+      '</div>' +
+      '<div class="taisha-footer">' +
+        '<button class="taisha-submit-btn" id="kyuryoSubmitBtn" onclick="submitKyuryoForm()" style="background:linear-gradient(135deg,#c88719,#a06c0a);">💰 給料精算を申請</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  var panel = overlay.querySelector('.taisha-panel');
+  if (panel) panel.scrollTop = 0;
+}
+
+function closeKyuryoForm() {
+  var el = document.getElementById('kyuryoOverlay');
+  if (el) el.remove();
+}
+
+async function submitKyuryoForm() {
+  var emp = currentEmployee;
+  if (!emp) return;
+
+  var hakensaki = document.getElementById('kyuryo_hakensaki').value.trim();
+  var no = document.getElementById('kyuryo_no').value.trim();
+  var name = document.getElementById('kyuryo_name').value.trim();
+  var hakenTaisha = document.getElementById('kyuryo_hakenTaisha').value;
+  var yukyuTaisha = document.getElementById('kyuryo_yukyuTaisha').value;
+  var seisanDate = document.getElementById('kyuryo_seisanDate').value;
+  var shiharai = document.getElementById('kyuryo_shiharai').value;
+  var sonota = document.getElementById('kyuryo_sonota').value.trim();
+
+  // Validation
+  if (!hakenTaisha) { showToast('派遣先退社日を入力してください', 'error'); return; }
+  if (!yukyuTaisha) { showToast('有給付与退社日を入力してください', 'error'); return; }
+  if (!seisanDate) { showToast('精算日（振込日）を入力してください', 'error'); return; }
+  if (!shiharai) { showToast('支払方法を選択してください', 'error'); return; }
+
+  // Confirm
+  var overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.style.zIndex = '99999';
+  overlay.innerHTML = '<div class="confirm-box">' +
+    '<div class="confirm-title">💰 給料精算確認</div>' +
+    '<div class="confirm-msg" style="text-align:left;">' +
+    '<strong>' + escHtml(no + ' ' + name) + '</strong><br>' +
+    '部署: ' + escHtml(hakensaki) + '<br>' +
+    '派遣先退社日: ' + escHtml(hakenTaisha) + '<br>' +
+    '有給付与退社日: ' + escHtml(yukyuTaisha) + '<br>' +
+    '精算日: ' + escHtml(seisanDate) + '<br>' +
+    '支払方法: ' + escHtml(shiharai) + '<br>' +
+    (sonota ? 'その他: ' + escHtml(sonota) + '<br>' : '') +
+    '</div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
+    '<button class="btn-ok" id="kyuryoConfirmOk">申請する</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  document.getElementById('kyuryoConfirmOk').onclick = async function() {
+    overlay.remove();
+    await executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota);
+  };
+}
+
+async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota) {
+  var btn = document.getElementById('kyuryoSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '送信中...'; }
+
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+
+    // Get List6 GUID by title
+    var listInfoResp = await fetch(SP_SITE_URL + "/_api/web/lists/GetByTitle('List6')?$select=Id,ListItemEntityTypeFullName", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!listInfoResp.ok) throw new Error('List6が見つかりません');
+    var listInfo = await listInfoResp.json();
+    var listGuid = listInfo.d.Id;
+    var entityType = listInfo.d.ListItemEntityTypeFullName;
+
+    // Fetch list fields to get correct internal names
+    var fieldsResp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString&$top=200", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    var fieldsData = await fieldsResp.json();
+    var fields = fieldsData.d.results || [];
+
+    // Build field name map by matching display names
+    function findField(titleSubstr) {
+      var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(titleSubstr) >= 0; });
+      return hit ? hit.InternalName : null;
+    }
+
+    var body = { '__metadata': { type: entityType } };
+
+    // Title field = 部署 hakensaki
+    body['Title'] = hakensaki;
+
+    // Map fields by display name
+    var fNo = findField('社員番号') || findField('No');
+    var fName = findField('名前') || findField('nome');
+    var fHakenTaisha = findField('派遣先退社') || findField('派遣先');
+    var fYukyuTaisha = findField('有給付与退社') || findField('有給');
+    var fSeisan = findField('精算日') || findField('振込');
+    var fShiharai = findField('支払方法') || findField('支払');
+    var fSonota = findField('その他') || findField('他');
+
+    if (fNo) body[fNo] = parseFloat(no) || no;
+    if (fName) body[fName] = name;
+    if (fHakenTaisha) body[fHakenTaisha] = hakenTaisha + 'T00:00:00Z';
+    if (fYukyuTaisha) body[fYukyuTaisha] = yukyuTaisha + 'T00:00:00Z';
+    if (fSeisan) body[fSeisan] = seisanDate + 'T00:00:00Z';
+    if (fShiharai) body[fShiharai] = shiharai;
+    if (fSonota) body[fSonota] = sonota;
+
+    var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')/items", {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      var errText = await resp.text();
+      console.error('Kyuryo submit error:', errText);
+      throw new Error('送信失敗: ' + resp.status);
+    }
+
+    showToast('💰 給料精算を申請しました', 'success');
+    closeKyuryoForm();
+
+  } catch (e) {
+    console.error('Kyuryo submit error:', e);
+    showToast('送信に失敗しました: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💰 給料精算を申請'; }
+  }
+}
 
 // ============================================================
 // 脱退連絡票作成 Form
