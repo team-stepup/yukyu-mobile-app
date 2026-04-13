@@ -2008,7 +2008,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '3a7e7a8';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7690,16 +7690,21 @@ function renderVehicleCards(items) {
 function openVehicleDetail(idx) {
   var item = _vehicleData[idx];
   if (!item) return;
+  window._currentVehicleIdx = idx;
   var vf = window._vf || {};
   var fields = _vehicleFields || [];
 
-  // フィールド値取得ヘルパー
   function getVal(prop) { return prop ? (item[prop] || '') : ''; }
-  function getDate(prop) {
+  function fmtDate(prop) {
     var v = getVal(prop);
-    if (!v) return '-';
+    if (!v) return '';
     var d = new Date(v);
     return isNaN(d) ? v : d.toLocaleDateString('ja-JP');
+  }
+  function rawDate(prop) {
+    var v = getVal(prop);
+    if (!v) return '';
+    return v.substring(0, 10);
   }
   function findPropByTitle(substr) {
     var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(substr) >= 0; });
@@ -7709,152 +7714,156 @@ function openVehicleDetail(idx) {
   var number = getVal(vf.number) || item['Title'] || '';
   var no1 = getVal(vf.no1);
   var displayNumber = number + (no1 ? '  ' + no1 : '');
-  var carType = getVal(vf.carType);
-  var color = getVal(vf.color);
-  var driver = getVal(vf.driver);
-  var affiliation = getVal(vf.affiliation);
-  var hakensaki = getVal(vf.hakensaki);
-  var usage = getVal(vf.usage);
-  var syaken = vf.syaken ? item[vf.syaken] : '';
-  var syakenDate = syaken ? new Date(syaken) : null;
-  var syakenStr = syakenDate && !isNaN(syakenDate) ? syakenDate.toLocaleDateString('ja-JP') : '-';
-  var daysLeft = syakenDate ? Math.ceil((syakenDate - new Date()) / 86400000) : 999;
-  var syakenWarn = daysLeft <= 90;
 
-  // 追加フィールドを動的に探す
   var fCapacity = findPropByTitle('乗車') || findPropByTitle('定員') || findPropByTitle('Capacity');
-  var fPickupCount = findPropByTitle('送迎人数') || findPropByTitle('送迎') && findPropByTitle('人数');
+  var fPickupCount = findPropByTitle('送迎人数');
+  var fMorningCount = findPropByTitle('朝') && findPropByTitle('人数') ? findPropByTitle('朝') : null;
   var fRegDate = findPropByTitle('初年度') || findPropByTitle('登録');
   var fOwner = findPropByTitle('所有') || findPropByTitle('Owner');
   var fTaijinHoken = findPropByTitle('対人');
   var fTaibutsuHoken = findPropByTitle('対物');
   var fJinshin = findPropByTitle('人身');
-  var fSyaryoHoken = findPropByTitle('車両保険') || findPropByTitle('車両');
+  var fSyaryoHoken = findPropByTitle('車両保険');
   var fLink = findPropByTitle('Link') || findPropByTitle('リンク') || findPropByTitle('link');
 
-  // スタイル定義
-  var sectionStyle = 'background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--border);';
-  var headerStyle = 'font-size:12px;font-weight:700;color:#fff;padding:4px 10px;border-radius:6px;display:inline-block;margin-bottom:8px;';
-  var rowStyle = 'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f0f5;font-size:13px;';
-  var labelStyle = 'color:var(--text-light);font-weight:600;';
-  var valStyle = 'font-weight:500;text-align:right;';
-  var boldValStyle = 'font-weight:700;font-size:14px;text-align:right;';
+  // 編集可能フィールド定義 [{label, prop, type, options?}]
+  var editFields = [
+    { label: 'ドライバー', prop: vf.driver, type: 'text' },
+    { label: '所属', prop: vf.affiliation, type: 'text' },
+    { label: '送迎先', prop: vf.hakensaki, type: 'text' },
+    { label: '使用区分', prop: vf.usage, type: 'select', options: ['使用', '未使用', '会社'] },
+    { label: '車検有効期限', prop: vf.syaken, type: 'date' },
+    { label: '乗車定員', prop: fCapacity, type: 'text' },
+    { label: '初年度登録', prop: fRegDate, type: 'date' },
+    { label: '所有者', prop: fOwner, type: 'text' },
+    { label: '対人保険', prop: fTaijinHoken, type: 'text' },
+    { label: '対物保険', prop: fTaibutsuHoken, type: 'text' },
+    { label: '人身傷害', prop: fJinshin, type: 'text' },
+    { label: '車両保険', prop: fSyaryoHoken, type: 'text' },
+  ].filter(function(f) { return f.prop; });
+  window._vehicleEditFields = editFields;
 
-  function row(label, val, bold) {
-    if (!val || val === '-') return '';
-    return '<div style="' + rowStyle + '"><span style="' + labelStyle + '">' + label + '</span><span style="' + (bold ? boldValStyle : valStyle) + '">' + escHtml(String(val)) + '</span></div>';
+  var syaken = vf.syaken ? item[vf.syaken] : '';
+  var syakenDate = syaken ? new Date(syaken) : null;
+  var daysLeft = syakenDate && !isNaN(syakenDate) ? Math.ceil((syakenDate - new Date()) / 86400000) : 999;
+  var syakenWarn = daysLeft <= 90;
+
+  // スタイル
+  var S = 'background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--border);';
+  var H = 'font-size:12px;font-weight:700;color:#fff;padding:4px 10px;border-radius:6px;display:inline-block;margin-bottom:8px;';
+  var R = 'display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0f5;font-size:13px;';
+  var L = 'color:var(--text-light);font-weight:600;min-width:90px;';
+  function row(label, val) {
+    if (!val) return '';
+    return '<div style="' + R + '"><span style="' + L + '">' + label + '</span><span style="font-weight:500;text-align:right;">' + escHtml(String(val)) + '</span></div>';
   }
 
   var html = '';
 
-  // ヘッダー: ナンバー
-  html += '<div style="' + sectionStyle + 'background:var(--primary);color:#fff;text-align:center;padding:14px;">';
+  // ヘッダー
+  html += '<div style="' + S + 'background:var(--primary);color:#fff;text-align:center;padding:14px;">';
   html += '<div style="font-size:10px;opacity:0.8;">車両管理台帳</div>';
   html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;">' + escHtml(displayNumber) + '</div>';
   html += '</div>';
 
-  // 車両情報セクション
-  html += '<div style="' + sectionStyle + '">';
-  html += '<div style="' + headerStyle + 'background:#1565c0;">車両情報</div>';
-  html += row('車種', carType + (color ? ' / ' + color : ''));
+  // 車両情報
+  html += '<div style="' + S + '">';
+  html += '<div style="' + H + 'background:#1565c0;">車両情報</div>';
+  html += row('車種', getVal(vf.carType));
+  html += row('色', getVal(vf.color));
   html += row('乗車定員', getVal(fCapacity));
-  html += row('使用区分', usage);
-  html += row('初年度登録', getDate(fRegDate));
+  html += row('使用区分', getVal(vf.usage));
+  html += row('初年度登録', fmtDate(fRegDate));
   html += row('所有者', getVal(fOwner));
   html += '</div>';
 
-  // 運行情報セクション
-  html += '<div style="' + sectionStyle + '">';
-  html += '<div style="' + headerStyle + 'background:#2e7d32;">運行情報</div>';
-  html += '<div style="' + rowStyle + '"><span style="' + labelStyle + '">ドライバー</span><span style="font-weight:700;font-size:14px;">' + escHtml(driver) + '</span></div>';
-  if (affiliation) html += row('所属', affiliation);
-  html += row('送迎先メイン', hakensaki);
+  // 運行情報
+  html += '<div style="' + S + '">';
+  html += '<div style="' + H + 'background:#2e7d32;">運行情報</div>';
+  html += '<div style="' + R + '"><span style="' + L + '">ドライバー</span><span style="font-weight:700;font-size:14px;">' + escHtml(getVal(vf.driver)) + '</span></div>';
+  html += row('所属', getVal(vf.affiliation));
+  html += row('送迎先', getVal(vf.hakensaki));
   html += row('送迎人数', getVal(fPickupCount));
   html += '</div>';
 
-  // 車検セクション
-  html += '<div style="' + sectionStyle + (syakenWarn ? 'border-color:#f57c00;' : '') + '">';
-  html += '<div style="' + headerStyle + 'background:' + (syakenWarn ? '#c62828' : '#f57c00') + ';">車検</div>';
-  html += '<div style="' + rowStyle + 'border:none;">';
-  html += '<span style="' + labelStyle + '">車検有効期限' + (syakenWarn ? ' ⚠️' : '') + '</span>';
-  html += '<span style="font-weight:800;font-size:15px;color:' + (syakenWarn ? '#c62828' : 'var(--text)') + ';">' + syakenStr + '</span>';
-  html += '</div>';
+  // 車検
+  var syakenStr = syakenDate && !isNaN(syakenDate) ? syakenDate.toLocaleDateString('ja-JP') : '-';
+  html += '<div style="' + S + (syakenWarn ? 'border-color:#f57c00;' : '') + '">';
+  html += '<div style="' + H + 'background:' + (syakenWarn ? '#c62828' : '#f57c00') + ';">車検</div>';
+  html += '<div style="' + R + 'border:none;"><span style="' + L + '">車検有効期限' + (syakenWarn ? ' ⚠️' : '') + '</span>';
+  html += '<span style="font-weight:800;font-size:15px;color:' + (syakenWarn ? '#c62828' : 'var(--text)') + ';">' + syakenStr + '</span></div>';
   if (syakenWarn && daysLeft > 0) html += '<div style="text-align:right;font-size:11px;color:#c62828;font-weight:600;">残り ' + daysLeft + '日</div>';
   if (syakenWarn && daysLeft <= 0) html += '<div style="text-align:right;font-size:11px;color:#c62828;font-weight:700;">期限切れ</div>';
   html += '</div>';
 
-  // 保険セクション
-  var hasInsurance = getVal(fTaijinHoken) || getVal(fTaibutsuHoken) || getVal(fJinshin) || getVal(fSyaryoHoken);
-  if (hasInsurance) {
-    html += '<div style="' + sectionStyle + '">';
-    html += '<div style="' + headerStyle + 'background:#7b1fa2;">保険情報</div>';
-    html += row('対人保険', getVal(fTaijinHoken));
-    html += row('対物保険', getVal(fTaibutsuHoken));
-    html += row('人身傷害', getVal(fJinshin));
-    html += row('車両保険', getVal(fSyaryoHoken));
+  // 自動車保険
+  var ins = [
+    { label: '対人保険', val: getVal(fTaijinHoken) },
+    { label: '対物保険', val: getVal(fTaibutsuHoken) },
+    { label: '人身傷害', val: getVal(fJinshin) },
+    { label: '車両保険', val: getVal(fSyaryoHoken) },
+  ].filter(function(i) { return i.val; });
+  if (ins.length > 0) {
+    html += '<div style="' + S + '">';
+    html += '<div style="' + H + 'background:#7b1fa2;">自動車保険</div>';
+    ins.forEach(function(i) { html += row(i.label, i.val); });
     html += '</div>';
   }
 
-  // その他のフィールド（上記で表示していないもの）
-  var shownKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId'];
-  [vf.number, vf.no1, vf.carType, vf.color, vf.driver, vf.affiliation, vf.hakensaki, vf.usage, vf.syaken, fCapacity, fPickupCount, fRegDate, fOwner, fTaijinHoken, fTaibutsuHoken, fJinshin, fSyaryoHoken, fLink].forEach(function(k) { if (k) shownKeys.push(k); });
-
-  // デバッグ: その他に表示されるフィールド一覧
-  var debugOther = [];
-  Object.keys(item).forEach(function(k) {
-    if (shownKeys.indexOf(k) >= 0) return;
-    if (k.indexOf('Id') === k.length - 2 && k.length > 2) return;
-    var v = item[k];
-    if (v === null || v === undefined || v === '') return;
-    if (typeof v === 'object') return;
-    var f = fields.find(function(ff) { return ff.EntityPropertyName === k || ff.InternalName === k; });
-    debugOther.push((f ? f.Title : k) + '=' + String(v).substring(0, 30));
-  });
-  if (debugOther.length > 0) alert('その他フィールド:\n' + debugOther.join('\n'));
+  // 非表示にするキー（システム・既表示・不要）
+  var hideKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId', 'ContentType', 'OData__vti_ItemDeclaredRecord'];
+  [vf.number, vf.no1, vf.carType, vf.color, vf.driver, vf.affiliation, vf.hakensaki, vf.usage, vf.syaken, fCapacity, fPickupCount, fMorningCount, fRegDate, fOwner, fTaijinHoken, fTaibutsuHoken, fJinshin, fSyaryoHoken, fLink].forEach(function(k) { if (k) hideKeys.push(k); });
 
   var otherRows = '';
-  var fieldTranslate = {
-    'Pick-up': '送迎先', 'Pickup': '送迎先', 'Affiliation': '所属', 'Usage': '使用区分',
-    'Color': '色', 'Driver': 'ドライバー', 'Number': 'ナンバー', 'Model': '車種',
-    'Maker': 'メーカー', 'Year': '年式', 'Mileage': '走行距離', 'Insurance': '保険',
-    'Inspection': '車検', 'Note': '備考', 'Notes': '備考', 'Status': '状態',
-    'Type': '種別', 'Capacity': '定員', 'Fuel': '燃料', 'Registration': '登録',
-    'Owner': '所有者', 'Location': '場所', 'Company': '会社', 'Branch': '支店',
-    'Date': '日付', 'Expiry': '期限', 'Comment': 'コメント', 'Description': '説明',
-  };
   Object.keys(item).forEach(function(key) {
-    if (shownKeys.indexOf(key) >= 0) return;
+    if (hideKeys.indexOf(key) >= 0) return;
     if (key.indexOf('Id') === key.length - 2 && key.length > 2) return;
+    if (key.indexOf('StringId') >= 0) return;
     var val = item[key];
     if (val === null || val === undefined || val === '') return;
     if (typeof val === 'object') return;
+    if (typeof val === 'boolean') return;
+    if (typeof val === 'number' && val === 0) return;
     var fld = fields.find(function(f) { return f.EntityPropertyName === key || f.InternalName === key; });
     var label = fld ? fld.Title : key;
-    for (var eng in fieldTranslate) {
-      if (label.indexOf(eng) >= 0) { label = fieldTranslate[eng]; break; }
-    }
+    // 翻訳
+    var tr = {'Pick-up':'送迎先','Pickup':'送迎先','Affiliation':'所属','Usage':'使用区分','Color':'色','Driver':'ドライバー','Model':'車種','Maker':'メーカー','Year':'年式','Mileage':'走行距離','Insurance':'保険','Inspection':'車検','Note':'備考','Notes':'備考','Capacity':'定員','Fuel':'燃料','Registration':'登録','Owner':'所有者','Location':'場所','Company':'会社','Branch':'支店','Comment':'コメント','Description':'説明','Morning':'朝の送迎','Number':'番号','NO1':'番号','Plate':'ナンバー','VIN':'車台番号','Weight':'重量','Engine':'エンジン','Status':'状態','Type':'種別'};
+    for (var eng in tr) { if (label.indexOf(eng) >= 0) { label = tr[eng]; break; } }
     if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) val = new Date(val).toLocaleDateString('ja-JP');
     otherRows += row(label, String(val));
   });
   if (otherRows) {
-    html += '<div style="' + sectionStyle + '">';
-    html += '<div style="' + headerStyle + 'background:#546e7a;">その他</div>';
+    html += '<div style="' + S + '">';
+    html += '<div style="' + H + 'background:#546e7a;">その他</div>';
     html += otherRows;
     html += '</div>';
   }
 
-  // Link列（フォルダーリンク）
+  // Link列（フォルダーリンク） - SharePoint Hyperlink型は {Url, Description} オブジェクト
   var linkUrl = '';
   if (fLink) {
     var linkVal = item[fLink];
     if (linkVal && typeof linkVal === 'object' && linkVal.Url) linkUrl = linkVal.Url;
-    else if (linkVal && typeof linkVal === 'string') linkUrl = linkVal;
+    else if (linkVal && typeof linkVal === 'string' && linkVal.indexOf('http') === 0) linkUrl = linkVal;
   }
+  // フォールバック: Link列が見つからない場合、全フィールドからURL型を探す
+  if (!linkUrl) {
+    fields.forEach(function(f) {
+      if (linkUrl) return;
+      if (f.TypeAsString === 'URL') {
+        var v = item[f.EntityPropertyName];
+        if (v && typeof v === 'object' && v.Url) linkUrl = v.Url;
+        else if (v && typeof v === 'string' && v.indexOf('http') === 0) linkUrl = v;
+      }
+    });
+  }
+  window._vehicleFolderUrl = linkUrl;
 
   // ボタン
   html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">';
+  html += '<button onclick="openVehicleEditForm(' + idx + ')" style="padding:11px;border-radius:10px;background:#f57c00;color:#fff;border:none;font-weight:600;font-size:13px;">✏️ 内容を編集</button>';
   if (linkUrl) {
-    html += '<button onclick="window.open(\'' + escHtml(linkUrl) + '\',\'_blank\')" style="padding:11px;border-radius:10px;background:#2e7d32;color:#fff;border:none;font-weight:600;font-size:13px;">📁 車両フォルダーを開く</button>';
+    html += '<a href="' + escHtml(linkUrl) + '" target="_blank" rel="noopener" style="display:block;padding:11px;border-radius:10px;background:#2e7d32;color:#fff;border:none;font-weight:600;font-size:13px;text-align:center;text-decoration:none;">📁 車両フォルダーを開く</a>';
   }
   html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="padding:11px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;font-size:13px;">🔧 点検記録を見る</button>';
   html += '</div>';
@@ -7936,6 +7945,170 @@ async function searchTenken() {
     console.error('Tenken search error:', e);
     body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">' + escHtml(e.message) + '</div>';
   }
+}
+
+// ============================================================
+// 車両編集フォーム
+// ============================================================
+function openVehicleEditForm(idx) {
+  var item = _vehicleData[idx];
+  if (!item) return;
+  var editFields = window._vehicleEditFields || [];
+  if (editFields.length === 0) { showToast('編集可能なフィールドがありません', 'error'); return; }
+
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.id = 'vehicleEditOverlay';
+  ov.style.zIndex = '99998';
+
+  var vf = window._vf || {};
+  var number = (item[vf.number] || item['Title'] || '') + (vf.no1 && item[vf.no1] ? '  ' + item[vf.no1] : '');
+
+  var formHtml = '<div style="background:#fff;border-radius:16px;width:92%;max-width:420px;max-height:85vh;overflow-y:auto;padding:20px;">';
+  formHtml += '<div style="text-align:center;margin-bottom:12px;">';
+  formHtml += '<div style="font-size:10px;color:var(--text-light);">車両情報を編集</div>';
+  formHtml += '<div style="font-size:16px;font-weight:700;color:var(--primary);">' + escHtml(number) + '</div>';
+  formHtml += '</div>';
+
+  editFields.forEach(function(f, i) {
+    var curVal = item[f.prop];
+    formHtml += '<div style="margin-bottom:10px;">';
+    formHtml += '<label style="font-size:11px;font-weight:600;color:var(--text-light);display:block;margin-bottom:3px;">' + escHtml(f.label) + '</label>';
+    if (f.type === 'select' && f.options) {
+      formHtml += '<select id="vedit_' + i + '" style="width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;">';
+      formHtml += '<option value="">（なし）</option>';
+      f.options.forEach(function(o) {
+        formHtml += '<option value="' + escHtml(o) + '"' + (curVal === o ? ' selected' : '') + '>' + escHtml(o) + '</option>';
+      });
+      formHtml += '</select>';
+    } else if (f.type === 'date') {
+      var dateVal = curVal ? String(curVal).substring(0, 10) : '';
+      formHtml += '<input type="date" id="vedit_' + i + '" value="' + escHtml(dateVal) + '" style="width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;">';
+    } else {
+      formHtml += '<input type="text" id="vedit_' + i + '" value="' + escHtml(String(curVal || '')) + '" style="width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;">';
+    }
+    formHtml += '</div>';
+  });
+
+  formHtml += '<div style="display:flex;gap:8px;margin-top:14px;">';
+  formHtml += '<button onclick="document.getElementById(\'vehicleEditOverlay\').remove()" style="flex:1;padding:11px;border-radius:10px;background:#e0e0e0;color:var(--text);border:none;font-weight:600;font-size:13px;">キャンセル</button>';
+  formHtml += '<button id="vehicleEditSaveBtn" onclick="saveVehicleEdit(' + idx + ')" style="flex:1;padding:11px;border-radius:10px;background:#f57c00;color:#fff;border:none;font-weight:600;font-size:13px;">💾 保存</button>';
+  formHtml += '</div>';
+  formHtml += '</div>';
+
+  ov.innerHTML = formHtml;
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+function saveVehicleEdit(idx) {
+  try {
+    executeSaveVehicleEdit(idx).catch(function(e) { showToast('保存エラー: ' + e.message, 'error'); });
+  } catch(e) {
+    showToast('エラー: ' + e.message, 'error');
+  }
+}
+
+async function executeSaveVehicleEdit(idx) {
+  var item = _vehicleData[idx];
+  if (!item) throw new Error('車両データが見つかりません');
+  var editFields = window._vehicleEditFields || [];
+  var btn = document.getElementById('vehicleEditSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+
+  try {
+    var token = await getToken();
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')";
+
+    // EntityType取得
+    var metaResp = await fetch(listApi + "?$select=ListItemEntityTypeFullName", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!metaResp.ok) throw new Error('リストメタ取得失敗: ' + metaResp.status);
+    var metaData = await metaResp.json();
+    var entityType = metaData.d.ListItemEntityTypeFullName;
+
+    // 変更されたフィールドのみPATCH
+    var body = { '__metadata': { type: entityType } };
+    var hasChanges = false;
+
+    editFields.forEach(function(f, i) {
+      var el = document.getElementById('vedit_' + i);
+      if (!el) return;
+      var newVal = el.value;
+      var oldVal = item[f.prop];
+
+      if (f.type === 'date') {
+        var oldDate = oldVal ? String(oldVal).substring(0, 10) : '';
+        if (newVal !== oldDate) {
+          body[f.prop] = newVal ? newVal + 'T00:00:00Z' : null;
+          hasChanges = true;
+        }
+      } else {
+        var oldStr = oldVal === null || oldVal === undefined ? '' : String(oldVal);
+        if (newVal !== oldStr) {
+          body[f.prop] = newVal || null;
+          hasChanges = true;
+        }
+      }
+    });
+
+    if (!hasChanges) {
+      showToast('変更はありません');
+      var ov = document.getElementById('vehicleEditOverlay');
+      if (ov) ov.remove();
+      return;
+    }
+
+    var itemId = item.Id || item.ID;
+    var resp = await fetch(listApi + "/items(" + itemId + ")", {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': item.__metadata ? item.__metadata.etag : '*',
+        'X-HTTP-Method': 'MERGE'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      var errText = await resp.text();
+      throw new Error('更新失敗(' + resp.status + '): ' + errText.substring(0, 200));
+    }
+
+    // ローカルデータ更新
+    editFields.forEach(function(f, i) {
+      var el = document.getElementById('vedit_' + i);
+      if (!el) return;
+      var newVal = el.value;
+      if (f.type === 'date') {
+        _vehicleData[idx][f.prop] = newVal ? newVal + 'T00:00:00Z' : null;
+      } else {
+        _vehicleData[idx][f.prop] = newVal || null;
+      }
+    });
+
+    var ov = document.getElementById('vehicleEditOverlay');
+    if (ov) ov.remove();
+    showToast('✅ 保存しました');
+
+    // 詳細画面を再描画
+    openVehicleDetail(idx);
+
+  } catch(e) {
+    console.error('Vehicle edit save error:', e);
+    throw e;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+  }
+}
+
+// フォルダーリンクを開く（iOS Safari対応）
+function openVehicleFolder(url) {
+  if (!url) { showToast('フォルダーリンクがありません', 'error'); return; }
+  window.open(url, '_blank');
 }
 
 // ============================================================
