@@ -7285,27 +7285,31 @@ function closeKyuryoForm() {
   if (el) el.remove();
 }
 
-async function submitKyuryoForm() {
-  var emp = currentEmployee;
-  if (!emp) return;
+function submitKyuryoForm() {
+  try {
+    var emp = currentEmployee;
+    if (!emp) { showToast('社員データがありません', 'error'); return; }
 
-  var hakensaki = document.getElementById('kyuryo_hakensaki').value.trim();
-  var no = document.getElementById('kyuryo_no').value.trim();
-  var name = document.getElementById('kyuryo_name').value.trim();
-  var hakenTaisha = document.getElementById('kyuryo_hakenTaisha').value;
-  var yukyuTaisha = document.getElementById('kyuryo_yukyuTaisha').value;
-  var seisanDate = document.getElementById('kyuryo_seisanDate').value;
-  var shiharai = document.getElementById('kyuryo_shiharai').value;
-  var sonota = document.getElementById('kyuryo_sonota').value.trim();
+    var hakensaki = document.getElementById('kyuryo_hakensaki').value.trim();
+    var no = document.getElementById('kyuryo_no').value.trim();
+    var name = document.getElementById('kyuryo_name').value.trim();
+    var hakenTaisha = document.getElementById('kyuryo_hakenTaisha').value;
+    var yukyuTaisha = document.getElementById('kyuryo_yukyuTaisha').value;
+    var seisanDate = document.getElementById('kyuryo_seisanDate').value;
+    var shiharai = document.getElementById('kyuryo_shiharai').value;
+    var sonota = document.getElementById('kyuryo_sonota').value.trim();
 
-  // Validation
-  if (!hakenTaisha) { showToast('派遣先退社日を入力してください', 'error'); return; }
-  if (!yukyuTaisha) { showToast('有給付与退社日を入力してください', 'error'); return; }
-  if (!seisanDate) { showToast('精算日（振込日）を入力してください', 'error'); return; }
-  if (!shiharai) { showToast('支払方法を選択してください', 'error'); return; }
+    // Validation
+    if (!hakenTaisha) { showToast('派遣先退社日を入力してください', 'error'); return; }
+    if (!yukyuTaisha) { showToast('有給付与退社日を入力してください', 'error'); return; }
+    if (!seisanDate) { showToast('精算日（振込日）を入力してください', 'error'); return; }
+    if (!shiharai) { showToast('支払方法を選択してください', 'error'); return; }
 
-  // Direct submit (no confirm dialog - button already says 申請)
-  await executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota);
+    executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota)
+      .catch(function(e) { showToast('送信エラー: ' + e.message, 'error'); });
+  } catch(e) {
+    showToast('エラー: ' + e.message, 'error');
+  }
 }
 
 async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota) {
