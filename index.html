@@ -2008,7 +2008,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'e7e5f1f';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2535,6 +2535,7 @@ function switchScreen(screenId, skipHistory) {
   const mFooter = document.getElementById('maebariListFooter');
   if (mFooter && screenId !== 'maebariListScreen') mFooter.style.display = 'none';
 
+  if (screenId === 'searchScreen') loadHomeBadges();
   if (screenId === 'maebariListScreen') initMaebariListDate();
   if (screenId === 'yukyuListScreen') initYukyuListDate();
   if (screenId === 'nyutaiScreen') loadNyutaiScreen();
@@ -3569,135 +3570,143 @@ async function loadHomeBadges() {
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
 
-  // 前払い: count this Friday's records
-  try {
-    var fri = getNextFriday();
-    var friStart = new Date(fri); friStart.setHours(0,0,0,0);
-    var friEnd = new Date(fri); friEnd.setHours(23,59,59,999);
-    var mFilter = "$filter=" + MF.payDate + " ge datetime'" + friStart.toISOString() + "' and " + MF.payDate + " le datetime'" + friEnd.toISOString() + "'&$top=500";
-    var mRecs = await spGet(LIST_MAEBARI_GUID, mFilter) || [];
-    var mBadge = document.getElementById('maebariBadgeCount');
-    if (mBadge) {
-      if (mRecs.length > 0) { mBadge.textContent = mRecs.length; mBadge.style.display = 'inline-block'; }
-      else { mBadge.style.display = 'none'; }
-    }
-  } catch(e) { console.log('Maebari badge error:', e); }
+  // 全バッジを並列取得で高速化
+  var fri = getNextFriday();
+  var friStart = new Date(fri); friStart.setHours(0,0,0,0);
+  var friEnd = new Date(fri); friEnd.setHours(23,59,59,999);
+  var todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
 
-  // 社員データ取得（入退・有給・期限で共用）
-  var allEmps = [];
-  try {
-    allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
-  } catch(e) { console.log('Employee fetch error:', e); return; }
+  var mFilter = "$filter=" + MF.payDate + " ge datetime'" + friStart.toISOString() + "' and " + MF.payDate + " le datetime'" + friEnd.toISOString() + "'&$top=500";
+  var yFilter = "$filter=" + F.leaveDate + " ge datetime'" + monthStart.toISOString() + "' and " + F.leaveDate + " le datetime'" + todayEnd.toISOString() + "'&$top=500";
 
-  // 入退: count current month's 入社 and 退社
-  try {
-    var nyuCount = 0, taiCount = 0;
-    allEmps.forEach(function(emp) {
-      var nd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
-      if (nd && nd >= monthStart && nd <= monthEnd) nyuCount++;
-      var td = emp[F.yukyuTaisha] ? new Date(emp[F.yukyuTaisha]) : (emp[F.hakenTaisha] ? new Date(emp[F.hakenTaisha]) : null);
-      if (td && td >= monthStart && td <= monthEnd) taiCount++;
-    });
-    var nBadgeIn = document.getElementById('nyutaiBadgeIn');
-    var nBadgeOut = document.getElementById('nyutaiBadgeOut');
-    if (nBadgeIn) {
-      if (nyuCount > 0) { nBadgeIn.textContent = '+' + nyuCount; nBadgeIn.style.display = 'inline-block'; }
-      else { nBadgeIn.style.display = 'none'; }
-    }
-    if (nBadgeOut) {
-      if (taiCount > 0) { nBadgeOut.textContent = '-' + taiCount; nBadgeOut.style.display = 'inline-block'; }
-      else { nBadgeOut.style.display = 'none'; }
-    }
-  } catch(e) { console.log('Nyutai badge error:', e); }
+  // 5つのAPI呼び出しを同時実行
+  var results = await Promise.allSettled([
+    spGet(LIST_MAEBARI_GUID, mFilter).catch(function(e) { console.log('Maebari badge error:', e); return []; }),
+    spGetAll(LIST_EMPLOYEES_GUID, '$top=500').catch(function(e) { console.log('Employee fetch error:', e); return []; }),
+    spGet(LIST_LEAVE_GUID, yFilter).catch(function(e) { console.log('Yukyu badge error:', e); return []; }),
+    fetchEmployeeFields().catch(function(e) { console.log('Fields fetch error:', e); return []; }),
+    loadVehicleBadgeData().catch(function(e) { console.log('Vehicle badge error:', e); return null; })
+  ]);
 
-  // 有給確認: count current month's leave requests
-  try {
-    var todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
-    var yFilter = "$filter=" + F.leaveDate + " ge datetime'" + monthStart.toISOString() + "' and " + F.leaveDate + " le datetime'" + todayEnd.toISOString() + "'&$top=500";
-    var yRecs = await spGet(LIST_LEAVE_GUID, yFilter) || [];
-    var yBadge = document.getElementById('yukyuBadgeCount');
-    if (yBadge) {
-      if (yRecs.length > 0) { yBadge.textContent = yRecs.length; yBadge.style.display = 'inline-block'; }
-      else { yBadge.style.display = 'none'; }
-    }
-  } catch(e) { console.log('Yukyu badge error:', e); }
+  var mRecs = results[0].value || [];
+  var allEmps = results[1].value || [];
+  var yRecs = results[2].value || [];
+  var meta = results[3].value || [];
+  var vehicleResult = results[4].value;
 
-  // 期限注意: count alerts
-  try {
-    var meta = await fetchEmployeeFields();
-    var keyMap = buildFieldKeyMap(meta);
-    var expiryCount = 0;
-    allEmps.forEach(function(emp) {
-      if (isResigned(emp)) return;
-      PROFILE_CATEGORIES.forEach(function(cat) {
-        cat.fields.forEach(function(field) {
-          if (field.format !== 'dateExpiry') return;
-          var odataKey = keyMap[field.key];
-          if (!odataKey) return;
-          var val = emp[odataKey];
-          if (!val) return;
-          var d = new Date(val);
-          if (isNaN(d)) return;
-          if (Math.ceil((d - today) / 86400000) <= 60) expiryCount++;
-        });
+  // 前払いバッジ
+  var mBadge = document.getElementById('maebariBadgeCount');
+  if (mBadge) {
+    if (mRecs.length > 0) { mBadge.textContent = mRecs.length; mBadge.style.display = 'inline-block'; }
+    else { mBadge.style.display = 'none'; }
+  }
+
+  // 入退バッジ
+  var nyuCount = 0, taiCount = 0;
+  allEmps.forEach(function(emp) {
+    var nd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
+    if (nd && nd >= monthStart && nd <= monthEnd) nyuCount++;
+    var td = emp[F.yukyuTaisha] ? new Date(emp[F.yukyuTaisha]) : (emp[F.hakenTaisha] ? new Date(emp[F.hakenTaisha]) : null);
+    if (td && td >= monthStart && td <= monthEnd) taiCount++;
+  });
+  var nBadgeIn = document.getElementById('nyutaiBadgeIn');
+  var nBadgeOut = document.getElementById('nyutaiBadgeOut');
+  if (nBadgeIn) {
+    if (nyuCount > 0) { nBadgeIn.textContent = '+' + nyuCount; nBadgeIn.style.display = 'inline-block'; }
+    else { nBadgeIn.style.display = 'none'; }
+  }
+  if (nBadgeOut) {
+    if (taiCount > 0) { nBadgeOut.textContent = '-' + taiCount; nBadgeOut.style.display = 'inline-block'; }
+    else { nBadgeOut.style.display = 'none'; }
+  }
+
+  // 有給確認バッジ
+  var yBadge = document.getElementById('yukyuBadgeCount');
+  if (yBadge) {
+    if (yRecs.length > 0) { yBadge.textContent = yRecs.length; yBadge.style.display = 'inline-block'; }
+    else { yBadge.style.display = 'none'; }
+  }
+
+  // 期限注意バッジ
+  var keyMap = meta.length > 0 ? buildFieldKeyMap(meta) : {};
+  var expiryCount = 0;
+  allEmps.forEach(function(emp) {
+    if (isResigned(emp)) return;
+    PROFILE_CATEGORIES.forEach(function(cat) {
+      cat.fields.forEach(function(field) {
+        if (field.format !== 'dateExpiry') return;
+        var odataKey = keyMap[field.key];
+        if (!odataKey) return;
+        var val = emp[odataKey];
+        if (!val) return;
+        var d = new Date(val);
+        if (isNaN(d)) return;
+        if (Math.ceil((d - today) / 86400000) <= 60) expiryCount++;
       });
     });
-    var eBadge = document.getElementById('expiryBadgeCount');
-    if (eBadge) {
-      if (expiryCount > 0) { eBadge.textContent = expiryCount; eBadge.style.display = 'inline-block'; }
-      else { eBadge.style.display = 'none'; }
-    }
-  } catch(e) { console.log('Expiry badge error:', e); }
+  });
+  var eBadge = document.getElementById('expiryBadgeCount');
+  if (eBadge) {
+    if (expiryCount > 0) { eBadge.textContent = expiryCount; eBadge.style.display = 'inline-block'; }
+    else { eBadge.style.display = 'none'; }
+  }
 
-  // 車両バッジ: 使用台数(青) + 車検1か月以内(赤)
-  try {
-    var vToken = await getToken();
-    // 全フィールド取得して使用・車検を探す
-    var vfResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=EntityPropertyName,Title,TypeAsString&$top=300", {
-      headers: { 'Authorization': 'Bearer ' + vToken, 'Accept': 'application/json;odata=verbose' }
-    });
-    if (vfResp.ok) {
-      var vfData = await vfResp.json();
-      var vfList = vfData.d.results || [];
-      var vfUsage2 = null, vfSyaken2 = null;
-      vfList.forEach(function(f) {
-        if (f.Title && (f.Title.indexOf('Usage') >= 0 || f.Title.indexOf('使用') >= 0)) vfUsage2 = f.EntityPropertyName;
-        if (f.Title && f.Title.indexOf('車検') >= 0 && f.TypeAsString === 'DateTime') vfSyaken2 = f.EntityPropertyName;
-      });
-      console.log('Vehicle badge fields:', vfUsage2, vfSyaken2);
-      if (vfUsage2) {
-        var selectFields = vfUsage2;
-        if (vfSyaken2) selectFields += ',' + vfSyaken2;
-        var viResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=" + selectFields + "&$top=500", {
-          headers: { 'Authorization': 'Bearer ' + vToken, 'Accept': 'application/json;odata=verbose' }
-        });
-        if (viResp.ok) {
-          var viData = await viResp.json();
-          var viItems = viData.d.results || [];
-          var useCount2 = 0, syakenCount = 0;
-          var now = new Date();
-          var in30 = new Date(now.getTime() + 30 * 86400000);
-          viItems.forEach(function(v) {
-            if ((v[vfUsage2] || '') === '使用') useCount2++;
-            if (vfSyaken2 && v[vfSyaken2]) {
-              var sd = new Date(v[vfSyaken2]);
-              if (!isNaN(sd) && sd <= in30 && sd >= now) syakenCount++;
-            }
-          });
-          var vBU = document.getElementById('vehicleBadgeUse');
-          if (vBU) {
-            if (useCount2 > 0) { vBU.textContent = useCount2; vBU.style.display = 'inline-block'; }
-            else { vBU.style.display = 'none'; }
-          }
-          var vBS = document.getElementById('vehicleBadgeSyaken');
-          if (vBS) {
-            if (syakenCount > 0) { vBS.textContent = syakenCount; vBS.style.display = 'inline-block'; }
-            else { vBS.style.display = 'none'; }
-          }
-        }
-      }
+  // 車両バッジ
+  if (vehicleResult) {
+    var vBU = document.getElementById('vehicleBadgeUse');
+    if (vBU) {
+      if (vehicleResult.use > 0) { vBU.textContent = vehicleResult.use; vBU.style.display = 'inline-block'; }
+      else { vBU.style.display = 'none'; }
     }
-  } catch(e) { console.log('Vehicle badge error:', e); }
+    var vBS = document.getElementById('vehicleBadgeSyaken');
+    if (vBS) {
+      if (vehicleResult.syaken > 0) { vBS.textContent = vehicleResult.syaken; vBS.style.display = 'inline-block'; }
+      else { vBS.style.display = 'none'; }
+    }
+  }
+}
+
+// 車両バッジ用データ取得（並列呼び出し用に分離）
+var _vehicleBadgeFieldsCache = null;
+async function loadVehicleBadgeData() {
+  var token = await getToken();
+  var hdrs = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
+
+  // フィールド情報キャッシュ
+  if (!_vehicleBadgeFieldsCache) {
+    var vfResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=EntityPropertyName,Title,TypeAsString&$top=300", { headers: hdrs });
+    if (!vfResp.ok) return null;
+    var vfData = await vfResp.json();
+    var vfList = vfData.d.results || [];
+    var vfUsage = null, vfSyaken = null;
+    vfList.forEach(function(f) {
+      if (f.Title && (f.Title.indexOf('Usage') >= 0 || f.Title.indexOf('使用') >= 0)) vfUsage = f.EntityPropertyName;
+      if (f.Title && f.Title.indexOf('車検') >= 0 && f.TypeAsString === 'DateTime') vfSyaken = f.EntityPropertyName;
+    });
+    _vehicleBadgeFieldsCache = { usage: vfUsage, syaken: vfSyaken };
+  }
+
+  var uf = _vehicleBadgeFieldsCache.usage;
+  var sf = _vehicleBadgeFieldsCache.syaken;
+  if (!uf) return null;
+
+  var selectFields = uf + (sf ? ',' + sf : '');
+  var viResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=" + selectFields + "&$top=500", { headers: hdrs });
+  if (!viResp.ok) return null;
+  var viData = await viResp.json();
+  var viItems = viData.d.results || [];
+
+  var useCount = 0, syakenCount = 0;
+  var now = new Date();
+  var in30 = new Date(now.getTime() + 30 * 86400000);
+  viItems.forEach(function(v) {
+    if ((v[uf] || '') === '使用') useCount++;
+    if (sf && v[sf]) {
+      var sd = new Date(v[sf]);
+      if (!isNaN(sd) && sd <= in30 && sd >= now) syakenCount++;
+    }
+  });
+  return { use: useCount, syaken: syakenCount };
 }
 
 // Global expiry alerts cache for filter
