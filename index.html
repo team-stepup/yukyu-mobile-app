@@ -430,6 +430,7 @@ body {
 }
 .ql-icon { font-size: 28px; line-height: 1; }
 .ql-text { font-size: 11px; font-weight: 700; color: var(--text); letter-spacing: 0.5px; }
+.ql-badge { position:absolute;top:4px;right:4px;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 4px;line-height:16px;text-align:center; }
 
 /* Home Search Card */
 .home-search-card {
@@ -1591,6 +1592,8 @@ body {
   color: var(--danger);
   font-weight: 600;
 }
+.expiry-filter-btn { padding:6px 12px;border-radius:20px;border:1.5px solid var(--border);background:#fff;font-size:12px;font-weight:600;color:var(--text-light);cursor:pointer; }
+.expiry-filter-btn.active { background:var(--primary);color:#fff;border-color:var(--primary); }
 </style>
 </head>
 <body>
@@ -1642,22 +1645,25 @@ body {
   <!-- Screen 1: Employee Search -->
   <div class="screen" id="searchScreen">
     <div class="quick-links">
-      <button class="quick-link-btn" onclick="switchScreen('maebariListScreen')">
+      <button class="quick-link-btn" onclick="switchScreen('maebariListScreen')" style="position:relative;">
         <span class="ql-icon">💰</span>
         <span class="ql-text">前払い一覧</span>
+        <span id="maebariBadgeCount" class="ql-badge" style="background:#f57c00;display:none;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')">
         <span class="ql-icon">📅</span>
         <span class="ql-text">有給確認</span>
       </button>
-      <button class="quick-link-btn" onclick="switchScreen('nyutaiScreen')">
+      <button class="quick-link-btn" onclick="switchScreen('nyutaiScreen')" style="position:relative;">
         <span class="ql-icon">🚪</span>
         <span class="ql-text">入退連絡</span>
+        <span id="nyutaiBadgeIn" class="ql-badge" style="background:#2e7d32;display:none;top:4px;right:26px;"></span>
+        <span id="nyutaiBadgeOut" class="ql-badge" style="background:#c62828;display:none;top:4px;right:4px;"></span>
       </button>
       <button class="quick-link-btn" onclick="openExpiryList()" style="position:relative;">
         <span class="ql-icon">⚠️</span>
         <span class="ql-text">期限注意</span>
-        <span id="expiryBadgeCount" style="display:none;position:absolute;top:4px;right:4px;background:#d32f2f;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 4px;"></span>
+        <span id="expiryBadgeCount" class="ql-badge" style="background:#d32f2f;display:none;"></span>
       </button>
     </div>
 
@@ -1696,6 +1702,7 @@ body {
       <button class="back-btn" onclick="switchScreen('searchScreen')">←</button>
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">⚠️ 期限注意リスト</h2>
     </div>
+    <div id="expiryFilterBtns"></div>
     <div id="expiryListBody" style="display:flex;flex-direction:column;gap:8px;"></div>
   </div>
 
@@ -1958,7 +1965,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '6d223e9';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2196,6 +2203,7 @@ async function onLoginSuccess(resp) {
   switchScreen('searchScreen');
   showToast('ログインしました', 'success');
   populateHakenDropdown();
+  loadHomeBadges();
 }
 
 async function acquireToken() {
@@ -3510,6 +3518,74 @@ function categoryHasAlert(emp, keyMap, category) {
 }
 
 // Open expiry alert list — shows all employees with deadlines within 60 days
+// Home badge counts (前払い・入退・期限注意)
+async function loadHomeBadges() {
+  try {
+    // 前払い: count today's records
+    var today = new Date();
+    var ds = new Date(today); ds.setHours(0,0,0,0);
+    var de = new Date(today); de.setHours(23,59,59,999);
+    var mFilter = "$filter=" + MF.payDate + " ge datetime'" + ds.toISOString() + "' and " + MF.payDate + " le datetime'" + de.toISOString() + "'&$select=Id&$top=500";
+    var mRecs = await spGet(LIST_MAEBARI_GUID, mFilter) || [];
+    var mBadge = document.getElementById('maebariBadgeCount');
+    if (mBadge) {
+      if (mRecs.length > 0) { mBadge.textContent = mRecs.length; mBadge.style.display = 'inline-block'; }
+      else { mBadge.style.display = 'none'; }
+    }
+
+    // 入退: count current month's 入社 and 退社
+    var mStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    var mEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
+    var allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$select=Id,' + F.nyushaDate + ',' + F.hakenTaisha + ',' + F.yukyuTaisha + '&$top=500');
+    var nyuCount = 0, taiCount = 0;
+    allEmps.forEach(function(emp) {
+      var nd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
+      if (nd && nd >= mStart && nd <= mEnd) nyuCount++;
+      var td = emp[F.yukyuTaisha] ? new Date(emp[F.yukyuTaisha]) : (emp[F.hakenTaisha] ? new Date(emp[F.hakenTaisha]) : null);
+      if (td && td >= mStart && td <= mEnd) taiCount++;
+    });
+    var nBadgeIn = document.getElementById('nyutaiBadgeIn');
+    var nBadgeOut = document.getElementById('nyutaiBadgeOut');
+    if (nBadgeIn) {
+      if (nyuCount > 0) { nBadgeIn.textContent = '+' + nyuCount; nBadgeIn.style.display = 'inline-block'; }
+      else { nBadgeIn.style.display = 'none'; }
+    }
+    if (nBadgeOut) {
+      if (taiCount > 0) { nBadgeOut.textContent = '-' + taiCount; nBadgeOut.style.display = 'inline-block'; }
+      else { nBadgeOut.style.display = 'none'; }
+    }
+
+    // 期限注意: count alerts
+    var meta = await fetchEmployeeFields();
+    var keyMap = buildFieldKeyMap(meta);
+    var expiryCount = 0;
+    allEmps.forEach(function(emp) {
+      if (isResigned(emp)) return;
+      PROFILE_CATEGORIES.forEach(function(cat) {
+        cat.fields.forEach(function(field) {
+          if (field.format !== 'dateExpiry') return;
+          var odataKey = keyMap[field.key];
+          if (!odataKey) return;
+          var val = emp[odataKey];
+          if (!val) return;
+          var d = new Date(val);
+          if (isNaN(d)) return;
+          if (Math.ceil((d - today) / 86400000) <= 60) expiryCount++;
+        });
+      });
+    });
+    var eBadge = document.getElementById('expiryBadgeCount');
+    if (eBadge) {
+      if (expiryCount > 0) { eBadge.textContent = expiryCount; eBadge.style.display = 'inline-block'; }
+      else { eBadge.style.display = 'none'; }
+    }
+  } catch(e) { console.log('Home badge error:', e); }
+}
+
+// Global expiry alerts cache for filter
+var _expiryAlerts = [];
+var _expiryHakenList = [];
+
 async function openExpiryList() {
   showSpinner();
   try {
@@ -3517,13 +3593,15 @@ async function openExpiryList() {
     const meta = await fetchEmployeeFields();
     const keyMap = buildFieldKeyMap(meta);
     const now = new Date();
-    const alerts = [];
+    _expiryAlerts = [];
+    var hakenSet = {};
 
     // Collect all dateExpiry fields with ≤60 days remaining (or expired)
     allEmps.forEach(function(emp) {
       if (isResigned(emp)) return;
       var empName = emp.Title || '';
       var empNo = emp[F.syainNo] || '';
+      var haken = getHakensaki(emp) || '（未設定）';
       PROFILE_CATEGORIES.forEach(function(cat) {
         cat.fields.forEach(function(field) {
           if (field.format !== 'dateExpiry') return;
@@ -3535,56 +3613,44 @@ async function openExpiryList() {
           if (isNaN(d)) return;
           var diffDays = Math.ceil((d - now) / 86400000);
           if (diffDays <= 60) {
-            alerts.push({
+            _expiryAlerts.push({
               emp: emp,
               empName: empName,
               empNo: empNo,
+              hakensaki: haken,
               fieldLabel: field.label,
               dateStr: formatDate(val),
               diffDays: diffDays,
               catIcon: cat.icon
             });
+            hakenSet[haken] = (hakenSet[haken] || 0) + 1;
           }
         });
       });
     });
 
     // Sort: expired first (most negative), then soonest
-    alerts.sort(function(a, b) { return a.diffDays - b.diffDays; });
+    _expiryAlerts.sort(function(a, b) { return a.diffDays - b.diffDays; });
 
-    var body = document.getElementById('expiryListBody');
-    if (alerts.length === 0) {
-      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">期限注意の項目はありません 🎉</div>';
-    } else {
-      var html = '';
-      alerts.forEach(function(a) {
-        var badgeClass = a.diffDays < 0 ? 'expiry-danger' : (a.diffDays <= 30 ? 'expiry-danger' : 'expiry-warn');
-        var badgeText = a.diffDays < 0 ? '期限切れ' : ('残り' + a.diffDays + '日');
-        var borderColor = a.diffDays < 0 ? '#d32f2f' : (a.diffDays <= 30 ? '#f57c00' : '#ffb300');
-        html += '<div onclick=\'openNyutaiEmployee(' + (a.emp.Id || 0) + ')\' style="' +
-          'background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);' +
-          'border-left:4px solid ' + borderColor + ';cursor:pointer;">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
-            '<span style="font-weight:700;font-size:14px;color:var(--text);">' + escHtml(a.empNo) + ' ' + escHtml(a.empName) + '</span>' +
-            '<span class="' + badgeClass + '" style="font-size:11px;font-weight:600;">' + badgeText + '</span>' +
-          '</div>' +
-          '<div style="font-size:12px;color:var(--text-light);">' +
-            a.catIcon + ' ' + escHtml(a.fieldLabel) + '：' + a.dateStr +
-          '</div>' +
-        '</div>';
-      });
-      body.innerHTML = html;
-    }
+    // Build hakensaki filter buttons
+    _expiryHakenList = Object.keys(hakenSet).sort();
+    var filterHtml = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">' +
+      '<button class="expiry-filter-btn active" onclick="filterExpiryList(\'all\')">すべて (' + _expiryAlerts.length + ')</button>';
+    _expiryHakenList.forEach(function(h) {
+      filterHtml += '<button class="expiry-filter-btn" onclick="filterExpiryList(\'' + escHtml(h).replace(/'/g, "\\'") + '\')">' + escHtml(h) + ' (' + hakenSet[h] + ')</button>';
+    });
+    filterHtml += '</div>';
+
+    var filterEl = document.getElementById('expiryFilterBtns');
+    if (filterEl) filterEl.innerHTML = filterHtml;
+
+    renderExpiryCards(_expiryAlerts);
 
     // Update badge count on home button
     var badge = document.getElementById('expiryBadgeCount');
     if (badge) {
-      if (alerts.length > 0) {
-        badge.textContent = alerts.length;
-        badge.style.display = 'flex';
-      } else {
-        badge.style.display = 'none';
-      }
+      if (_expiryAlerts.length > 0) { badge.textContent = _expiryAlerts.length; badge.style.display = 'inline-block'; }
+      else { badge.style.display = 'none'; }
     }
 
     switchScreen('expiryListScreen');
@@ -3594,6 +3660,45 @@ async function openExpiryList() {
   } finally {
     hideSpinner();
   }
+}
+
+function filterExpiryList(haken) {
+  var filtered = haken === 'all' ? _expiryAlerts : _expiryAlerts.filter(function(a) { return a.hakensaki === haken; });
+  renderExpiryCards(filtered);
+  // Update active button
+  var btns = document.querySelectorAll('.expiry-filter-btn');
+  btns.forEach(function(b) { b.classList.remove('active'); });
+  if (haken === 'all') { btns[0].classList.add('active'); }
+  else {
+    btns.forEach(function(b) { if (b.textContent.indexOf(haken) === 0) b.classList.add('active'); });
+  }
+}
+
+function renderExpiryCards(alerts) {
+  var body = document.getElementById('expiryListBody');
+  if (alerts.length === 0) {
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">期限注意の項目はありません 🎉</div>';
+    return;
+  }
+  var html = '';
+  alerts.forEach(function(a) {
+    var badgeClass = a.diffDays < 0 ? 'expiry-danger' : (a.diffDays <= 30 ? 'expiry-danger' : 'expiry-warn');
+    var badgeText = a.diffDays < 0 ? '期限切れ' : ('残り' + a.diffDays + '日');
+    var borderColor = a.diffDays < 0 ? '#d32f2f' : (a.diffDays <= 30 ? '#f57c00' : '#ffb300');
+    html += '<div onclick=\'openNyutaiEmployee(' + (a.emp.Id || 0) + ')\' style="' +
+      'background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);' +
+      'border-left:4px solid ' + borderColor + ';cursor:pointer;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+        '<span style="font-weight:700;font-size:14px;color:var(--text);">' + escHtml(a.empNo) + ' ' + escHtml(a.empName) + '</span>' +
+        '<span class="' + badgeClass + '" style="font-size:11px;font-weight:600;">' + badgeText + '</span>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-light);">' +
+        '<span>' + a.catIcon + ' ' + escHtml(a.fieldLabel) + '：' + a.dateStr + '</span>' +
+        '<span style="color:var(--primary);font-weight:600;">' + escHtml(a.hakensaki) + '</span>' +
+      '</div>' +
+    '</div>';
+  });
+  body.innerHTML = html;
 }
 
 // Load and render employee profile
@@ -7174,39 +7279,8 @@ async function submitKyuryoForm() {
   if (!seisanDate) { showToast('精算日（振込日）を入力してください', 'error'); return; }
   if (!shiharai) { showToast('支払方法を選択してください', 'error'); return; }
 
-  // Store params globally for confirm callback
-  window._kyuryoParams = { hakensaki: hakensaki, no: no, name: name, hakenTaisha: hakenTaisha, yukyuTaisha: yukyuTaisha, seisanDate: seisanDate, shiharai: shiharai, sonota: sonota };
-
-  // Confirm
-  var overlay = document.createElement('div');
-  overlay.className = 'confirm-overlay';
-  overlay.id = 'kyuryoConfirmOverlay';
-  overlay.style.zIndex = '99999';
-  overlay.innerHTML = '<div class="confirm-box">' +
-    '<div class="confirm-title">💰 給料精算確認</div>' +
-    '<div class="confirm-msg" style="text-align:left;">' +
-    '<strong>' + escHtml(no + ' ' + name) + '</strong><br>' +
-    '部署: ' + escHtml(hakensaki) + '<br>' +
-    '派遣先退社日: ' + escHtml(hakenTaisha) + '<br>' +
-    '有給付与退社日: ' + escHtml(yukyuTaisha) + '<br>' +
-    '精算日: ' + escHtml(seisanDate) + '<br>' +
-    '支払方法: ' + escHtml(shiharai) + '<br>' +
-    (sonota ? 'その他: ' + escHtml(sonota) + '<br>' : '') +
-    '</div>' +
-    '<div class="confirm-btns">' +
-    '<button class="btn-cancel" onclick="document.getElementById(\'kyuryoConfirmOverlay\').remove()">戻る</button>' +
-    '<button class="btn-ok" onclick="confirmKyuryoSubmit()">申請する</button>' +
-    '</div></div>';
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-}
-
-function confirmKyuryoSubmit() {
-  var el = document.getElementById('kyuryoConfirmOverlay');
-  if (el) el.remove();
-  var p = window._kyuryoParams;
-  if (!p) return;
-  executeKyuryoSubmit(p.hakensaki, p.no, p.name, p.hakenTaisha, p.yukyuTaisha, p.seisanDate, p.shiharai, p.sonota);
+  // Direct submit (no confirm dialog - button already says 申請)
+  await executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota);
 }
 
 async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota) {
