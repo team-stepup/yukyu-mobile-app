@@ -7884,8 +7884,14 @@ async function generateZaishokuDocument(lang) {
       drawTextFit(170, 338, fmtDatePT(birthday), 9, 380);
 
       // === 国籍 / Nacionalidade ===
+      // Auto-fill PT nationality if user left it blank
+      var effNatPt = nationalityPt;
+      if (!effNatPt && nationality) {
+        var natMap = {'ブラジル':'Brasileira','フィリピン':'Filipina','ペルー':'Peruana','中国':'Chinesa','ベトナム':'Vietnamita','インドネシア':'Indonésia','タイ':'Tailandesa','韓国':'Coreana','ボリビア':'Boliviana','アルゼンチン':'Argentina','コロンビア':'Colombiana','パラグアイ':'Paraguaia'};
+        effNatPt = natMap[nationality] || '';
+      }
       drawTextFit(170, 379, nationality, 11, 380);
-      drawTextFit(170, 396, nationalityPt, 9, 380);
+      drawTextFit(170, 396, effNatPt, 9, 380);
 
       // === 採用年月日 / Data de inclusão na empresa ===
       drawTextFit(170, 437, fmtDateJP(nyushaDate), 11, 380);
@@ -7895,24 +7901,48 @@ async function generateZaishokuDocument(lang) {
       drawTextFit(170, 585, fmtDateJP(todayStr), 11, 380);
       drawTextFit(170, 602, fmtDatePT(todayStr), 9, 380);
 
-      // === 事業所所在地 (romaji on lower row) ===
-      drawText(235, 672, COMPANY_ADDR_RM, 8);
-      // === 事業所名称 (romaji on lower row) ===
-      drawText(235, 734, COMPANY_NAME_PT, 8);
+      // === Whiteout entire company info area (baked labels + values) ===
+      whiteRect(50, 636, 490, 170);
 
-      // === 代表者 / Representante (template cut off below) ===
-      drawText(155, 768, '代表者', 9);
-      drawText(155, 784, 'Representante', 8);
-      drawText(235, 768, COMPANY_REP_JP, 10);
-      drawText(235, 784, COMPANY_REP_PT, 8);
+      // Consistent bilingual layout: JP label (upper) / PT label (lower) : value
+      var LBL_R = 170; // right edge of label column
+      var VAL_X = 180; // left start of value column
+      var ROW1 = 652;  // 事業所所在地
+      var ROW2 = 718;  // 事業所名称
+      var ROW3 = 760;  // 代表者
+      var ROW4 = 800;  // 電話番号
 
-      // === 電話番号 / Telefone ===
-      drawText(155, 808, '電話番号', 9);
-      drawText(155, 824, 'Telefone', 8);
-      drawText(235, 814, COMPANY_TEL, 10);
+      // Helper: draw bilingual label pair (JP upper, PT lower)
+      function drawBiLabel(rightX, yJp, jp, pt) {
+        drawText(rightX - 120, yJp, jp, 9);
+        drawText(rightX - 120, yJp + 14, pt, 7.5);
+      }
 
-      // Red company seal next to representative
-      drawRedSeal(470, 790, 60);
+      // Row 1: 事業所所在地 / Endereço do escritório
+      drawText(58, ROW1, '事業所所在地：', 9);
+      drawText(58, ROW1 + 14, 'Endereço do escritório', 7.5);
+      drawText(VAL_X, ROW1, COMPANY_ADDR_JP, 9);
+      drawTextFit(VAL_X, ROW1 + 14, COMPANY_ADDR_RM, 7.5, 360);
+
+      // Row 2: 事業所名称 / Nome da Empresa
+      drawText(58, ROW2, '事業所名称：', 9);
+      drawText(58, ROW2 + 14, 'Nome da Empresa:', 7.5);
+      drawText(VAL_X, ROW2, COMPANY_NAME_JP, 9);
+      drawText(VAL_X, ROW2 + 14, COMPANY_NAME_PT, 7.5);
+
+      // Row 3: 代表者 / Representante
+      drawText(58, ROW3, '代表者：', 9);
+      drawText(58, ROW3 + 14, 'Representante:', 7.5);
+      drawText(VAL_X, ROW3, '代表取締役 山下浩俊', 9);
+      drawText(VAL_X, ROW3 + 14, 'Diretor Representante: Hirotoshi Yamashita', 7.5);
+
+      // Row 4: 電話番号 / Telefone
+      drawText(58, ROW4, '電話番号：', 9);
+      drawText(58, ROW4 + 14, 'Telefone:', 7.5);
+      drawText(VAL_X, ROW4, COMPANY_TEL, 9);
+
+      // Red company seal
+      drawRedSeal(470, 770, 60);
 
     } else {
       // === JP version ===
