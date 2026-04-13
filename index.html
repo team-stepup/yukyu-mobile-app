@@ -2008,7 +2008,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '88db51f';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7726,14 +7726,16 @@ function openVehicleDetail(idx) {
   var displayNumber = number + (no1 ? '  ' + no1 : '');
 
   var fCapacity = findPropByTitle('乗車') || findPropByTitle('定員') || findPropByTitle('Capacity');
+  var fPassengers = findPropByTitle('number of passengers') || findPropByTitle('passengers') || findPropByTitle('人数');
   var fPickupCount = findPropByTitle('送迎人数');
   var fMorningCount = findPropByTitle('朝') && findPropByTitle('人数') ? findPropByTitle('朝') : null;
   var fRegDate = findPropByTitle('初年度') || findPropByTitle('登録');
   var fOwner = findPropByTitle('所有') || findPropByTitle('Owner');
-  var fTaijinHoken = findPropByTitle('対人');
-  var fTaibutsuHoken = findPropByTitle('対物');
-  var fJinshin = findPropByTitle('人身');
-  var fSyaryoHoken = findPropByTitle('車両保険');
+  // 自動車保険フィールド（英語タイトル→日本語表示）
+  var fPropertyDamage = findPropByTitle('Property Damage') || findPropByTitle('対人');
+  var fVehicleIns = findPropByTitle('Vehicle') || findPropByTitle('対物');
+  var fPersonalInjury = findPropByTitle('Personal Injury') || findPropByTitle('車両');
+  var fLegalExpenses = findPropByTitle('Legal Expenses') || findPropByTitle('搭乗者');
   var fLink = findPropByTitle('Link') || findPropByTitle('リンク') || findPropByTitle('link');
 
   // 編集可能フィールド定義 [{label, prop, type, options?}]
@@ -7744,12 +7746,13 @@ function openVehicleDetail(idx) {
     { label: '使用区分', prop: vf.usage, type: 'select', options: ['使用', '未使用', '会社'] },
     { label: '車検有効期限', prop: vf.syaken, type: 'date' },
     { label: '乗車定員', prop: fCapacity, type: 'text' },
+    { label: '何人乗り', prop: fPassengers, type: 'text' },
     { label: '初年度登録', prop: fRegDate, type: 'date' },
     { label: '所有者', prop: fOwner, type: 'text' },
-    { label: '対人保険', prop: fTaijinHoken, type: 'text' },
-    { label: '対物保険', prop: fTaibutsuHoken, type: 'text' },
-    { label: '人身傷害', prop: fJinshin, type: 'text' },
-    { label: '車両保険', prop: fSyaryoHoken, type: 'text' },
+    { label: '対人', prop: fPropertyDamage, type: 'text' },
+    { label: '対物', prop: fVehicleIns, type: 'text' },
+    { label: '車両', prop: fPersonalInjury, type: 'text' },
+    { label: '搭乗者傷害', prop: fLegalExpenses, type: 'text' },
   ].filter(function(f) { return f.prop; });
   window._vehicleEditFields = editFields;
 
@@ -7780,8 +7783,9 @@ function openVehicleDetail(idx) {
   html += '<div style="' + S + '">';
   html += '<div style="' + H + 'background:#1565c0;">車両情報</div>';
   html += row('車種', getVal(vf.carType));
-  html += row('色', getVal(vf.color));
+  html += row('Color → 色', getVal(vf.color));
   html += row('乗車定員', getVal(fCapacity));
+  html += row('number of passengers → 何人乗り', getVal(fPassengers));
   html += row('使用区分', getVal(vf.usage));
   html += row('初年度登録', fmtDate(fRegDate));
   html += row('所有者', getVal(fOwner));
@@ -7806,46 +7810,17 @@ function openVehicleDetail(idx) {
   if (syakenWarn && daysLeft <= 0) html += '<div style="text-align:right;font-size:11px;color:#c62828;font-weight:700;">期限切れ</div>';
   html += '</div>';
 
-  // 自動車保険
+  // 自動車保険（英語フィールド→日本語表示）
   var ins = [
-    { label: '対人保険', val: getVal(fTaijinHoken) },
-    { label: '対物保険', val: getVal(fTaibutsuHoken) },
-    { label: '人身傷害', val: getVal(fJinshin) },
-    { label: '車両保険', val: getVal(fSyaryoHoken) },
+    { label: 'Property Damage → 対人', val: getVal(fPropertyDamage) },
+    { label: 'Vehicle → 対物', val: getVal(fVehicleIns) },
+    { label: 'Personal Injury → 車両', val: getVal(fPersonalInjury) },
+    { label: 'Legal Expenses Coverage → 搭乗者傷害', val: getVal(fLegalExpenses) },
   ].filter(function(i) { return i.val; });
   if (ins.length > 0) {
     html += '<div style="' + S + '">';
     html += '<div style="' + H + 'background:#7b1fa2;">自動車保険</div>';
     ins.forEach(function(i) { html += row(i.label, i.val); });
-    html += '</div>';
-  }
-
-  // 非表示にするキー（システム・既表示・不要）
-  var hideKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId', 'ContentType', 'OData__vti_ItemDeclaredRecord'];
-  [vf.number, vf.no1, vf.carType, vf.color, vf.driver, vf.affiliation, vf.hakensaki, vf.usage, vf.syaken, fCapacity, fPickupCount, fMorningCount, fRegDate, fOwner, fTaijinHoken, fTaibutsuHoken, fJinshin, fSyaryoHoken, fLink].forEach(function(k) { if (k) hideKeys.push(k); });
-
-  var otherRows = '';
-  Object.keys(item).forEach(function(key) {
-    if (hideKeys.indexOf(key) >= 0) return;
-    if (key.indexOf('Id') === key.length - 2 && key.length > 2) return;
-    if (key.indexOf('StringId') >= 0) return;
-    var val = item[key];
-    if (val === null || val === undefined || val === '') return;
-    if (typeof val === 'object') return;
-    if (typeof val === 'boolean') return;
-    if (typeof val === 'number' && val === 0) return;
-    var fld = fields.find(function(f) { return f.EntityPropertyName === key || f.InternalName === key; });
-    var label = fld ? fld.Title : key;
-    // 翻訳
-    var tr = {'Pick-up':'送迎先','Pickup':'送迎先','Affiliation':'所属','Usage':'使用区分','Color':'色','Driver':'ドライバー','Model':'車種','Maker':'メーカー','Year':'年式','Mileage':'走行距離','Insurance':'保険','Inspection':'車検','Note':'備考','Notes':'備考','Capacity':'定員','Fuel':'燃料','Registration':'登録','Owner':'所有者','Location':'場所','Company':'会社','Branch':'支店','Comment':'コメント','Description':'説明','Morning':'朝の送迎','Number':'番号','NO1':'番号','Plate':'ナンバー','VIN':'車台番号','Weight':'重量','Engine':'エンジン','Status':'状態','Type':'種別'};
-    for (var eng in tr) { if (label.indexOf(eng) >= 0) { label = tr[eng]; break; } }
-    if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) val = new Date(val).toLocaleDateString('ja-JP');
-    otherRows += row(label, String(val));
-  });
-  if (otherRows) {
-    html += '<div style="' + S + '">';
-    html += '<div style="' + H + 'background:#546e7a;">その他</div>';
-    html += otherRows;
     html += '</div>';
   }
 
