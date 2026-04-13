@@ -7642,6 +7642,16 @@ function applyVehicleFilter() {
     return true;
   });
 
+  // 車検満了日が近い順にソート（日付なしは末尾）
+  filtered.sort(function(a, b) {
+    var da = vf.syaken ? (a[vf.syaken] || '') : '';
+    var db = vf.syaken ? (b[vf.syaken] || '') : '';
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
+
   document.getElementById('vehicleListCount').textContent = filtered.length + '台';
   renderVehicleCards(filtered);
 }
