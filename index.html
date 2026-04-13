@@ -7532,6 +7532,7 @@ async function loadVehicleList() {
 
     // Debug: show field mapping in console
     var fNumber = findProp('ナンバー') || findProp('number') || 'Title';
+    var fNo1 = findProp('NO1') || findProp('No1') || findProp('NO_x0031_');
     var fCarType = findProp('車種') || findProp('車名');
     var fDriver = findProp('ドライバー') || findProp('運転');
     var fHakensaki = findProp('送迎') || findProp('Pick') || findProp('派遣');
@@ -7540,7 +7541,7 @@ async function loadVehicleList() {
     var fUsage = findProp('使用');
     var fAffiliation = findProp('Affiliation') || findProp('所属') || findProp('affiliation');
 
-    console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage, fAffiliation:fAffiliation}));
+    console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fNo1:fNo1, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage, fAffiliation:fAffiliation}));
 
     // Build fixed Usage filter buttons: 使用(default), 未使用, 役員, 全て
     // Debug: show unique usage values
@@ -7578,7 +7579,7 @@ async function loadVehicleList() {
     pickupDiv.innerHTML = pickupHtml;
 
     // Store field mapping globally
-    window._vf = { number: fNumber, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
+    window._vf = { number: fNumber, no1: fNo1, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
     window._vehicleUsageFilter = '使用';
     window._vehiclePickupFilter = 'all';
 
@@ -7646,6 +7647,8 @@ function renderVehicleCards(items) {
 
   items.forEach(function(item, idx) {
     var number = item[vf.number] || item['Title'] || '';
+    var no1 = vf.no1 ? (item[vf.no1] || '') : '';
+    var displayNumber = number + (no1 ? '  ' + no1 : '');
     var carType = vf.carType ? (item[vf.carType] || '') : '';
     var driver = vf.driver ? (item[vf.driver] || '') : '';
     var hakensaki = vf.hakensaki ? (item[vf.hakensaki] || '') : '';
@@ -7660,7 +7663,7 @@ function renderVehicleCards(items) {
 
     html += '<div style="background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--border);cursor:pointer;" onclick="openVehicleDetail(' + idx + ')">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-    html += '<div style="font-weight:700;font-size:14px;color:var(--primary);">' + escHtml(number) + '</div>';
+    html += '<div style="font-weight:700;font-size:14px;color:var(--primary);">' + escHtml(displayNumber) + '</div>';
     html += '<div style="font-size:12px;color:var(--text-light);">' + escHtml(carType) + (color ? ' / ' + escHtml(color) : '') + '</div>';
     html += '</div>';
     html += '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;">';
@@ -7684,6 +7687,8 @@ function openVehicleDetail(idx) {
   var vf = window._vf || {};
 
   var number = item[vf.number] || item['Title'] || '';
+  var no1 = vf.no1 ? (item[vf.no1] || '') : '';
+  var displayNumber = number + (no1 ? '  ' + no1 : '');
   var carType = vf.carType ? (item[vf.carType] || '') : '';
   var driver = vf.driver ? (item[vf.driver] || '') : '';
   var hakensaki = vf.hakensaki ? (item[vf.hakensaki] || '') : '';
@@ -7698,7 +7703,7 @@ function openVehicleDetail(idx) {
   var html = '<div style="background:#fff;border-radius:14px;padding:16px;border:1px solid var(--border);">';
   html += '<div style="text-align:center;font-size:18px;font-weight:700;color:var(--primary);margin-bottom:12px;">🚗 車両管理台帳</div>';
   html += '<table style="width:100%;font-size:13px;border-collapse:collapse;">';
-  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);width:100px;">ナンバー</td><td style="padding:6px 8px;font-weight:700;">' + escHtml(number) + '</td></tr>';
+  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);width:100px;">ナンバー</td><td style="padding:6px 8px;font-weight:700;">' + escHtml(displayNumber) + '</td></tr>';
   html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">車種</td><td style="padding:6px 8px;">' + escHtml(carType) + (color ? ' / ' + escHtml(color) : '') + '</td></tr>';
   html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">ドライバー' + warn + '</td><td style="padding:6px 8px;">' + escHtml(driver) + '</td></tr>';
   html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">車検日' + warn + '</td><td style="padding:6px 8px;">' + syakenStr + '</td></tr>';
