@@ -7799,6 +7799,19 @@ function openVehicleDetail(idx) {
   var shownKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId'];
   [vf.number, vf.no1, vf.carType, vf.color, vf.driver, vf.affiliation, vf.hakensaki, vf.usage, vf.syaken, fCapacity, fPickupCount, fRegDate, fOwner, fTaijinHoken, fTaibutsuHoken, fJinshin, fSyaryoHoken, fLink].forEach(function(k) { if (k) shownKeys.push(k); });
 
+  // デバッグ: その他に表示されるフィールド一覧
+  var debugOther = [];
+  Object.keys(item).forEach(function(k) {
+    if (shownKeys.indexOf(k) >= 0) return;
+    if (k.indexOf('Id') === k.length - 2 && k.length > 2) return;
+    var v = item[k];
+    if (v === null || v === undefined || v === '') return;
+    if (typeof v === 'object') return;
+    var f = fields.find(function(ff) { return ff.EntityPropertyName === k || ff.InternalName === k; });
+    debugOther.push((f ? f.Title : k) + '=' + String(v).substring(0, 30));
+  });
+  if (debugOther.length > 0) alert('その他フィールド:\n' + debugOther.join('\n'));
+
   var otherRows = '';
   var fieldTranslate = {
     'Pick-up': '送迎先', 'Pickup': '送迎先', 'Affiliation': '所属', 'Usage': '使用区分',
