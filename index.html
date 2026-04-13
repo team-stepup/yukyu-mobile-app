@@ -7325,48 +7325,21 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
     var metaResp = await fetch(listApi + "?$select=ListItemEntityTypeFullName", { headers: hdrs });
     if (!metaResp.ok) {
       var metaErr = await metaResp.text();
-      alert('リストアクセスエラー(' + metaResp.status + '): ' + metaErr.substring(0, 300));
-      throw new Error('リストアクセス失敗: ' + metaResp.status);
+      throw new Error('リストアクセス失敗(' + metaResp.status + '): ' + metaErr.substring(0, 200));
     }
     var metaData = await metaResp.json();
     var entityType = metaData.d.ListItemEntityTypeFullName;
 
-    // Step 2: フィールド情報を取得
-    var fieldsResp = await fetch(listApi + "/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString&$top=200", { headers: hdrs });
-    var fields = [];
-    if (fieldsResp.ok) {
-      var fd = await fieldsResp.json();
-      fields = fd.d.results || [];
-      console.log('給料精算 fields:', fields.map(function(f){ return f.Title + '→' + f.InternalName + '(' + f.TypeAsString + ')'; }));
-      alert('フィールド一覧: ' + fields.map(function(f){ return f.Title + '→' + f.InternalName; }).join(', '));
-    }
-
-    // Step 3: フィールドマッピング
-    function findField(titleSubstr) {
-      var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(titleSubstr) >= 0; });
-      return hit ? hit.InternalName : null;
-    }
-
+    // Step 2: ハードコードされたフィールド内部名（デバッグalertで確認済み）
     var body = { '__metadata': { type: entityType } };
     body['Title'] = hakensaki;
-
-    var fNo = findField('社員番号');
-    var fName = findField('名前');
-    var fHakenTaisha = findField('派遣先退社');
-    var fYukyuTaisha = findField('有給');
-    var fSeisan = findField('精算日');
-    var fShiharai = findField('支払');
-    var fSonota = findField('その他');
-
-    if (fNo) body[fNo] = parseFloat(no) || no;
-    if (fName) body[fName] = name;
-    if (fHakenTaisha && hakenTaisha) body[fHakenTaisha] = hakenTaisha + 'T00:00:00Z';
-    if (fYukyuTaisha && yukyuTaisha) body[fYukyuTaisha] = yukyuTaisha + 'T00:00:00Z';
-    if (fSeisan && seisanDate) body[fSeisan] = seisanDate + 'T00:00:00Z';
-    if (fShiharai) body[fShiharai] = shiharai;
-    if (fSonota) body[fSonota] = sonota;
-
-    alert('送信データ: ' + JSON.stringify(body, null, 2));
+    body['_x793e__x54e1__x756a__x53f7_No_x'] = parseFloat(no) || 0;
+    body['_x540d__x524d__x3000_nome'] = name;
+    if (hakenTaisha) body['_x6d3e__x9063__x5148__x9000__x79'] = hakenTaisha + 'T00:00:00Z';
+    if (yukyuTaisha) body['_x6709__x7d66__x4ed8__x4e0e__x90'] = yukyuTaisha + 'T00:00:00Z';
+    if (seisanDate) body['_x7cbe__x7b97__x65e5__x0028__x63'] = seisanDate + 'T00:00:00Z';
+    if (shiharai) body['_x652f__x6255__x65b9__x6cd5__x00'] = shiharai;
+    if (sonota) body['_x0036__x002e__x305d__x306e__x4e'] = sonota;
 
     // Step 4: POST
     var resp = await fetch(listApi + "/items", {
@@ -7381,12 +7354,8 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
 
     if (!resp.ok) {
       var errText = await resp.text();
-      alert('POST失敗(' + resp.status + '): ' + errText.substring(0, 500));
-      throw new Error('送信失敗: ' + resp.status);
+      throw new Error('送信失敗(' + resp.status + '): ' + errText.substring(0, 200));
     }
-
-    var result = await resp.json();
-    alert('成功！ ID=' + (result.d ? result.d.Id : 'unknown'));
 
     closeKyuryoForm();
     var doneOv = document.createElement('div');
