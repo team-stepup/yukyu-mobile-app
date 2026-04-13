@@ -7890,17 +7890,11 @@ async function searchTenken() {
     }
 
     var fNumber = findProp('ナンバー') || findProp('number') || 'Title';
-    var fDate = findProp('点検日') || findProp('日時') || findProp('日付');
-    if (!fDate) fDate = findPropExact('Date') || findPropExact('date') || findProp('Created');
+    // 点検日時 = Created列（SharePointの作成日時）
+    var fDate = 'Created';
     var fCarType = findProp('車種') || findProp('車名');
     var fMileage = findProp('走行') || findProp('距離');
     var fDriver = findProp('ドライバー') || findProp('運転');
-
-    // DateTime型フィールドからも点検日を探す
-    if (!fDate) {
-      var dtFields = fields.filter(function(f) { return f.TypeAsString === 'DateTime'; });
-      if (dtFields.length > 0) fDate = dtFields[0].EntityPropertyName;
-    }
 
     console.log('Tenken ALL fields:', JSON.stringify(fields.map(function(f) { return f.Title + '→' + f.EntityPropertyName + '(' + f.TypeAsString + ')'; })));
     console.log('Tenken field map:', JSON.stringify({fNumber:fNumber, fDate:fDate, fCarType:fCarType, fMileage:fMileage, fDriver:fDriver}));
@@ -8321,55 +8315,15 @@ async function executeSaveVehicleEdit(idx) {
   }
 }
 
-// NO1番号（数字のみ）でSharePointフォルダを自動検索して開く
-var _vehicleFolderCache = null;
-async function openVehicleFolderByNo1(no1) {
-  // 数字のみ抽出
-  var digits = String(no1 || '').replace(/[^0-9]/g, '');
+// 車両フォルダーを開く（親フォルダURL直接アクセス方式 — API不要で確実）
+var VEHICLE_FOLDER_BASE = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FTeamStepup%2FShared%20Documents%2F%E7%A4%BE%E5%93%A1%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB%2F%E2%98%85%E8%BB%8A%E4%B8%A1%E7%AE%A1%E7%90%86%E3%80%80%E9%80%81%E8%BF%8E%2F%E8%BB%8A%E4%B8%A1%E7%AE%A1%E7%90%86%2Dsyaryou%20kaisya';
+
+function openVehicleFolderByNo1(numberStr) {
+  var digits = String(numberStr || '').replace(/[^0-9]/g, '');
   if (!digits) { showToast('ナンバーが取得できません', 'error'); return; }
-  var btn = document.getElementById('vehicleFolderBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '検索中...'; }
-
-  try {
-    var token = await getToken();
-    var spBase = 'https://teamstepupcom774.sharepoint.com';
-    var siteApi = spBase + '/sites/TeamStepup/_api/web';
-    var folderRelPath = "/sites/TeamStepup/Shared Documents/社員ファイル/★車両管理　送迎/車両管理-syaryou kaisya";
-
-    // フォルダ一覧をキャッシュ
-    if (!_vehicleFolderCache) {
-      var apiUrl = siteApi + "/GetFolderByServerRelativeUrl('" + folderRelPath + "')/Folders?$select=Name,ServerRelativeUrl&$top=500";
-      var resp = await fetch(apiUrl, {
-        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
-      });
-      if (!resp.ok) {
-        var errTxt = await resp.text();
-        throw new Error('フォルダ一覧取得失敗(' + resp.status + '): ' + errTxt.substring(0, 150));
-      }
-      var data = await resp.json();
-      _vehicleFolderCache = data.d.results || [];
-    }
-
-    // 数字で前方一致検索
-    var match = _vehicleFolderCache.find(function(f) {
-      var name = f.Name || '';
-      // フォルダ名の先頭数字を抽出して比較
-      var folderDigits = name.match(/^(\d+)/);
-      return folderDigits && folderDigits[1] === digits;
-    });
-
-    if (match) {
-      var folderUrl = spBase + '/sites/TeamStepup/Shared%20Documents/Forms/AllItems.aspx?id=' + encodeURIComponent(match.ServerRelativeUrl);
-      window.open(folderUrl, '_blank');
-    } else {
-      showToast('フォルダが見つかりません: ' + digits, 'error');
-    }
-  } catch(e) {
-    console.error('Vehicle folder error:', e);
-    showToast('フォルダ検索エラー: ' + e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '📁 フォルダー'; }
-  }
+  // 親フォルダURLにsearch=数字を付けてSharePoint内で絞り込み
+  var url = VEHICLE_FOLDER_BASE + '&search=' + encodeURIComponent(digits);
+  window.open(url, '_blank');
 }
 
 // ============================================================
