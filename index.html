@@ -1669,7 +1669,8 @@ body {
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
         <span class="ql-text">車両管理</span>
-        <span id="vehicleBadgeCount" class="ql-badge" style="background:#1565c0;display:none;"></span>
+        <span id="vehicleBadgeUse" class="ql-badge" style="background:#1565c0;display:none;top:4px;right:26px;"></span>
+        <span id="vehicleBadgeExec" class="ql-badge" style="background:#f57c00;display:none;top:4px;right:4px;"></span>
       </button>
     </div>
 
@@ -3642,6 +3643,41 @@ async function loadHomeBadges() {
       else { eBadge.style.display = 'none'; }
     }
   } catch(e) { console.log('Expiry badge error:', e); }
+
+  // 車両バッジ: 使用台数・役員台数
+  try {
+    var token2 = await getToken();
+    var vFields = await fetchVehicleFields();
+    var vfUsage = null;
+    for (var fi = 0; fi < vFields.length; fi++) {
+      if (vFields[fi].Title && vFields[fi].Title.indexOf('使用') >= 0) { vfUsage = vFields[fi].EntityPropertyName; break; }
+    }
+    if (vfUsage) {
+      var vResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=" + vfUsage + "&$top=500", {
+        headers: { 'Authorization': 'Bearer ' + token2, 'Accept': 'application/json;odata=verbose' }
+      });
+      if (vResp.ok) {
+        var vData = await vResp.json();
+        var vItems = vData.d.results || [];
+        var useCount = 0, execCount = 0;
+        vItems.forEach(function(v) {
+          var u = v[vfUsage] || '';
+          if (u === '使用') useCount++;
+          if (u === '役員') execCount++;
+        });
+        var vBadgeUse = document.getElementById('vehicleBadgeUse');
+        var vBadgeExec = document.getElementById('vehicleBadgeExec');
+        if (vBadgeUse) {
+          if (useCount > 0) { vBadgeUse.textContent = useCount; vBadgeUse.style.display = 'inline-block'; }
+          else { vBadgeUse.style.display = 'none'; }
+        }
+        if (vBadgeExec) {
+          if (execCount > 0) { vBadgeExec.textContent = execCount; vBadgeExec.style.display = 'inline-block'; }
+          else { vBadgeExec.style.display = 'none'; }
+        }
+      }
+    }
+  } catch(e) { console.log('Vehicle badge error:', e); }
 }
 
 // Global expiry alerts cache for filter
@@ -7482,7 +7518,7 @@ async function loadVehicleList() {
     var fNumber = findProp('ナンバー') || findProp('number') || 'Title';
     var fCarType = findProp('車種') || findProp('車名');
     var fDriver = findProp('ドライバー') || findProp('運転');
-    var fHakensaki = findProp('送迎') || findProp('派遣');
+    var fHakensaki = findProp('送迎') || findProp('Pick') || findProp('派遣');
     var fSyaken = findProp('車検');
     var fColor = findProp('色') || findProp('カラー');
     var fUsage = findProp('使用');
@@ -7490,18 +7526,17 @@ async function loadVehicleList() {
 
     console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage, fAffiliation:fAffiliation}));
 
-    // Build Usage filter buttons
-    var usageSet = {};
+    // Build fixed Usage filter buttons: 使用(default), 未使用, 役員, 全て
+    var usageCounts = { '使用': 0, '未使用': 0, '役員': 0 };
     items.forEach(function(item) {
-      var u = fUsage ? (item[fUsage] || '未設定') : '未設定';
-      usageSet[u] = (usageSet[u] || 0) + 1;
+      var u = fUsage ? (item[fUsage] || '') : '';
+      if (usageCounts.hasOwnProperty(u)) usageCounts[u]++;
     });
     var filterDiv = document.getElementById('vehicleFilterBtns');
-    var filterHtml = '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'all\')">全て(' + items.length + ')</button>';
-    Object.keys(usageSet).sort().forEach(function(u) {
-      var isActive = (u === '使用') ? ' active' : '';
-      filterHtml += '<button class="expiry-filter-btn' + isActive + '" onclick="filterVehicleList(this,\'' + escHtml(u) + '\')">' + escHtml(u) + '(' + usageSet[u] + ')</button>';
-    });
+    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleList(this,\'使用\')">使用(' + usageCounts['使用'] + ')</button>';
+    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'未使用\')">未使用(' + usageCounts['未使用'] + ')</button>';
+    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'役員\')">役員(' + usageCounts['役員'] + ')</button>';
+    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'all\')">全て(' + items.length + ')</button>';
     filterDiv.innerHTML = filterHtml;
 
     // Store field mapping globally
@@ -7630,16 +7665,42 @@ function openVehicleDetail(idx) {
   if (vf.syaken) skipKeys.push(vf.syaken);
   if (vf.color) skipKeys.push(vf.color);
 
+  // 英語→日本語翻訳辞書
+  var fieldTranslate = {
+    'Pick-up': '送迎先', 'Pick up': '送迎先', 'Pickup': '送迎先',
+    'Affiliation': '所属', 'Usage': '使用状況', 'Color': '色',
+    'Driver': 'ドライバー', 'Number': 'ナンバー', 'Model': '車種',
+    'Maker': 'メーカー', 'Year': '年式', 'Mileage': '走行距離',
+    'Insurance': '保険', 'Inspection': '車検', 'Note': '備考', 'Notes': '備考',
+    'Status': '状態', 'Type': '種別', 'Capacity': '定員', 'Fuel': '燃料',
+    'Registration': '登録', 'Owner': '所有者', 'Location': '場所',
+    'Plate': 'ナンバープレート', 'VIN': '車台番号', 'Engine': 'エンジン',
+    'Transmission': '変速機', 'Weight': '重量', 'Comment': 'コメント',
+    'Description': '説明', 'Category': 'カテゴリ', 'Department': '部署',
+    'Company': '会社', 'Branch': '支店', 'Date': '日付', 'Expiry': '期限',
+    'Title': 'タイトル', 'ContentType': 'コンテンツタイプ',
+  };
+  function translateLabel(label) {
+    if (fieldTranslate[label]) return fieldTranslate[label];
+    // Check partial match
+    for (var eng in fieldTranslate) {
+      if (label.toLowerCase().indexOf(eng.toLowerCase()) >= 0) return fieldTranslate[eng];
+    }
+    return label;
+  }
+
   Object.keys(item).forEach(function(key) {
     if (skipKeys.indexOf(key) >= 0) return;
     if (key.indexOf('Id') === key.length - 2 && key.length > 2) return;
     var val = item[key];
     if (val === null || val === undefined || val === '') return;
     if (typeof val === 'object') return;
-    // Find display name
+    // Find display name from field metadata
     var fields = _vehicleFields || [];
     var fld = fields.find(function(f) { return f.EntityPropertyName === key || f.InternalName === key; });
     var label = fld ? fld.Title : key;
+    // Translate to Japanese
+    label = translateLabel(label);
     if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) {
       val = new Date(val).toLocaleDateString('ja-JP');
     }
