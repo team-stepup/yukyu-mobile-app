@@ -1958,7 +1958,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '2952711';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7849,100 +7849,95 @@ async function generateZaishokuDocument(lang) {
     var COMPANY_TEL = '0538-36-6968';
 
     if (lang === 'pt') {
-      // Aggressive whiteout: clear entire data area of every row to wipe baked placeholders.
-      // x range covers from end of label area to right margin
-      var DX = 160, DW = 395;
-      whiteRect(DX, 188, DW, 38);   // 現住所 row
-      whiteRect(DX, 246, DW, 38);   // 氏名 row
-      whiteRect(DX, 304, DW, 38);   // 生年月日 row
-      whiteRect(DX, 362, DW, 38);   // 国籍 row
-      whiteRect(DX, 420, DW, 38);   // 採用年月日 row
-      whiteRect(DX, 568, DW, 38);   // 日付 row
-      // Whiteout baked romaji rows in 事業所 area so we can redraw cleanly
-      whiteRect(225, 658, 330, 18); // baked romaji address
-      whiteRect(225, 720, 330, 18); // baked romaji company name
+      // === PT: Whiteout EVERYTHING below title and redraw at tighter positions ===
+      whiteRect(50, 178, 500, 650);
 
-      // Auto-romaji fallback for address if user didn't provide one
+      // Auto helpers
       var effAddrRomaji = addressRomaji;
-      if (!effAddrRomaji && address) {
-        effAddrRomaji = jpAddressToRomaji(address);
-      }
-      // Don't show 在留: number-style strings as a "name romaji" — it's the card number
+      if (!effAddrRomaji && address) effAddrRomaji = jpAddressToRomaji(address);
       var effNameAlt = nameAlt;
       if (effNameAlt && /^[A-Z]{2}\d/.test(effNameAlt)) effNameAlt = '';
-
-      // === 現住所 / Endereço ===
-      drawTextFit(170, 205, address, 11, 380);
-      drawTextFit(170, 222, effAddrRomaji, 9, 380);
-
-      // === 氏名 / Nome ===
-      drawTextFit(170, 263, name, 11, 380);
-      drawTextFit(170, 280, effNameAlt, 9, 380);
-
-      // === 生年月日 / Data de Nascimento ===
-      drawTextFit(170, 321, fmtDateJP(birthday), 11, 380);
-      drawTextFit(170, 338, fmtDatePT(birthday), 9, 380);
-
-      // === 国籍 / Nacionalidade ===
-      // Auto-fill PT nationality if user left it blank
       var effNatPt = nationalityPt;
       if (!effNatPt && nationality) {
         var natMap = {'ブラジル':'Brasileira','フィリピン':'Filipina','ペルー':'Peruana','中国':'Chinesa','ベトナム':'Vietnamita','インドネシア':'Indonésia','タイ':'Tailandesa','韓国':'Coreana','ボリビア':'Boliviana','アルゼンチン':'Argentina','コロンビア':'Colombiana','パラグアイ':'Paraguaia'};
         effNatPt = natMap[nationality] || '';
       }
-      drawTextFit(170, 379, nationality, 11, 380);
-      drawTextFit(170, 396, effNatPt, 9, 380);
 
-      // === 採用年月日 / Data de inclusão na empresa ===
-      drawTextFit(170, 437, fmtDateJP(nyushaDate), 11, 380);
-      drawTextFit(170, 454, fmtDatePT(nyushaDate), 9, 380);
+      // Layout: labels at x=58, values at x=170, row height 48pt
+      var LX = 58, VX = 170, RH = 48, Y0 = 178;
 
-      // === 日付 / Data ===
-      drawTextFit(170, 585, fmtDateJP(todayStr), 11, 380);
-      drawTextFit(170, 602, fmtDatePT(todayStr), 9, 380);
-
-      // === Whiteout entire company info area (baked labels + values) ===
-      whiteRect(50, 636, 490, 170);
-
-      // Consistent bilingual layout: JP label (upper) / PT label (lower) : value
-      var LBL_R = 170; // right edge of label column
-      var VAL_X = 180; // left start of value column
-      var ROW1 = 652;  // 事業所所在地
-      var ROW2 = 718;  // 事業所名称
-      var ROW3 = 760;  // 代表者
-      var ROW4 = 800;  // 電話番号
-
-      // Helper: draw bilingual label pair (JP upper, PT lower)
-      function drawBiLabel(rightX, yJp, jp, pt) {
-        drawText(rightX - 120, yJp, jp, 9);
-        drawText(rightX - 120, yJp + 14, pt, 7.5);
+      function ptLabel(y, jp, pt) {
+        drawText(LX, y, jp, 9);
+        drawText(LX, y + 13, pt, 7.5);
       }
 
-      // Row 1: 事業所所在地 / Endereço do escritório
-      drawText(58, ROW1, '事業所所在地：', 9);
-      drawText(58, ROW1 + 14, 'Endereço do escritório', 7.5);
-      drawText(VAL_X, ROW1, COMPANY_ADDR_JP, 9);
-      drawTextFit(VAL_X, ROW1 + 14, COMPANY_ADDR_RM, 7.5, 360);
+      // 現住所
+      ptLabel(Y0, '現住所：', 'Endereço:');
+      drawTextFit(VX, Y0, address, 10, 380);
+      drawTextFit(VX, Y0 + 13, effAddrRomaji, 8, 380);
 
-      // Row 2: 事業所名称 / Nome da Empresa
-      drawText(58, ROW2, '事業所名称：', 9);
-      drawText(58, ROW2 + 14, 'Nome da Empresa:', 7.5);
-      drawText(VAL_X, ROW2, COMPANY_NAME_JP, 9);
-      drawText(VAL_X, ROW2 + 14, COMPANY_NAME_PT, 7.5);
+      // 氏名
+      var Y1 = Y0 + RH;
+      ptLabel(Y1, '氏　名：', 'Nome:');
+      drawTextFit(VX, Y1, name, 10, 380);
+      drawTextFit(VX, Y1 + 13, effNameAlt, 8, 380);
 
-      // Row 3: 代表者 / Representante
-      drawText(58, ROW3, '代表者：', 9);
-      drawText(58, ROW3 + 14, 'Representante:', 7.5);
-      drawText(VAL_X, ROW3, '代表取締役 山下浩俊', 9);
-      drawText(VAL_X, ROW3 + 14, 'Diretor Representante: Hirotoshi Yamashita', 7.5);
+      // 生年月日
+      var Y2 = Y1 + RH;
+      ptLabel(Y2, '生年月日：', 'Data de Nascimento:');
+      drawTextFit(VX, Y2, fmtDateJP(birthday), 10, 380);
+      drawTextFit(VX, Y2 + 13, fmtDatePT(birthday), 8, 380);
 
-      // Row 4: 電話番号 / Telefone
-      drawText(58, ROW4, '電話番号：', 9);
-      drawText(58, ROW4 + 14, 'Telefone:', 7.5);
-      drawText(VAL_X, ROW4, COMPANY_TEL, 9);
+      // 国籍
+      var Y3 = Y2 + RH;
+      ptLabel(Y3, '国　籍：', 'Nacionalidade:');
+      drawTextFit(VX, Y3, nationality, 10, 380);
+      drawTextFit(VX, Y3 + 13, effNatPt, 8, 380);
+
+      // 採用年月日
+      var Y4 = Y3 + RH;
+      ptLabel(Y4, '採用年月日：', 'Data de inclusão na empresa:');
+      drawTextFit(VX, Y4, fmtDateJP(nyushaDate), 10, 380);
+      drawTextFit(VX, Y4 + 13, fmtDatePT(nyushaDate), 8, 380);
+
+      // 証明文
+      var YC = Y4 + RH + 15;
+      drawText(LX, YC, '上記の者につき、当事業所にて現在在職中である事を証明致します。', 9);
+      drawText(LX, YC + 15, 'Certifico que a pessoa acima está atualmente empregada em nossa empresa.', 7.5);
+
+      // 日付
+      var YD = YC + 45;
+      drawTextFit(VX, YD, fmtDateJP(todayStr), 10, 380);
+      drawTextFit(VX, YD + 13, fmtDatePT(todayStr), 8, 380);
+
+      // === 事業所情報 ===
+      var YB = YD + 45;
+      var VX2 = 180;
+
+      drawText(LX, YB, '事業所所在地：', 9);
+      drawText(LX, YB + 13, 'Endereço do escritório:', 7.5);
+      drawText(VX2, YB, COMPANY_ADDR_JP, 9);
+      drawTextFit(VX2, YB + 13, COMPANY_ADDR_RM, 7.5, 350);
+
+      var YB2 = YB + 36;
+      drawText(LX, YB2, '事業所名称：', 9);
+      drawText(LX, YB2 + 13, 'Nome da Empresa:', 7.5);
+      drawText(VX2, YB2, COMPANY_NAME_JP, 9);
+      drawText(VX2, YB2 + 13, COMPANY_NAME_PT, 7.5);
+
+      var YB3 = YB2 + 33;
+      drawText(LX, YB3, '代表者：', 9);
+      drawText(LX, YB3 + 13, 'Representante:', 7.5);
+      drawText(VX2, YB3, '代表取締役 山下浩俊', 9);
+      drawTextFit(VX2, YB3 + 13, 'Diretor Representante: Hirotoshi Yamashita', 7.5, 350);
+
+      var YB4 = YB3 + 33;
+      drawText(LX, YB4, '電話番号：', 9);
+      drawText(LX, YB4 + 13, 'Telefone:', 7.5);
+      drawText(VX2, YB4, COMPANY_TEL, 9);
 
       // Red company seal
-      drawRedSeal(470, 770, 60);
+      drawRedSeal(460, YB3, 60);
 
     } else {
       // === JP version ===
