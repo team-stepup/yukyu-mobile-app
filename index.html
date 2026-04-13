@@ -7550,7 +7550,10 @@ async function loadVehicleList() {
     var fDriver = findProp('ドライバー') || findProp('運転');
     var fHakensaki = findProp('送迎') || findProp('Pick') || findProp('派遣');
     var fSyaken = findProp('車検');
-    var fColor = findProp('Color') || findProp('色') || findProp('カラー');
+    var fColor = (function() {
+      var exact = fields.find(function(f) { return f.Title === 'Color' || f.Title === '色' || f.Title === 'color'; });
+      return exact ? exact.EntityPropertyName : (findProp('カラー') || null);
+    })();
     var fUsage = findProp('Usage') || findProp('使用');
     var fAffiliation = findProp('Affiliation') || findProp('所属') || findProp('affiliation');
 
@@ -7795,34 +7798,13 @@ function openVehicleDetail(idx) {
 
   var html = '';
 
-  // Link列（フォルダーリンク）先読み
-  var linkUrl = '';
-  if (fLink) {
-    var linkVal = item[fLink];
-    if (linkVal && typeof linkVal === 'object' && linkVal.Url) linkUrl = linkVal.Url;
-    else if (linkVal && typeof linkVal === 'string' && linkVal.indexOf('http') === 0) linkUrl = linkVal;
-  }
-  if (!linkUrl) {
-    fields.forEach(function(f) {
-      if (linkUrl) return;
-      if (f.TypeAsString === 'URL') {
-        var v = item[f.EntityPropertyName];
-        if (v && typeof v === 'object' && v.Url) linkUrl = v.Url;
-        else if (v && typeof v === 'string' && v.indexOf('http') === 0) linkUrl = v;
-      }
-    });
-  }
-  window._vehicleFolderUrl = linkUrl;
-
   // ヘッダー + アクションボタン
   html += '<div style="' + S + 'background:var(--primary);color:#fff;text-align:center;padding:14px 14px 10px;">';
   html += '<div style="font-size:10px;opacity:0.8;">車両管理台帳</div>';
   html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;margin-bottom:10px;">' + escHtml(displayNumber) + '</div>';
   html += '<div style="display:flex;gap:6px;justify-content:center;">';
   html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">✏️ 編集</button>';
-  if (linkUrl) {
-    html += '<a href="' + escHtml(linkUrl) + '" target="_blank" rel="noopener" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;text-align:center;text-decoration:none;display:block;">📁 フォルダー</a>';
-  }
+  html += '<button id="vehicleFolderBtn" onclick="openVehicleFolderByNo1(\'' + escHtml(no1) + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📁 フォルダー</button>';
   html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">🔧 点検記録</button>';
   html += '</div>';
   html += '</div>';
@@ -8143,10 +8125,47 @@ async function executeSaveVehicleEdit(idx) {
   }
 }
 
-// フォルダーリンクを開く（iOS Safari対応）
-function openVehicleFolder(url) {
-  if (!url) { showToast('フォルダーリンクがありません', 'error'); return; }
-  window.open(url, '_blank');
+// NO1番号でSharePointフォルダを自動検索して開く
+var _vehicleFolderCache = null;
+async function openVehicleFolderByNo1(no1) {
+  if (!no1) { showToast('NO1番号がありません', 'error'); return; }
+  var btn = document.getElementById('vehicleFolderBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '検索中...'; }
+
+  try {
+    var token = await getToken();
+    var folderPath = "/sites/TeamStepup/Shared Documents/社員ファイル/★車両管理　送迎/車両管理-syaryou kaisya";
+    var spBase = 'https://teamstepupcom774.sharepoint.com';
+
+    // フォルダ一覧をキャッシュ
+    if (!_vehicleFolderCache) {
+      var resp = await fetch(spBase + "/sites/TeamStepup/_api/web/GetFolderByServerRelativeUrl('" + encodeURIComponent(folderPath) + "')/Folders?$select=Name,ServerRelativeUrl&$top=500", {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+      });
+      if (!resp.ok) throw new Error('フォルダ一覧取得失敗: ' + resp.status);
+      var data = await resp.json();
+      _vehicleFolderCache = data.d.results || [];
+    }
+
+    // NO1番号で前方一致検索
+    var no1Str = String(no1).trim();
+    var match = _vehicleFolderCache.find(function(f) {
+      var name = f.Name || '';
+      return name.indexOf(no1Str) === 0;
+    });
+
+    if (match) {
+      var folderUrl = spBase + '/sites/TeamStepup/Shared%20Documents/Forms/AllItems.aspx?id=' + encodeURIComponent(match.ServerRelativeUrl);
+      window.open(folderUrl, '_blank');
+    } else {
+      showToast('フォルダが見つかりません: ' + no1Str, 'error');
+    }
+  } catch(e) {
+    console.error('Vehicle folder error:', e);
+    showToast('フォルダ検索エラー: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📁 フォルダー'; }
+  }
 }
 
 // ============================================================
