@@ -7773,10 +7773,36 @@ function openVehicleDetail(idx) {
 
   var html = '';
 
-  // ヘッダー
-  html += '<div style="' + S + 'background:var(--primary);color:#fff;text-align:center;padding:14px;">';
+  // Link列（フォルダーリンク）先読み
+  var linkUrl = '';
+  if (fLink) {
+    var linkVal = item[fLink];
+    if (linkVal && typeof linkVal === 'object' && linkVal.Url) linkUrl = linkVal.Url;
+    else if (linkVal && typeof linkVal === 'string' && linkVal.indexOf('http') === 0) linkUrl = linkVal;
+  }
+  if (!linkUrl) {
+    fields.forEach(function(f) {
+      if (linkUrl) return;
+      if (f.TypeAsString === 'URL') {
+        var v = item[f.EntityPropertyName];
+        if (v && typeof v === 'object' && v.Url) linkUrl = v.Url;
+        else if (v && typeof v === 'string' && v.indexOf('http') === 0) linkUrl = v;
+      }
+    });
+  }
+  window._vehicleFolderUrl = linkUrl;
+
+  // ヘッダー + アクションボタン
+  html += '<div style="' + S + 'background:var(--primary);color:#fff;text-align:center;padding:14px 14px 10px;">';
   html += '<div style="font-size:10px;opacity:0.8;">車両管理台帳</div>';
-  html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;">' + escHtml(displayNumber) + '</div>';
+  html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;margin-bottom:10px;">' + escHtml(displayNumber) + '</div>';
+  html += '<div style="display:flex;gap:6px;justify-content:center;">';
+  html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">✏️ 編集</button>';
+  if (linkUrl) {
+    html += '<a href="' + escHtml(linkUrl) + '" target="_blank" rel="noopener" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;text-align:center;text-decoration:none;display:block;">📁 フォルダー</a>';
+  }
+  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">🔧 点検記録</button>';
+  html += '</div>';
   html += '</div>';
 
   // 車両情報
@@ -7824,34 +7850,6 @@ function openVehicleDetail(idx) {
     html += '</div>';
   }
 
-  // Link列（フォルダーリンク） - SharePoint Hyperlink型は {Url, Description} オブジェクト
-  var linkUrl = '';
-  if (fLink) {
-    var linkVal = item[fLink];
-    if (linkVal && typeof linkVal === 'object' && linkVal.Url) linkUrl = linkVal.Url;
-    else if (linkVal && typeof linkVal === 'string' && linkVal.indexOf('http') === 0) linkUrl = linkVal;
-  }
-  // フォールバック: Link列が見つからない場合、全フィールドからURL型を探す
-  if (!linkUrl) {
-    fields.forEach(function(f) {
-      if (linkUrl) return;
-      if (f.TypeAsString === 'URL') {
-        var v = item[f.EntityPropertyName];
-        if (v && typeof v === 'object' && v.Url) linkUrl = v.Url;
-        else if (v && typeof v === 'string' && v.indexOf('http') === 0) linkUrl = v;
-      }
-    });
-  }
-  window._vehicleFolderUrl = linkUrl;
-
-  // ボタン
-  html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">';
-  html += '<button onclick="openVehicleEditForm(' + idx + ')" style="padding:11px;border-radius:10px;background:#f57c00;color:#fff;border:none;font-weight:600;font-size:13px;">✏️ 内容を編集</button>';
-  if (linkUrl) {
-    html += '<a href="' + escHtml(linkUrl) + '" target="_blank" rel="noopener" style="display:block;padding:11px;border-radius:10px;background:#2e7d32;color:#fff;border:none;font-weight:600;font-size:13px;text-align:center;text-decoration:none;">📁 車両フォルダーを開く</a>';
-  }
-  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="padding:11px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;font-size:13px;">🔧 点検記録を見る</button>';
-  html += '</div>';
 
   document.getElementById('vehicleDetailBody').innerHTML = html;
   switchScreen('vehicleDetailScreen');
