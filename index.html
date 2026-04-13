@@ -1705,16 +1705,20 @@ body {
 
   <!-- Screen: 車両一覧 -->
   <div class="screen" id="vehicleListScreen">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🚗 車両一覧</h2>
-      <span id="vehicleListCount" style="font-size:12px;color:var(--text-light);margin-left:auto;"></span>
+      <span id="vehicleListCount" style="font-size:13px;font-weight:600;color:var(--primary);margin-left:auto;background:var(--bg);padding:2px 10px;border-radius:12px;"></span>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:8px;">
-      <input id="vehicleSearchInput" type="text" placeholder="ナンバー / 車名 / 運転手 / 所属" style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;" oninput="applyVehicleFilter()">
-      <button onclick="document.getElementById('vehicleSearchInput').value='';applyVehicleFilter();" style="padding:6px 10px;border:none;background:none;font-size:16px;color:#999;">&times;</button>
+    <div style="background:#fff;border-radius:14px;padding:10px;border:1px solid var(--border);margin-bottom:10px;">
+      <div id="vehicleFilterBtns" style="display:flex;border-radius:8px;overflow:hidden;border:1.5px solid var(--primary);margin-bottom:8px;"></div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="vehiclePickupSelect" onchange="filterVehiclePickup(this.value)" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:#fafaff;color:var(--text);"></select>
+        <div style="flex:2;position:relative;">
+          <input id="vehicleSearchInput" type="text" placeholder="🔍 検索" style="width:100%;padding:7px 28px 7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;" oninput="applyVehicleFilter()">
+          <span onclick="document.getElementById('vehicleSearchInput').value='';applyVehicleFilter();" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);color:#999;cursor:pointer;font-size:14px;">&times;</span>
+        </div>
+      </div>
     </div>
-    <div id="vehicleFilterBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
-    <div id="vehiclePickupBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
     <div id="vehicleListBody"></div>
   </div>
 
@@ -2004,7 +2008,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '262f802';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7549,25 +7553,35 @@ async function loadVehicleList() {
       var u = fUsage ? (item[fUsage] || '') : '';
       if (usageCounts.hasOwnProperty(u)) usageCounts[u]++;
     });
+    // セグメントコントロール風 Usageフィルター
+    var segStyle = 'flex:1;padding:6px 0;border:none;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:var(--text-light);transition:all .2s;';
+    var segActiveStyle = 'flex:1;padding:6px 0;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;transition:all .2s;';
     var filterDiv = document.getElementById('vehicleFilterBtns');
-    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleUsage(this,\'使用\')">使用(' + usageCounts['使用'] + ')</button>';
-    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleUsage(this,\'未使用\')">未使用(' + usageCounts['未使用'] + ')</button>';
-    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleUsage(this,\'会社\')">会社(' + usageCounts['会社'] + ')</button>';
-    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleUsage(this,\'all\')">全て(' + items.length + ')</button>';
+    var segItems = [
+      { key: '使用', label: '使用 ' + usageCounts['使用'] },
+      { key: '未使用', label: '未使用 ' + usageCounts['未使用'] },
+      { key: '会社', label: '会社 ' + usageCounts['会社'] },
+      { key: 'all', label: '全て ' + items.length }
+    ];
+    var filterHtml = '';
+    segItems.forEach(function(s) {
+      var isActive = s.key === '使用';
+      filterHtml += '<button style="' + (isActive ? segActiveStyle : segStyle) + '" onclick="filterVehicleUsage(this,\'' + s.key + '\')">' + s.label + '</button>';
+    });
     filterDiv.innerHTML = filterHtml;
 
-    // Pick-up(送迎先)フィルター
+    // 送迎先ドロップダウン
     var pickupSet = {};
     items.forEach(function(item) {
       var p = fHakensaki ? (item[fHakensaki] || '') : '';
       if (p) pickupSet[p] = (pickupSet[p] || 0) + 1;
     });
-    var pickupDiv = document.getElementById('vehiclePickupBtns');
-    var pickupHtml = '<button class="expiry-filter-btn active" style="font-size:11px;" onclick="filterVehiclePickup(this,\'all\')">全送迎先</button>';
+    var pickupSel = document.getElementById('vehiclePickupSelect');
+    var pickupHtml = '<option value="all">全送迎先</option>';
     Object.keys(pickupSet).sort().forEach(function(p) {
-      pickupHtml += '<button class="expiry-filter-btn" style="font-size:11px;" onclick="filterVehiclePickup(this,\'' + escHtml(p) + '\')">' + escHtml(p) + '(' + pickupSet[p] + ')</button>';
+      pickupHtml += '<option value="' + escHtml(p) + '">' + escHtml(p) + ' (' + pickupSet[p] + ')</option>';
     });
-    pickupDiv.innerHTML = pickupHtml;
+    pickupSel.innerHTML = pickupHtml;
 
     // Store field mapping globally
     window._vf = { number: fNumber, no1: fNo1, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
@@ -7584,25 +7598,26 @@ async function loadVehicleList() {
 }
 
 function filterVehicleUsage(btn, usage) {
-  var btns = document.querySelectorAll('#vehicleFilterBtns .expiry-filter-btn');
-  btns.forEach(function(b) { b.classList.remove('active'); });
-  btn.classList.add('active');
+  // セグメントコントロールのスタイル切り替え
+  var btns = document.querySelectorAll('#vehicleFilterBtns button');
+  var normalStyle = 'flex:1;padding:6px 0;border:none;font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:var(--text-light);transition:all .2s;';
+  var activeStyle = 'flex:1;padding:6px 0;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;transition:all .2s;';
+  btns.forEach(function(b) { b.style.cssText = normalStyle; });
+  btn.style.cssText = activeStyle;
   window._vehicleUsageFilter = usage;
   applyVehicleFilter();
 }
 
-function filterVehiclePickup(btn, pickup) {
-  var btns = document.querySelectorAll('#vehiclePickupBtns .expiry-filter-btn');
-  btns.forEach(function(b) { b.classList.remove('active'); });
-  btn.classList.add('active');
-  window._vehiclePickupFilter = pickup;
+function filterVehiclePickup(val) {
+  window._vehiclePickupFilter = val;
   applyVehicleFilter();
 }
 
 function applyVehicleFilter() {
   var vf = window._vf || {};
   var usage = window._vehicleUsageFilter || 'all';
-  var pickup = window._vehiclePickupFilter || 'all';
+  var pickupSel = document.getElementById('vehiclePickupSelect');
+  var pickup = pickupSel ? pickupSel.value : (window._vehiclePickupFilter || 'all');
   var searchVal = (document.getElementById('vehicleSearchInput').value || '').trim().toLowerCase();
 
   var filtered = _vehicleData.filter(function(item) {
