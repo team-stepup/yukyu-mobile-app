@@ -1650,9 +1650,10 @@ body {
         <span class="ql-text">前払い一覧</span>
         <span id="maebariBadgeCount" class="ql-badge" style="background:#f57c00;display:none;"></span>
       </button>
-      <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')">
+      <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
         <span class="ql-text">有給確認</span>
+        <span id="yukyuBadgeCount" class="ql-badge" style="background:#1565c0;display:none;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('nyutaiScreen')" style="position:relative;">
         <span class="ql-icon">🚪</span>
@@ -3521,10 +3522,12 @@ function categoryHasAlert(emp, keyMap, category) {
 // Open expiry alert list — shows all employees with deadlines within 60 days
 // Home badge counts (前払い・入退・期限注意)
 async function loadHomeBadges() {
-  try {
-    var today = new Date();
+  var today = new Date();
+  var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
 
-    // 前払い: count this Friday's records
+  // 前払い: count this Friday's records
+  try {
     var fri = getNextFriday();
     var friStart = new Date(fri); friStart.setHours(0,0,0,0);
     var friEnd = new Date(fri); friEnd.setHours(23,59,59,999);
@@ -3535,9 +3538,16 @@ async function loadHomeBadges() {
       if (mRecs.length > 0) { mBadge.textContent = mRecs.length; mBadge.style.display = 'inline-block'; }
       else { mBadge.style.display = 'none'; }
     }
+  } catch(e) { console.log('Maebari badge error:', e); }
 
-    // 入退: count current month's 入社 and 退社
-    var allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+  // 社員データ取得（入退・有給・期限で共用）
+  var allEmps = [];
+  try {
+    allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+  } catch(e) { console.log('Employee fetch error:', e); return; }
+
+  // 入退: count current month's 入社 and 退社
+  try {
     var nyuCount = 0, taiCount = 0;
     allEmps.forEach(function(emp) {
       var nd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
@@ -3555,8 +3565,21 @@ async function loadHomeBadges() {
       if (taiCount > 0) { nBadgeOut.textContent = '-' + taiCount; nBadgeOut.style.display = 'inline-block'; }
       else { nBadgeOut.style.display = 'none'; }
     }
+  } catch(e) { console.log('Nyutai badge error:', e); }
 
-    // 期限注意: count alerts
+  // 有給確認: count current month's leave requests
+  try {
+    var yFilter = "$filter=" + F.leaveDate + " ge datetime'" + monthStart.toISOString() + "' and " + F.leaveDate + " le datetime'" + monthEnd.toISOString() + "'&$top=500";
+    var yRecs = await spGet(LIST_LEAVE_GUID, yFilter) || [];
+    var yBadge = document.getElementById('yukyuBadgeCount');
+    if (yBadge) {
+      if (yRecs.length > 0) { yBadge.textContent = yRecs.length; yBadge.style.display = 'inline-block'; }
+      else { yBadge.style.display = 'none'; }
+    }
+  } catch(e) { console.log('Yukyu badge error:', e); }
+
+  // 期限注意: count alerts
+  try {
     var meta = await fetchEmployeeFields();
     var keyMap = buildFieldKeyMap(meta);
     var expiryCount = 0;
@@ -3580,7 +3603,7 @@ async function loadHomeBadges() {
       if (expiryCount > 0) { eBadge.textContent = expiryCount; eBadge.style.display = 'inline-block'; }
       else { eBadge.style.display = 'none'; }
     }
-  } catch(e) { console.log('Home badge error:', e); }
+  } catch(e) { console.log('Expiry badge error:', e); }
 }
 
 // Global expiry alerts cache for filter
