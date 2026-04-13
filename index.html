@@ -1669,8 +1669,7 @@ body {
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
         <span class="ql-text">車両管理</span>
-        <span id="vehicleBadgeUse" class="ql-badge" style="background:#1565c0;display:none;top:4px;right:26px;"></span>
-        <span id="vehicleBadgeExec" class="ql-badge" style="background:#f57c00;display:none;top:4px;right:4px;"></span>
+        <span id="vehicleBadgeUse" class="ql-badge" style="background:#1565c0;display:none;"></span>
       </button>
     </div>
 
@@ -1713,7 +1712,8 @@ body {
       <input id="vehicleSearchInput" type="text" placeholder="ナンバー / 車名 / 運転手 / 所属" style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;" oninput="applyVehicleFilter()">
       <button onclick="document.getElementById('vehicleSearchInput').value='';applyVehicleFilter();" style="padding:6px 10px;border:none;background:none;font-size:16px;color:#999;">&times;</button>
     </div>
-    <div id="vehicleFilterBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+    <div id="vehicleFilterBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
+    <div id="vehiclePickupBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
     <div id="vehicleListBody"></div>
   </div>
 
@@ -2003,7 +2003,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '34bfc3e';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -3659,21 +3659,15 @@ async function loadHomeBadges() {
       if (vResp.ok) {
         var vData = await vResp.json();
         var vItems = vData.d.results || [];
-        var useCount = 0, execCount = 0;
+        var useCount = 0;
         vItems.forEach(function(v) {
           var u = v[vfUsage] || '';
           if (u === '使用') useCount++;
-          if (u === '役員') execCount++;
         });
         var vBadgeUse = document.getElementById('vehicleBadgeUse');
-        var vBadgeExec = document.getElementById('vehicleBadgeExec');
         if (vBadgeUse) {
           if (useCount > 0) { vBadgeUse.textContent = useCount; vBadgeUse.style.display = 'inline-block'; }
           else { vBadgeUse.style.display = 'none'; }
-        }
-        if (vBadgeExec) {
-          if (execCount > 0) { vBadgeExec.textContent = execCount; vBadgeExec.style.display = 'inline-block'; }
-          else { vBadgeExec.style.display = 'none'; }
         }
       }
     }
@@ -7532,17 +7526,31 @@ async function loadVehicleList() {
       var u = fUsage ? (item[fUsage] || '') : '';
       if (usageCounts.hasOwnProperty(u)) usageCounts[u]++;
     });
+    // Usage固定フィルター
     var filterDiv = document.getElementById('vehicleFilterBtns');
-    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleList(this,\'使用\')">使用(' + usageCounts['使用'] + ')</button>';
-    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'未使用\')">未使用(' + usageCounts['未使用'] + ')</button>';
-    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'役員\')">役員(' + usageCounts['役員'] + ')</button>';
-    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'all\')">全て(' + items.length + ')</button>';
+    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleUsage(this,\'使用\')">使用(' + usageCounts['使用'] + ')</button>';
+    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleUsage(this,\'未使用\')">未使用(' + usageCounts['未使用'] + ')</button>';
+    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleUsage(this,\'役員\')">役員(' + usageCounts['役員'] + ')</button>';
+    filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleUsage(this,\'all\')">全て(' + items.length + ')</button>';
     filterDiv.innerHTML = filterHtml;
+
+    // Pick-up(送迎先)フィルター
+    var pickupSet = {};
+    items.forEach(function(item) {
+      var p = fHakensaki ? (item[fHakensaki] || '') : '';
+      if (p) pickupSet[p] = (pickupSet[p] || 0) + 1;
+    });
+    var pickupDiv = document.getElementById('vehiclePickupBtns');
+    var pickupHtml = '<button class="expiry-filter-btn active" style="font-size:11px;" onclick="filterVehiclePickup(this,\'all\')">全送迎先</button>';
+    Object.keys(pickupSet).sort().forEach(function(p) {
+      pickupHtml += '<button class="expiry-filter-btn" style="font-size:11px;" onclick="filterVehiclePickup(this,\'' + escHtml(p) + '\')">' + escHtml(p) + '(' + pickupSet[p] + ')</button>';
+    });
+    pickupDiv.innerHTML = pickupHtml;
 
     // Store field mapping globally
     window._vf = { number: fNumber, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
-    // デフォルト「使用」フィルター
     window._vehicleUsageFilter = '使用';
+    window._vehiclePickupFilter = 'all';
 
     countEl.textContent = items.length + '台';
     document.getElementById('vehicleSearchInput').value = '';
@@ -7553,7 +7561,7 @@ async function loadVehicleList() {
   }
 }
 
-function filterVehicleList(btn, usage) {
+function filterVehicleUsage(btn, usage) {
   var btns = document.querySelectorAll('#vehicleFilterBtns .expiry-filter-btn');
   btns.forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
@@ -7561,16 +7569,30 @@ function filterVehicleList(btn, usage) {
   applyVehicleFilter();
 }
 
+function filterVehiclePickup(btn, pickup) {
+  var btns = document.querySelectorAll('#vehiclePickupBtns .expiry-filter-btn');
+  btns.forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  window._vehiclePickupFilter = pickup;
+  applyVehicleFilter();
+}
+
 function applyVehicleFilter() {
   var vf = window._vf || {};
   var usage = window._vehicleUsageFilter || 'all';
+  var pickup = window._vehiclePickupFilter || 'all';
   var searchVal = (document.getElementById('vehicleSearchInput').value || '').trim().toLowerCase();
 
   var filtered = _vehicleData.filter(function(item) {
     // Usage filter
     if (usage !== 'all') {
-      var u = vf.usage ? (item[vf.usage] || '未設定') : '未設定';
+      var u = vf.usage ? (item[vf.usage] || '') : '';
       if (u !== usage) return false;
+    }
+    // Pick-up filter
+    if (pickup !== 'all') {
+      var p = vf.hakensaki ? (item[vf.hakensaki] || '') : '';
+      if (p !== pickup) return false;
     }
     // Search filter (ナンバー / 車名 / ドライバー / Affiliation)
     if (searchVal) {
