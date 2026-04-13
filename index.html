@@ -1654,6 +1654,11 @@ body {
         <span class="ql-icon">🚪</span>
         <span class="ql-text">入退連絡</span>
       </button>
+      <button class="quick-link-btn" onclick="openExpiryList()" style="position:relative;">
+        <span class="ql-icon">⚠️</span>
+        <span class="ql-text">期限注意</span>
+        <span id="expiryBadgeCount" style="display:none;position:absolute;top:4px;right:4px;background:#d32f2f;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 4px;"></span>
+      </button>
     </div>
 
     <div class="home-search-card">
@@ -1683,6 +1688,15 @@ body {
       </div>
       <button class="home-search-btn" style="width:100%;margin-top:10px;padding:11px;border-radius:12px;" onclick="openHakenList()">表示</button>
     </div>
+  </div>
+
+  <!-- Screen: 期限注意リスト -->
+  <div class="screen" id="expiryListScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <button class="back-btn" onclick="switchScreen('searchScreen')">←</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">⚠️ 期限注意リスト</h2>
+    </div>
+    <div id="expiryListBody" style="display:flex;flex-direction:column;gap:8px;"></div>
   </div>
 
   <!-- Screen: 新規社員登録 -->
@@ -1944,8 +1958,11 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '75f8e88';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
+// If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
+// so the display immediately shows "最新" instead of stale "新バージョンあり"
+if (/[?&]v=/.test(location.search)) initialVersion = null;
 let latestVersionData = null;
 
 function updateVersionDisplay() {
@@ -1953,7 +1970,7 @@ function updateVersionDisplay() {
   if (!el) return;
   const cur = initialVersion || '(dev)';
   if (latestVersionData && latestVersionData.version && latestVersionData.version !== initialVersion) {
-    el.innerHTML = 'v' + escHtml(cur) + ' <span class="ver-update">→ 新バージョンあり (v' + escHtml(latestVersionData.version) + ')</span>';
+    el.innerHTML = '<span class="ver-update">更新あり</span>';
   } else {
     el.innerHTML = 'v' + escHtml(cur) + ' <span class="ver-latest">最新</span>';
   }
@@ -3418,6 +3435,7 @@ function buildFieldKeyMap(fieldsMeta) {
     zairyuKigen: '在留期限',
     zairyuKigenCard: '在留期限（カード）',
     zairyuBikou: '在留：備考１',
+    zairyuName: '在留カード氏名',
     carType: '対象車両',
     carMaker: '車両メーカー名',
     carName: '車名',
@@ -3498,9 +3516,9 @@ function formatProfileValue(val, format) {
     let alert = '';
     if (diffDays < 0) {
       alert = ' <span class="expiry-danger">期限切れ</span>';
-    } else if (diffDays <= 180) {
+    } else if (diffDays <= 30) {
       alert = ' <span class="expiry-danger">残り' + diffDays + '日</span>';
-    } else if (diffDays <= 365) {
+    } else if (diffDays <= 60) {
       alert = ' <span class="expiry-warn">残り' + diffDays + '日</span>';
     }
     return formatDate(val) + alert;
@@ -3557,9 +3575,96 @@ function categoryHasAlert(emp, keyMap, category) {
     const d = new Date(val);
     if (isNaN(d)) continue;
     const diffDays = Math.ceil((d - new Date()) / 86400000);
-    if (diffDays <= 365) return true;
+    if (diffDays <= 60) return true;
   }
   return false;
+}
+
+// Open expiry alert list — shows all employees with deadlines within 60 days
+async function openExpiryList() {
+  showSpinner();
+  try {
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+    const meta = await fetchEmployeeFields();
+    const keyMap = buildFieldKeyMap(meta);
+    const now = new Date();
+    const alerts = [];
+
+    // Collect all dateExpiry fields with ≤60 days remaining (or expired)
+    allEmps.forEach(function(emp) {
+      if (isResigned(emp)) return;
+      var empName = emp.Title || '';
+      var empNo = emp[F.syainNo] || '';
+      PROFILE_CATEGORIES.forEach(function(cat) {
+        cat.fields.forEach(function(field) {
+          if (field.format !== 'dateExpiry') return;
+          var odataKey = keyMap[field.key];
+          if (!odataKey) return;
+          var val = emp[odataKey];
+          if (!val) return;
+          var d = new Date(val);
+          if (isNaN(d)) return;
+          var diffDays = Math.ceil((d - now) / 86400000);
+          if (diffDays <= 60) {
+            alerts.push({
+              emp: emp,
+              empName: empName,
+              empNo: empNo,
+              fieldLabel: field.label,
+              dateStr: formatDate(val),
+              diffDays: diffDays,
+              catIcon: cat.icon
+            });
+          }
+        });
+      });
+    });
+
+    // Sort: expired first (most negative), then soonest
+    alerts.sort(function(a, b) { return a.diffDays - b.diffDays; });
+
+    var body = document.getElementById('expiryListBody');
+    if (alerts.length === 0) {
+      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">期限注意の項目はありません 🎉</div>';
+    } else {
+      var html = '';
+      alerts.forEach(function(a) {
+        var badgeClass = a.diffDays < 0 ? 'expiry-danger' : (a.diffDays <= 30 ? 'expiry-danger' : 'expiry-warn');
+        var badgeText = a.diffDays < 0 ? '期限切れ' : ('残り' + a.diffDays + '日');
+        var borderColor = a.diffDays < 0 ? '#d32f2f' : (a.diffDays <= 30 ? '#f57c00' : '#ffb300');
+        html += '<div onclick=\'openNyutaiEmployee(' + (a.emp.Id || 0) + ')\' style="' +
+          'background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);' +
+          'border-left:4px solid ' + borderColor + ';cursor:pointer;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+            '<span style="font-weight:700;font-size:14px;color:var(--text);">' + escHtml(a.empNo) + ' ' + escHtml(a.empName) + '</span>' +
+            '<span class="' + badgeClass + '" style="font-size:11px;font-weight:600;">' + badgeText + '</span>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text-light);">' +
+            a.catIcon + ' ' + escHtml(a.fieldLabel) + '：' + a.dateStr +
+          '</div>' +
+        '</div>';
+      });
+      body.innerHTML = html;
+    }
+
+    // Update badge count on home button
+    var badge = document.getElementById('expiryBadgeCount');
+    if (badge) {
+      if (alerts.length > 0) {
+        badge.textContent = alerts.length;
+        badge.style.display = 'flex';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    switchScreen('expiryListScreen');
+  } catch (e) {
+    console.error('Expiry list error:', e);
+    showToast('期限リスト取得エラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
 }
 
 // Load and render employee profile
@@ -7556,10 +7661,11 @@ async function openZaishokuForm() {
   var nyushaDate = emp[keyMap['nyushaDate']] ? String(emp[keyMap['nyushaDate']]).substring(0,10) : '';
   var zairyuBikou = emp[keyMap['zairyuBikou']] || findEmpValueByTitle('在留：備考') || findEmpValueByTitle('備考');
   var tokki1 = emp[keyMap['tokki1']] || findEmpValueByTitle('特記') || '';
-  // Romaji name from residence card — search broadly
-  var romajiName = findEmpValueByTitle('ローマ字氏名') || findEmpValueByTitle('ローマ字') ||
-                   findEmpValueByTitle('英字氏名') || findEmpValueByTitle('英字') ||
-                   findEmpValueByTitle('在留：氏名') || findEmpValueByTitle('在留氏名') || '';
+  // Romaji name from residence card — try keyMap first, then broad search
+  var romajiName = emp[keyMap['zairyuName']] ||
+                   findEmpValueByTitle('在留カード氏名') || findEmpValueByTitle('在留カード：氏名') ||
+                   findEmpValueByTitle('カード氏名') || findEmpValueByTitle('在留：氏名') ||
+                   findEmpValueByTitle('ローマ字氏名') || findEmpValueByTitle('ローマ字') || '';
 
   var overlay = document.createElement('div');
   overlay.className = 'taisha-overlay';
@@ -7896,10 +8002,11 @@ async function generateZaishokuDocument(lang) {
         drawTextFit(DATA_X, 200, address, 14, 380);
       }
 
-      // === 氏名 (在留カードのローマ字氏名のみ) ===
+      // === 氏名 (在留カードローマ字、なければ漢字/カナ) ===
+      // y=260 = 「氏　名：」ラベルのベースラインと同じ高さ
       var romajiAlt = (document.getElementById('zai_name_alt').value || '').trim();
       if (romajiAlt && /^[A-Z]{2}\d/.test(romajiAlt)) romajiAlt = '';
-      drawTextFit(DATA_X, 264, romajiAlt || name, 13, 380);
+      drawTextFit(DATA_X, 260, romajiAlt || name, 13, 380);
 
       // === Whiteout original 4 underlines (生年月日/国籍/採用年月日/日付) ===
       whiteRect(180, 320, 160, 8);   // 生年月日 line
@@ -7921,20 +8028,13 @@ async function generateZaishokuDocument(lang) {
       drawLine(DATA_X, 627, LINE_RIGHT, 627, 1.2);
       drawText(DATA_X, 622, fmtDateJP(todayStr), 12);
 
-      // === Replace baked black seal with red seal (wider whiteout, larger seal) ===
-      whiteRect(415, 662, 90, 86);
-      drawRedSeal(458, 704, 80);
-
-      // === Whiteout the bottom company labels area and redraw cleanly ===
-      // Original labels at y=694 (事業所所在地), y=730 (事業所名称), y=766 (代表者)
-      // are missing the leading 事/代 char. Redraw labels right-aligned to colon at x=165.
-      whiteRect(50, 684, 168, 130);
+      // === Whiteout entire company info area (labels + values + black seal) ===
+      whiteRect(50, 678, 460, 140);
 
       function drawSpacedLabel(rightX, y, text, sz) {
-        // Render with the visual style "X X X" (character spacing similar to template)
         ctx.fillStyle = '#000000';
         setFont(sz);
-        var spacing = sz * 1.6; // pt between char centers
+        var spacing = sz * 1.6;
         var w = (text.length - 1) * spacing;
         var startX = rightX - w;
         for (var i = 0; i < text.length; i++) {
@@ -7942,17 +8042,23 @@ async function generateZaishokuDocument(lang) {
           var chW = ctx.measureText(ch).width / SCALE;
           ctx.fillText(ch, (startX + i * spacing - chW / 2) * SCALE, y * SCALE);
         }
-        // Colon
         ctx.fillText('：', (rightX + 2) * SCALE, y * SCALE);
       }
 
+      // Redraw labels (right-aligned to colon at x=165)
       drawSpacedLabel(165, 698, '事業所所在地', 10);
       drawSpacedLabel(165, 734, '事業所名称', 10);
       drawSpacedLabel(165, 770, '代表者', 10);
       drawSpacedLabel(165, 806, '電話番号', 10);
 
-      // 電話番号 value (同じ列、山下の真下から)
-      drawText(235, 806, COMPANY_TEL, 11);
+      // Redraw values (normal weight, tight spacing, starting at x=185)
+      drawText(185, 698, COMPANY_ADDR_JP, 11);
+      drawText(185, 734, COMPANY_NAME_JP, 11);
+      drawText(185, 770, '代表取締役 山下浩俊', 11);
+      drawText(185, 806, COMPANY_TEL, 11);
+
+      // Red seal (larger, at original black seal position)
+      drawRedSeal(458, 704, 80);
     }
 
     // Convert canvas to PNG bytes, embed via pdf-lib
@@ -8192,21 +8298,34 @@ function renderHakenTable(employees, container) {
     });
   }
 
+  // Sort by name (あいうえお順)
+  var sorted = employees.slice().sort(function(a, b) {
+    return (a.Title || '').localeCompare(b.Title || '', 'ja');
+  });
+
+  // Column order: 社員番号 → 氏名 → 通勤方法 → 在職
   let html = '<table class="haken-table"><thead><tr>' +
-    '<th>氏名</th><th>社番</th><th>通勤方法</th><th>在職</th>';
+    '<th>社番</th><th>氏名</th><th>通勤方法</th><th>在職</th>';
   extraCols.forEach(col => {
     html += '<th>' + escHtml(col.field.label) + '</th>';
   });
   html += '</tr></thead><tbody>';
 
-  employees.forEach(emp => {
+  // Strip romaji from 通勤方法 (e.g. "送迎 Sougei" → "送迎")
+  function stripTsukinRomaji(val) {
+    if (!val) return val;
+    return val.replace(/\s*[A-Za-z].*/g, '').trim() || val;
+  }
+
+  sorted.forEach(emp => {
     const tsukin = getTsukinValue(emp);
     const resigned = isResigned(emp);
-    const tsukinDisplay = tsukin ? escHtml(tsukin) : '<span style="color:var(--warning);font-weight:600;">⚠未登録</span>';
+    const tsukinClean = stripTsukinRomaji(tsukin);
+    const tsukinDisplay = tsukinClean ? escHtml(tsukinClean) : '<span style="color:var(--warning);font-weight:600;">⚠未登録</span>';
     const statusDisplay = resigned ? '<span style="color:var(--danger);">退社</span>' : '<span style="color:var(--success);">在職</span>';
     html += '<tr onclick=\'selectEmployee(' + JSON.stringify(emp).replace(/'/g, "&#39;") + ')\' style="cursor:pointer;">' +
-      '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
       '<td>' + (emp[F.syainNo] || '') + '</td>' +
+      '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
       '<td>' + tsukinDisplay + '</td>' +
       '<td>' + statusDisplay + '</td>';
     extraCols.forEach(col => {
