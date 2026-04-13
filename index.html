@@ -1669,7 +1669,8 @@ body {
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
         <span class="ql-text">車両管理</span>
-        <span id="vehicleBadgeUse" class="ql-badge" style="background:#1565c0;display:none;"></span>
+        <span id="vehicleBadgeUse" class="ql-badge" style="background:#1565c0;display:none;top:4px;right:26px;"></span>
+        <span id="vehicleBadgeSyaken" class="ql-badge" style="background:#c62828;display:none;top:4px;right:4px;"></span>
       </button>
     </div>
 
@@ -3644,30 +3645,51 @@ async function loadHomeBadges() {
     }
   } catch(e) { console.log('Expiry badge error:', e); }
 
-  // 車両バッジ: 使用台数・役員台数
+  // 車両バッジ: 使用台数(青) + 車検1か月以内(赤)
   try {
-    var token2 = await getToken();
-    var vFields = await fetchVehicleFields();
-    var vfUsage = null;
-    for (var fi = 0; fi < vFields.length; fi++) {
-      if (vFields[fi].Title && vFields[fi].Title.indexOf('使用') >= 0) { vfUsage = vFields[fi].EntityPropertyName; break; }
-    }
-    if (vfUsage) {
-      var vResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=" + vfUsage + "&$top=500", {
-        headers: { 'Authorization': 'Bearer ' + token2, 'Accept': 'application/json;odata=verbose' }
+    var vToken = await getToken();
+    // 全フィールド取得して使用・車検を探す
+    var vfResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=EntityPropertyName,Title,TypeAsString&$top=300", {
+      headers: { 'Authorization': 'Bearer ' + vToken, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (vfResp.ok) {
+      var vfData = await vfResp.json();
+      var vfList = vfData.d.results || [];
+      var vfUsage2 = null, vfSyaken2 = null;
+      vfList.forEach(function(f) {
+        if (f.Title && f.Title.indexOf('使用') >= 0) vfUsage2 = f.EntityPropertyName;
+        if (f.Title && f.Title.indexOf('車検') >= 0 && f.TypeAsString === 'DateTime') vfSyaken2 = f.EntityPropertyName;
       });
-      if (vResp.ok) {
-        var vData = await vResp.json();
-        var vItems = vData.d.results || [];
-        var useCount = 0;
-        vItems.forEach(function(v) {
-          var u = v[vfUsage] || '';
-          if (u === '使用') useCount++;
+      console.log('Vehicle badge fields:', vfUsage2, vfSyaken2);
+      if (vfUsage2) {
+        var selectFields = vfUsage2;
+        if (vfSyaken2) selectFields += ',' + vfSyaken2;
+        var viResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=" + selectFields + "&$top=500", {
+          headers: { 'Authorization': 'Bearer ' + vToken, 'Accept': 'application/json;odata=verbose' }
         });
-        var vBadgeUse = document.getElementById('vehicleBadgeUse');
-        if (vBadgeUse) {
-          if (useCount > 0) { vBadgeUse.textContent = useCount; vBadgeUse.style.display = 'inline-block'; }
-          else { vBadgeUse.style.display = 'none'; }
+        if (viResp.ok) {
+          var viData = await viResp.json();
+          var viItems = viData.d.results || [];
+          var useCount2 = 0, syakenCount = 0;
+          var now = new Date();
+          var in30 = new Date(now.getTime() + 30 * 86400000);
+          viItems.forEach(function(v) {
+            if ((v[vfUsage2] || '') === '使用') useCount2++;
+            if (vfSyaken2 && v[vfSyaken2]) {
+              var sd = new Date(v[vfSyaken2]);
+              if (!isNaN(sd) && sd <= in30 && sd >= now) syakenCount++;
+            }
+          });
+          var vBU = document.getElementById('vehicleBadgeUse');
+          if (vBU) {
+            if (useCount2 > 0) { vBU.textContent = useCount2; vBU.style.display = 'inline-block'; }
+            else { vBU.style.display = 'none'; }
+          }
+          var vBS = document.getElementById('vehicleBadgeSyaken');
+          if (vBS) {
+            if (syakenCount > 0) { vBS.textContent = syakenCount; vBS.style.display = 'inline-block'; }
+            else { vBS.style.display = 'none'; }
+          }
         }
       }
     }
