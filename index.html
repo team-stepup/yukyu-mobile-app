@@ -2008,7 +2008,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '5f98ee2';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7730,6 +7730,7 @@ function openVehicleDetail(idx) {
   var fTaibutsuHoken = findPropByTitle('対物');
   var fJinshin = findPropByTitle('人身');
   var fSyaryoHoken = findPropByTitle('車両保険') || findPropByTitle('車両');
+  var fLink = findPropByTitle('Link') || findPropByTitle('リンク') || findPropByTitle('link');
 
   // スタイル定義
   var sectionStyle = 'background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--border);';
@@ -7796,7 +7797,7 @@ function openVehicleDetail(idx) {
 
   // その他のフィールド（上記で表示していないもの）
   var shownKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId'];
-  [vf.number, vf.no1, vf.carType, vf.color, vf.driver, vf.affiliation, vf.hakensaki, vf.usage, vf.syaken, fCapacity, fPickupCount, fRegDate, fOwner, fTaijinHoken, fTaibutsuHoken, fJinshin, fSyaryoHoken].forEach(function(k) { if (k) shownKeys.push(k); });
+  [vf.number, vf.no1, vf.carType, vf.color, vf.driver, vf.affiliation, vf.hakensaki, vf.usage, vf.syaken, fCapacity, fPickupCount, fRegDate, fOwner, fTaijinHoken, fTaibutsuHoken, fJinshin, fSyaryoHoken, fLink].forEach(function(k) { if (k) shownKeys.push(k); });
 
   var otherRows = '';
   var fieldTranslate = {
@@ -7829,9 +7830,20 @@ function openVehicleDetail(idx) {
     html += '</div>';
   }
 
+  // Link列（フォルダーリンク）
+  var linkUrl = '';
+  if (fLink) {
+    var linkVal = item[fLink];
+    if (linkVal && typeof linkVal === 'object' && linkVal.Url) linkUrl = linkVal.Url;
+    else if (linkVal && typeof linkVal === 'string') linkUrl = linkVal;
+  }
+
   // ボタン
-  html += '<div style="display:flex;gap:8px;margin-top:4px;">';
-  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;padding:11px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;font-size:13px;">🔧 点検記録を見る</button>';
+  html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">';
+  if (linkUrl) {
+    html += '<button onclick="window.open(\'' + escHtml(linkUrl) + '\',\'_blank\')" style="padding:11px;border-radius:10px;background:#2e7d32;color:#fff;border:none;font-weight:600;font-size:13px;">📁 車両フォルダーを開く</button>';
+  }
+  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="padding:11px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;font-size:13px;">🔧 点検記録を見る</button>';
   html += '</div>';
 
   document.getElementById('vehicleDetailBody').innerHTML = html;
