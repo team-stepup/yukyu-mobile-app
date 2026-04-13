@@ -1958,7 +1958,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'c70380f';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7590,44 +7590,8 @@ async function openZaishokuForm() {
   var nyushaDate = emp[keyMap['nyushaDate']] ? String(emp[keyMap['nyushaDate']]).substring(0,10) : '';
   var zairyuBikou = emp[keyMap['zairyuBikou']] || findEmpValueByTitle('在留：備考') || findEmpValueByTitle('備考');
   var tokki1 = emp[keyMap['tokki1']] || findEmpValueByTitle('特記') || '';
-  // Romaji name from residence card — search any field title containing 在留+氏名
-  // Also log all field titles for debugging
-  var romajiName = emp[keyMap['zairyuName']] || '';
-  if (!romajiName && fieldsMeta) {
-    // Broad search: find any field whose title contains '氏名' (excluding Title itself)
-    var candidates = Object.keys(fieldsMeta).filter(function(k) {
-      if (k === 'Title') return false;
-      var t = fieldsMeta[k] && fieldsMeta[k].title;
-      return t && t.indexOf('氏名') >= 0;
-    });
-    console.log('[zaishoku] 氏名 field candidates:', candidates.map(function(k) {
-      return k + ' → "' + fieldsMeta[k].title + '" = ' + (emp[(k.indexOf('_') === 0 ? 'OData_' + k : k)] || '(空)');
-    }));
-    // Pick the one with '在留' or 'カード' in its title, fallback to any that has a value
-    for (var ci = 0; ci < candidates.length; ci++) {
-      var ck = candidates[ci];
-      var ct = fieldsMeta[ck].title;
-      var codataKey = (ck === 'Title' || ck === 'Id') ? ck : (ck.indexOf('_') === 0 ? 'OData_' + ck : ck);
-      var cv = emp[codataKey] || '';
-      if (cv && (ct.indexOf('在留') >= 0 || ct.indexOf('カード') >= 0 || ct.indexOf('ローマ') >= 0)) {
-        romajiName = cv;
-        break;
-      }
-    }
-    // If still not found, try any field with '氏名' that has a non-kana/kanji value (likely romaji)
-    if (!romajiName) {
-      for (var ci2 = 0; ci2 < candidates.length; ci2++) {
-        var ck2 = candidates[ci2];
-        var codataKey2 = (ck2.indexOf('_') === 0 ? 'OData_' + ck2 : ck2);
-        var cv2 = emp[codataKey2] || '';
-        if (cv2 && /[A-Za-z]/.test(cv2)) { romajiName = cv2; break; }
-      }
-    }
-  }
-  if (!romajiName) {
-    romajiName = findEmpValueByTitle('在留カード氏名') || findEmpValueByTitle('カード氏名') ||
-                 findEmpValueByTitle('在留：氏名') || findEmpValueByTitle('ローマ字') || '';
-  }
+  // ローマ字氏名 = 特記事項１ (tokki1)
+  var romajiName = tokki1;
 
   var overlay = document.createElement('div');
   overlay.className = 'taisha-overlay';
