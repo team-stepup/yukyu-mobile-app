@@ -7691,90 +7691,147 @@ function openVehicleDetail(idx) {
   var item = _vehicleData[idx];
   if (!item) return;
   var vf = window._vf || {};
+  var fields = _vehicleFields || [];
 
-  var number = item[vf.number] || item['Title'] || '';
-  var no1 = vf.no1 ? (item[vf.no1] || '') : '';
+  // フィールド値取得ヘルパー
+  function getVal(prop) { return prop ? (item[prop] || '') : ''; }
+  function getDate(prop) {
+    var v = getVal(prop);
+    if (!v) return '-';
+    var d = new Date(v);
+    return isNaN(d) ? v : d.toLocaleDateString('ja-JP');
+  }
+  function findPropByTitle(substr) {
+    var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(substr) >= 0; });
+    return hit ? hit.EntityPropertyName : null;
+  }
+
+  var number = getVal(vf.number) || item['Title'] || '';
+  var no1 = getVal(vf.no1);
   var displayNumber = number + (no1 ? '  ' + no1 : '');
-  var carType = vf.carType ? (item[vf.carType] || '') : '';
-  var driver = vf.driver ? (item[vf.driver] || '') : '';
-  var hakensaki = vf.hakensaki ? (item[vf.hakensaki] || '') : '';
-  var syaken = vf.syaken ? (item[vf.syaken] || '') : '';
-  var color = vf.color ? (item[vf.color] || '') : '';
-
+  var carType = getVal(vf.carType);
+  var color = getVal(vf.color);
+  var driver = getVal(vf.driver);
+  var affiliation = getVal(vf.affiliation);
+  var hakensaki = getVal(vf.hakensaki);
+  var usage = getVal(vf.usage);
+  var syaken = vf.syaken ? item[vf.syaken] : '';
   var syakenDate = syaken ? new Date(syaken) : null;
   var syakenStr = syakenDate && !isNaN(syakenDate) ? syakenDate.toLocaleDateString('ja-JP') : '-';
   var daysLeft = syakenDate ? Math.ceil((syakenDate - new Date()) / 86400000) : 999;
-  var warn = daysLeft <= 90 ? ' ⚠️' : '';
+  var syakenWarn = daysLeft <= 90;
 
-  var html = '<div style="background:#fff;border-radius:14px;padding:16px;border:1px solid var(--border);">';
-  html += '<div style="text-align:center;font-size:18px;font-weight:700;color:var(--primary);margin-bottom:12px;">🚗 車両管理台帳</div>';
-  html += '<table style="width:100%;font-size:13px;border-collapse:collapse;">';
-  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);width:100px;">ナンバー</td><td style="padding:6px 8px;font-weight:700;">' + escHtml(displayNumber) + '</td></tr>';
-  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">車種</td><td style="padding:6px 8px;">' + escHtml(carType) + (color ? ' / ' + escHtml(color) : '') + '</td></tr>';
-  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">ドライバー' + warn + '</td><td style="padding:6px 8px;">' + escHtml(driver) + '</td></tr>';
-  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">車検日' + warn + '</td><td style="padding:6px 8px;">' + syakenStr + '</td></tr>';
-  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">送迎先</td><td style="padding:6px 8px;">' + escHtml(hakensaki) + '</td></tr>';
-  html += '</table>';
+  // 追加フィールドを動的に探す
+  var fCapacity = findPropByTitle('乗車') || findPropByTitle('定員') || findPropByTitle('Capacity');
+  var fPickupCount = findPropByTitle('送迎人数') || findPropByTitle('送迎') && findPropByTitle('人数');
+  var fRegDate = findPropByTitle('初年度') || findPropByTitle('登録');
+  var fOwner = findPropByTitle('所有') || findPropByTitle('Owner');
+  var fTaijinHoken = findPropByTitle('対人');
+  var fTaibutsuHoken = findPropByTitle('対物');
+  var fJinshin = findPropByTitle('人身');
+  var fSyaryoHoken = findPropByTitle('車両保険') || findPropByTitle('車両');
 
-  // Show all other fields
-  html += '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">';
-  html += '<div style="font-weight:700;font-size:13px;margin-bottom:8px;">その他の情報</div>';
-  html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-  var skipKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId'];
-  if (vf.number && vf.number !== 'Title') skipKeys.push(vf.number);
-  if (vf.carType) skipKeys.push(vf.carType);
-  if (vf.driver) skipKeys.push(vf.driver);
-  if (vf.hakensaki) skipKeys.push(vf.hakensaki);
-  if (vf.syaken) skipKeys.push(vf.syaken);
-  if (vf.color) skipKeys.push(vf.color);
+  // スタイル定義
+  var sectionStyle = 'background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--border);';
+  var headerStyle = 'font-size:12px;font-weight:700;color:#fff;padding:4px 10px;border-radius:6px;display:inline-block;margin-bottom:8px;';
+  var rowStyle = 'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f0f5;font-size:13px;';
+  var labelStyle = 'color:var(--text-light);font-weight:600;';
+  var valStyle = 'font-weight:500;text-align:right;';
+  var boldValStyle = 'font-weight:700;font-size:14px;text-align:right;';
 
-  // 英語→日本語翻訳辞書
-  var fieldTranslate = {
-    'Pick-up': '送迎先', 'Pick up': '送迎先', 'Pickup': '送迎先',
-    'Affiliation': '所属', 'Usage': '使用状況', 'Color': '色',
-    'Driver': 'ドライバー', 'Number': 'ナンバー', 'Model': '車種',
-    'Maker': 'メーカー', 'Year': '年式', 'Mileage': '走行距離',
-    'Insurance': '保険', 'Inspection': '車検', 'Note': '備考', 'Notes': '備考',
-    'Status': '状態', 'Type': '種別', 'Capacity': '定員', 'Fuel': '燃料',
-    'Registration': '登録', 'Owner': '所有者', 'Location': '場所',
-    'Plate': 'ナンバープレート', 'VIN': '車台番号', 'Engine': 'エンジン',
-    'Transmission': '変速機', 'Weight': '重量', 'Comment': 'コメント',
-    'Description': '説明', 'Category': 'カテゴリ', 'Department': '部署',
-    'Company': '会社', 'Branch': '支店', 'Date': '日付', 'Expiry': '期限',
-    'Title': 'タイトル', 'ContentType': 'コンテンツタイプ',
-  };
-  function translateLabel(label) {
-    if (fieldTranslate[label]) return fieldTranslate[label];
-    // Check partial match
-    for (var eng in fieldTranslate) {
-      if (label.toLowerCase().indexOf(eng.toLowerCase()) >= 0) return fieldTranslate[eng];
-    }
-    return label;
+  function row(label, val, bold) {
+    if (!val || val === '-') return '';
+    return '<div style="' + rowStyle + '"><span style="' + labelStyle + '">' + label + '</span><span style="' + (bold ? boldValStyle : valStyle) + '">' + escHtml(String(val)) + '</span></div>';
   }
 
+  var html = '';
+
+  // ヘッダー: ナンバー
+  html += '<div style="' + sectionStyle + 'background:var(--primary);color:#fff;text-align:center;padding:14px;">';
+  html += '<div style="font-size:10px;opacity:0.8;">車両管理台帳</div>';
+  html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;">' + escHtml(displayNumber) + '</div>';
+  html += '</div>';
+
+  // 車両情報セクション
+  html += '<div style="' + sectionStyle + '">';
+  html += '<div style="' + headerStyle + 'background:#1565c0;">車両情報</div>';
+  html += row('車種', carType + (color ? ' / ' + color : ''));
+  html += row('乗車定員', getVal(fCapacity));
+  html += row('使用区分', usage);
+  html += row('初年度登録', getDate(fRegDate));
+  html += row('所有者', getVal(fOwner));
+  html += '</div>';
+
+  // 運行情報セクション
+  html += '<div style="' + sectionStyle + '">';
+  html += '<div style="' + headerStyle + 'background:#2e7d32;">運行情報</div>';
+  html += '<div style="' + rowStyle + '"><span style="' + labelStyle + '">ドライバー</span><span style="font-weight:700;font-size:14px;">' + escHtml(driver) + '</span></div>';
+  if (affiliation) html += row('所属', affiliation);
+  html += row('送迎先メイン', hakensaki);
+  html += row('送迎人数', getVal(fPickupCount));
+  html += '</div>';
+
+  // 車検セクション
+  html += '<div style="' + sectionStyle + (syakenWarn ? 'border-color:#f57c00;' : '') + '">';
+  html += '<div style="' + headerStyle + 'background:' + (syakenWarn ? '#c62828' : '#f57c00') + ';">車検</div>';
+  html += '<div style="' + rowStyle + 'border:none;">';
+  html += '<span style="' + labelStyle + '">車検有効期限' + (syakenWarn ? ' ⚠️' : '') + '</span>';
+  html += '<span style="font-weight:800;font-size:15px;color:' + (syakenWarn ? '#c62828' : 'var(--text)') + ';">' + syakenStr + '</span>';
+  html += '</div>';
+  if (syakenWarn && daysLeft > 0) html += '<div style="text-align:right;font-size:11px;color:#c62828;font-weight:600;">残り ' + daysLeft + '日</div>';
+  if (syakenWarn && daysLeft <= 0) html += '<div style="text-align:right;font-size:11px;color:#c62828;font-weight:700;">期限切れ</div>';
+  html += '</div>';
+
+  // 保険セクション
+  var hasInsurance = getVal(fTaijinHoken) || getVal(fTaibutsuHoken) || getVal(fJinshin) || getVal(fSyaryoHoken);
+  if (hasInsurance) {
+    html += '<div style="' + sectionStyle + '">';
+    html += '<div style="' + headerStyle + 'background:#7b1fa2;">保険情報</div>';
+    html += row('対人保険', getVal(fTaijinHoken));
+    html += row('対物保険', getVal(fTaibutsuHoken));
+    html += row('人身傷害', getVal(fJinshin));
+    html += row('車両保険', getVal(fSyaryoHoken));
+    html += '</div>';
+  }
+
+  // その他のフィールド（上記で表示していないもの）
+  var shownKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId'];
+  [vf.number, vf.no1, vf.carType, vf.color, vf.driver, vf.affiliation, vf.hakensaki, vf.usage, vf.syaken, fCapacity, fPickupCount, fRegDate, fOwner, fTaijinHoken, fTaibutsuHoken, fJinshin, fSyaryoHoken].forEach(function(k) { if (k) shownKeys.push(k); });
+
+  var otherRows = '';
+  var fieldTranslate = {
+    'Pick-up': '送迎先', 'Pickup': '送迎先', 'Affiliation': '所属', 'Usage': '使用区分',
+    'Color': '色', 'Driver': 'ドライバー', 'Number': 'ナンバー', 'Model': '車種',
+    'Maker': 'メーカー', 'Year': '年式', 'Mileage': '走行距離', 'Insurance': '保険',
+    'Inspection': '車検', 'Note': '備考', 'Notes': '備考', 'Status': '状態',
+    'Type': '種別', 'Capacity': '定員', 'Fuel': '燃料', 'Registration': '登録',
+    'Owner': '所有者', 'Location': '場所', 'Company': '会社', 'Branch': '支店',
+    'Date': '日付', 'Expiry': '期限', 'Comment': 'コメント', 'Description': '説明',
+  };
   Object.keys(item).forEach(function(key) {
-    if (skipKeys.indexOf(key) >= 0) return;
+    if (shownKeys.indexOf(key) >= 0) return;
     if (key.indexOf('Id') === key.length - 2 && key.length > 2) return;
     var val = item[key];
     if (val === null || val === undefined || val === '') return;
     if (typeof val === 'object') return;
-    // Find display name from field metadata
-    var fields = _vehicleFields || [];
     var fld = fields.find(function(f) { return f.EntityPropertyName === key || f.InternalName === key; });
     var label = fld ? fld.Title : key;
-    // Translate to Japanese
-    label = translateLabel(label);
-    if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) {
-      val = new Date(val).toLocaleDateString('ja-JP');
+    for (var eng in fieldTranslate) {
+      if (label.indexOf(eng) >= 0) { label = fieldTranslate[eng]; break; }
     }
-    html += '<tr><td style="padding:4px 8px;color:var(--text-light);">' + escHtml(label) + '</td><td style="padding:4px 8px;">' + escHtml(String(val)) + '</td></tr>';
+    if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) val = new Date(val).toLocaleDateString('ja-JP');
+    otherRows += row(label, String(val));
   });
-  html += '</table></div>';
+  if (otherRows) {
+    html += '<div style="' + sectionStyle + '">';
+    html += '<div style="' + headerStyle + 'background:#546e7a;">その他</div>';
+    html += otherRows;
+    html += '</div>';
+  }
 
-  // Button to view inspection records
-  html += '<div style="margin-top:16px;display:flex;gap:8px;">';
-  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;padding:10px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;font-size:13px;">🔧 点検記録を見る</button>';
-  html += '</div>';
+  // ボタン
+  html += '<div style="display:flex;gap:8px;margin-top:4px;">';
+  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;padding:11px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;font-size:13px;">🔧 点検記録を見る</button>';
   html += '</div>';
 
   document.getElementById('vehicleDetailBody').innerHTML = html;
