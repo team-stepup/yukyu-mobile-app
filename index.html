@@ -1958,7 +1958,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'd9bfeda';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6784,6 +6784,8 @@ async function openTaishaForm() {
     '</div>';
 
   document.body.appendChild(overlay);
+  var panel = overlay.querySelector('.taisha-panel');
+  if (panel) panel.scrollTop = 0;
 
 }
 
@@ -6984,6 +6986,8 @@ async function openShahoForm() {
     '</div>';
 
   document.body.appendChild(overlay);
+  var panel = overlay.querySelector('.taisha-panel');
+  if (panel) panel.scrollTop = 0;
 }
 
 function closeShahoForm() {
@@ -7228,6 +7232,8 @@ async function openDattaiForm() {
     '</div>';
 
   document.body.appendChild(overlay);
+  var panel = overlay.querySelector('.taisha-panel');
+  if (panel) panel.scrollTop = 0;
 
   // 扶養者データがある場合、自動で行を追加
   if (hasFuyou && huyouFurigana) {
@@ -7641,6 +7647,8 @@ async function openZaishokuForm() {
       '</div>' +
     '</div>';
   document.body.appendChild(overlay);
+  var panel = overlay.querySelector('.taisha-panel');
+  if (panel) panel.scrollTop = 0;
 }
 
 function closeZaishokuForm() {
@@ -7648,15 +7656,32 @@ function closeZaishokuForm() {
   if (el) el.remove();
 }
 
-// Basic Japanese address → romaji converter (best-effort, dictionary-based)
+// Japanese address → romaji converter (proper postal format: number, town, city, pref)
 function jpAddressToRomaji(addr) {
   if (!addr) return '';
+  var s = String(addr);
+  // Strip 〒postcode
+  s = s.replace(/^\s*〒?\s*\d{3}-?\d{4}\s*/, '');
+  // Convert full-width digits/dash first
+  s = s.replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+  s = s.replace(/[ー－]/g, '-');
+
+  // Extract number part (番地-号, or standalone numbers at end of town part)
+  var numberPart = '';
+  // Match patterns: 1006-7, 1006番地7号, 1006番7号, 1006-7号, etc.
+  var numMatch = s.match(/(\d[\d\-番地号の]+)/);
+  if (numMatch) {
+    numberPart = numMatch[1].replace(/番地?/g, '-').replace(/号/g, '').replace(/の/g, '-').replace(/-+/g, '-').replace(/-$/, '');
+    s = s.replace(numMatch[0], ' @NUM@ ');
+  }
+
   // Place name dictionary (Shizuoka focus + common neighbors)
   var dict = {
     // 都道府県
-    '北海道':'Hokkaido','東京都':'Tokyo','京都府':'Kyoto','大阪府':'Osaka',
-    '静岡県':'Shizuoka','愛知県':'Aichi','神奈川県':'Kanagawa','東京':'Tokyo',
-    '岐阜県':'Gifu','長野県':'Nagano','三重県':'Mie','山梨県':'Yamanashi',
+    '北海道':'Hokkaido','東京都':'Tokyo-to','京都府':'Kyoto-fu','大阪府':'Osaka-fu',
+    '静岡県':'Shizuoka-ken','愛知県':'Aichi-ken','神奈川県':'Kanagawa-ken',
+    '岐阜県':'Gifu-ken','長野県':'Nagano-ken','三重県':'Mie-ken','山梨県':'Yamanashi-ken',
+    '埼玉県':'Saitama-ken','千葉県':'Chiba-ken','群馬県':'Gunma-ken','栃木県':'Tochigi-ken',
     // 静岡県内 市区町村
     '磐田市':'Iwata-shi','浜松市':'Hamamatsu-shi','袋井市':'Fukuroi-shi',
     '掛川市':'Kakegawa-shi','森町':'Mori-cho','菊川市':'Kikugawa-shi',
@@ -7679,42 +7704,51 @@ function jpAddressToRomaji(addr) {
     '岡':'Oka','南島':'Minamijima','中野':'Nakano','下野部':'Shimonobe',
     // 浜松市町名（主要）
     '中央':'Chuo','広沢':'Hirosawa','三方原':'Mikatahara','和合':'Wago',
-    '佐鳴台':'Sanaru-dai','志都呂':'Shitoro','入野':'Irino','蜆塚':'Shijimizuka',
+    '佐鳴台':'Sanarui-dai','志都呂':'Shitoro','入野':'Irino','蜆塚':'Shijimizuka',
     // 袋井市
     '上山梨':'Kamiyamanashi','下山梨':'Shimoyamanashi'
   };
-  var s = String(addr);
-  // Strip 〒postcode
-  s = s.replace(/^\s*〒?\s*\d{3}-?\d{4}\s*/, '');
-  // Replace dictionary entries (longest first)
+
+  // Categorize dictionary hits by level for proper ordering
+  var pref = '', city = '', ward = '', town = '';
   var keys = Object.keys(dict).sort(function(a,b){ return b.length - a.length; });
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i];
-    if (s.indexOf(k) >= 0) s = s.split(k).join(' ' + dict[k] + ' ');
+    if (s.indexOf(k) < 0) continue;
+    var v = dict[k];
+    s = s.split(k).join(' ');
+    if (/-ken$/.test(v) || v === 'Hokkaido' || /-to$/.test(v) || /-fu$/.test(v)) pref = v;
+    else if (/-shi$/.test(v) || /-cho$/.test(v) || /-mura$/.test(v)) city = v;
+    else if (/-ku$/.test(v)) ward = v;
+    else town = v;
   }
-  // Suffix conversions (only if not already converted via dict)
-  s = s.replace(/([一-龥])県/g, '$1-ken');
-  s = s.replace(/([一-龥])府/g, '$1-fu');
-  s = s.replace(/([一-龥])市/g, '$1-shi');
-  s = s.replace(/([一-龥])区/g, '$1-ku');
-  s = s.replace(/([一-龥]+)町/g, '$1-cho');
-  s = s.replace(/([一-龥]+)村/g, '$1-mura');
-  s = s.replace(/([0-9０-９]+)丁目/g, '$1-chome');
-  s = s.replace(/([0-9０-９]+)番地/g, '$1');
-  s = s.replace(/番地/g, '');
-  s = s.replace(/番/g, '-');
-  s = s.replace(/号/g, '');
-  // Convert full-width digits/dash
-  s = s.replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
-  s = s.replace(/[ー－]/g, '-');
-  // Remove any remaining Japanese characters (kanji, hiragana, katakana)
+
+  // Suffix conversions for any remaining Japanese place names
+  var townExtra = '';
+  s = s.replace(/([一-龥]+)県/g, function(_,m){ return ' '; });
+  s = s.replace(/([一-龥]+)府/g, function(_,m){ return ' '; });
+  s = s.replace(/([一-龥]+)市/g, function(_,m){ return ' '; });
+  s = s.replace(/([一-龥]+)区/g, function(_,m){ return ' '; });
+  s = s.replace(/([一-龥]+)町/g, function(_,m){ return ' '; });
+  s = s.replace(/([一-龥]+)村/g, function(_,m){ return ' '; });
+  s = s.replace(/丁目/g, '');
+
+  // Remove any remaining Japanese characters
   s = s.replace(/[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uF900-\uFAFF]+/g, ' ');
-  // Collapse spaces
-  s = s.replace(/\s+/g, ' ').trim();
-  // Clean up stray dashes/commas
-  s = s.replace(/^[\s,\-]+/, '').replace(/[\s,\-]+$/, '');
-  s = s.replace(/\s*,\s*/g, ', ').replace(/-\s+-/g, '-');
-  return s;
+  s = s.replace(/@NUM@/g, '').replace(/\s+/g, ' ').trim();
+
+  // Build proper postal format: number, town, city, ward, pref
+  var parts = [];
+  if (numberPart) parts.push(numberPart);
+  if (town) parts.push(town);
+  if (s.trim()) parts.push(s.trim()); // any leftover romaji (apartment name etc.)
+  if (ward) parts.push(ward);
+  if (city) parts.push(city);
+  if (pref) parts.push(pref);
+
+  var result = parts.join(', ').replace(/,\s*,/g, ',').replace(/\s+/g, ' ').trim();
+  result = result.replace(/^[\s,]+/, '').replace(/[\s,]+$/, '');
+  return result;
 }
 
 async function generateZaishokuDocument(lang) {
@@ -7859,8 +7893,8 @@ async function generateZaishokuDocument(lang) {
     var COMPANY_TEL = '0538-36-6968';
 
     if (lang === 'pt') {
-      // === PT: Whiteout EVERYTHING below title and redraw at tighter positions ===
-      whiteRect(50, 178, 500, 650);
+      // === PT: Whiteout EVERYTHING below title and redraw ===
+      whiteRect(35, 178, 530, 660);
 
       // Auto helpers
       var effAddrRomaji = addressRomaji;
@@ -7873,80 +7907,81 @@ async function generateZaishokuDocument(lang) {
         effNatPt = natMap[nationality] || '';
       }
 
-      // Layout: centered on A4 (595pt), margins ~45pt each side
-      var LX = 45, VX = 175, RH = 50, Y0 = 178;
-      var MAXW = 505; // 595 - 45*2
-      var VMAXW = MAXW - (VX - LX); // value area width
+      // Layout: A4=595pt, margins 40pt each side → 515pt usable
+      var LX = 40, VX = 170, RH = 50, Y0 = 178;
+      var MAXW = 515;
+      var VMAXW = MAXW - (VX - LX);
 
       function ptLabel(y, jp, pt) {
-        drawText(LX, y, jp, 10);
-        drawText(LX, y + 14, pt, 8.5);
+        drawText(LX, y, jp, 11);
+        drawText(LX, y + 15, pt, 9);
       }
 
       // 現住所
       ptLabel(Y0, '現住所：', 'Endereço:');
-      drawTextFit(VX, Y0, address, 11, VMAXW);
-      drawTextFit(VX, Y0 + 14, effAddrRomaji, 9, VMAXW);
+      drawTextFit(VX, Y0, address, 12, VMAXW);
+      drawTextFit(VX, Y0 + 15, effAddrRomaji, 9.5, VMAXW);
 
       // 氏名
       var Y1 = Y0 + RH;
       ptLabel(Y1, '氏　名：', 'Nome:');
-      drawTextFit(VX, Y1, name, 11, VMAXW);
-      drawTextFit(VX, Y1 + 14, effNameAlt, 9, VMAXW);
+      drawTextFit(VX, Y1, name, 12, VMAXW);
+      drawTextFit(VX, Y1 + 15, effNameAlt, 9.5, VMAXW);
 
       // 生年月日
       var Y2 = Y1 + RH;
       ptLabel(Y2, '生年月日：', 'Data de Nascimento:');
-      drawTextFit(VX, Y2, fmtDateJP(birthday), 11, VMAXW);
-      drawTextFit(VX, Y2 + 14, fmtDatePT(birthday), 9, VMAXW);
+      drawTextFit(VX, Y2, fmtDateJP(birthday), 12, VMAXW);
+      drawTextFit(VX, Y2 + 15, fmtDatePT(birthday), 9.5, VMAXW);
 
       // 国籍
       var Y3 = Y2 + RH;
       ptLabel(Y3, '国　籍：', 'Nacionalidade:');
-      drawTextFit(VX, Y3, nationality, 11, VMAXW);
-      drawTextFit(VX, Y3 + 14, effNatPt, 9, VMAXW);
+      drawTextFit(VX, Y3, nationality, 12, VMAXW);
+      drawTextFit(VX, Y3 + 15, effNatPt, 9.5, VMAXW);
 
       // 採用年月日
       var Y4 = Y3 + RH;
       ptLabel(Y4, '採用年月日：', 'Data de inclusão na empresa:');
-      drawTextFit(VX, Y4, fmtDateJP(nyushaDate), 11, VMAXW);
-      drawTextFit(VX, Y4 + 14, fmtDatePT(nyushaDate), 9, VMAXW);
+      drawTextFit(VX, Y4, fmtDateJP(nyushaDate), 12, VMAXW);
+      drawTextFit(VX, Y4 + 15, fmtDatePT(nyushaDate), 9.5, VMAXW);
 
       // 証明文
       var YC = Y4 + RH + 15;
-      drawText(LX, YC, '上記の者につき、当事業所にて現在在職中である事を証明致します。', 10);
-      drawText(LX, YC + 16, 'Certifico que a pessoa acima está atualmente empregada em nossa empresa.', 8.5);
+      drawText(LX, YC, '上記の者につき、当事業所にて現在在職中である事を証明致します。', 10.5);
+      drawText(LX, YC + 17, 'Certifico que a pessoa acima está atualmente empregada em nossa empresa.', 9);
 
       // 日付
-      var YD = YC + 48;
-      drawTextFit(LX, YD, fmtDateJP(todayStr), 11, VMAXW);
-      drawTextFit(LX, YD + 14, fmtDatePT(todayStr), 9, VMAXW);
+      var YD = YC + 50;
+      drawTextFit(LX, YD, fmtDateJP(todayStr), 12, VMAXW);
+      drawTextFit(LX, YD + 15, fmtDatePT(todayStr), 9.5, VMAXW);
 
       // === 事業所情報 ===
-      var YB = YD + 48;
-      var VX2 = 195;
+      var YB = YD + 50;
+      var VX2 = 190;
+      var VX2W = MAXW - (VX2 - LX);
 
-      drawText(LX, YB, '事業所所在地：', 10);
-      drawText(LX, YB + 14, 'Endereço do escritório:', 8.5);
-      drawText(VX2, YB, COMPANY_ADDR_JP, 10);
-      drawTextFit(VX2, YB + 14, COMPANY_ADDR_RM, 8.5, MAXW - (VX2 - LX));
+      drawText(LX, YB, '事業所所在地：', 11);
+      drawText(LX, YB + 15, 'Endereço do escritório:', 9);
+      drawText(VX2, YB, COMPANY_ADDR_JP, 11);
+      drawTextFit(VX2, YB + 15, COMPANY_ADDR_RM, 9, VX2W);
 
       var YB2 = YB + 38;
-      drawText(LX, YB2, '事業所名称：', 10);
-      drawText(LX, YB2 + 14, 'Nome da Empresa:', 8.5);
-      drawText(VX2, YB2, COMPANY_NAME_JP, 10);
-      drawText(VX2, YB2 + 14, COMPANY_NAME_PT, 8.5);
+      drawText(LX, YB2, '事業所名称：', 11);
+      drawText(LX, YB2 + 15, 'Nome da Empresa:', 9);
+      drawText(VX2, YB2, COMPANY_NAME_JP, 11);
+      drawText(VX2, YB2 + 15, COMPANY_NAME_PT, 9);
 
-      var YB3 = YB2 + 35;
-      drawText(LX, YB3, '代表者：', 10);
-      drawText(LX, YB3 + 14, 'Representante:', 8.5);
-      drawText(VX2, YB3, '代表取締役 山下浩俊', 10);
-      drawTextFit(VX2, YB3 + 14, 'Diretor Representante: Hirotoshi Yamashita', 8.5, MAXW - (VX2 - LX));
+      var YB3 = YB2 + 36;
+      drawText(LX, YB3, '代表者：', 11);
+      drawText(LX, YB3 + 15, 'Representante:', 9);
+      drawText(VX2, YB3, '代表取締役 山下浩俊', 11);
+      drawTextFit(VX2, YB3 + 15, 'Diretor Representante: Hirotoshi Yamashita', 9, VX2W);
 
-      var YB4 = YB3 + 35;
-      drawText(LX, YB4, '電話番号：', 10);
-      drawText(LX, YB4 + 14, 'Telefone:', 8.5);
-      drawText(VX2, YB4, COMPANY_TEL, 10);
+      var YB4 = YB3 + 36;
+      drawText(LX, YB4, '電話番号：', 11);
+      drawText(LX, YB4 + 15, 'Telefone:', 9);
+      drawText(VX2, YB4, COMPANY_TEL, 11);
 
       // Red company seal
       drawRedSeal(340, YB3, 60);
