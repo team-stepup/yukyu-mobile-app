@@ -7747,11 +7747,22 @@ function openVehicleDetail(idx) {
   var fLegalExpenses = findPropByTitle('Legal Expenses') || findPropByTitle('搭乗者');
   var fLink = findPropByTitle('Link') || findPropByTitle('リンク') || findPropByTitle('link');
 
+  // ドライバー・送迎先の既存値リストを作成
+  var driverSet = {}, hakenSet = {};
+  _vehicleData.forEach(function(v) {
+    var d = vf.driver ? (v[vf.driver] || '') : '';
+    var h = vf.hakensaki ? (v[vf.hakensaki] || '') : '';
+    if (d) driverSet[d] = 1;
+    if (h) hakenSet[h] = 1;
+  });
+  var driverList = Object.keys(driverSet).sort();
+  var hakenList = Object.keys(hakenSet).sort();
+
   // 編集可能フィールド定義 [{label, prop, type, options?}]
   var editFields = [
-    { label: 'ドライバー', prop: vf.driver, type: 'text' },
+    { label: 'ドライバー', prop: vf.driver, type: 'dropdown_new', options: driverList },
     { label: '所属', prop: vf.affiliation, type: 'text' },
-    { label: '送迎先', prop: vf.hakensaki, type: 'text' },
+    { label: '送迎先', prop: vf.hakensaki, type: 'dropdown_new', options: hakenList },
     { label: '使用区分', prop: vf.usage, type: 'select', options: ['使用', '未使用', '会社'] },
     { label: '車検有効期限', prop: vf.syaken, type: 'date' },
     { label: '乗車定員', prop: fCapacity, type: 'text' },
@@ -7964,10 +7975,21 @@ function openVehicleEditForm(idx) {
 
   editFields.forEach(function(f, i) {
     var curVal = item[f.prop];
+    var inputStyle = 'width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;';
     formHtml += '<div style="margin-bottom:10px;">';
     formHtml += '<label style="font-size:11px;font-weight:600;color:var(--text-light);display:block;margin-bottom:3px;">' + escHtml(f.label) + '</label>';
-    if (f.type === 'select' && f.options) {
-      formHtml += '<select id="vedit_' + i + '" style="width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;">';
+    if (f.type === 'dropdown_new' && f.options) {
+      var isCustom = curVal && f.options.indexOf(curVal) < 0;
+      formHtml += '<select id="vedit_' + i + '" onchange="toggleVeditCustom(' + i + ')" style="' + inputStyle + '">';
+      formHtml += '<option value="">（なし）</option>';
+      f.options.forEach(function(o) {
+        formHtml += '<option value="' + escHtml(o) + '"' + (curVal === o ? ' selected' : '') + '>' + escHtml(o) + '</option>';
+      });
+      formHtml += '<option value="__new__"' + (isCustom ? ' selected' : '') + '>＋ 新規入力</option>';
+      formHtml += '</select>';
+      formHtml += '<input type="text" id="vedit_custom_' + i + '" placeholder="新しい値を入力" value="' + escHtml(isCustom ? String(curVal) : '') + '" style="' + inputStyle + 'margin-top:6px;display:' + (isCustom ? 'block' : 'none') + ';">';
+    } else if (f.type === 'select' && f.options) {
+      formHtml += '<select id="vedit_' + i + '" style="' + inputStyle + '">';
       formHtml += '<option value="">（なし）</option>';
       f.options.forEach(function(o) {
         formHtml += '<option value="' + escHtml(o) + '"' + (curVal === o ? ' selected' : '') + '>' + escHtml(o) + '</option>';
@@ -7975,9 +7997,9 @@ function openVehicleEditForm(idx) {
       formHtml += '</select>';
     } else if (f.type === 'date') {
       var dateVal = curVal ? String(curVal).substring(0, 10) : '';
-      formHtml += '<input type="date" id="vedit_' + i + '" value="' + escHtml(dateVal) + '" style="width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;">';
+      formHtml += '<input type="date" id="vedit_' + i + '" value="' + escHtml(dateVal) + '" style="' + inputStyle + '">';
     } else {
-      formHtml += '<input type="text" id="vedit_' + i + '" value="' + escHtml(String(curVal || '')) + '" style="width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;">';
+      formHtml += '<input type="text" id="vedit_' + i + '" value="' + escHtml(String(curVal || '')) + '" style="' + inputStyle + '">';
     }
     formHtml += '</div>';
   });
@@ -7991,6 +8013,32 @@ function openVehicleEditForm(idx) {
   ov.innerHTML = formHtml;
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
+}
+
+function toggleVeditCustom(i) {
+  var sel = document.getElementById('vedit_' + i);
+  var custom = document.getElementById('vedit_custom_' + i);
+  if (!sel || !custom) return;
+  if (sel.value === '__new__') {
+    custom.style.display = 'block';
+    custom.focus();
+  } else {
+    custom.style.display = 'none';
+    custom.value = '';
+  }
+}
+
+function getVeditValue(f, i) {
+  var el = document.getElementById('vedit_' + i);
+  if (!el) return '';
+  if (f.type === 'dropdown_new') {
+    if (el.value === '__new__') {
+      var custom = document.getElementById('vedit_custom_' + i);
+      return custom ? custom.value : '';
+    }
+    return el.value;
+  }
+  return el.value;
 }
 
 function saveVehicleEdit(idx) {
@@ -8025,9 +8073,7 @@ async function executeSaveVehicleEdit(idx) {
     var hasChanges = false;
 
     editFields.forEach(function(f, i) {
-      var el = document.getElementById('vedit_' + i);
-      if (!el) return;
-      var newVal = el.value;
+      var newVal = getVeditValue(f, i);
       var oldVal = item[f.prop];
 
       if (f.type === 'date') {
@@ -8072,9 +8118,7 @@ async function executeSaveVehicleEdit(idx) {
 
     // ローカルデータ更新
     editFields.forEach(function(f, i) {
-      var el = document.getElementById('vedit_' + i);
-      if (!el) return;
-      var newVal = el.value;
+      var newVal = getVeditValue(f, i);
       if (f.type === 'date') {
         _vehicleData[idx][f.prop] = newVal ? newVal + 'T00:00:00Z' : null;
       } else {
