@@ -1966,7 +1966,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '60afc65';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -3569,7 +3569,8 @@ async function loadHomeBadges() {
 
   // 有給確認: count current month's leave requests
   try {
-    var yFilter = "$filter=" + F.leaveDate + " ge datetime'" + monthStart.toISOString() + "' and " + F.leaveDate + " le datetime'" + monthEnd.toISOString() + "'&$top=500";
+    var todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+    var yFilter = "$filter=" + F.leaveDate + " ge datetime'" + monthStart.toISOString() + "' and " + F.leaveDate + " le datetime'" + todayEnd.toISOString() + "'&$top=500";
     var yRecs = await spGet(LIST_LEAVE_GUID, yFilter) || [];
     var yBadge = document.getElementById('yukyuBadgeCount');
     if (yBadge) {
@@ -7315,35 +7316,25 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
     var token = await getToken();
     if (!token) throw new Error('認証エラー');
 
-    // Try multiple list name patterns to find the kyuryo list
-    var listUrl = null;
-    var entityType = null;
-    var listGuid = null;
-    var listNames = ['List6', '給料精算SEISAN', '給料精算'];
-    for (var li = 0; li < listNames.length; li++) {
-      try {
-        var tryResp = await fetch(SP_SITE_URL + "/_api/web/lists/GetByTitle('" + encodeURIComponent(listNames[li]) + "')?$select=Id,ListItemEntityTypeFullName", {
-          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
-        });
-        if (tryResp.ok) {
-          var tryData = await tryResp.json();
-          listGuid = tryData.d.Id;
-          entityType = tryData.d.ListItemEntityTypeFullName;
-          console.log('Found kyuryo list:', listNames[li], listGuid);
-          break;
-        }
-      } catch(e) { console.log('List not found:', listNames[li]); }
-    }
-    if (!listGuid) throw new Error('給料精算リストが見つかりません（List6/給料精算SEISAN）');
+    // Access list via server-relative URL (most reliable)
+    var listApiBase = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List6')";
 
-    // Fetch list fields to get correct internal names
-    var fieldsResp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString&$top=200", {
+    // Get entity type
+    var metaResp = await fetch(listApiBase + "?$select=ListItemEntityTypeFullName", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!metaResp.ok) throw new Error('給料精算リスト(List6)にアクセスできません: ' + metaResp.status);
+    var metaData = await metaResp.json();
+    var entityType = metaData.d.ListItemEntityTypeFullName;
+
+    // Fetch list fields
+    var fieldsResp = await fetch(listApiBase + "/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString&$top=200", {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
     if (!fieldsResp.ok) throw new Error('フィールド情報取得失敗');
     var fieldsData = await fieldsResp.json();
     var fields = fieldsData.d.results || [];
-    console.log('Kyuryo list fields:', fields.map(function(f){ return f.Title + '(' + f.InternalName + ')'; }));
+    console.log('List6 fields:', fields.map(function(f){ return f.Title + '(' + f.InternalName + ':' + f.TypeAsString + ')'; }));
 
     // Build field name map by matching display names
     function findField(titleSubstr) {
@@ -7352,11 +7343,8 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
     }
 
     var body = { '__metadata': { type: entityType } };
-
-    // Title field = 部署 hakensaki
     body['Title'] = hakensaki;
 
-    // Map fields by display name
     var fNo = findField('社員番号') || findField('No');
     var fName = findField('名前') || findField('nome');
     var fHakenTaisha = findField('派遣先退社');
@@ -7365,7 +7353,7 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
     var fShiharai = findField('支払方法') || findField('支払');
     var fSonota = findField('その他') || findField('他');
 
-    console.log('Field mapping:', {fNo, fName, fHakenTaisha, fYukyuTaisha, fSeisan, fShiharai, fSonota});
+    console.log('Field mapping:', JSON.stringify({fNo:fNo, fName:fName, fHakenTaisha:fHakenTaisha, fYukyuTaisha:fYukyuTaisha, fSeisan:fSeisan, fShiharai:fShiharai, fSonota:fSonota}));
 
     if (fNo) body[fNo] = parseFloat(no) || no;
     if (fName) body[fName] = name;
@@ -7375,9 +7363,10 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
     if (fShiharai) body[fShiharai] = shiharai;
     if (fSonota) body[fSonota] = sonota;
 
-    console.log('Kyuryo POST body:', JSON.stringify(body));
+    console.log('POST body:', JSON.stringify(body));
 
-    var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')/items", {
+    // POST to create new list item
+    var resp = await fetch(listApiBase + "/items", {
       method: 'POST',
       headers: {
         'Authorization': 'Bearer ' + token,
@@ -7389,16 +7378,30 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
 
     if (!resp.ok) {
       var errText = await resp.text();
-      console.error('Kyuryo submit error:', errText);
-      // Retry without problematic fields
-      var errObj = {};
-      try { errObj = JSON.parse(errText); } catch(e){}
-      var errMsg = (errObj.error && errObj.error.message && errObj.error.message.value) || resp.status;
-      throw new Error(errMsg);
+      console.error('POST error:', errText);
+      // If field error, retry with only Title
+      if (errText.indexOf('value does not fall') >= 0 || errText.indexOf('Invalid') >= 0) {
+        console.log('Retrying with minimal fields...');
+        var minBody = { '__metadata': { type: entityType }, 'Title': hakensaki };
+        var resp2 = await fetch(listApiBase + "/items", {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'Content-Type': 'application/json;odata=verbose' },
+          body: JSON.stringify(minBody),
+        });
+        if (!resp2.ok) {
+          var err2 = await resp2.text();
+          console.error('Minimal POST error:', err2);
+          throw new Error('送信失敗（最小）: ' + resp2.status);
+        }
+      } else {
+        var errObj = {};
+        try { errObj = JSON.parse(errText); } catch(e){}
+        var errMsg = (errObj.error && errObj.error.message && errObj.error.message.value) || resp.status;
+        throw new Error(errMsg);
+      }
     }
 
     closeKyuryoForm();
-    // 完了通知（大きなダイアログ）
     var doneOv = document.createElement('div');
     doneOv.className = 'confirm-overlay';
     doneOv.style.zIndex = '99999';
