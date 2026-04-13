@@ -1709,7 +1709,7 @@ body {
       <span id="vehicleListCount" style="font-size:12px;color:var(--text-light);margin-left:auto;"></span>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:8px;">
-      <input id="vehicleSearchInput" type="text" placeholder="ナンバー / 車名 で検索" style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;" oninput="applyVehicleFilter()">
+      <input id="vehicleSearchInput" type="text" placeholder="ナンバー / 車名 / 運転手 / 所属" style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;" oninput="applyVehicleFilter()">
       <button onclick="document.getElementById('vehicleSearchInput').value='';applyVehicleFilter();" style="padding:6px 10px;border:none;background:none;font-size:16px;color:#999;">&times;</button>
     </div>
     <div id="vehicleFilterBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
@@ -2002,7 +2002,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'e25eb9a';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7486,8 +7486,9 @@ async function loadVehicleList() {
     var fSyaken = findProp('車検');
     var fColor = findProp('色') || findProp('カラー');
     var fUsage = findProp('使用');
+    var fAffiliation = findProp('Affiliation') || findProp('所属') || findProp('affiliation');
 
-    console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage}));
+    console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage, fAffiliation:fAffiliation}));
 
     // Build Usage filter buttons
     var usageSet = {};
@@ -7496,15 +7497,17 @@ async function loadVehicleList() {
       usageSet[u] = (usageSet[u] || 0) + 1;
     });
     var filterDiv = document.getElementById('vehicleFilterBtns');
-    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleList(this,\'all\')">全て(' + items.length + ')</button>';
+    var filterHtml = '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'all\')">全て(' + items.length + ')</button>';
     Object.keys(usageSet).sort().forEach(function(u) {
-      filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'' + escHtml(u) + '\')">' + escHtml(u) + '(' + usageSet[u] + ')</button>';
+      var isActive = (u === '使用') ? ' active' : '';
+      filterHtml += '<button class="expiry-filter-btn' + isActive + '" onclick="filterVehicleList(this,\'' + escHtml(u) + '\')">' + escHtml(u) + '(' + usageSet[u] + ')</button>';
     });
     filterDiv.innerHTML = filterHtml;
 
     // Store field mapping globally
-    window._vf = { number: fNumber, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage };
-    window._vehicleUsageFilter = 'all';
+    window._vf = { number: fNumber, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
+    // デフォルト「使用」フィルター
+    window._vehicleUsageFilter = '使用';
 
     countEl.textContent = items.length + '台';
     document.getElementById('vehicleSearchInput').value = '';
@@ -7534,11 +7537,13 @@ function applyVehicleFilter() {
       var u = vf.usage ? (item[vf.usage] || '未設定') : '未設定';
       if (u !== usage) return false;
     }
-    // Search filter (ナンバー or 車名)
+    // Search filter (ナンバー / 車名 / ドライバー / Affiliation)
     if (searchVal) {
       var number = (item[vf.number] || item['Title'] || '').toLowerCase();
       var carType = vf.carType ? (item[vf.carType] || '').toLowerCase() : '';
-      if (number.indexOf(searchVal) < 0 && carType.indexOf(searchVal) < 0) return false;
+      var driver = vf.driver ? (item[vf.driver] || '').toLowerCase() : '';
+      var affil = vf.affiliation ? (item[vf.affiliation] || '').toLowerCase() : '';
+      if (number.indexOf(searchVal) < 0 && carType.indexOf(searchVal) < 0 && driver.indexOf(searchVal) < 0 && affil.indexOf(searchVal) < 0) return false;
     }
     return true;
   });
