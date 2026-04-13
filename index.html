@@ -1958,7 +1958,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '2306833';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7174,9 +7174,13 @@ async function submitKyuryoForm() {
   if (!seisanDate) { showToast('精算日（振込日）を入力してください', 'error'); return; }
   if (!shiharai) { showToast('支払方法を選択してください', 'error'); return; }
 
+  // Store params globally for confirm callback
+  window._kyuryoParams = { hakensaki: hakensaki, no: no, name: name, hakenTaisha: hakenTaisha, yukyuTaisha: yukyuTaisha, seisanDate: seisanDate, shiharai: shiharai, sonota: sonota };
+
   // Confirm
   var overlay = document.createElement('div');
   overlay.className = 'confirm-overlay';
+  overlay.id = 'kyuryoConfirmOverlay';
   overlay.style.zIndex = '99999';
   overlay.innerHTML = '<div class="confirm-box">' +
     '<div class="confirm-title">💰 給料精算確認</div>' +
@@ -7190,16 +7194,19 @@ async function submitKyuryoForm() {
     (sonota ? 'その他: ' + escHtml(sonota) + '<br>' : '') +
     '</div>' +
     '<div class="confirm-btns">' +
-    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
-    '<button class="btn-ok" id="kyuryoConfirmOk">申請する</button>' +
+    '<button class="btn-cancel" onclick="document.getElementById(\'kyuryoConfirmOverlay\').remove()">戻る</button>' +
+    '<button class="btn-ok" onclick="confirmKyuryoSubmit()">申請する</button>' +
     '</div></div>';
   document.body.appendChild(overlay);
   overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+}
 
-  document.getElementById('kyuryoConfirmOk').addEventListener('click', function() {
-    overlay.remove();
-    executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota);
-  });
+function confirmKyuryoSubmit() {
+  var el = document.getElementById('kyuryoConfirmOverlay');
+  if (el) el.remove();
+  var p = window._kyuryoParams;
+  if (!p) return;
+  executeKyuryoSubmit(p.hakensaki, p.no, p.name, p.hakenTaisha, p.yukyuTaisha, p.seisanDate, p.shiharai, p.sonota);
 }
 
 async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha, seisanDate, shiharai, sonota) {
@@ -7292,8 +7299,22 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
       throw new Error(errMsg);
     }
 
-    showToast('💰 給料精算を申請しました', 'success');
     closeKyuryoForm();
+    // 完了通知（大きなダイアログ）
+    var doneOv = document.createElement('div');
+    doneOv.className = 'confirm-overlay';
+    doneOv.style.zIndex = '99999';
+    doneOv.innerHTML = '<div class="confirm-box" style="text-align:center;">' +
+      '<div style="font-size:48px;margin-bottom:12px;">✅</div>' +
+      '<div class="confirm-title" style="color:#2e7d32;">申請完了</div>' +
+      '<div class="confirm-msg">' +
+      '<strong>' + escHtml(no + ' ' + name) + '</strong><br>' +
+      '給料精算を申請しました。<br>Teamsに承認要求が届きます。' +
+      '</div>' +
+      '<div class="confirm-btns">' +
+      '<button class="btn-ok" onclick="this.closest(\'.confirm-overlay\').remove()">OK</button>' +
+      '</div></div>';
+    document.body.appendChild(doneOv);
 
   } catch (e) {
     console.error('Kyuryo submit error:', e);
