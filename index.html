@@ -1708,6 +1708,10 @@ body {
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🚗 車両一覧</h2>
       <span id="vehicleListCount" style="font-size:12px;color:var(--text-light);margin-left:auto;"></span>
     </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <input id="vehicleSearchInput" type="text" placeholder="ナンバー / 車名 で検索" style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;" oninput="applyVehicleFilter()">
+      <button onclick="document.getElementById('vehicleSearchInput').value='';applyVehicleFilter();" style="padding:6px 10px;border:none;background:none;font-size:16px;color:#999;">&times;</button>
+    </div>
     <div id="vehicleFilterBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
     <div id="vehicleListBody"></div>
   </div>
@@ -7485,43 +7489,62 @@ async function loadVehicleList() {
 
     console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage}));
 
-    // Build hakensaki filter buttons
-    var hakenSet = {};
+    // Build Usage filter buttons
+    var usageSet = {};
     items.forEach(function(item) {
-      var h = fHakensaki ? (item[fHakensaki] || '') : '';
-      if (h) hakenSet[h] = (hakenSet[h] || 0) + 1;
+      var u = fUsage ? (item[fUsage] || '未設定') : '未設定';
+      usageSet[u] = (usageSet[u] || 0) + 1;
     });
     var filterDiv = document.getElementById('vehicleFilterBtns');
-    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleList(\'all\')">全て(' + items.length + ')</button>';
-    Object.keys(hakenSet).sort().forEach(function(h) {
-      filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(\'' + escHtml(h) + '\')">' + escHtml(h) + '(' + hakenSet[h] + ')</button>';
+    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleList(this,\'all\')">全て(' + items.length + ')</button>';
+    Object.keys(usageSet).sort().forEach(function(u) {
+      filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(this,\'' + escHtml(u) + '\')">' + escHtml(u) + '(' + usageSet[u] + ')</button>';
     });
     filterDiv.innerHTML = filterHtml;
 
     // Store field mapping globally
     window._vf = { number: fNumber, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage };
+    window._vehicleUsageFilter = 'all';
 
     countEl.textContent = items.length + '台';
-    renderVehicleCards(items);
+    document.getElementById('vehicleSearchInput').value = '';
+    applyVehicleFilter();
   } catch(e) {
     console.error('Vehicle list error:', e);
     body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">' + escHtml(e.message) + '</div>';
   }
 }
 
-function filterVehicleList(haken) {
+function filterVehicleList(btn, usage) {
   var btns = document.querySelectorAll('#vehicleFilterBtns .expiry-filter-btn');
   btns.forEach(function(b) { b.classList.remove('active'); });
-  event.target.classList.add('active');
+  btn.classList.add('active');
+  window._vehicleUsageFilter = usage;
+  applyVehicleFilter();
+}
 
-  if (haken === 'all') {
-    renderVehicleCards(_vehicleData);
-  } else {
-    var filtered = _vehicleData.filter(function(item) {
-      return window._vf.hakensaki && item[window._vf.hakensaki] === haken;
-    });
-    renderVehicleCards(filtered);
-  }
+function applyVehicleFilter() {
+  var vf = window._vf || {};
+  var usage = window._vehicleUsageFilter || 'all';
+  var searchVal = (document.getElementById('vehicleSearchInput').value || '').trim().toLowerCase();
+
+  var filtered = _vehicleData.filter(function(item) {
+    // Usage filter
+    if (usage !== 'all') {
+      var u = vf.usage ? (item[vf.usage] || '未設定') : '未設定';
+      if (u !== usage) return false;
+    }
+    // Search filter (ナンバー or 車名)
+    if (searchVal) {
+      var number = (item[vf.number] || item['Title'] || '').toLowerCase();
+      var carType = vf.carType ? (item[vf.carType] || '').toLowerCase() : '';
+      if (number.indexOf(searchVal) < 0 && carType.indexOf(searchVal) < 0) return false;
+    }
+    return true;
+  });
+
+  document.getElementById('vehicleListCount').textContent = filtered.length + '台';
+  renderVehicleCards(filtered);
 }
 
 function renderVehicleCards(items) {
