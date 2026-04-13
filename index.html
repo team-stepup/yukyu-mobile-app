@@ -1666,6 +1666,11 @@ body {
         <span class="ql-text">期限注意</span>
         <span id="expiryBadgeCount" class="ql-badge" style="background:#d32f2f;display:none;"></span>
       </button>
+      <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
+        <span class="ql-icon">🚗</span>
+        <span class="ql-text">車両管理</span>
+        <span id="vehicleBadgeCount" class="ql-badge" style="background:#1565c0;display:none;"></span>
+      </button>
     </div>
 
     <div class="home-search-card">
@@ -1695,6 +1700,33 @@ body {
       </div>
       <button class="home-search-btn" style="width:100%;margin-top:10px;padding:11px;border-radius:12px;" onclick="openHakenList()">表示</button>
     </div>
+  </div>
+
+  <!-- Screen: 車両一覧 -->
+  <div class="screen" id="vehicleListScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🚗 車両一覧</h2>
+      <span id="vehicleListCount" style="font-size:12px;color:var(--text-light);margin-left:auto;"></span>
+    </div>
+    <div id="vehicleFilterBtns" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+    <div id="vehicleListBody"></div>
+  </div>
+
+  <!-- Screen: 車両台帳 -->
+  <div class="screen" id="vehicleDetailScreen">
+    <div id="vehicleDetailBody"></div>
+  </div>
+
+  <!-- Screen: 点検記録 -->
+  <div class="screen" id="tenkenListScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🔧 点検記録</h2>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <input id="tenkenSearchInput" type="text" placeholder="ナンバーで検索" style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;">
+      <button onclick="searchTenken()" style="padding:8px 16px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;">検索</button>
+    </div>
+    <div id="tenkenListBody"></div>
   </div>
 
   <!-- Screen: 期限注意リスト -->
@@ -1966,7 +1998,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '3a885dd';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2462,7 +2494,7 @@ function switchScreen(screenId, skipHistory) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -2496,6 +2528,7 @@ function switchScreen(screenId, skipHistory) {
   if (screenId === 'maebariListScreen') initMaebariListDate();
   if (screenId === 'yukyuListScreen') initYukyuListDate();
   if (screenId === 'nyutaiScreen') loadNyutaiScreen();
+  if (screenId === 'vehicleListScreen') loadVehicleList();
 }
 
 function resetSearch() {
@@ -7382,6 +7415,292 @@ async function executeKyuryoSubmit(hakensaki, no, name, hakenTaisha, yukyuTaisha
     showToast('送信に失敗しました: ' + e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '💰 給料精算を申請'; }
+  }
+}
+
+// ============================================================
+// 車両管理 (List) & 点検記録 (List2)
+// ============================================================
+var _vehicleFields = null;
+var _tenkenFields = null;
+var _vehicleData = [];
+
+async function fetchVehicleFields() {
+  if (_vehicleFields) return _vehicleFields;
+  var token = await getToken();
+  var resp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString,EntityPropertyName&$top=300", {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+  });
+  if (!resp.ok) throw new Error('車両リストフィールド取得失敗');
+  var data = await resp.json();
+  _vehicleFields = data.d.results || [];
+  console.log('Vehicle fields:', _vehicleFields.map(function(f){ return f.Title + '→' + f.EntityPropertyName + '(' + f.TypeAsString + ')'; }));
+  return _vehicleFields;
+}
+
+async function fetchTenkenFields() {
+  if (_tenkenFields) return _tenkenFields;
+  var token = await getToken();
+  var resp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List2')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,TypeAsString,EntityPropertyName&$top=300", {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+  });
+  if (!resp.ok) throw new Error('点検リストフィールド取得失敗');
+  var data = await resp.json();
+  _tenkenFields = data.d.results || [];
+  console.log('Tenken fields:', _tenkenFields.map(function(f){ return f.Title + '→' + f.EntityPropertyName + '(' + f.TypeAsString + ')'; }));
+  return _tenkenFields;
+}
+
+async function loadVehicleList() {
+  var body = document.getElementById('vehicleListBody');
+  var countEl = document.getElementById('vehicleListCount');
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+
+  try {
+    var token = await getToken();
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')";
+    var resp = await fetch(listApi + "/items?$top=500&$orderby=Title asc", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) throw new Error('車両データ取得失敗: ' + resp.status);
+    var data = await resp.json();
+    var items = data.d.results || [];
+    _vehicleData = items;
+
+    // Also fetch fields for mapping
+    var fields = await fetchVehicleFields();
+    function findProp(titleSubstr) {
+      var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(titleSubstr) >= 0; });
+      return hit ? hit.EntityPropertyName : null;
+    }
+
+    // Debug: show field mapping in console
+    var fNumber = findProp('ナンバー') || findProp('number') || 'Title';
+    var fCarType = findProp('車種') || findProp('車名');
+    var fDriver = findProp('ドライバー') || findProp('運転');
+    var fHakensaki = findProp('送迎') || findProp('派遣');
+    var fSyaken = findProp('車検');
+    var fColor = findProp('色') || findProp('カラー');
+    var fUsage = findProp('使用');
+
+    console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage}));
+
+    // Build hakensaki filter buttons
+    var hakenSet = {};
+    items.forEach(function(item) {
+      var h = fHakensaki ? (item[fHakensaki] || '') : '';
+      if (h) hakenSet[h] = (hakenSet[h] || 0) + 1;
+    });
+    var filterDiv = document.getElementById('vehicleFilterBtns');
+    var filterHtml = '<button class="expiry-filter-btn active" onclick="filterVehicleList(\'all\')">全て(' + items.length + ')</button>';
+    Object.keys(hakenSet).sort().forEach(function(h) {
+      filterHtml += '<button class="expiry-filter-btn" onclick="filterVehicleList(\'' + escHtml(h) + '\')">' + escHtml(h) + '(' + hakenSet[h] + ')</button>';
+    });
+    filterDiv.innerHTML = filterHtml;
+
+    // Store field mapping globally
+    window._vf = { number: fNumber, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage };
+
+    countEl.textContent = items.length + '台';
+    renderVehicleCards(items);
+  } catch(e) {
+    console.error('Vehicle list error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">' + escHtml(e.message) + '</div>';
+  }
+}
+
+function filterVehicleList(haken) {
+  var btns = document.querySelectorAll('#vehicleFilterBtns .expiry-filter-btn');
+  btns.forEach(function(b) { b.classList.remove('active'); });
+  event.target.classList.add('active');
+
+  if (haken === 'all') {
+    renderVehicleCards(_vehicleData);
+  } else {
+    var filtered = _vehicleData.filter(function(item) {
+      return window._vf.hakensaki && item[window._vf.hakensaki] === haken;
+    });
+    renderVehicleCards(filtered);
+  }
+}
+
+function renderVehicleCards(items) {
+  var vf = window._vf || {};
+  var today = new Date();
+  var html = '';
+
+  items.forEach(function(item, idx) {
+    var number = item[vf.number] || item['Title'] || '';
+    var carType = vf.carType ? (item[vf.carType] || '') : '';
+    var driver = vf.driver ? (item[vf.driver] || '') : '';
+    var hakensaki = vf.hakensaki ? (item[vf.hakensaki] || '') : '';
+    var syaken = vf.syaken ? (item[vf.syaken] || '') : '';
+    var color = vf.color ? (item[vf.color] || '') : '';
+    var usage = vf.usage ? (item[vf.usage] || '') : '';
+
+    var syakenDate = syaken ? new Date(syaken) : null;
+    var syakenStr = syakenDate && !isNaN(syakenDate) ? syakenDate.toLocaleDateString('ja-JP') : '';
+    var daysLeft = syakenDate ? Math.ceil((syakenDate - today) / 86400000) : 999;
+    var syakenColor = daysLeft <= 30 ? '#c62828' : daysLeft <= 90 ? '#f57c00' : 'var(--text-light)';
+
+    html += '<div style="background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--border);cursor:pointer;" onclick="openVehicleDetail(' + idx + ')">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+    html += '<div style="font-weight:700;font-size:14px;color:var(--primary);">' + escHtml(number) + '</div>';
+    html += '<div style="font-size:12px;color:var(--text-light);">' + escHtml(carType) + (color ? ' / ' + escHtml(color) : '') + '</div>';
+    html += '</div>';
+    html += '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;">';
+    html += '<div>🧑 ' + escHtml(driver) + '</div>';
+    html += '<div>' + escHtml(hakensaki) + '</div>';
+    html += '</div>';
+    if (syakenStr) {
+      html += '<div style="margin-top:4px;font-size:11px;color:' + syakenColor + ';">車検: ' + syakenStr;
+      if (daysLeft <= 90) html += ' <strong>(' + daysLeft + '日)</strong>';
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+
+  document.getElementById('vehicleListBody').innerHTML = html || '<div style="text-align:center;padding:20px;color:var(--text-light);">データなし</div>';
+}
+
+function openVehicleDetail(idx) {
+  var item = _vehicleData[idx];
+  if (!item) return;
+  var vf = window._vf || {};
+
+  var number = item[vf.number] || item['Title'] || '';
+  var carType = vf.carType ? (item[vf.carType] || '') : '';
+  var driver = vf.driver ? (item[vf.driver] || '') : '';
+  var hakensaki = vf.hakensaki ? (item[vf.hakensaki] || '') : '';
+  var syaken = vf.syaken ? (item[vf.syaken] || '') : '';
+  var color = vf.color ? (item[vf.color] || '') : '';
+
+  var syakenDate = syaken ? new Date(syaken) : null;
+  var syakenStr = syakenDate && !isNaN(syakenDate) ? syakenDate.toLocaleDateString('ja-JP') : '-';
+  var daysLeft = syakenDate ? Math.ceil((syakenDate - new Date()) / 86400000) : 999;
+  var warn = daysLeft <= 90 ? ' ⚠️' : '';
+
+  var html = '<div style="background:#fff;border-radius:14px;padding:16px;border:1px solid var(--border);">';
+  html += '<div style="text-align:center;font-size:18px;font-weight:700;color:var(--primary);margin-bottom:12px;">🚗 車両管理台帳</div>';
+  html += '<table style="width:100%;font-size:13px;border-collapse:collapse;">';
+  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);width:100px;">ナンバー</td><td style="padding:6px 8px;font-weight:700;">' + escHtml(number) + '</td></tr>';
+  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">車種</td><td style="padding:6px 8px;">' + escHtml(carType) + (color ? ' / ' + escHtml(color) : '') + '</td></tr>';
+  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">ドライバー' + warn + '</td><td style="padding:6px 8px;">' + escHtml(driver) + '</td></tr>';
+  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">車検日' + warn + '</td><td style="padding:6px 8px;">' + syakenStr + '</td></tr>';
+  html += '<tr><td style="padding:6px 8px;font-weight:600;color:var(--text-light);">送迎先</td><td style="padding:6px 8px;">' + escHtml(hakensaki) + '</td></tr>';
+  html += '</table>';
+
+  // Show all other fields
+  html += '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">';
+  html += '<div style="font-weight:700;font-size:13px;margin-bottom:8px;">その他の情報</div>';
+  html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+  var skipKeys = ['__metadata', 'Id', 'ID', 'Title', 'ContentTypeId', 'AuthorId', 'EditorId', 'Created', 'Modified', 'Attachments', 'GUID', 'FileSystemObjectType', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl', 'OData__UIVersionString', 'OData__ColorTag', 'ComplianceAssetId'];
+  if (vf.number && vf.number !== 'Title') skipKeys.push(vf.number);
+  if (vf.carType) skipKeys.push(vf.carType);
+  if (vf.driver) skipKeys.push(vf.driver);
+  if (vf.hakensaki) skipKeys.push(vf.hakensaki);
+  if (vf.syaken) skipKeys.push(vf.syaken);
+  if (vf.color) skipKeys.push(vf.color);
+
+  Object.keys(item).forEach(function(key) {
+    if (skipKeys.indexOf(key) >= 0) return;
+    if (key.indexOf('Id') === key.length - 2 && key.length > 2) return;
+    var val = item[key];
+    if (val === null || val === undefined || val === '') return;
+    if (typeof val === 'object') return;
+    // Find display name
+    var fields = _vehicleFields || [];
+    var fld = fields.find(function(f) { return f.EntityPropertyName === key || f.InternalName === key; });
+    var label = fld ? fld.Title : key;
+    if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) {
+      val = new Date(val).toLocaleDateString('ja-JP');
+    }
+    html += '<tr><td style="padding:4px 8px;color:var(--text-light);">' + escHtml(label) + '</td><td style="padding:4px 8px;">' + escHtml(String(val)) + '</td></tr>';
+  });
+  html += '</table></div>';
+
+  // Button to view inspection records
+  html += '<div style="margin-top:16px;display:flex;gap:8px;">';
+  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;padding:10px;border-radius:10px;background:var(--primary);color:#fff;border:none;font-weight:600;font-size:13px;">🔧 点検記録を見る</button>';
+  html += '</div>';
+  html += '</div>';
+
+  document.getElementById('vehicleDetailBody').innerHTML = html;
+  switchScreen('vehicleDetailScreen');
+}
+
+function openTenkenForVehicle(number) {
+  document.getElementById('tenkenSearchInput').value = number;
+  switchScreen('tenkenListScreen');
+  searchTenken();
+}
+
+async function searchTenken() {
+  var query = document.getElementById('tenkenSearchInput').value.trim();
+  var body = document.getElementById('tenkenListBody');
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+
+  try {
+    var token = await getToken();
+    var fields = await fetchTenkenFields();
+    function findProp(titleSubstr) {
+      var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(titleSubstr) >= 0; });
+      return hit ? hit.EntityPropertyName : null;
+    }
+
+    var fNumber = findProp('ナンバー') || findProp('number') || 'Title';
+    var fDate = findProp('点検日') || findProp('日時') || findProp('日付');
+    var fCarType = findProp('車種') || findProp('車名');
+    var fMileage = findProp('走行') || findProp('距離');
+    var fDriver = findProp('ドライバー') || findProp('運転');
+
+    console.log('Tenken field map:', JSON.stringify({fNumber:fNumber, fDate:fDate, fCarType:fCarType, fMileage:fMileage, fDriver:fDriver}));
+
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List2')";
+    var filterStr = query ? "$filter=substringof('" + encodeURIComponent(query) + "'," + fNumber + ")&" : '';
+    var resp = await fetch(listApi + "/items?" + filterStr + "$orderby=" + (fDate || 'Created') + " desc&$top=200", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) throw new Error('点検記録取得失敗: ' + resp.status);
+    var data = await resp.json();
+    var items = data.d.results || [];
+
+    if (items.length === 0) {
+      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">データなし</div>';
+      return;
+    }
+
+    var html = '<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;background:#fff;border-radius:10px;">';
+    html += '<thead><tr style="background:var(--primary);color:#fff;">';
+    html += '<th style="padding:8px 6px;text-align:left;">点検日</th>';
+    html += '<th style="padding:8px 6px;text-align:left;">ナンバー</th>';
+    html += '<th style="padding:8px 6px;text-align:left;">車種</th>';
+    html += '<th style="padding:8px 6px;text-align:right;">走行距離</th>';
+    html += '<th style="padding:8px 6px;text-align:left;">ドライバー</th>';
+    html += '</tr></thead><tbody>';
+
+    items.forEach(function(item) {
+      var dateVal = fDate ? (item[fDate] || '') : '';
+      var dateStr = dateVal ? new Date(dateVal).toLocaleDateString('ja-JP') : '';
+      var numVal = item[fNumber] || item['Title'] || '';
+      var carVal = fCarType ? (item[fCarType] || '') : '';
+      var mileVal = fMileage ? (item[fMileage] || '') : '';
+      var drvVal = fDriver ? (item[fDriver] || '') : '';
+
+      html += '<tr style="border-bottom:1px solid #eee;">';
+      html += '<td style="padding:6px;">' + escHtml(dateStr) + '</td>';
+      html += '<td style="padding:6px;">' + escHtml(String(numVal)) + '</td>';
+      html += '<td style="padding:6px;">' + escHtml(carVal) + '</td>';
+      html += '<td style="padding:6px;text-align:right;">' + (mileVal ? Number(mileVal).toLocaleString() : '') + '</td>';
+      html += '<td style="padding:6px;">' + escHtml(drvVal) + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    body.innerHTML = html;
+  } catch(e) {
+    console.error('Tenken search error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">' + escHtml(e.message) + '</div>';
   }
 }
 
