@@ -1509,6 +1509,57 @@ body {
   margin-bottom: 8px;
 }
 .profile-header .profile-meta span { white-space: nowrap; }
+.profile-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px dashed #eef1f6;
+}
+.profile-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #e3eaf5;
+  border-radius: 16px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.profile-quick-btn:active { transform: scale(0.95); }
+.profile-quick-btn .pq-icon { font-size: 13px; line-height: 1; }
+.profile-quick-btn .pq-label { line-height: 1; }
+.profile-quick-btn.pq-folder {
+  background: linear-gradient(135deg, #1565c0, #42a5f5);
+  color: #fff;
+  border-color: #1565c0;
+  box-shadow: 0 2px 6px rgba(21,101,192,0.25);
+}
+.profile-quick-btn.pq-gensen {
+  background: linear-gradient(135deg, #ef6c00, #ffa726);
+  color: #fff;
+  border-color: #ef6c00;
+  box-shadow: 0 2px 6px rgba(239,108,0,0.25);
+}
+.profile-quick-btn.pq-kyuryou {
+  background: linear-gradient(135deg, #c62828, #ef5350);
+  color: #fff;
+  border-color: #c62828;
+  box-shadow: 0 2px 6px rgba(198,40,40,0.25);
+}
+.profile-quick-btn.pq-chingin {
+  background: linear-gradient(135deg, #6a1b9a, #ab47bc);
+  color: #fff;
+  border-color: #6a1b9a;
+  box-shadow: 0 2px 6px rgba(106,27,154,0.25);
+}
 
 /* Accordion */
 .accordion-section {
@@ -3579,6 +3630,16 @@ async function loadLeaveDetails() {
   const tsukinValH = tsukinKeyH ? (emp[tsukinKeyH] || '') : '';
   const tsukinIcon = tsukinValH.indexOf('車') >= 0 ? '🚗' : tsukinValH.indexOf('電車') >= 0 ? '🚃' : tsukinValH.indexOf('バス') >= 0 ? '🚌' : tsukinValH.indexOf('自転車') >= 0 ? '🚲' : tsukinValH.indexOf('徒歩') >= 0 ? '🚶' : '🚶';
 
+  // 社員ファイルURLを取得（emp内のspUrl型フィールドを検索）
+  var syainFileUrl = '';
+  for (var _k in emp) {
+    var _v = emp[_k];
+    if (_v && typeof _v === 'object' && _v.Url) { syainFileUrl = _v.Url; break; }
+  }
+  var empNoStr = String(emp[F.syainNo] || '');
+  var empNameStr = String(emp.Title || '');
+  var sfBtnB64 = syainFileUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ url: syainFileUrl, no: empNoStr, name: empNameStr })))) : '';
+
   // Header (shared between all tabs)
   document.getElementById('detailHeader').innerHTML = `
     <div class="profile-header">
@@ -3592,6 +3653,12 @@ async function loadLeaveDetails() {
         ${hakensaki ? '<span>派遣先: ' + escHtml(hakensaki) + '</span>' : ''}
         <span>起算日: ${formatDate(kisanDate)}</span>
         ${resigned ? '<span style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</span>' : ''}
+      </div>
+      <div class="profile-quick-actions">
+        ${syainFileUrl ? `<button class="profile-quick-btn pq-folder" onclick="openSyainFolderFromPayload('${sfBtnB64}')"><span class="pq-icon">📂</span><span class="pq-label">社員ファイル</span></button>` : ''}
+        <button class="profile-quick-btn pq-gensen" onclick="openGensenSearch()"><span class="pq-icon">📄</span><span class="pq-label">源泉</span></button>
+        <button class="profile-quick-btn pq-kyuryou" onclick="openKyuryouSearch()"><span class="pq-icon">💴</span><span class="pq-label">給料明細</span></button>
+        <button class="profile-quick-btn pq-chingin" onclick="openChinginViewer()"><span class="pq-icon">📒</span><span class="pq-label">賃金台帳</span></button>
       </div>
     </div>
   `;
@@ -3887,7 +3954,6 @@ const PROFILE_CATEGORIES = [
       { key: 'yukyuTaisha', label: '有給使用後退社日', format: 'date' },
       { key: 'kisanDate', label: '有休付与起算日', format: 'date' },
       { key: '_calcTenure', label: '在職期間', format: 'calcTenure' },
-      { key: 'syainFile', label: '社員ファイル', format: 'spUrl' },
     ]
   },
   {
@@ -4352,9 +4418,6 @@ var SHIRYOU_CATEGORIES = [
   {
     id: 'kyuyo', label: '給与関連', icon: '💴', color: '#f57c00',
     items: [
-      { icon: '📄', label: '源泉徴収票', sub: '社員番号で全年度検索', action: 'openGensenSearch' },
-      { icon: '💴', label: '給料明細', sub: '社員番号で全年月検索', action: 'openKyuryouSearch' },
-      { icon: '📒', label: '賃金台帳', sub: '毎月15日更新予定', action: 'openChinginViewer' },
       { icon: '🌐', label: '給料明細 翻訳', url: 'https://acrobat.adobe.com/id/urn:aaid:sc:ap:ce9938d7-2baf-452d-858f-e6acd473bc56' }
     ]
   },
