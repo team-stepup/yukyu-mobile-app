@@ -2578,7 +2578,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '6178b99';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -5140,12 +5140,14 @@ async function loadEmployeeProfile() {
       if (field.key === 'syainFile') {
         var sfUrl = (val && typeof val === 'object' && val.Url) ? val.Url : String(val || '');
         if (sfUrl) {
-          var sfEmpNo = emp[F.syainNo] || '';
-          var sfEmpName = emp.Title || '';
-          var sfPayload = escHtml(JSON.stringify({ url: sfUrl, no: sfEmpNo, name: sfEmpName }));
+          var sfEmpNo = String(emp[F.syainNo] || '');
+          var sfEmpName = String(emp.Title || '');
+          // base64エンコードでHTML属性内の引用符問題を回避
+          var sfJson = JSON.stringify({ url: sfUrl, no: sfEmpNo, name: sfEmpName });
+          var sfB64 = btoa(unescape(encodeURIComponent(sfJson)));
           rows.push({
             label: field.label,
-            value: '<button class="syain-file-btn" onclick="openSyainFolderFromPayload(this.dataset.payload)" data-payload="' + sfPayload + '">📂 社員ファイルを開く</button>'
+            value: '<button class="syain-file-btn" onclick="openSyainFolderFromPayload(\'' + sfB64 + '\')">📂 社員ファイルを開く</button>'
           });
         }
         return;
@@ -10399,12 +10401,13 @@ async function openChinginViewer() {
   }
 }
 
-function openSyainFolderFromPayload(payloadJson) {
+function openSyainFolderFromPayload(payloadB64) {
   try {
-    var p = JSON.parse(payloadJson);
+    var json = decodeURIComponent(escape(atob(payloadB64)));
+    var p = JSON.parse(json);
     openSyainFolderViewer(p.url, p.no, p.name);
   } catch(e) {
-    console.error('syain payload parse error:', e);
+    console.error('syain payload parse error:', e, 'payload=', payloadB64);
     showToast('社員ファイル情報を解析できません', 'error');
   }
 }
