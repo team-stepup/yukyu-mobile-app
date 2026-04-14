@@ -1892,6 +1892,53 @@ body {
   font-weight: 300;
   flex-shrink: 0;
 }
+.vfolder-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.vfolder-row .vfolder-file {
+  flex: 1;
+  min-width: 0;
+}
+.vfolder-dl-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  border-radius: 12px;
+  border: 1px solid #c8e6c9;
+  background: linear-gradient(180deg, #e8f5e9, #c8e6c9);
+  color: #2e7d32;
+  font-size: 18px;
+  text-decoration: none;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.vfolder-dl-btn:active {
+  transform: scale(0.94);
+  box-shadow: 0 2px 8px rgba(46,125,50,0.25);
+}
+.gensen-sp-link {
+  flex-shrink: 0;
+  margin-right: 6px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gensen-sp-link:active {
+  background: rgba(255,255,255,0.32);
+  transform: scale(0.94);
+}
 .vfolder-subfolder {
   cursor: pointer;
   background: linear-gradient(180deg, #fffaf0, #fff);
@@ -10401,19 +10448,24 @@ function renderVehicleFolderContents(subfolders, files, digits) {
     var size = f.Size ? formatFileSize(parseInt(f.Size)) : '';
     var date = f.LastModifiedTime ? formatDate(f.LastModifiedTime) : '';
     var url = f.Path || '';
+    var srUrl = f.ServerRelativeUrl || '';
+    var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
 
-    html += '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
-      '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
-      '<div class="vfolder-file-info">' +
-        '<div class="vfolder-file-name">' + escHtml(name) + '</div>' +
-        '<div class="vfolder-file-meta">' +
-          '<span class="vfolder-file-badge" style="background:' + meta.color + ';">' + escHtml(meta.label) + '</span>' +
-          (date ? '<span>' + escHtml(date) + '</span>' : '') +
-          (size ? '<span>' + escHtml(size) + '</span>' : '') +
+    html += '<div class="vfolder-row">' +
+      '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
+        '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(name) + '</div>' +
+          '<div class="vfolder-file-meta">' +
+            '<span class="vfolder-file-badge" style="background:' + meta.color + ';">' + escHtml(meta.label) + '</span>' +
+            (date ? '<span>' + escHtml(date) + '</span>' : '') +
+            (size ? '<span>' + escHtml(size) + '</span>' : '') +
+          '</div>' +
         '</div>' +
-      '</div>' +
-      '<span class="vfolder-file-arrow">›</span>' +
-    '</a>';
+        '<span class="vfolder-file-arrow">›</span>' +
+      '</a>' +
+      '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
+    '</div>';
   });
   html += '</div>';
 
@@ -10486,6 +10538,7 @@ function openChinginForEmp(empNo, empName) {
       '/sites/TeamStepup/Shared Documents/社員ファイル/chingin'
     ],
     basePathDiscover: { parent: '/sites/TeamStepup/Shared Documents/社員ファイル', match: /賃金|chingin|チンギン/i },
+    fallbackUrl: 'https://teamstepupcom774.sharepoint.com/:f:/s/TeamStepup/IgANCR0EYtP_SYkIHU6JILgAAfc71cbvugf9mI-4Vwv_UCw',
     empNo: normalizeGensenEmpNo(empNo),
     empName: empName,
     maxDepth: 3
@@ -10543,6 +10596,7 @@ async function openEmpFileBrowser(opts) {
       content.innerHTML = '<div class="vfolder-empty">' +
         '<div class="vfolder-empty-icon">⚠️</div>' +
         '<div class="vfolder-empty-text">読み込みに失敗しました<br><span style="font-size:10px;">' + escHtml(String(e.message || e)) + '</span></div>' +
+        (opts.fallbackUrl ? '<button class="vfolder-empty-btn" onclick="window.open(\'' + escHtml(opts.fallbackUrl).replace(/'/g, '&#39;') + '\',\'_blank\')">📁 SharePointで開く</button>' : '') +
         '</div>';
     }
   }
@@ -10638,7 +10692,9 @@ function renderEmpBrowserResults(matches, opts) {
       '<div class="vfolder-empty-icon">📭</div>' +
       '<div class="vfolder-empty-text">該当するファイルが見つかりません' +
         (opts.empNo ? '<br><span style="font-size:11px;">社員番号: ' + escHtml(opts.empNo) + '</span>' : '') +
-      '</div></div>';
+      '</div>' +
+      (opts.fallbackUrl ? '<button class="vfolder-empty-btn" onclick="window.open(\'' + escHtml(opts.fallbackUrl).replace(/'/g, '&#39;') + '\',\'_blank\')">📁 SharePointで開く</button>' : '') +
+      '</div>';
     return;
   }
 
@@ -10671,20 +10727,24 @@ function renderEmpBrowserResults(matches, opts) {
     var size = m.size ? formatFileSize(parseInt(m.size)) : '';
     var date = m.date ? formatDate(m.date) : '';
     var url = 'https://teamstepupcom774.sharepoint.com' + m.srUrl;
+    var dlUrl = TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(m.srUrl);
 
-    html += '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
-      '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
-      '<div class="vfolder-file-info">' +
-        '<div class="vfolder-file-name">' + escHtml(m.name) + '</div>' +
-        '<div class="vfolder-file-meta">' +
-          '<span class="vfolder-file-badge" style="background:' + meta.color + ';">' + escHtml(meta.label) + '</span>' +
-          (m.folder ? '<span>📁 ' + escHtml(m.folder) + '</span>' : '') +
-          (date ? '<span>' + escHtml(date) + '</span>' : '') +
-          (size ? '<span>' + escHtml(size) + '</span>' : '') +
+    html += '<div class="vfolder-row">' +
+      '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
+        '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(m.name) + '</div>' +
+          '<div class="vfolder-file-meta">' +
+            '<span class="vfolder-file-badge" style="background:' + meta.color + ';">' + escHtml(meta.label) + '</span>' +
+            (m.folder ? '<span>📁 ' + escHtml(m.folder) + '</span>' : '') +
+            (date ? '<span>' + escHtml(date) + '</span>' : '') +
+            (size ? '<span>' + escHtml(size) + '</span>' : '') +
+          '</div>' +
         '</div>' +
-      '</div>' +
-      '<span class="vfolder-file-arrow">›</span>' +
-    '</a>';
+        '<span class="vfolder-file-arrow">›</span>' +
+      '</a>' +
+      '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
+    '</div>';
   });
   html += '</div>';
 
@@ -10730,6 +10790,7 @@ async function openSyainFolderViewer(rawUrl, empNo, empName) {
         '<div class="gensen-title">' + escHtml(titleText) + '</div>' +
         (subText ? '<div class="gensen-subtitle">' + escHtml(subText) + '</div>' : '') +
       '</div>' +
+      '<button class="gensen-sp-link" onclick="window.open(\'' + escHtml(rawUrl).replace(/'/g, '&#39;') + '\',\'_blank\')" title="SharePointで開く">SP</button>' +
       '<button class="gensen-close" onclick="this.closest(\'.gensen-overlay\').remove()">✕</button>' +
     '</div>' +
     '<div class="gensen-body" style="padding:14px;">' +
@@ -10890,19 +10951,24 @@ function renderSyainFolderContents(subfolders, files) {
     var size = f.Size ? formatFileSize(parseInt(f.Size)) : '';
     var date = f.LastModifiedTime ? formatDate(f.LastModifiedTime) : '';
     var url = f.Path || '';
+    var srUrl = f.ServerRelativeUrl || '';
+    var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
 
-    html += '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
-      '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
-      '<div class="vfolder-file-info">' +
-        '<div class="vfolder-file-name">' + escHtml(name) + '</div>' +
-        '<div class="vfolder-file-meta">' +
-          '<span class="vfolder-file-badge" style="background:' + meta.color + ';">' + escHtml(meta.label) + '</span>' +
-          (date ? '<span>' + escHtml(date) + '</span>' : '') +
-          (size ? '<span>' + escHtml(size) + '</span>' : '') +
+    html += '<div class="vfolder-row">' +
+      '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
+        '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(name) + '</div>' +
+          '<div class="vfolder-file-meta">' +
+            '<span class="vfolder-file-badge" style="background:' + meta.color + ';">' + escHtml(meta.label) + '</span>' +
+            (date ? '<span>' + escHtml(date) + '</span>' : '') +
+            (size ? '<span>' + escHtml(size) + '</span>' : '') +
+          '</div>' +
         '</div>' +
-      '</div>' +
-      '<span class="vfolder-file-arrow">›</span>' +
-    '</a>';
+        '<span class="vfolder-file-arrow">›</span>' +
+      '</a>' +
+      '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
+    '</div>';
   });
   html += '</div>';
 
