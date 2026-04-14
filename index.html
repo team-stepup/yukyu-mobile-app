@@ -5272,10 +5272,35 @@ async function deleteYukyuEdit() {
 // ============================================================
 // Screen 3: Leave Application
 // ============================================================
-function openApplyScreen() {
+// 社員データ(Lists)の給与体系(時給)を取得する。leave records cache のフォールバック付き。
+let _currentHourlyRate = 0;
+async function fetchEmployeeHourlyRate(emp) {
+  if (!emp) return 0;
+  try {
+    const meta = await fetchEmployeeFields();
+    if (meta) {
+      const keyMap = buildFieldKeyMap(meta);
+      const key = keyMap['kyuyoTaikei'];
+      if (key && emp[key] !== undefined && emp[key] !== null && emp[key] !== '') {
+        const n = parseFloat(emp[key]);
+        if (!isNaN(n) && n > 0) return n;
+      }
+    }
+  } catch(e) { console.warn('fetchEmployeeHourlyRate error:', e); }
+  // フォールバック: 過去の有給記録から取得
+  if (appliedDatesCache && appliedDatesCache.length > 0) {
+    for (const r of appliedDatesCache) {
+      if (r[F.hourlyRate] && r[F.hourlyRate] > 0) return r[F.hourlyRate];
+    }
+  }
+  return 0;
+}
+
+async function openApplyScreen() {
   selectedDates = [];
   calendarYear = new Date().getFullYear();
   calendarMonth = new Date().getMonth();
+  _currentHourlyRate = await fetchEmployeeHourlyRate(currentEmployee);
   renderApplyScreen();
   switchScreen('applyScreen');
 }
@@ -5483,9 +5508,9 @@ function updateCalcSummary() {
   const totalDays = selectedDates.length * daysPerDate;
   const totalHours = selectedDates.length * hoursPerDate;
 
-  // Get hourly rate from leave records or use 0
-  let hourlyRate = 0;
-  if (appliedDatesCache.length > 0) {
+  // 時給は社員データ(給与体系)から取得（openApplyScreenでprefetch済み）
+  let hourlyRate = _currentHourlyRate || 0;
+  if (hourlyRate === 0 && appliedDatesCache.length > 0) {
     for (const r of appliedDatesCache) {
       if (r[F.hourlyRate] && r[F.hourlyRate] > 0) {
         hourlyRate = r[F.hourlyRate];
@@ -5539,8 +5564,9 @@ async function submitLeaveApplication() {
   if (leaveType === '半日（午前）') hoursPerDate = amHours;
   else if (leaveType === '半日（午後）') hoursPerDate = pmHours;
 
-  let hourlyRate = 0;
-  if (appliedDatesCache.length > 0) {
+  // 時給は社員データ(給与体系)から最新を取得。失敗時は過去の有給記録にフォールバック
+  let hourlyRate = await fetchEmployeeHourlyRate(emp);
+  if (hourlyRate === 0 && appliedDatesCache.length > 0) {
     for (const r of appliedDatesCache) {
       if (r[F.hourlyRate] && r[F.hourlyRate] > 0) {
         hourlyRate = r[F.hourlyRate];
