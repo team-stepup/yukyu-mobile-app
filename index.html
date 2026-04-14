@@ -2011,7 +2011,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '6a42de8';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2250,6 +2250,7 @@ async function onLoginSuccess(resp) {
   showToast('ログインしました', 'success');
   populateHakenDropdown();
   loadHomeBadges();
+  loadSharedConfig();
 }
 
 async function acquireToken() {
@@ -2261,6 +2262,7 @@ async function acquireToken() {
     document.getElementById('authBtn').textContent = 'logout';
     switchScreen('searchScreen');
     loadHomeBadges();
+    loadSharedConfig();
     return resp.accessToken;
   } catch (e) {
     try {
@@ -2276,6 +2278,58 @@ async function acquireToken() {
 async function getToken() {
   if (accessToken) return accessToken;
   return await acquireToken();
+}
+
+// ============================================================
+// Shared App Config (SharePoint file-based, shared across all users)
+// ============================================================
+const CONFIG_FOLDER_URL = '/sites/PowerApps/Shared Documents';
+const CONFIG_FILE_NAME = 'stepup-app-config.json';
+let _sharedConfig = {};
+let _sharedConfigLoaded = false;
+
+async function loadSharedConfig() {
+  const token = await getToken();
+  if (!token) return {};
+  try {
+    const url = SP_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + CONFIG_FOLDER_URL + "/" + CONFIG_FILE_NAME + "')/$value";
+    const resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (resp.ok) {
+      _sharedConfig = await resp.json();
+      _sharedConfigLoaded = true;
+      return _sharedConfig;
+    }
+  } catch(e) { console.log('Shared config load error (may not exist yet):', e); }
+  _sharedConfigLoaded = true;
+  return {};
+}
+
+async function saveSharedConfig(config) {
+  const token = await getToken();
+  if (!token) { showToast('認証エラー', 'error'); return false; }
+  const content = JSON.stringify(config);
+  const url = SP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + CONFIG_FOLDER_URL + "')/Files/add(url='" + CONFIG_FILE_NAME + "',overwrite=true)";
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+      },
+      body: content,
+    });
+    if (resp.ok) {
+      _sharedConfig = config;
+      return true;
+    }
+    console.error('Shared config save error:', resp.status);
+    return false;
+  } catch(e) {
+    console.error('Shared config save error:', e);
+    return false;
+  }
 }
 
 // ============================================================
@@ -4053,9 +4107,9 @@ function getMaebariPeriod(offset) {
   if (endMonth > 11) { endMonth -= 12; endYear++; }
   const defaultEnd = getNthFriday(endYear, endMonth, 1);
 
-  // Check if current month(offset=0) has custom end date
+  // Check if current month(offset=0) has custom end date (shared across all users)
   const customKey = 'maebari_custom_end_' + today.getFullYear() + '_' + today.getMonth();
-  const customEndStr = localStorage.getItem(customKey);
+  const customEndStr = (_sharedConfig && _sharedConfig[customKey]) || null;
 
   if (offset === 0 && customEndStr) {
     // 今月分: use custom end
@@ -4295,13 +4349,22 @@ function toggleMaebariCalendar() {
   }
 }
 
-function onMaebariPeriodEndChange(val) {
+async function onMaebariPeriodEndChange(val) {
   if (!val) return;
-  // Save custom end date for current month to localStorage
+  // Save custom end date to shared config (SharePoint file, shared across all users)
   const today = new Date();
   const customKey = 'maebari_custom_end_' + today.getFullYear() + '_' + today.getMonth();
-  localStorage.setItem(customKey, val);
-  showToast('期間終了日を変更しました', 'success');
+  const config = Object.assign({}, _sharedConfig);
+  config[customKey] = val;
+  showSpinner();
+  const ok = await saveSharedConfig(config);
+  hideSpinner();
+  if (ok) {
+    showToast('期間終了日を変更しました（全ユーザーに適用）', 'success');
+  } else {
+    showToast('期間終了日の保存に失敗しました', 'error');
+    return;
+  }
   // Reload maebari data with new period
   loadMaebariData();
 }
