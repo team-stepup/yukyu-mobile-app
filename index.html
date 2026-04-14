@@ -11273,20 +11273,32 @@ async function openCalendarPopup() {
 }
 
 // 給料明細 翻訳 (Adobe Acrobat 共有URL)
-function openTranslateGuidePopup() {
-  var url = 'https://acrobat.adobe.com/id/urn:aaid:sc:ap:ce9938d7-2baf-452d-858f-e6acd473bc56';
+async function openTranslateGuidePopup() {
+  var srUrl = '/sites/TeamStepup/Shared Documents/💻総務部‐soumu-/staff-portal/新しいフォルダー/給与明細\u3000翻訳.pdf';
+  var externalUrl = 'https://teamstepupcom774.sharepoint.com' + encodeURI(srUrl);
+  var dlUrl = TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl);
+
   var overlay = createPreviewPopup('給料明細 翻訳', 'linear-gradient(135deg,#ef6c00 0%,#f57c00 50%,#ffa726 100%)');
   var body = overlay.querySelector('#previewBody');
   var actions = overlay.querySelector('#previewActions');
   actions.innerHTML =
-    '<a href="' + escHtml(url) + '" target="_blank" rel="noopener">📁 PDFを開く</a>' +
-    '<a href="' + escHtml(url) + '" target="_blank" rel="noopener">⬇️ PDFダウンロード</a>';
-  body.innerHTML =
-    '<div class="preview-loading-box" style="padding:30px 20px;">' +
-      '<div class="pl-icon">🌐</div>' +
-      '<div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:6px;">給料明細の見方（多言語翻訳）</div>' +
-      '<div style="font-size:11px;color:#bbb;line-height:1.6;">Adobe Acrobatオンラインで開きます。<br>下のボタンからPDFを開く / ダウンロードできます。</div>' +
-    '</div>';
+    '<a href="' + escHtml(externalUrl) + '" target="_blank" rel="noopener">📁 PDFを開く</a>' +
+    '<a href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener">⬇️ PDFダウンロード</a>';
+  body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">🌐</div><div>翻訳ガイドを読み込み中...</div></div>';
+
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var pbuf = await downloadSpFile(token, srUrl);
+    await renderPdfBufferToBody(pbuf, body);
+  } catch (e) {
+    console.error('translate guide preview error:', e);
+    body.innerHTML = '<div class="preview-loading-box">' +
+      '<div class="pl-icon">⚠️</div>' +
+      '<div style="color:#ef9a9a;">プレビュー読み込み失敗</div>' +
+      '<div style="font-size:10px;color:#999;margin-top:6px;">下のボタンから開いてください</div>' +
+      '</div>';
+  }
 }
 
 // 第2駐車場 使用可能場所 (SharePoint AllItems URL から id= パラメータ抽出)
