@@ -10763,21 +10763,61 @@ function openSyainFolderFromPayload(payloadB64) {
   }
 }
 
+// SharePoint URL → ServerRelativeUrl への変換（3パターン対応）
+async function resolveSyainServerRelativeUrl(rawUrl, token) {
+  var u;
+  try { u = new URL(rawUrl); } catch(e) { return null; }
+
+  // パターン1: ?id=... クエリ（AllItems.aspx?id=/sites/.../folder）
+  var idParam = u.searchParams.get('id');
+  if (idParam) {
+    var p = decodeURIComponent(idParam).replace(/\/+$/, '');
+    if (p.indexOf('/') === 0) return p;
+  }
+
+  // パターン2: 直接パス /sites/.../Shared Documents/...
+  var pathname = decodeURIComponent(u.pathname);
+  if (/^\/sites\//i.test(pathname) &&
+      !/\.aspx$/i.test(pathname) &&
+      pathname.indexOf('/:') === -1 &&
+      pathname.indexOf('/_layouts/') === -1) {
+    return pathname.replace(/\/+$/, '');
+  }
+
+  // パターン3: 共有リンク /:f:/s/<site>/<token> → v2.0 shares API で解決
+  if (/\/:[a-zA-Z]:\//.test(pathname)) {
+    try {
+      var b64 = btoa(unescape(encodeURIComponent(rawUrl)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      var apiUrl = u.origin + '/_api/v2.0/shares/u!' + b64 + '/driveItem';
+      var r = await fetch(apiUrl, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
+      });
+      if (r.ok) {
+        var d = await r.json();
+        if (d.webUrl) {
+          var u2 = new URL(d.webUrl);
+          var id2 = u2.searchParams.get('id');
+          if (id2) {
+            var p2 = decodeURIComponent(id2).replace(/\/+$/, '');
+            if (p2.indexOf('/') === 0) return p2;
+          }
+          var pn2 = decodeURIComponent(u2.pathname);
+          if (/^\/sites\//i.test(pn2) && !/\.aspx$/i.test(pn2) && pn2.indexOf('/:') === -1) {
+            return pn2.replace(/\/+$/, '');
+          }
+        }
+      } else {
+        console.warn('v2.0 shares API failed:', r.status);
+      }
+    } catch(e) { console.error('share resolve error:', e); }
+  }
+
+  return null;
+}
+
 async function openSyainFolderViewer(rawUrl, empNo, empName) {
   if (!rawUrl) { showToast('URLが見つかりません', 'error'); return; }
-  // SharePoint URLからServerRelativeUrlを抽出
-  var srUrl = '';
-  try {
-    var u = new URL(rawUrl);
-    srUrl = decodeURIComponent(u.pathname);
-  } catch(e) {
-    var m = String(rawUrl).match(/^https?:\/\/[^\/]+(\/.*)$/);
-    srUrl = m ? decodeURIComponent(m[1]) : '';
-  }
-  if (!srUrl) { showToast('URLを解析できません', 'error'); return; }
-
-  // 末尾のスラッシュとクエリを除去
-  srUrl = srUrl.replace(/\?.*$/, '').replace(/\/+$/, '');
 
   var titleText = (empNo ? '社員ファイル' : (empName || 'フォルダ'));
   var subText = empNo ? ((empNo || '') + ' ' + (empName || '')) : '';
@@ -10805,6 +10845,9 @@ async function openSyainFolderViewer(rawUrl, empNo, empName) {
 
   try {
     var token = await getToken();
+    var srUrl = await resolveSyainServerRelativeUrl(rawUrl, token);
+    if (!srUrl) throw new Error('URLを解析できません');
+
     var contents = await loadVehicleFolderContents(token, srUrl);
     _sfNavStack = [{ srUrl: srUrl, name: (empNo || '') + ' ' + (empName || '') }];
     renderSyainFolderContents(contents.folders, contents.files);
@@ -10814,8 +10857,8 @@ async function openSyainFolderViewer(rawUrl, empNo, empName) {
     if (content) {
       content.innerHTML = '<div class="vfolder-empty">' +
         '<div class="vfolder-empty-icon">⚠️</div>' +
-        '<div class="vfolder-empty-text">フォルダを開けませんでした</div>' +
-        '<button class="vfolder-empty-btn" onclick="window.open(\'' + escHtml(rawUrl) + '\',\'_blank\')">📁 SharePointで開く</button>' +
+        '<div class="vfolder-empty-text">フォルダを開けませんでした<br><span style="font-size:10px;">' + escHtml(String(e.message || e)) + '</span></div>' +
+        '<button class="vfolder-empty-btn" onclick="window.open(\'' + escHtml(rawUrl).replace(/'/g, '&#39;') + '\',\'_blank\')">📁 SharePointで開く</button>' +
         '</div>';
     }
   }
