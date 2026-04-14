@@ -2826,7 +2826,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '3ddc44c';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -4106,7 +4106,8 @@ async function fetchEmployeeFields() {
 // Fetch full employee record with all fields
 async function fetchFullEmployee(syainNo) {
   try {
-    const filter = "$filter=" + F.syainNo + " eq " + syainNo + "&$top=1";
+    // 同じ社員番号で複数レコードがある場合(移動入社後)は最新(最大Id)を返す
+    const filter = "$filter=" + F.syainNo + " eq " + syainNo + "&$orderby=Id desc&$top=1";
     const results = await spGet(LIST_EMPLOYEES_GUID, filter);
     return results && results.length > 0 ? results[0] : null;
   } catch (e) {
@@ -4362,6 +4363,10 @@ function buildFieldKeyMap(fieldsMeta) {
     shahoFurigana: '扶養者フリガナ',
     tokki1: '特記事項１',
     syainFile: '社員ファイル',
+    sagyouFuku: '作業服',
+    yuukiMuki: '有期',
+    koyouKaisi: '雇用契約開始',
+    koyouSyuryo: '雇用契約終了',
   };
 
   Object.keys(titleMap).forEach(key => {
@@ -8619,6 +8624,7 @@ function startProcedure(type) {
   if (type === 'dattai') { openDattaiForm(); return; }
   if (type === 'zaishoku') { openZaishokuForm(); return; }
   if (type === 'kyuryo') { openKyuryoForm(); return; }
+  if (type === 'idou') { openIdouForm(); return; }
 
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -9090,6 +9096,398 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
   }
 }
 
+
+// ============================================================
+// 移動入社 Form (旧派遣先を退社→新派遣先で同番号で新レコード作成)
+// ============================================================
+async function openIdouForm() {
+  const emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  if (isEmployeeRetired(emp)) {
+    showToast('退社済みの社員のため移動入社はできません', 'error');
+    return;
+  }
+  const name = emp.Title || '';
+  const no = emp[F.syainNo] || '';
+  const today = toLocalDateStr(new Date());
+
+  const fieldsMeta = await fetchEmployeeFields();
+  const keyMap = buildFieldKeyMap(fieldsMeta);
+  await resolveBukaKey();
+
+  function getCh(fieldKey) {
+    return getFieldChoices(fieldKey, keyMap);
+  }
+  function buildOpts(choices, selected) {
+    if (!choices) return '';
+    return choices.map(function(c) {
+      return '<option value="' + escHtml(c) + '"' + (c === selected ? ' selected' : '') + '>' + escHtml(c) + '</option>';
+    }).join('');
+  }
+  function val(fieldKey) {
+    const k = keyMap[fieldKey];
+    return k ? (emp[k] || '') : '';
+  }
+
+  // 旧レコードから取得(プリセット用)
+  const oldBuka = getBukaValue(emp);
+  const oldSoshiki = val('soshikiTani');
+  const oldSyokusyu = val('syokusyu');
+  const oldSeikyu = val('seikyu');
+  const oldKyuyo = val('kyuyoTaikei');
+  const oldTsukin = val('tsukinTeate');
+  const oldSagyou = val('sagyouFuku');
+  const oldYuukiMuki = val('yuukiMuki');
+  const oldKaisi = val('koyouKaisi') ? String(val('koyouKaisi')).substring(0, 10) : '';
+  const oldSyuryo = val('koyouSyuryo') ? String(val('koyouSyuryo')).substring(0, 10) : '';
+  const oldZaiyokuSyubetu = emp[F.zaiyokuSyubetu] || '';
+  const kisanRaw = emp[F.kisanDate] || '';
+  const kisan = kisanRaw ? String(kisanRaw).substring(0, 10) : '';
+
+  // 表示用(自動コピー項目のサマリ)
+  const birthday = val('birthday') ? String(val('birthday')).substring(0, 10) : '';
+  const sex = val('sex');
+  const nationality = val('nationality');
+  const yubin = val('yubin');
+  const address = val('address');
+  const keitai = val('keitai');
+  const email = val('email');
+  const koyouNo = val('koyouNo');
+  const koyouShutoku = val('koyouShutoku') ? String(val('koyouShutoku')).substring(0, 10) : '';
+  const kenpoHihokensha = val('kenpoHihokensha');
+
+  // 派遣先選択肢: 全社員データから収集
+  let hakenChoices = [];
+  try {
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=2000');
+    const set = new Set();
+    allEmps.forEach(function(e) {
+      const b = getBukaValue(e);
+      if (b) set.add(b);
+    });
+    hakenChoices = Array.from(set).sort();
+  } catch (e) {
+    console.warn('haken list fetch failed:', e);
+  }
+
+  // 各 choice 列の選択肢
+  const zaiyokuChoices = getCh('zaiyokuSyubetu') || [];
+  const soshikiChoices = getCh('soshikiTani') || [];
+  const syokusyuChoices = getCh('syokusyu') || [];
+  const kyuyoChoices = getCh('kyuyoTaikei') || [];
+  const yuukiChoices = getCh('yuukiMuki') || [];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'taisha-overlay';
+  overlay.id = 'idouOverlay';
+  overlay.innerHTML =
+    '<div class="taisha-panel">' +
+      '<div class="taisha-header" style="background:linear-gradient(135deg,#6a1b9a 0%,#8e24aa 50%,#ab47bc 100%);">' +
+        '<div class="taisha-header-bar">' +
+          '<span class="taisha-title">🔄 移動入社</span>' +
+          '<button class="taisha-close" onclick="closeIdouForm()">✕</button>' +
+        '</div>' +
+        '<div class="taisha-emp-info">' +
+          '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
+          '<span>現派遣先: ' + escHtml(oldBuka || '-') + '</span>' +
+          '<span>有休起算日: ' + escHtml(kisan || '-') + '(継続)</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="taisha-body">' +
+
+      // ───── 自動コピー項目(参考表示) ─────
+      '<div style="background:#f3e5f5;border-radius:10px;padding:10px 12px;margin-bottom:10px;">' +
+        '<div style="font-size:11px;font-weight:700;color:#6a1b9a;margin-bottom:6px;">📋 自動引継ぎ(個人情報)</div>' +
+        '<div style="font-size:11px;color:#555;line-height:1.7;">' +
+          '生年月日: ' + escHtml(birthday || '-') + ' / 性別: ' + escHtml(sex || '-') + '<br>' +
+          '本籍: ' + escHtml(nationality || '-') + ' / 〒' + escHtml(yubin || '-') + '<br>' +
+          '住所: ' + escHtml(address || '-') + '<br>' +
+          'TEL: ' + escHtml(keitai || '-') + ' / ' + escHtml(email || '-') + '<br>' +
+          '健保被保険者: ' + escHtml(kenpoHihokensha || '-') + '<br>' +
+          '雇用被保険者番号: ' + escHtml(koyouNo || '-') + ' / 取得日: ' + escHtml(koyouShutoku || '-') +
+        '</div>' +
+      '</div>' +
+
+      // ───── 採用種別(移動在職中など) ─────
+      '<div class="taisha-field">' +
+        '<label>採用種別 <span style="color:var(--danger);">*</span></label>' +
+        (zaiyokuChoices.length > 0
+          ? '<select id="idou_zaiyokuSyubetu"><option value="">選択してください</option>' + buildOpts(zaiyokuChoices, '移動在職中idou zaisyokutyuu') + '</select>'
+          : '<input type="text" id="idou_zaiyokuSyubetu" value="移動在職中idou zaisyokutyuu">') +
+      '</div>' +
+
+      // ───── 移動入社日 ─────
+      '<div class="taisha-field">' +
+        '<label>移動入社日 <span style="color:var(--danger);">*</span></label>' +
+        '<input type="date" id="idou_nyushaDate" value="' + today + '">' +
+        '<div style="font-size:10px;color:var(--text-light);margin-top:3px;">旧派遣先の退社日 = この日付の前日に自動設定されます</div>' +
+      '</div>' +
+
+      // ───── 派遣先(部課) ─────
+      '<div class="taisha-field">' +
+        '<label>派遣先(部課) <span style="color:var(--danger);">*</span></label>' +
+        '<select id="idou_buka"><option value="">選択してください</option>' +
+          hakenChoices.map(function(h) {
+            return '<option value="' + escHtml(h) + '">' + escHtml(h) + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      // ───── 組織単位 ─────
+      '<div class="taisha-field">' +
+        '<label>組織単位</label>' +
+        (soshikiChoices.length > 0
+          ? '<select id="idou_soshikiTani"><option value="">選択してください</option>' + buildOpts(soshikiChoices) + '</select>'
+          : '<input type="text" id="idou_soshikiTani" placeholder="例: 浜松製造部 製造課">') +
+      '</div>' +
+
+      // ───── 職種 ─────
+      '<div class="taisha-field">' +
+        '<label>職種</label>' +
+        (syokusyuChoices.length > 0
+          ? '<select id="idou_syokusyu"><option value="">選択してください</option>' + buildOpts(syokusyuChoices) + '</select>'
+          : '<input type="text" id="idou_syokusyu">') +
+      '</div>' +
+
+      // ───── 請求単価 ─────
+      '<div class="taisha-field">' +
+        '<label>請求単価</label>' +
+        '<input type="number" id="idou_seikyu" placeholder="例: 1500">' +
+      '</div>' +
+
+      // ───── 給与体系 ─────
+      '<div class="taisha-field">' +
+        '<label>給与体系(時給)</label>' +
+        (kyuyoChoices.length > 0
+          ? '<select id="idou_kyuyoTaikei"><option value="">選択してください</option>' + buildOpts(kyuyoChoices) + '</select>'
+          : '<input type="number" id="idou_kyuyoTaikei" placeholder="例: 1300">') +
+      '</div>' +
+
+      // ───── 通勤手当 ─────
+      '<div class="taisha-field">' +
+        '<label>通勤手当</label>' +
+        '<input type="number" id="idou_tsukinTeate" placeholder="例: 5000">' +
+      '</div>' +
+
+      // ───── 作業服・靴 ─────
+      (keyMap['sagyouFuku']
+        ? '<div class="taisha-field">' +
+            '<label>作業服・靴(入社時)</label>' +
+            '<input type="text" id="idou_sagyouFuku" placeholder="支給品/サイズなど">' +
+          '</div>'
+        : '') +
+
+      // ───── 有期/無期 ─────
+      (keyMap['yuukiMuki']
+        ? '<div class="taisha-field">' +
+            '<label>有期/無期雇用</label>' +
+            (yuukiChoices.length > 0
+              ? '<select id="idou_yuukiMuki"><option value="">選択してください</option>' + buildOpts(yuukiChoices) + '</select>'
+              : '<input type="text" id="idou_yuukiMuki">') +
+          '</div>'
+        : '') +
+
+      // ───── 雇用契約開始日/終了日 ─────
+      (keyMap['koyouKaisi']
+        ? '<div class="taisha-field">' +
+            '<label>雇用契約開始日</label>' +
+            '<input type="date" id="idou_koyouKaisi" value="' + today + '">' +
+          '</div>'
+        : '') +
+      (keyMap['koyouSyuryo']
+        ? '<div class="taisha-field">' +
+            '<label>雇用契約終了日</label>' +
+            '<input type="date" id="idou_koyouSyuryo">' +
+          '</div>'
+        : '') +
+
+      '</div>' +
+      '<div class="taisha-footer">' +
+        '<button class="taisha-submit-btn" id="idouSubmitBtn" onclick="submitIdouForm()" style="background:linear-gradient(135deg,#6a1b9a,#8e24aa);">🔄 移動入社を送信</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  var panel = overlay.querySelector('.taisha-panel');
+  if (panel) panel.scrollTop = 0;
+}
+
+function closeIdouForm() {
+  const el = document.getElementById('idouOverlay');
+  if (el) el.remove();
+}
+
+async function submitIdouForm() {
+  const emp = currentEmployee;
+  if (!emp) return;
+
+  function v(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+
+  const zaiyoku = v('idou_zaiyokuSyubetu');
+  const nyushaDate = v('idou_nyushaDate');
+  const buka = v('idou_buka');
+  const soshiki = v('idou_soshikiTani');
+  const syokusyu = v('idou_syokusyu');
+  const seikyu = v('idou_seikyu');
+  const kyuyo = v('idou_kyuyoTaikei');
+  const tsukin = v('idou_tsukinTeate');
+  const sagyou = v('idou_sagyouFuku');
+  const yuukimuki = v('idou_yuukiMuki');
+  const koyouKaisi = v('idou_koyouKaisi');
+  const koyouSyuryo = v('idou_koyouSyuryo');
+
+  if (!zaiyoku) { showToast('採用種別を選択してください', 'error'); return; }
+  if (!nyushaDate) { showToast('移動入社日を入力してください', 'error'); return; }
+  if (!buka) { showToast('派遣先(部課)を選択してください', 'error'); return; }
+
+  // 旧レコードの派遣先退社日 = 移動入社日 - 1日
+  const d = new Date(nyushaDate);
+  d.setDate(d.getDate() - 1);
+  const oldHakenTaisha = toLocalDateStr(d);
+
+  const name = emp.Title || '';
+  const no = emp[F.syainNo] || '';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.style.zIndex = '99999';
+  overlay.innerHTML = '<div class="confirm-box">' +
+    '<div class="confirm-title">🔄 移動入社確認</div>' +
+    '<div class="confirm-msg" style="text-align:left;">' +
+    '<strong>' + escHtml(no + ' ' + name) + '</strong><br><br>' +
+    '<u>旧レコード(更新)</u><br>' +
+    '派遣先退社日: ' + escHtml(oldHakenTaisha) + '<br><br>' +
+    '<u>新レコード(作成)</u><br>' +
+    '社員番号: ' + escHtml(String(no)) + ' (同番)<br>' +
+    '採用種別: ' + escHtml(zaiyoku) + '<br>' +
+    '移動入社日: ' + escHtml(nyushaDate) + '<br>' +
+    '派遣先: ' + escHtml(buka) + '<br>' +
+    (soshiki ? '組織: ' + escHtml(soshiki) + '<br>' : '') +
+    (syokusyu ? '職種: ' + escHtml(syokusyu) + '<br>' : '') +
+    '有休起算日: 旧レコードから継続' +
+    '</div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
+    '<button class="btn-ok" id="idouConfirmOk">送信する</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  document.getElementById('idouConfirmOk').onclick = async function() {
+    overlay.remove();
+    await executeIdouSubmit({
+      zaiyoku: zaiyoku, nyushaDate: nyushaDate, buka: buka,
+      soshiki: soshiki, syokusyu: syokusyu, seikyu: seikyu,
+      kyuyo: kyuyo, tsukin: tsukin, sagyou: sagyou,
+      yuukimuki: yuukimuki, koyouKaisi: koyouKaisi, koyouSyuryo: koyouSyuryo,
+      oldHakenTaisha: oldHakenTaisha
+    });
+  };
+}
+
+async function executeIdouSubmit(p) {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const btn = document.getElementById('idouSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '送信中...'; }
+
+  try {
+    const fieldsMeta = await fetchEmployeeFields();
+    const keyMap = buildFieldKeyMap(fieldsMeta);
+    await resolveBukaKey();
+
+    function setField(body, fieldKey, value) {
+      const odataKey = keyMap[fieldKey];
+      if (!odataKey) { console.warn('[idou] no mapping for', fieldKey); return; }
+      const internalName = odataKey.replace(/^OData_/, '');
+      body[internalName] = value;
+    }
+    function setFieldByOdata(body, odataKey, value) {
+      if (!odataKey) return;
+      const internalName = odataKey.replace(/^OData_/, '');
+      body[internalName] = value;
+    }
+    function copyFromOld(body, fieldKey) {
+      const k = keyMap[fieldKey];
+      if (!k) return;
+      const v = emp[k];
+      if (v === null || v === undefined || v === '') return;
+      const internalName = k.replace(/^OData_/, '');
+      body[internalName] = v;
+    }
+
+    // ─── 旧レコード PATCH (派遣先退社日のみ) ───
+    const patchBody = {};
+    patchBody[F.hakenTaisha.replace(/^OData_/, '')] = p.oldHakenTaisha + 'T00:00:00Z';
+    patchBody['__metadata'] = { type: LIST_ITEM_ENTITY };
+    if (btn) btn.textContent = '旧レコード更新中...';
+    await spPatchEmployee(emp.Id, patchBody);
+
+    // ─── 新レコード CREATE ───
+    if (btn) btn.textContent = '新レコード作成中...';
+    const newBody = {};
+
+    // Title (氏名) と社員番号
+    newBody['Title'] = emp.Title || '';
+    newBody[F.syainNo.replace(/^OData_/, '')] = emp[F.syainNo];
+
+    // 起算日(継続)
+    if (emp[F.kisanDate]) {
+      newBody[F.kisanDate.replace(/^OData_/, '')] = emp[F.kisanDate];
+    }
+
+    // 個人情報を旧レコードからコピー
+    ['birthday','sex','nationality','yubin','address','keitai','email',
+     'emergencyName','emergencyRelation','emergencyTel',
+     'bankName','bankBranch','bankAccount','bankMeigi',
+     'zairyuShikaku','zairyuKigen','zairyuKigenCard','zairyuBikou','tokki1',
+     'kenpoHihokensha','kenpoShutoku','seiriNo','koyouNo','koyouShutoku','koyouName'
+    ].forEach(function(k) { copyFromOld(newBody, k); });
+
+    // ユーザー入力
+    setFieldByOdata(newBody, F.zaiyokuSyubetu, p.zaiyoku);
+    setFieldByOdata(newBody, F.nyushaDate, p.nyushaDate + 'T00:00:00Z');
+
+    // 派遣先(部課) → bukaODataKey経由
+    if (bukaODataKey && p.buka) {
+      const bukaInternal = bukaODataKey.replace(/^OData_/, '');
+      newBody[bukaInternal] = p.buka;
+    }
+
+    if (p.soshiki) setField(newBody, 'soshikiTani', p.soshiki);
+    if (p.syokusyu) setField(newBody, 'syokusyu', p.syokusyu);
+    if (p.seikyu) setField(newBody, 'seikyu', parseFloat(p.seikyu));
+    if (p.kyuyo) {
+      var kyuyoNum = parseFloat(p.kyuyo);
+      setField(newBody, 'kyuyoTaikei', isNaN(kyuyoNum) ? p.kyuyo : kyuyoNum);
+    }
+    if (p.tsukin) setField(newBody, 'tsukinTeate', parseFloat(p.tsukin));
+    if (p.sagyou) setField(newBody, 'sagyouFuku', p.sagyou);
+    if (p.yuukimuki) setField(newBody, 'yuukiMuki', p.yuukimuki);
+    if (p.koyouKaisi) setField(newBody, 'koyouKaisi', p.koyouKaisi + 'T00:00:00Z');
+    if (p.koyouSyuryo) setField(newBody, 'koyouSyuryo', p.koyouSyuryo + 'T00:00:00Z');
+
+    newBody['__metadata'] = { type: LIST_ITEM_ENTITY };
+
+    console.log('[idou] new record body:', JSON.stringify(newBody));
+    await spCreateEmployee(newBody);
+
+    showToast('🔄 移動入社を登録しました', 'success');
+    closeIdouForm();
+
+    // 新レコードに切り替え(同番号で再取得)
+    const updated = await fetchFullEmployee(emp[F.syainNo]);
+    if (updated) {
+      currentEmployee = updated;
+      loadLeaveDetails();
+    }
+  } catch (e) {
+    console.error('Idou submit error:', e);
+    showToast('送信に失敗しました: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 移動入社を送信'; }
+  }
+}
 
 // ============================================================
 // 給料精算 Form
