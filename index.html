@@ -2676,7 +2676,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '0727075';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -10526,28 +10526,306 @@ function openKyuryouForEmp(empNo, empName) {
 }
 
 function openChinginForEmp(empNo, empName) {
-  openEmpFileBrowser({
-    title: '賃金台帳',
-    icon: '📒',
-    headerStyle: 'background:linear-gradient(135deg,#6a1b9a 0%,#8e24aa 50%,#ab47bc 100%);',
-    basePathCandidates: [
-      '/sites/TeamStepup/Shared Documents/社員ファイル/賃金台帳',
-      '/sites/TeamStepup/Shared Documents/社員ファイル/★賃金台帳',
-      '/sites/TeamStepup/Shared Documents/社員ファイル/※※賃金台帳',
-      '/sites/TeamStepup/Shared Documents/社員ファイル/※※賃金　chingin',
-      '/sites/TeamStepup/Shared Documents/社員ファイル/賃金',
-      '/sites/TeamStepup/Shared Documents/社員ファイル/chingin'
-    ],
-    basePathDiscover: { parent: '/sites/TeamStepup/Shared Documents/社員ファイル', match: /賃金|chingin|チンギン/i },
-    fallbackUrl: 'https://teamstepupcom774.sharepoint.com/:f:/s/TeamStepup/IgANCR0EYtP_SYkIHU6JILgAAfc71cbvugf9mI-4Vwv_UCw',
-    empNo: normalizeGensenEmpNo(empNo),
-    empName: empName,
-    maxDepth: 3
-  });
+  var no = normalizeGensenEmpNo(empNo);
+  if (!no) { showToast('社員番号が取得できません', 'error'); return; }
+  openChinginExtractor(no, empName || '');
 }
 
 // 後方互換: 旧ボタンから呼ばれる可能性
 function openChinginViewer() { openChinginForEmp('', ''); }
+
+// ============================================================
+// 賃金台帳 PDF抽出機能
+// 結合PDFから社員番号でページ検索→新PDF生成
+// ============================================================
+var CHINGIN_BASE_PATH = '/sites/TeamStepup/Shared Documents/💻総務部‐soumu-/！個別タイムカード/賃金台帳';
+var CHINGIN_SOURCES = [
+  { label: 'R7', filename: 'R7.pdf' },
+  { label: 'R8', filename: 'R8.pdf' }
+];
+var CHINGIN_FALLBACK_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FTeamStepup%2FShared%20Documents%2F%F0%9F%92%BB%E7%B7%8F%E5%8B%99%E9%83%A8%E2%80%90soumu%2D%2F%EF%BC%81%E5%80%8B%E5%88%A5%E3%82%BF%E3%82%A4%E3%83%A0%E3%82%AB%E3%83%BC%E3%83%89%2F%E8%B3%83%E9%87%91%E5%8F%B0%E5%B8%B3';
+
+var _pdfLibsLoaded = false;
+async function loadPdfLibs() {
+  if (_pdfLibsLoaded) return;
+  await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+  await loadScriptOnce('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js');
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  _pdfLibsLoaded = true;
+}
+
+function loadScriptOnce(src) {
+  return new Promise(function(resolve, reject) {
+    if (document.querySelector('script[data-loaded-src="' + src + '"]')) { resolve(); return; }
+    var s = document.createElement('script');
+    s.src = src;
+    s.setAttribute('data-loaded-src', src);
+    s.onload = function() { resolve(); };
+    s.onerror = function() { reject(new Error('スクリプト読込失敗: ' + src)); };
+    document.head.appendChild(s);
+  });
+}
+
+async function downloadSpFile(token, path) {
+  var apiUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" +
+    encodeURIComponent(path).replace(/'/g, "''") + "')/$value";
+  var resp = await fetch(apiUrl, {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/octet-stream' }
+  });
+  if (!resp.ok) {
+    var msg = 'ダウンロード失敗 (' + resp.status + ')';
+    if (resp.status === 404) msg = 'ファイルが見つかりません';
+    if (resp.status === 401 || resp.status === 403) msg = 'アクセス権限がありません';
+    throw new Error(msg);
+  }
+  return await resp.arrayBuffer();
+}
+
+async function extractMatchingPages(buffer, empNo, onProgress) {
+  var pdfjsLib = window.pdfjsLib;
+  if (!pdfjsLib) throw new Error('PDF.js 未読込');
+  var pdf = await pdfjsLib.getDocument({ data: buffer.slice(0) }).promise;
+  var matches = [];
+  var totalTextLen = 0;
+
+  var empNoStr = String(empNo).replace(/\D/g, '');
+  var empNoNoZero = empNoStr.replace(/^0+/, '');
+  var patterns = [
+    new RegExp('社員番号[\\s::\\.\\-]*' + empNoStr + '(?![0-9])'),
+    new RegExp('社員\\s*No[\\.\\s::]*' + empNoStr + '(?![0-9])', 'i')
+  ];
+  if (empNoNoZero && empNoNoZero !== empNoStr) {
+    patterns.push(new RegExp('社員番号[\\s::\\.\\-]*' + empNoNoZero + '(?![0-9])'));
+  }
+
+  for (var i = 1; i <= pdf.numPages; i++) {
+    var page = await pdf.getPage(i);
+    var content = await page.getTextContent();
+    var text = content.items.map(function(it) { return it.str; }).join(' ');
+    totalTextLen += text.length;
+    for (var j = 0; j < patterns.length; j++) {
+      if (patterns[j].test(text)) {
+        matches.push(i - 1);
+        break;
+      }
+    }
+    if (onProgress && (i % 3 === 0 || i === pdf.numPages)) onProgress(i, pdf.numPages);
+  }
+  return { matches: matches, totalPages: pdf.numPages, totalTextLen: totalTextLen };
+}
+
+async function buildPdfFromPages(buffer, pageIndices) {
+  var PDFDocument = window.PDFLib.PDFDocument;
+  var srcDoc = await PDFDocument.load(buffer);
+  var newDoc = await PDFDocument.create();
+  var copied = await newDoc.copyPages(srcDoc, pageIndices);
+  copied.forEach(function(p) { newDoc.addPage(p); });
+  return await newDoc.save();
+}
+
+function buildChinginProgressHtml(empNo, empName, label, msg, prog) {
+  var bar = '';
+  if (prog && prog.total) {
+    var pct = Math.round(prog.page / prog.total * 100);
+    bar = '<div style="margin-top:14px;background:#eee;border-radius:8px;overflow:hidden;height:8px;width:100%;max-width:240px;">' +
+      '<div style="background:linear-gradient(90deg,#6a1b9a,#ab47bc);height:100%;width:' + pct + '%;transition:width 0.2s;"></div></div>' +
+      '<div style="margin-top:6px;font-size:11px;color:#999;">' + prog.page + ' / ' + prog.total + ' ページ</div>';
+  }
+  return '<div class="vfolder-loading">' +
+    '<div class="vfolder-spinner"></div>' +
+    '<div style="font-size:14px;font-weight:700;color:#6a1b9a;">' + escHtml(label) + ' ' + escHtml(msg) + '</div>' +
+    '<div style="font-size:11px;color:#999;margin-top:4px;">' + escHtml(empNo + ' ' + empName) + '</div>' +
+    bar +
+    '</div>';
+}
+
+async function openChinginExtractor(empNo, empName) {
+  var overlay = document.createElement('div');
+  overlay.className = 'gensen-overlay';
+  overlay.innerHTML = '<div class="gensen-popup">' +
+    '<div class="gensen-header" style="background:linear-gradient(135deg,#6a1b9a 0%,#8e24aa 50%,#ab47bc 100%);">' +
+      '<div class="gensen-header-icon">📒</div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div class="gensen-title">賃金台帳 抽出</div>' +
+        '<div class="gensen-subtitle">' + escHtml(empNo + ' ' + empName) + '</div>' +
+      '</div>' +
+      '<button class="gensen-sp-link" onclick="window.open(\'' + CHINGIN_FALLBACK_URL.replace(/'/g, '&#39;') + '\',\'_blank\')" title="SharePointで開く">SP</button>' +
+      '<button class="gensen-close" onclick="this.closest(\'.gensen-overlay\').remove()">✕</button>' +
+    '</div>' +
+    '<div class="gensen-body" style="padding:14px;">' +
+      '<div id="chinginExtractContent">' +
+        '<div class="vfolder-loading"><div class="vfolder-spinner"></div><div>準備中...</div></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var setStatus = function(html) {
+    var c = document.getElementById('chinginExtractContent');
+    if (c) c.innerHTML = html;
+  };
+
+  try {
+    setStatus(buildChinginProgressHtml(empNo, empName, '', 'PDFライブラリ読込中...', null));
+    await loadPdfLibs();
+
+    setStatus(buildChinginProgressHtml(empNo, empName, '', '認証中...', null));
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+
+    var results = [];
+    for (var i = 0; i < CHINGIN_SOURCES.length; i++) {
+      var s = CHINGIN_SOURCES[i];
+      var path = CHINGIN_BASE_PATH + '/' + s.filename;
+      try {
+        setStatus(buildChinginProgressHtml(empNo, empName, s.label, 'ダウンロード中...', null));
+        var buffer = await downloadSpFile(token, path);
+
+        setStatus(buildChinginProgressHtml(empNo, empName, s.label, '解析中...', { page: 0, total: 1 }));
+        var ext = await extractMatchingPages(buffer, empNo, function(page, total) {
+          setStatus(buildChinginProgressHtml(empNo, empName, s.label, '解析中...', { page: page, total: total }));
+        });
+
+        var avgTextPerPage = ext.totalPages > 0 ? (ext.totalTextLen / ext.totalPages) : 0;
+        var isImagePdf = avgTextPerPage < 30;
+
+        if (ext.matches.length === 0) {
+          results.push({ label: s.label, ok: true, count: 0, totalPages: ext.totalPages, isImagePdf: isImagePdf });
+          continue;
+        }
+
+        setStatus(buildChinginProgressHtml(empNo, empName, s.label, 'PDF生成中...', null));
+        var newBytes = await buildPdfFromPages(buffer, ext.matches);
+        var blob = new Blob([newBytes], { type: 'application/pdf' });
+        var filename = empNo + '_' + s.label + '_賃金台帳.pdf';
+        results.push({
+          label: s.label, ok: true, count: ext.matches.length,
+          totalPages: ext.totalPages, blob: blob, filename: filename, isImagePdf: false
+        });
+      } catch (e) {
+        console.error('chingin ' + s.label + ' error:', e);
+        results.push({ label: s.label, ok: false, error: String(e.message || e) });
+      }
+    }
+
+    renderChinginResults(results, empNo, empName);
+  } catch (e) {
+    console.error('openChinginExtractor:', e);
+    setStatus('<div class="vfolder-empty">' +
+      '<div class="vfolder-empty-icon">⚠️</div>' +
+      '<div class="vfolder-empty-text">処理に失敗しました<br><span style="font-size:10px;">' + escHtml(String(e.message || e)) + '</span></div>' +
+      '<button class="vfolder-empty-btn" onclick="window.open(\'' + CHINGIN_FALLBACK_URL + '\',\'_blank\')">📁 SharePointで開く</button>' +
+      '</div>');
+  }
+}
+
+var _chinginResults = null;
+
+function renderChinginResults(results, empNo, empName) {
+  var content = document.getElementById('chinginExtractContent');
+  if (!content) return;
+
+  _chinginResults = results;
+
+  var totalCount = 0;
+  var anyHasMatches = false;
+  var allImagePdf = true;
+  results.forEach(function(r) {
+    if (r.ok) {
+      totalCount += r.count;
+      if (r.count > 0) anyHasMatches = true;
+      if (!r.isImagePdf) allImagePdf = false;
+    } else {
+      allImagePdf = false;
+    }
+  });
+
+  var html = '<div class="vfolder-summary">' +
+    '<span class="vfolder-summary-count">' + totalCount + '</span>' +
+    '<span class="vfolder-summary-label">ページ抽出</span>' +
+    '<span class="vfolder-type-chip">No. ' + escHtml(empNo) + '</span>' +
+    '</div>';
+
+  if (!anyHasMatches && allImagePdf) {
+    html += '<div class="vfolder-empty" style="padding:20px 12px;">' +
+      '<div class="vfolder-empty-icon">🖼️</div>' +
+      '<div class="vfolder-empty-text">PDFからテキスト抽出ができませんでした<br>' +
+      '<span style="font-size:11px;color:#999;">スキャン画像PDFの可能性があります。<br>SharePointで直接ご確認ください。</span></div>' +
+      '<button class="vfolder-empty-btn" onclick="window.open(\'' + CHINGIN_FALLBACK_URL + '\',\'_blank\')">📁 SharePointで開く</button>' +
+      '</div>';
+    content.innerHTML = html;
+    return;
+  }
+
+  html += '<div class="vfolder-list">';
+  results.forEach(function(r, idx) {
+    if (!r.ok) {
+      html += '<div class="vfolder-file" style="border-color:#ffcdd2;background:#ffebee;">' +
+        '<div class="vfolder-file-icon" style="background:#ffcdd2;color:#c62828;">⚠️</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(r.label) + ' エラー</div>' +
+          '<div class="vfolder-file-meta"><span>' + escHtml(r.error) + '</span></div>' +
+        '</div></div>';
+      return;
+    }
+    if (r.count === 0) {
+      html += '<div class="vfolder-file" style="border-color:#eee;background:#fafafa;opacity:0.7;">' +
+        '<div class="vfolder-file-icon" style="background:#f5f5f5;color:#999;">📭</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(r.label) + '</div>' +
+          '<div class="vfolder-file-meta">' +
+            '<span>該当ページなし</span>' +
+            '<span>(全' + r.totalPages + 'ページ)</span>' +
+          '</div>' +
+        '</div></div>';
+      return;
+    }
+    var url = URL.createObjectURL(r.blob);
+    html += '<div class="vfolder-row">' +
+      '<a class="vfolder-file" href="' + url + '" download="' + escHtml(r.filename) + '" target="_blank">' +
+        '<div class="vfolder-file-icon" style="background:#e1bee7;color:#6a1b9a;">📄</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(r.filename) + '</div>' +
+          '<div class="vfolder-file-meta">' +
+            '<span class="vfolder-file-badge" style="background:#6a1b9a;">PDF</span>' +
+            '<span>' + r.count + ' / ' + r.totalPages + ' ページ</span>' +
+          '</div>' +
+        '</div>' +
+        '<span class="vfolder-file-arrow">›</span>' +
+      '</a>' +
+      '<button class="vfolder-dl-btn" onclick="shareChinginExtract(' + idx + ')" title="共有" style="background:linear-gradient(180deg,#f3e5f5,#e1bee7);border-color:#ce93d8;color:#6a1b9a;">📤</button>' +
+    '</div>';
+  });
+  html += '</div>';
+
+  content.innerHTML = html;
+}
+
+async function shareChinginExtract(idx) {
+  var r = (_chinginResults || [])[idx];
+  if (!r || !r.blob) return;
+  try {
+    var file = new File([r.blob], r.filename, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: r.filename });
+    } else {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(r.blob);
+      a.download = r.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      console.error('share error:', e);
+      showToast('共有に失敗しました', 'error');
+    }
+  }
+}
 
 async function openEmpFileBrowser(opts) {
   // ポップアップを即座に表示
