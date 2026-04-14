@@ -8416,38 +8416,58 @@ async function executeSaveTenkenAdd() {
     var metaData = await metaResp.json();
     var entityType = metaData.d.ListItemEntityTypeFullName;
 
-    // フィールドメタデータを取得して有効なプロパティ名のセットを作る
-    var fieldsResp = await fetch(listApi + "/fields?$filter=Hidden eq false&$select=EntityPropertyName,InternalName,TypeAsString&$top=200", {
+    // フィールドメタデータを取得（書き込み可能なフィールドのみ）
+    var fieldsResp = await fetch(listApi + "/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=EntityPropertyName,InternalName,TypeAsString,Title&$top=200", {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
-    var validProps = new Set();
+    var fieldTypeMap = {}; // EntityPropertyName/InternalName -> TypeAsString
     if (fieldsResp.ok) {
       var fieldsData = await fieldsResp.json();
       (fieldsData.d.results || []).forEach(function(f) {
-        validProps.add(f.EntityPropertyName);
-        validProps.add(f.InternalName);
+        if (f.EntityPropertyName) fieldTypeMap[f.EntityPropertyName] = f.TypeAsString;
+        if (f.InternalName) fieldTypeMap[f.InternalName] = f.TypeAsString;
       });
     }
 
+    // 複雑な型はスキップ（Lookup/User/Taxonomy等は単純な値を受け付けない）
+    var SKIP_TYPES = ['Lookup','LookupMulti','User','UserMulti','TaxonomyFieldType','TaxonomyFieldTypeMulti','Computed','Calculated','Attachments','Guid'];
+
     var body = { '__metadata': { type: entityType } };
+    var skipped = [];
     var inputs = document.querySelectorAll('[id^="tadd_"]');
     inputs.forEach(function(el) {
       var prop = el.getAttribute('data-prop');
-      var type = el.getAttribute('data-type');
       var val = el.value;
       if (!prop || prop === '' || val === '') return;
       if (el.disabled || el.readOnly) return; // 読み取り専用はスキップ
-      // 有効なプロパティ名かチェック
-      if (validProps.size > 0 && !validProps.has(prop)) {
-        console.warn('Skipping invalid prop:', prop);
+
+      var fieldType = fieldTypeMap[prop];
+      if (!fieldType) {
+        skipped.push(prop + '(unknown)');
         return;
       }
-      if (type === 'date') body[prop] = val + 'T00:00:00Z';
-      else if (type === 'number') body[prop] = parseFloat(val) || 0;
-      else if (type === 'boolean') body[prop] = val === 'true';
-      else body[prop] = val;
+      if (SKIP_TYPES.indexOf(fieldType) >= 0) {
+        skipped.push(prop + '(' + fieldType + ')');
+        return;
+      }
+
+      // SharePointフィールドタイプに応じて値を整形
+      if (fieldType === 'DateTime') {
+        body[prop] = val + 'T00:00:00Z';
+      } else if (fieldType === 'Number' || fieldType === 'Currency') {
+        var n = parseFloat(val);
+        if (!isNaN(n)) body[prop] = n;
+      } else if (fieldType === 'Boolean') {
+        body[prop] = (val === 'true' || val === '1' || val === 'on');
+      } else if (fieldType === 'MultiChoice') {
+        body[prop] = { '__metadata': { type: 'Collection(Edm.String)' }, 'results': [val] };
+      } else {
+        // Text, Note, Choice 等は文字列でOK
+        body[prop] = String(val);
+      }
     });
     console.log('Tenken save body:', JSON.stringify(body));
+    if (skipped.length) console.log('Skipped fields:', skipped);
 
     var resp = await fetch(listApi + "/items", {
       method: 'POST',
@@ -8460,7 +8480,15 @@ async function executeSaveTenkenAdd() {
     });
     if (!resp.ok) {
       var errText = await resp.text();
-      throw new Error('登録失敗(' + resp.status + '): ' + errText.substring(0, 200));
+      // SharePointエラーメッセージから日本語部分を抽出
+      var msg = errText;
+      try {
+        var ej = JSON.parse(errText);
+        if (ej && ej.error && ej.error.message && ej.error.message.value) {
+          msg = ej.error.message.value;
+        }
+      } catch(_) {}
+      throw new Error('登録失敗(' + resp.status + '): ' + msg.substring(0, 300));
     }
 
     var ov = document.getElementById('tenkenAddOverlay');
