@@ -2010,6 +2010,114 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 12px;
+  animation: gensenOverlayFadeIn 0.15s ease;
+}
+.preview-popup {
+  background: #fff;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+}
+.preview-header {
+  background: linear-gradient(135deg,#1565c0 0%,#1976d2 50%,#42a5f5 100%);
+  color: #fff;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preview-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: break-all;
+}
+.preview-close {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.preview-body {
+  flex: 1;
+  overflow: auto;
+  background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  position: relative;
+}
+.preview-body canvas, .preview-body img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+.preview-page-info {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.preview-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fafafa;
+  border-top: 1px solid #eee;
+}
+.preview-actions a, .preview-actions button {
+  flex: 1;
+  padding: 9px;
+  border-radius: 9px;
+  border: 1px solid #c5d9ee;
+  background: linear-gradient(180deg, #fff, #f0f7ff);
+  color: #1565c0;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  text-align: center;
+}
+.preview-actions a:active, .preview-actions button:active {
+  transform: scale(0.97);
+}
+.preview-loading-box {
+  padding: 40px 20px;
+  color: #ccc;
+  font-size: 13px;
+  text-align: center;
+}
+.preview-loading-box .pl-icon {
+  font-size: 36px;
+  margin-bottom: 10px;
+}
 .gensen-popup {
   background: #fff;
   border-radius: 18px;
@@ -6949,7 +7057,7 @@ function escHtml(str) {
 // ポップアップ外のボタン/リンククリックで開いている gensen-overlay を閉じる
 document.addEventListener('click', function(e) {
   if (!document.querySelector('.gensen-overlay')) return;
-  if (e.target.closest('.gensen-popup')) return;
+  if (e.target.closest('.gensen-popup, .preview-popup, .preview-overlay')) return;
   if (e.target.classList && e.target.classList.contains('gensen-overlay')) return;
   if (e.target.closest('button, a, [role="button"], [onclick]')) {
     document.querySelectorAll('.gensen-overlay').forEach(function(o) { o.remove(); });
@@ -10478,9 +10586,12 @@ function renderVehicleFolderContents(subfolders, files, digits) {
     var url = f.Path || '';
     var srUrl = f.ServerRelativeUrl || '';
     var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
+    var prevB64 = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ext: ext })))) : '';
 
     html += '<div class="vfolder-row">' +
-      '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
+      (prevB64
+        ? '<div class="vfolder-file" style="cursor:pointer;" onclick="openFilePreviewFromPayload(\'' + prevB64 + '\')">'
+        : '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">') +
         '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
         '<div class="vfolder-file-info">' +
           '<div class="vfolder-file-name">' + escHtml(name) + '</div>' +
@@ -10491,7 +10602,7 @@ function renderVehicleFolderContents(subfolders, files, digits) {
           '</div>' +
         '</div>' +
         '<span class="vfolder-file-arrow">›</span>' +
-      '</a>' +
+      (prevB64 ? '</div>' : '</a>') +
       '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
     '</div>';
   });
@@ -10967,6 +11078,112 @@ async function shareChinginExtract(idx) {
   }
 }
 
+// ============================================================
+// ファイルプレビュー (PDF/画像をインライン表示)
+// ============================================================
+function openFilePreviewFromPayload(payloadB64) {
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(payloadB64))));
+    openFilePreview(p.srUrl, p.name, p.ext);
+  } catch (e) {
+    console.error('preview payload parse:', e);
+    showToast('プレビュー情報を解析できません', 'error');
+  }
+}
+
+async function openFilePreview(srUrl, name, ext) {
+  ext = String(ext || '').toLowerCase().replace(/^\./, '');
+  var externalUrl = 'https://teamstepupcom774.sharepoint.com' + srUrl;
+  var dlUrl = TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl);
+
+  var overlay = document.createElement('div');
+  overlay.className = 'preview-overlay';
+  overlay.innerHTML = '<div class="preview-popup">' +
+    '<div class="preview-header">' +
+      '<div class="preview-name">' + escHtml(name) + '</div>' +
+      '<button class="preview-close" onclick="this.closest(\'.preview-overlay\').remove()">✕</button>' +
+    '</div>' +
+    '<div class="preview-body" id="previewBody">' +
+      '<div class="preview-loading-box"><div class="pl-icon">⏳</div><div>読み込み中...</div></div>' +
+    '</div>' +
+    '<div class="preview-actions">' +
+      '<a href="' + escHtml(externalUrl) + '" target="_blank" rel="noopener">📁 開く</a>' +
+      '<a href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener">⬇️ DL</a>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var body = overlay.querySelector('#previewBody');
+  var setBody = function(html) { if (body) body.innerHTML = html; };
+
+  var imageExts = ['jpg','jpeg','png','gif','webp','bmp','heic','heif'];
+  var pdfExts = ['pdf'];
+
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+
+    if (imageExts.indexOf(ext) >= 0) {
+      var buf = await downloadSpFile(token, srUrl);
+      var mime = (ext === 'jpg') ? 'image/jpeg' : ('image/' + ext);
+      var blob = new Blob([buf], { type: mime });
+      var url = URL.createObjectURL(blob);
+      setBody('<img src="' + url + '" alt="' + escHtml(name) + '">');
+    } else if (pdfExts.indexOf(ext) >= 0) {
+      setBody('<div class="preview-loading-box"><div class="pl-icon">📄</div><div>PDF読み込み中...</div></div>');
+      await loadPdfLibs();
+      var pbuf = await downloadSpFile(token, srUrl);
+      var pdfjsLib = window.pdfjsLib;
+      var pdf = await pdfjsLib.getDocument({ data: pbuf.slice(0) }).promise;
+      var page = await pdf.getPage(1);
+      var viewport = page.getViewport({ scale: 1.6 });
+      var canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      setBody('');
+      body.appendChild(canvas);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+      if (pdf.numPages > 1) {
+        var info = document.createElement('div');
+        info.className = 'preview-page-info';
+        info.textContent = '1 / ' + pdf.numPages + ' ページ';
+        body.appendChild(info);
+      }
+    } else {
+      // SharePoint サムネイルAPIを試行
+      try {
+        var origin = TEAMSTEPUP_SITE_URL.replace(/\/sites\/.*/, '');
+        var prevUrl = origin + '/_layouts/15/getpreview.ashx?path=' +
+          encodeURIComponent(externalUrl) + '&resolution=2';
+        var resp = await fetch(prevUrl, {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (resp.ok) {
+          var pblob = await resp.blob();
+          if (pblob.size > 200) {
+            var purl = URL.createObjectURL(pblob);
+            setBody('<img src="' + purl + '" alt="' + escHtml(name) + '">');
+            return;
+          }
+        }
+      } catch (_) {}
+      setBody('<div class="preview-loading-box">' +
+        '<div class="pl-icon">📄</div>' +
+        '<div>このファイル形式はプレビュー非対応</div>' +
+        '<div style="font-size:11px;color:#999;margin-top:8px;">下のボタンから開いてください</div>' +
+        '</div>');
+    }
+  } catch (e) {
+    console.error('preview error:', e);
+    setBody('<div class="preview-loading-box">' +
+      '<div class="pl-icon">⚠️</div>' +
+      '<div style="color:#ef9a9a;">読み込みエラー</div>' +
+      '<div style="font-size:10px;color:#999;margin-top:6px;">' + escHtml(String(e.message || e)) + '</div>' +
+      '</div>');
+  }
+}
+
 async function openEmpFileBrowser(opts) {
   // ポップアップを即座に表示
   var overlay = document.createElement('div');
@@ -11147,9 +11364,10 @@ function renderEmpBrowserResults(matches, opts) {
     var date = m.date ? formatDate(m.date) : '';
     var url = 'https://teamstepupcom774.sharepoint.com' + m.srUrl;
     var dlUrl = TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(m.srUrl);
+    var prevB64 = btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: m.srUrl, name: m.name, ext: ext }))));
 
     html += '<div class="vfolder-row">' +
-      '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
+      '<div class="vfolder-file" style="cursor:pointer;" onclick="openFilePreviewFromPayload(\'' + prevB64 + '\')">' +
         '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
         '<div class="vfolder-file-info">' +
           '<div class="vfolder-file-name">' + escHtml(m.name) + '</div>' +
@@ -11161,7 +11379,7 @@ function renderEmpBrowserResults(matches, opts) {
           '</div>' +
         '</div>' +
         '<span class="vfolder-file-arrow">›</span>' +
-      '</a>' +
+      '</div>' +
       '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
     '</div>';
   });
@@ -11415,9 +11633,12 @@ function renderSyainFolderContents(subfolders, files) {
     var url = f.Path || '';
     var srUrl = f.ServerRelativeUrl || '';
     var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
+    var prevB64 = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ext: ext })))) : '';
 
     html += '<div class="vfolder-row">' +
-      '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
+      (prevB64
+        ? '<div class="vfolder-file" style="cursor:pointer;" onclick="openFilePreviewFromPayload(\'' + prevB64 + '\')">'
+        : '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">') +
         '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
         '<div class="vfolder-file-info">' +
           '<div class="vfolder-file-name">' + escHtml(name) + '</div>' +
@@ -11428,7 +11649,7 @@ function renderSyainFolderContents(subfolders, files) {
           '</div>' +
         '</div>' +
         '<span class="vfolder-file-arrow">›</span>' +
-      '</a>' +
+      (prevB64 ? '</div>' : '</a>') +
       '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
     '</div>';
   });
