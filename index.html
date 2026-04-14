@@ -10619,26 +10619,27 @@ async function extractMatchingPages(buffer, empNo, onProgress) {
   var sampleText = '';
   var sampleCompact = '';
 
-  var empNoStr = String(empNo).replace(/\D/g, '');
-  var empNoNoZero = empNoStr.replace(/^0+/, '');
-  var nums = [empNoStr];
-  if (empNoNoZero && empNoNoZero !== empNoStr) nums.push(empNoNoZero);
+  // 正規化: 数字のみ抽出 → 先頭ゼロを除去した「コア番号」を取得
+  // PDF側が "70381" "070381" "0070381" のどの表記でもマッチさせるため、
+  // 正規表現側で "0*<コア番号>" を許容する
+  var empNoDigits = String(empNo).replace(/\D/g, '');
+  var coreNum = empNoDigits.replace(/^0+/, '') || empNoDigits;
+  var coreEsc = coreNum;
 
-  // 厳密: 「社員番号」ラベル + 番号
-  var strictPatterns = [];
-  nums.forEach(function(n) {
-    strictPatterns.push(new RegExp('社員番号[\\s::\\.\\-_／/、,]*' + n + '(?![0-9])'));
-    strictPatterns.push(new RegExp('社員\\s*ｺｰﾄﾞ[\\s::\\.\\-_]*' + n + '(?![0-9])'));
-    strictPatterns.push(new RegExp('社員\\s*コード[\\s::\\.\\-_]*' + n + '(?![0-9])'));
-    strictPatterns.push(new RegExp('社員\\s*No[\\s::\\.\\-_]*' + n + '(?![0-9])', 'i'));
-    strictPatterns.push(new RegExp('No[\\s::\\.\\-_]*' + n + '(?![0-9])', 'i'));
-  });
+  // 厳密: 「社員番号」ラベル + (任意の先頭ゼロ) + 番号
+  var strictPatterns = [
+    new RegExp('社員番号[\\s::\\.\\-_／/、,]*0*' + coreEsc + '(?![0-9])'),
+    new RegExp('社員\\s*ｺｰﾄﾞ[\\s::\\.\\-_]*0*' + coreEsc + '(?![0-9])'),
+    new RegExp('社員\\s*コード[\\s::\\.\\-_]*0*' + coreEsc + '(?![0-9])'),
+    new RegExp('社員\\s*No[\\s::\\.\\-_]*0*' + coreEsc + '(?![0-9])', 'i'),
+    new RegExp('No[\\s::\\.\\-_]*0*' + coreEsc + '(?![0-9])', 'i')
+  ];
 
   // ゆるい: 単独数字 (1ページ1社員前提)
-  var loosePatterns = [];
-  nums.forEach(function(n) {
-    loosePatterns.push(new RegExp('(?:^|[^0-9])' + n + '(?![0-9])'));
-  });
+  // 先頭の非数字 + 任意の0 + コア番号 + 後続非数字
+  var loosePatterns = [
+    new RegExp('(?:^|[^0-9])0*' + coreEsc + '(?![0-9])')
+  ];
 
   for (var i = 1; i <= pdf.numPages; i++) {
     var page = await pdf.getPage(i);
