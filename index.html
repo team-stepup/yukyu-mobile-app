@@ -2025,6 +2025,20 @@ body {
 .gensen-btn-view { background: linear-gradient(135deg, #1565c0, #42a5f5); color: #fff; }
 .gensen-btn-download { background: linear-gradient(135deg, #2e7d32, #66bb6a); color: #fff; }
 .gensen-btn-copy { background: linear-gradient(135deg, #ef6c00, #ffa726); color: #fff; }
+.kyuryou-header { background: linear-gradient(135deg, #c62828 0%, #e53935 50%, #ef5350 100%) !important; }
+.kyuryou-input { border-color: #ffcdd2 !important; color: #c62828 !important; }
+.kyuryou-input:focus { border-color: #e53935 !important; }
+.kyuryou-search-btn {
+  background: linear-gradient(135deg, #c62828, #ef5350) !important;
+  box-shadow: 0 2px 8px rgba(198,40,40,0.3) !important;
+}
+.kyuryou-count { color: #c62828 !important; }
+.kyuryou-item { border-left-color: #c62828 !important; border-color: #ffcdd2 !important; }
+.kyuryou-year { color: #c62828 !important; background: #ffebee !important; }
+.kyuryou-btn-copy {
+  background: linear-gradient(135deg, #c62828, #ef5350) !important;
+  color: #fff;
+}
 .shiryou-link {
   display: flex;
   align-items: center;
@@ -4282,7 +4296,7 @@ var SHIRYOU_CATEGORIES = [
     id: 'kyuyo', label: '給与関連', icon: '💴', color: '#f57c00',
     items: [
       { icon: '📄', label: '源泉徴収票', sub: '社員番号で全年度検索', action: 'openGensenSearch' },
-      { icon: '💴', label: '給料明細', url: 'https://teamstepupcom774.sharepoint.com/:f:/r/sites/TeamStepup/Shared%20Documents/%E7%A4%BE%E5%93%A1%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB/%E7%B5%A6%E4%B8%8E%E6%98%8E%E7%B4%B0%E3%83%87%E3%83%BC%E3%82%BF?csf=1&web=1&e=a4DK9C' },
+      { icon: '💴', label: '給料明細', sub: '社員番号で全年月検索', action: 'openKyuryouSearch' },
       { icon: '📒', label: '賃金台帳', sub: '毎月15日更新予定', url: 'https://teamstepupcom774.sharepoint.com/:f:/s/TeamStepup/IgANCR0EYtP_SYkIHU6JILgAAfc71cbvugf9mI-4Vwv_UCw' },
       { icon: '🌐', label: '給料明細 翻訳', url: 'https://acrobat.adobe.com/id/urn:aaid:sc:ap:ce9938d7-2baf-452d-858f-e6acd473bc56' }
     ]
@@ -4578,6 +4592,172 @@ function fallbackCopy(text) {
   try { document.execCommand('copy'); showToast('✅ URLをコピーしました'); }
   catch(e) { showToast('コピーに失敗しました', 'error'); }
   t.remove();
+}
+
+// ============================================================
+// 給料明細 検索（社員番号で年/月フォルダを再帰検索）
+// ============================================================
+var KYURYOU_BASE_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル/給与明細データ';
+
+// 共通: フォルダ配下のファイルを再帰的に取得し、社員番号と末尾一致するものだけを返す
+async function fetchMatchingFilesRecursive(basePath, empNo, token, maxDepth, currentDepth, parentPath) {
+  currentDepth = currentDepth || 0;
+  parentPath = parentPath || '';
+  var results = [];
+
+  // このレベルのファイルを取得
+  try {
+    var filesUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
+      encodeURIComponent(basePath) + "')/Files?$select=Name,ServerRelativeUrl,Length,TimeLastModified&$top=2000";
+    var fr = await fetch(filesUrl, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (fr.ok) {
+      var fd = await fr.json();
+      (fd.d.results || []).forEach(function(f) {
+        if (matchGensenFilename(f.Name, empNo)) {
+          results.push({
+            folder: parentPath || '(直下)',
+            name: f.Name,
+            serverRelativeUrl: f.ServerRelativeUrl,
+            size: f.Length,
+            date: f.TimeLastModified
+          });
+        }
+      });
+    }
+  } catch(_) {}
+
+  // 深さが残っていればサブフォルダを並列で再帰
+  if (currentDepth < maxDepth) {
+    try {
+      var foldersUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
+        encodeURIComponent(basePath) + "')/Folders?$select=Name,ServerRelativeUrl&$top=200";
+      var fdr = await fetch(foldersUrl, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+      });
+      if (fdr.ok) {
+        var fdd = await fdr.json();
+        var subs = (fdd.d.results || []).filter(function(f) {
+          return f.Name && f.Name !== 'Forms' && !f.Name.startsWith('_');
+        });
+        var subPromises = subs.map(function(sub) {
+          var newPath = parentPath ? parentPath + ' / ' + sub.Name : sub.Name;
+          return fetchMatchingFilesRecursive(sub.ServerRelativeUrl, empNo, token, maxDepth, currentDepth + 1, newPath);
+        });
+        var subResults = await Promise.all(subPromises);
+        subResults.forEach(function(sr) { results = results.concat(sr); });
+      }
+    } catch(_) {}
+  }
+  return results;
+}
+
+function openKyuryouSearch() {
+  var prefill = '';
+  try {
+    if (typeof currentEmployee !== 'undefined' && currentEmployee && typeof F !== 'undefined' && F && F.syainNo) {
+      prefill = String(currentEmployee[F.syainNo] || '');
+    }
+  } catch(_) {}
+
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.id = 'kyuryouSearchOverlay';
+  ov.innerHTML =
+    '<div class="gensen-popup">' +
+      '<div class="gensen-header kyuryou-header">' +
+        '<div class="gensen-header-icon">💴</div>' +
+        '<div style="flex:1;">' +
+          '<div class="gensen-title">給料明細</div>' +
+          '<div class="gensen-subtitle">社員番号で全年月を検索</div>' +
+        '</div>' +
+        '<button class="gensen-close" onclick="document.getElementById(\'kyuryouSearchOverlay\').remove()">✕</button>' +
+      '</div>' +
+      '<div class="gensen-body">' +
+        '<div class="gensen-input-row">' +
+          '<input type="text" inputmode="numeric" id="kyuryouEmpInput" class="kyuryou-input" placeholder="社員番号" value="' + escHtml(prefill) + '" maxlength="5" onkeydown="if(event.key===\'Enter\')executeKyuryouSearch()">' +
+          '<button onclick="executeKyuryouSearch()" class="kyuryou-search-btn">🔍 検索</button>' +
+        '</div>' +
+        '<div class="gensen-hint">3桁→自動で先頭に「00」を補完。年/月フォルダを横断してファイル名末尾が一致するものを表示します。</div>' +
+        '<div id="kyuryouResults"></div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+
+  if (prefill) setTimeout(executeKyuryouSearch, 100);
+  else { var el = document.getElementById('kyuryouEmpInput'); if (el) el.focus(); }
+}
+
+async function executeKyuryouSearch() {
+  var input = document.getElementById('kyuryouEmpInput');
+  if (!input) return;
+  var empNo = normalizeGensenEmpNo(input.value);
+  if (!empNo) { showToast('社員番号を入力してください', 'error'); return; }
+  input.value = empNo;
+
+  var resultsEl = document.getElementById('kyuryouResults');
+  resultsEl.innerHTML = '<div class="vfolder-loading"><div class="vfolder-spinner"></div><div>「' + empNo + '」を全年月で検索中...</div></div>';
+
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    // 給与明細データ → 年フォルダ → 月フォルダ → ファイル の最大2階層下まで再帰
+    var matches = await fetchMatchingFilesRecursive(KYURYOU_BASE_PATH, empNo, token, 2);
+    renderKyuryouResults(matches, empNo);
+  } catch (e) {
+    console.error('Kyuryou search error:', e);
+    resultsEl.innerHTML = '<div class="vfolder-empty">' +
+      '<div class="vfolder-empty-icon">⚠️</div>' +
+      '<div class="vfolder-empty-text">検索に失敗しました<br><span style="font-size:10px;">' + escHtml(String(e.message || e)) + '</span></div>' +
+      '</div>';
+  }
+}
+
+function renderKyuryouResults(matches, empNo) {
+  var el = document.getElementById('kyuryouResults');
+  if (!el) return;
+  if (matches.length === 0) {
+    el.innerHTML = '<div class="vfolder-empty">' +
+      '<div class="vfolder-empty-icon">📭</div>' +
+      '<div class="vfolder-empty-text">「' + escHtml(empNo) + '」に一致する給料明細が見つかりません</div>' +
+      '</div>';
+    return;
+  }
+
+  // 年/月フォルダパスで降順ソート（新しい年月を先頭に）
+  matches.sort(function(a, b) {
+    return String(b.folder || '').localeCompare(String(a.folder || ''), 'ja');
+  });
+
+  var html = '<div class="gensen-summary">' +
+    '<span class="gensen-summary-count kyuryou-count">' + matches.length + '</span>' +
+    '<span class="gensen-summary-label">件 (社員番号: <b>' + escHtml(empNo) + '</b>)</span>' +
+    '</div>';
+
+  html += '<div class="gensen-list">';
+  matches.forEach(function(m) {
+    var dateStr = m.date ? formatDate(m.date) : '';
+    var sizeStr = m.size ? formatFileSize(parseInt(m.size)) : '';
+    var viewUrl = 'https://teamstepupcom774.sharepoint.com' + m.serverRelativeUrl;
+    var dlUrl = TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(m.serverRelativeUrl);
+    html += '<div class="gensen-item kyuryou-item">' +
+      '<div class="gensen-item-top">' +
+        '<span class="gensen-item-year kyuryou-year">📅 ' + escHtml(m.folder) + '</span>' +
+        (dateStr ? '<span class="gensen-item-date">' + escHtml(dateStr) + '</span>' : '') +
+      '</div>' +
+      '<div class="gensen-item-name">📄 ' + escHtml(m.name) + '</div>' +
+      (sizeStr ? '<div class="gensen-item-meta">' + escHtml(sizeStr) + '</div>' : '') +
+      '<div class="gensen-item-actions">' +
+        '<a class="gensen-btn gensen-btn-view" href="' + escHtml(viewUrl) + '" target="_blank" rel="noopener">📖 開く</a>' +
+        '<a class="gensen-btn gensen-btn-download" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener">⬇️ DL</a>' +
+        '<button class="gensen-btn kyuryou-btn-copy" onclick="copyGensenUrl(\'' + escHtml(viewUrl).replace(/'/g, "\\'") + '\')">📋 URL</button>' +
+      '</div>' +
+    '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 // Global expiry alerts cache for filter
