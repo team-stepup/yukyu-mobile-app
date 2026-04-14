@@ -4140,6 +4140,7 @@ async function loadMaebariData() {
               <th>金額</th>
               <th>手数料</th>
               <th>合計</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -4147,11 +4148,13 @@ async function loadMaebariData() {
               const amount = r[MF.amount] || '';
               const fee = r[MF.fee] || '';
               const total = parseFloat(r[MF.total]) || 0;
+              const hasFee = fee && String(fee).trim();
               return `<tr>
                 <td>${formatDate(r[MF.payDate])}</td>
                 <td class="amount-cell">${escHtml(String(amount))}</td>
                 <td class="amount-cell">${escHtml(String(fee))}</td>
                 <td class="amount-cell" style="font-weight:700;">${formatCurrency(total)}</td>
+                <td style="text-align:center;padding:2px;">${hasFee ? '<span style="color:#ccc;font-size:12px;">🔒</span>' : '<button onclick="event.stopPropagation();deleteMaebariById(' + r.Id + ')" style="background:#e53935;color:#fff;border:none;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer;">🗑</button>'}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -4216,6 +4219,30 @@ async function loadMaebariData() {
   } catch (e) {
     console.error('Maebari fetch error:', e);
     container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">前払いデータの取得に失敗しました</div>';
+  }
+}
+
+async function deleteMaebariById(itemId) {
+  if (!confirm('この前払いを削除しますか？\nこの操作は取り消せません。')) return;
+  try {
+    var token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + itemId + ")";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'DELETE',
+      },
+    });
+    if (!resp.ok) throw new Error('削除失敗: ' + resp.status);
+    showToast('🗑 削除しました', 'success');
+    loadMaebariData();
+  } catch (e) {
+    console.error('Delete maebari error:', e);
+    showToast('削除エラー: ' + e.message, 'error');
   }
 }
 
