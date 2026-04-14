@@ -2011,7 +2011,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '2b7d37b';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -8393,9 +8393,14 @@ function openTenkenAddForm() {
   });
   h += '</div>';
 
-  // 車検有効期限（車両台帳から参照・読み取り専用）
+  // 車検有効期限（車両台帳から参照・読み取り専用だがListに保存する）
+  var fSyakenProp = '';
+  if (fields.length) {
+    var syakenField = fields.find(function(f) { return f.Title && (f.Title.indexOf('車検') >= 0 || f.Title.indexOf('Shaken') >= 0); });
+    if (syakenField) fSyakenProp = syakenField.EntityPropertyName;
+  }
   h += '<div style="' + DS + '"><label style="' + LS + '">車検有効期限</label>';
-  h += '<input type="date" id="tadd_syaken" value="' + escHtml(preSyaken) + '" style="' + IS + 'background:#f5f5f5;" disabled></div>';
+  h += '<input type="date" id="tadd_syaken" data-prop="' + escHtml(fSyakenProp) + '" data-type="date" value="' + escHtml(preSyaken) + '" style="' + IS + 'background:#f5f5f5;" readonly></div>';
 
   // 異常箇所・対応（テキスト）
   var fIjou = '';
@@ -8470,7 +8475,7 @@ async function executeSaveTenkenAdd() {
       var prop = el.getAttribute('data-prop');
       var val = el.value;
       if (!prop || prop === '' || val === '') return;
-      if (el.disabled || el.readOnly) return; // 読み取り専用はスキップ
+      // readonly/disabledでもdata-propがあれば保存（車両台帳から自動入力された値を保存するため）
 
       var fieldType = fieldTypeMap[prop];
       if (!fieldType) {
