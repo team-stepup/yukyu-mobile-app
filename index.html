@@ -2011,7 +2011,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'a09dab7';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2506,6 +2506,7 @@ function switchScreen(screenId, skipHistory) {
 
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
+  window.scrollTo(0, 0);
 
   const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
@@ -3501,7 +3502,7 @@ function formatProfileValue(val, format) {
       alert = ' <span class="expiry-danger">期限切れ</span>';
     } else if (diffDays <= 30) {
       alert = ' <span class="expiry-danger">残り' + diffDays + '日</span>';
-    } else if (diffDays <= 60) {
+    } else if (diffDays <= 30) {
       alert = ' <span class="expiry-warn">残り' + diffDays + '日</span>';
     }
     return formatDate(val) + alert;
@@ -3561,7 +3562,7 @@ function categoryHasAlert(emp, keyMap, category) {
     const d = new Date(val);
     if (isNaN(d)) continue;
     const diffDays = Math.ceil((d - new Date()) / 86400000);
-    if (diffDays <= 60) return true;
+    if (diffDays <= 30) return true;
   }
   return false;
 }
@@ -3644,7 +3645,7 @@ async function loadHomeBadges() {
         if (!val) return;
         var d = new Date(val);
         if (isNaN(d)) return;
-        if (Math.ceil((d - today) / 86400000) <= 60) expiryCount++;
+        if (Math.ceil((d - today) / 86400000) <= 30) expiryCount++;
       });
     });
   });
@@ -3742,7 +3743,7 @@ async function openExpiryList() {
           var d = new Date(val);
           if (isNaN(d)) return;
           var diffDays = Math.ceil((d - now) / 86400000);
-          if (diffDays <= 60) {
+          if (diffDays <= 30) {
             _expiryAlerts.push({
               emp: emp,
               empName: empName,
@@ -8001,65 +8002,135 @@ function openTenkenDetail(i) {
 function openTenkenAddForm() {
   var fm = _tenkenFieldMap;
   var fields = fm.fields || [];
-  if (!fields.length) { showToast('先に点検記録を検索してください', 'error'); return; }
 
-  // 入力対象フィールド（システム列以外）
-  var hideInternal = ['ContentTypeId', 'ContentType', 'Attachments', 'ComplianceAssetId', 'OData__ColorTag', 'OData__UIVersionString', 'OData__vti_ItemDeclaredRecord'];
-  var editableFields = fields.filter(function(f) {
-    if (hideInternal.indexOf(f.EntityPropertyName) >= 0) return false;
-    if (f.EntityPropertyName === 'Title') return true;
-    if (f.TypeAsString === 'Computed' || f.TypeAsString === 'Lookup' || f.TypeAsString === 'User') return false;
-    return true;
+  // 車両台帳から情報を取得（あれば）
+  var vf = window._vf || {};
+  var vIdx = window._currentVehicleIdx;
+  var vItem = (vIdx !== undefined && _vehicleData[vIdx]) ? _vehicleData[vIdx] : null;
+
+  var preNumber = document.getElementById('tenkenSearchInput').value.trim();
+  var preCarType = vItem && vf.carType ? (vItem[vf.carType] || '') : '';
+  var preDriver = vItem && vf.driver ? (vItem[vf.driver] || '') : '';
+  var preSyaken = vItem && vf.syaken ? (vItem[vf.syaken] || '').substring(0, 10) : '';
+  var preNo1 = vItem && vf.no1 ? (vItem[vf.no1] || '') : '';
+  var today = new Date().toISOString().substring(0, 10);
+
+  // ドライバー一覧（車両データから取得）
+  var driverSet = {};
+  _vehicleData.forEach(function(v) {
+    var d = vf.driver ? (v[vf.driver] || '') : '';
+    if (d) driverSet[d] = 1;
   });
-
-  var tr = {'Date':'点検日','date':'点検日','Driver':'ドライバー','driver':'ドライバー','Mileage':'走行距離','mileage':'走行距離','Number':'ナンバー','number':'ナンバー','Model':'車種','Color':'色','Note':'備考','Notes':'備考','Comment':'コメント','Oil':'オイル','Tire':'タイヤ','Brake':'ブレーキ','Light':'ライト','Battery':'バッテリー','Wiper':'ワイパー','Horn':'ホーン','Mirror':'ミラー','Belt':'ベルト','Coolant':'冷却水','Washer':'ウォッシャー','Check':'チェック','Result':'結果','Inspector':'点検者','Status':'状態','Type':'種別','Engine':'エンジン','Fuel':'燃料','Body':'車体','Window':'窓','Exhaust':'排気','Transmission':'変速機'};
+  var driverList = Object.keys(driverSet).sort();
 
   var ov = document.createElement('div');
   ov.className = 'confirm-overlay';
   ov.id = 'tenkenAddOverlay';
   ov.style.zIndex = '99998';
 
-  var formHtml = '<div style="background:#fff;border-radius:16px;width:92%;max-width:420px;max-height:85vh;overflow-y:auto;padding:20px;">';
-  formHtml += '<div style="text-align:center;margin-bottom:12px;">';
-  formHtml += '<div style="font-size:16px;font-weight:700;color:#2e7d32;">🔧 新規点検記録</div>';
-  formHtml += '</div>';
+  var IS = 'width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;';
+  var LS = 'font-size:11px;font-weight:600;color:var(--text-light);display:block;margin-bottom:3px;';
+  var DS = 'margin-bottom:10px;';
+  // ○×選択肢を生成するヘルパー
+  function checkSelect(id, prop) {
+    return '<select id="' + id + '" data-prop="' + prop + '" data-type="text" style="' + IS + '">' +
+      '<option value="○異常なし" selected>○ 異常なし</option>' +
+      '<option value="×異常あり">× 異常あり</option></select>';
+  }
 
-  // ナンバーのプリフィル（検索ボックスの値）
-  var preNumber = document.getElementById('tenkenSearchInput').value.trim();
+  var h = '<div style="background:#fff;border-radius:16px;width:92%;max-width:420px;max-height:85vh;overflow-y:auto;padding:20px;">';
+  h += '<div style="text-align:center;margin-bottom:14px;">';
+  h += '<div style="font-size:16px;font-weight:700;color:#2e7d32;">🔧 新規点検記録</div>';
+  if (preNumber) h += '<div style="font-size:13px;color:var(--text-light);margin-top:2px;">' + escHtml(preNumber) + '</div>';
+  h += '</div>';
 
-  editableFields.forEach(function(f, i) {
-    var label = f.Title;
-    for (var eng in tr) { if (label === eng || label.indexOf(eng) >= 0) { label = tr[eng]; break; } }
-    var inputStyle = 'width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;';
-    formHtml += '<div style="margin-bottom:8px;">';
-    formHtml += '<label style="font-size:11px;font-weight:600;color:var(--text-light);display:block;margin-bottom:3px;">' + escHtml(label) + '</label>';
-    if (f.TypeAsString === 'DateTime') {
-      var today = new Date().toISOString().substring(0, 10);
-      formHtml += '<input type="date" id="tadd_' + i + '" data-prop="' + escHtml(f.EntityPropertyName) + '" data-type="date" value="' + today + '" style="' + inputStyle + '">';
-    } else if (f.TypeAsString === 'Number') {
-      formHtml += '<input type="number" id="tadd_' + i + '" data-prop="' + escHtml(f.EntityPropertyName) + '" data-type="number" style="' + inputStyle + '">';
-    } else if (f.TypeAsString === 'Boolean') {
-      formHtml += '<select id="tadd_' + i + '" data-prop="' + escHtml(f.EntityPropertyName) + '" data-type="boolean" style="' + inputStyle + '"><option value="">---</option><option value="true">はい</option><option value="false">いいえ</option></select>';
-    } else if (f.TypeAsString === 'Choice' && f.Choices) {
-      var choices = f.Choices.results || f.Choices || [];
-      formHtml += '<select id="tadd_' + i + '" data-prop="' + escHtml(f.EntityPropertyName) + '" data-type="choice" style="' + inputStyle + '"><option value="">---</option>';
-      choices.forEach(function(c) { formHtml += '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>'; });
-      formHtml += '</select>';
-    } else {
-      var preVal = '';
-      if (f.EntityPropertyName === fm.number || f.EntityPropertyName === 'Title') preVal = preNumber;
-      formHtml += '<input type="text" id="tadd_' + i + '" data-prop="' + escHtml(f.EntityPropertyName) + '" data-type="text" value="' + escHtml(preVal) + '" style="' + inputStyle + '">';
-    }
-    formHtml += '</div>';
+  // ナンバー（プリフィル・読み取り専用風）
+  h += '<div style="' + DS + '"><label style="' + LS + '">ナンバー</label>';
+  h += '<input type="text" id="tadd_number" data-prop="Title" data-type="text" value="' + escHtml(preNumber) + '" style="' + IS + 'background:#f5f5f5;"></div>';
+
+  // 車種名（点検記録の車種名）
+  h += '<div style="' + DS + '"><label style="' + LS + '">車種名</label>';
+  h += '<input type="text" id="tadd_cartype" data-prop="' + escHtml(fm.carType || '') + '" data-type="text" value="' + escHtml(preCarType) + '" style="' + IS + '"></div>';
+
+  // NO1（車両台帳から参照）
+  var fNo1Prop = '';
+  if (fields.length) {
+    var no1Field = fields.find(function(f) { return f.Title && (f.Title.indexOf('NO1') >= 0 || f.Title.indexOf('No1') >= 0); });
+    if (no1Field) fNo1Prop = no1Field.EntityPropertyName;
+  }
+  h += '<div style="' + DS + '"><label style="' + LS + '">NO1</label>';
+  h += '<input type="text" id="tadd_no1" data-prop="' + escHtml(fNo1Prop) + '" data-type="text" value="' + escHtml(String(preNo1)) + '" style="' + IS + 'background:#f5f5f5;" readonly></div>';
+
+  // 走行距離（数値入力）
+  h += '<div style="' + DS + '"><label style="' + LS + '">走行距離 (km)</label>';
+  h += '<input type="number" id="tadd_mileage" data-prop="' + escHtml(fm.mileage || '') + '" data-type="number" placeholder="数値を入力" style="' + IS + '"></div>';
+
+  // ドライバー（車両台帳から参照、ドロップダウン）
+  h += '<div style="' + DS + '"><label style="' + LS + '">ドライバー</label>';
+  h += '<select id="tadd_driver" data-prop="' + escHtml(fm.driver || '') + '" data-type="text" style="' + IS + '">';
+  driverList.forEach(function(d) {
+    h += '<option value="' + escHtml(d) + '"' + (d === preDriver ? ' selected' : '') + '>' + escHtml(d) + '</option>';
   });
+  h += '</select></div>';
 
-  formHtml += '<div style="display:flex;gap:8px;margin-top:14px;">';
-  formHtml += '<button onclick="document.getElementById(\'tenkenAddOverlay\').remove()" style="flex:1;padding:11px;border-radius:10px;background:#e0e0e0;color:var(--text);border:none;font-weight:600;font-size:13px;">キャンセル</button>';
-  formHtml += '<button id="tenkenAddSaveBtn" onclick="saveTenkenAdd()" style="flex:1;padding:11px;border-radius:10px;background:#2e7d32;color:#fff;border:none;font-weight:600;font-size:13px;">💾 保存</button>';
-  formHtml += '</div>';
-  formHtml += '</div>';
+  // 免許証現物確認（デフォルト: 確認済み）
+  var fLicenseCheck = '';
+  if (fields.length) {
+    var licField = fields.find(function(f) { return f.Title && (f.Title.indexOf('免許') >= 0 || f.Title.indexOf('License') >= 0 || f.Title.indexOf('license') >= 0); });
+    if (licField) fLicenseCheck = licField.EntityPropertyName;
+  }
+  h += '<div style="' + DS + '"><label style="' + LS + '">免許証現物確認</label>';
+  h += '<select id="tadd_license" data-prop="' + escHtml(fLicenseCheck) + '" data-type="text" style="' + IS + '">';
+  h += '<option value="確認済み" selected>確認済み</option><option value="未確認">未確認</option></select></div>';
 
-  ov.innerHTML = formHtml;
+  // 点検項目（全てデフォルト: ○異常なし）
+  var checkItems = [
+    { label: 'ヘッドライト', search: ['ヘッドライト', 'Headlight', 'headlight'] },
+    { label: 'ウィンカー', search: ['ウィンカー', 'Winker', 'winker', 'Turn'] },
+    { label: 'ブレーキランプ', search: ['ブレーキ', 'Brake', 'brake'] },
+    { label: 'タイヤ空気圧', search: ['空気圧', 'Tire', 'tire', 'pressure'] },
+    { label: 'タイヤの溝', search: ['溝', 'tread', 'Tread'] },
+    { label: 'バッテリー', search: ['バッテリー', 'Battery', 'battery'] },
+    { label: 'オイル交換', search: ['オイル', 'Oil', 'oil'] }
+  ];
+  h += '<div style="' + DS + 'background:#f8f9fa;border-radius:10px;padding:10px;border:1px solid var(--border);">';
+  h += '<div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:8px;">点検項目</div>';
+  checkItems.forEach(function(ci, idx) {
+    var prop = '';
+    if (fields.length) {
+      for (var s = 0; s < ci.search.length; s++) {
+        var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(ci.search[s]) >= 0; });
+        if (hit) { prop = hit.EntityPropertyName; break; }
+      }
+    }
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;' + (idx < checkItems.length - 1 ? 'border-bottom:1px solid #e8e8e8;' : '') + '">';
+    h += '<span style="font-size:13px;font-weight:500;">' + ci.label + '</span>';
+    h += '<select id="tadd_check_' + idx + '" data-prop="' + escHtml(prop) + '" data-type="text" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;">';
+    h += '<option value="○異常なし" selected>○ 異常なし</option><option value="×異常あり">× 異常あり</option></select>';
+    h += '</div>';
+  });
+  h += '</div>';
+
+  // 車検有効期限（車両台帳から参照・読み取り専用）
+  h += '<div style="' + DS + '"><label style="' + LS + '">車検有効期限</label>';
+  h += '<input type="date" id="tadd_syaken" value="' + escHtml(preSyaken) + '" style="' + IS + 'background:#f5f5f5;" disabled></div>';
+
+  // 備考
+  var fNote = '';
+  if (fields.length) {
+    var noteField = fields.find(function(f) { return f.Title && (f.Title.indexOf('備考') >= 0 || f.Title === 'Note' || f.Title === 'Notes' || f.Title === 'Comment'); });
+    if (noteField) fNote = noteField.EntityPropertyName;
+  }
+  h += '<div style="' + DS + '"><label style="' + LS + '">備考</label>';
+  h += '<input type="text" id="tadd_note" data-prop="' + escHtml(fNote) + '" data-type="text" placeholder="任意" style="' + IS + '"></div>';
+
+  h += '<div style="display:flex;gap:8px;margin-top:14px;">';
+  h += '<button onclick="document.getElementById(\'tenkenAddOverlay\').remove()" style="flex:1;padding:11px;border-radius:10px;background:#e0e0e0;color:var(--text);border:none;font-weight:600;font-size:13px;">キャンセル</button>';
+  h += '<button id="tenkenAddSaveBtn" onclick="saveTenkenAdd()" style="flex:1;padding:11px;border-radius:10px;background:#2e7d32;color:#fff;border:none;font-weight:600;font-size:13px;">💾 保存</button>';
+  h += '</div>';
+  h += '</div>';
+
+  ov.innerHTML = h;
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
 }
@@ -8091,7 +8162,8 @@ async function executeSaveTenkenAdd() {
       var prop = el.getAttribute('data-prop');
       var type = el.getAttribute('data-type');
       var val = el.value;
-      if (!prop || val === '') return;
+      if (!prop || prop === '' || val === '') return;
+      if (el.disabled) return; // 読み取り専用はスキップ
       if (type === 'date') body[prop] = val + 'T00:00:00Z';
       else if (type === 'number') body[prop] = parseFloat(val) || 0;
       else if (type === 'boolean') body[prop] = val === 'true';
