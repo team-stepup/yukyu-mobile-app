@@ -2011,7 +2011,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '33e21f2';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -5864,10 +5864,13 @@ var DROPDOWN_NEW_FIELDS = {
   zairyuShikaku: { label: '在留資格' }
 };
 var _editDropdownCache = {};
+// 連動マップ: { dependentKey: { sourceValue: [allowed dependent values] } }
+var _editDropdownLinkMaps = {};
 
 async function loadEditDropdownOptions(keyMap) {
   if (Object.keys(_editDropdownCache).length > 0) return _editDropdownCache;
   try {
+    await resolveBukaKey();
     var allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
     var fields = Object.keys(DROPDOWN_NEW_FIELDS);
     fields.forEach(function(k) {
@@ -5889,10 +5892,76 @@ async function loadEditDropdownOptions(keyMap) {
     var soshikiList = _editDropdownCache['soshikiTani'] || [];
     bukaSet.forEach(function(b) { if (soshikiList.indexOf(b) < 0) soshikiList.push(b); });
     _editDropdownCache['soshikiTani'] = soshikiList.sort();
+
+    // 連動マップを構築
+    fields.forEach(function(depKey) {
+      var conf = DROPDOWN_NEW_FIELDS[depKey];
+      if (!conf.linkedTo) return;
+      var srcKey = conf.linkedTo;
+      var depOdata = keyMap[depKey];
+      var map = {};
+      allEmps.forEach(function(emp) {
+        var srcVal;
+        if (srcKey === 'hakensaki') {
+          srcVal = getBukaValue(emp);
+        } else {
+          var srcOdata = keyMap[srcKey];
+          srcVal = srcOdata ? emp[srcOdata] : '';
+        }
+        srcVal = (srcVal || '').toString().trim();
+        if (!srcVal) return;
+        var depVal = depOdata ? (emp[depOdata] || '').toString().trim() : '';
+        if (!depVal) return;
+        if (!map[srcVal]) map[srcVal] = new Set();
+        map[srcVal].add(depVal);
+      });
+      // Set → Array
+      var out = {};
+      Object.keys(map).forEach(function(k) { out[k] = Array.from(map[k]).sort(); });
+      _editDropdownLinkMaps[depKey] = out;
+    });
   } catch(e) {
     console.error('loadEditDropdownOptions error:', e);
   }
   return _editDropdownCache;
+}
+
+// 連動ドロップダウンを再フィルタ
+function refilterLinkedDropdown(dependentKey) {
+  var conf = DROPDOWN_NEW_FIELDS[dependentKey];
+  if (!conf || !conf.linkedTo) return;
+  var depSel = document.getElementById('editField_' + dependentKey);
+  if (!depSel) return;
+  // 親フィールドの値取得
+  var srcSel = document.getElementById('editField_' + conf.linkedTo);
+  if (!srcSel) return;
+  var srcVal = '';
+  if (srcSel.dataset.dropdownNew === '1' && srcSel.value === '__new__') {
+    var custom = document.getElementById('editField_' + conf.linkedTo + '_custom');
+    srcVal = custom ? custom.value.trim() : '';
+  } else {
+    srcVal = srcSel.value.trim();
+  }
+  var allOptions = _editDropdownCache[dependentKey] || [];
+  var allowed = null;
+  if (srcVal && _editDropdownLinkMaps[dependentKey]) {
+    allowed = _editDropdownLinkMaps[dependentKey][srcVal] || [];
+  }
+  var currentVal = depSel.value;
+  var filtered = (allowed && allowed.length > 0) ? allowed : allOptions;
+  var html = '<option value="">（未選択）</option>';
+  filtered.forEach(function(o) {
+    var sel = (currentVal === o) ? ' selected' : '';
+    html += '<option value="' + escHtml(o) + '"' + sel + '>' + escHtml(o) + '</option>';
+  });
+  html += '<option value="__new__"' + (currentVal === '__new__' ? ' selected' : '') + '>＋ 新規入力</option>';
+  depSel.innerHTML = html;
+  // 現在値が候補に無ければクリア
+  if (currentVal && currentVal !== '__new__' && filtered.indexOf(currentVal) < 0) {
+    depSel.value = '';
+    var customEl = document.getElementById('editField_' + dependentKey + '_custom');
+    if (customEl) customEl.style.display = 'none';
+  }
 }
 
 function buildDropdownNewHtml(fieldKey, currentVal, id) {
@@ -5916,15 +5985,15 @@ function toggleEditDropdownNew(selectId) {
   if (!sel || !custom) return;
   custom.style.display = (sel.value === '__new__') ? 'block' : 'none';
   if (sel.value === '__new__') custom.focus();
-  // 銀行→支店連動: 銀行が変わったら支店の選択肢をフィルタ
-  if (sel.dataset.field === 'bankName') filterBranchByBank();
-}
-
-function filterBranchByBank() {
-  var bankSel = document.getElementById('editField_bankName');
-  var branchSel = document.getElementById('editField_bankBranch');
-  if (!bankSel || !branchSel || bankSel.value === '__new__') return;
-  // 支店フィルタは複雑なので全選択肢を維持（銀行名でフィルタする正確な紐付けデータがないため）
+  // 親フィールドが変わった場合、依存ドロップダウンを再フィルタ
+  var srcKey = sel.dataset.field;
+  if (srcKey) {
+    Object.keys(DROPDOWN_NEW_FIELDS).forEach(function(depKey) {
+      if (DROPDOWN_NEW_FIELDS[depKey].linkedTo === srcKey) {
+        refilterLinkedDropdown(depKey);
+      }
+    });
+  }
 }
 
 function getEditDropdownNewValue(fieldKey) {
@@ -5950,7 +6019,7 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
   if (field.key === 'hakensaki') {
     const bukaVal = getBukaValue(currentEmployee || {});
     const opts = document.getElementById('hakenSelect');
-    let html = '<select class="edit-select" id="' + id + '" data-field="hakensaki" data-buka="1">';
+    let html = '<select class="edit-select" id="' + id + '" data-field="hakensaki" data-buka="1" onchange="refilterLinkedDropdown(\'soshikiTani\')">';
     html += '<option value="">（未選択）</option>';
     if (opts) {
       Array.from(opts.options).forEach(o => {
@@ -6047,6 +6116,13 @@ async function startEditSection(catId) {
   viewDiv.style.display = 'none';
   editDiv.innerHTML = html;
   editDiv.style.display = 'block';
+
+  // 連動ドロップダウンの初期フィルタ
+  Object.keys(DROPDOWN_NEW_FIELDS).forEach(function(depKey) {
+    if (DROPDOWN_NEW_FIELDS[depKey].linkedTo) {
+      refilterLinkedDropdown(depKey);
+    }
+  });
 }
 
 function cancelEditSection(catId) {
@@ -6487,6 +6563,8 @@ async function renderAddEmployeeForm() {
       if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
       // 派遣先は基本必須項目に移動済み
       if (field.key === 'hakensaki') return;
+      // 新規登録では退社日関連は不要
+      if (field.key === 'hakenTaisha' || field.key === 'yukyuTaisha') return;
       const odataKey = keyMap[field.key];
       if (!odataKey) return;
       const fieldType = getFieldType(field.key, keyMap);
