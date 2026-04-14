@@ -2680,6 +2680,7 @@ async function searchEmployee() {
           <div class="emp-card-name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
           <div class="emp-card-num">社員番号: ${emp[F.syainNo] || ''}</div>
           ${hakensaki ? '<div class="emp-card-hakensaki">派遣先: ' + escHtml(hakensaki) + '</div>' : ''}
+          <div class="emp-card-date">入社日: ${formatDate(emp[F.nyushaDate])}</div>
           <div class="emp-card-date">起算日: ${formatDate(kisanDate)}</div>
           ${resigned ? '<div class="emp-card-date" style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</div>' : ''}
         </div>
@@ -3255,6 +3256,8 @@ const PROFILE_CATEGORIES = [
       { key: '_calcAge', label: '年齢', format: 'calcAge' },
       { key: 'zaiyokuSyubetu', label: '採用種別', format: 'stripRomaji' },
       { key: 'nyushaDate', label: '入社日', format: 'date' },
+      { key: 'hakenTaisha', label: '派遣先退社日', format: 'date' },
+      { key: 'yukyuTaisha', label: '有給使用後退社日', format: 'date' },
       { key: 'kisanDate', label: '有休付与起算日', format: 'date' },
       { key: '_calcTenure', label: '在職期間', format: 'calcTenure' },
       { key: 'syainFile', label: '社員ファイル', format: 'spUrl' },
@@ -3377,6 +3380,8 @@ function buildFieldKeyMap(fieldsMeta) {
     kisanDate: F.kisanDate,
     zaiyokuSyubetu: F.zaiyokuSyubetu,
     hakensaki: F.hakensaki,
+    hakenTaisha: F.hakenTaisha,
+    yukyuTaisha: F.yukyuTaisha,
   };
 
   // Search field metadata for remaining fields by Japanese title
@@ -4612,15 +4617,57 @@ async function loadMaebariList() {
         + '<td style="text-align:center;">' + dateBtn + '</td>'
         + '</tr>';
     });
-    html += '</tbody></table></div><div style="height:50px;"></div>';
+    // 未処理（手数料未入力）件数
+    var unprocessed = records.filter(function(r) { return !r[MF.fee] || !String(r[MF.fee]).trim(); });
+    if (unprocessed.length > 0) {
+      html += '<div style="text-align:center;margin:12px 0;">' +
+        '<button onclick="deleteUnprocessedMaebari()" style="background:linear-gradient(135deg,#e53935,#c62828);color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;">🗑 未処理分（' + unprocessed.length + '件）を一括削除</button>' +
+        '</div>';
+    }
+    html += '</div><div style="height:50px;"></div>';
     body.innerHTML = html;
 
     footer.style.display = 'flex';
     footer.innerHTML = '<div class="footer-item"><span class="footer-label">申請件数</span> ' + records.length + '件</div>'
+      + (unprocessed.length > 0 ? '<div class="footer-item"><span class="footer-label">未処理</span> ' + unprocessed.length + '件</div>' : '')
       + '<div class="footer-item"><span class="footer-label">合計金額</span> ' + totalAmount.toLocaleString() + '円</div>';
   } catch (e) {
     console.error('Maebari list error:', e);
     body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
+  }
+}
+
+async function deleteUnprocessedMaebari() {
+  var records = window._maebariListRecords || [];
+  var unprocessed = records.filter(function(r) { return !r[MF.fee] || !String(r[MF.fee]).trim(); });
+  if (unprocessed.length === 0) { showToast('未処理の前払いはありません', 'error'); return; }
+
+  if (!confirm('手数料未入力の前払い ' + unprocessed.length + '件 ��一括削除しますか？\nこの操作は取り消せません。')) return;
+
+  try {
+    var token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    showToast('削除中... (0/' + unprocessed.length + ')', 'success');
+
+    var deleted = 0;
+    for (var i = 0; i < unprocessed.length; i++) {
+      var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + unprocessed[i].Id + ")";
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Accept': 'application/json;odata=verbose',
+          'IF-MATCH': '*',
+          'X-HTTP-Method': 'DELETE',
+        },
+      });
+      if (resp.ok) deleted++;
+    }
+    showToast('🗑 ' + deleted + '件 削除しました', 'success');
+    loadMaebariList();
+  } catch (e) {
+    console.error('Bulk delete error:', e);
+    showToast('削除エラー: ' + e.message, 'error');
   }
 }
 
@@ -5680,6 +5727,88 @@ async function deleteLeaveRecord(itemId, dateStr) {
 // ============================================================
 let editKeyMap = null; // cached keyMap for edit operations
 
+// dropdown_new 対象フィールド（既存値ドロップダウン + 新規入力）
+var DROPDOWN_NEW_FIELDS = {
+  soshikiTani: { label: '組織単位', linkedTo: 'hakensaki' },
+  bankName:    { label: '銀行' },
+  bankBranch:  { label: '支店', linkedTo: 'bankName' },
+  nationality: { label: '本(国)籍' },
+  zairyuShikaku: { label: '在留資格' }
+};
+var _editDropdownCache = {};
+
+async function loadEditDropdownOptions(keyMap) {
+  if (Object.keys(_editDropdownCache).length > 0) return _editDropdownCache;
+  try {
+    var allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+    var fields = Object.keys(DROPDOWN_NEW_FIELDS);
+    fields.forEach(function(k) {
+      var set = new Set();
+      var odataKey = keyMap[k];
+      if (!odataKey) return;
+      allEmps.forEach(function(emp) {
+        var v = emp[odataKey];
+        if (v && String(v).trim()) set.add(String(v).trim());
+      });
+      _editDropdownCache[k] = Array.from(set).sort();
+    });
+    // 組織単位: 派遣先（部課）の値も追加
+    var bukaSet = new Set();
+    allEmps.forEach(function(emp) {
+      var b = getBukaValue(emp);
+      if (b) bukaSet.add(b);
+    });
+    var soshikiList = _editDropdownCache['soshikiTani'] || [];
+    bukaSet.forEach(function(b) { if (soshikiList.indexOf(b) < 0) soshikiList.push(b); });
+    _editDropdownCache['soshikiTani'] = soshikiList.sort();
+  } catch(e) {
+    console.error('loadEditDropdownOptions error:', e);
+  }
+  return _editDropdownCache;
+}
+
+function buildDropdownNewHtml(fieldKey, currentVal, id) {
+  var options = _editDropdownCache[fieldKey] || [];
+  var isCustom = currentVal && options.indexOf(currentVal) < 0;
+  var html = '<select class="edit-select" id="' + id + '" data-field="' + fieldKey + '" data-dropdown-new="1" onchange="toggleEditDropdownNew(\'' + id + '\')">';
+  html += '<option value="">（未選択）</option>';
+  options.forEach(function(o) {
+    var sel = (!isCustom && currentVal === o) ? ' selected' : '';
+    html += '<option value="' + escHtml(o) + '"' + sel + '>' + escHtml(o) + '</option>';
+  });
+  html += '<option value="__new__"' + (isCustom ? ' selected' : '') + '>＋ 新規入力</option>';
+  html += '</select>';
+  html += '<input type="text" class="edit-input" id="' + id + '_custom" placeholder="新規入力..." value="' + (isCustom ? escHtml(currentVal) : '') + '" style="display:' + (isCustom ? 'block' : 'none') + ';margin-top:4px;">';
+  return html;
+}
+
+function toggleEditDropdownNew(selectId) {
+  var sel = document.getElementById(selectId);
+  var custom = document.getElementById(selectId + '_custom');
+  if (!sel || !custom) return;
+  custom.style.display = (sel.value === '__new__') ? 'block' : 'none';
+  if (sel.value === '__new__') custom.focus();
+  // 銀行→支店連動: 銀行が変わったら支店の選択肢をフィルタ
+  if (sel.dataset.field === 'bankName') filterBranchByBank();
+}
+
+function filterBranchByBank() {
+  var bankSel = document.getElementById('editField_bankName');
+  var branchSel = document.getElementById('editField_bankBranch');
+  if (!bankSel || !branchSel || bankSel.value === '__new__') return;
+  // 支店フィルタは複雑なので全選択肢を維持（銀行名でフィルタする正確な紐付けデータがないため）
+}
+
+function getEditDropdownNewValue(fieldKey) {
+  var sel = document.getElementById('editField_' + fieldKey);
+  if (!sel) return '';
+  if (sel.value === '__new__') {
+    var custom = document.getElementById('editField_' + fieldKey + '_custom');
+    return custom ? custom.value.trim() : '';
+  }
+  return sel.value;
+}
+
 function getEditInputHtml(field, currentVal, fieldType, choices) {
   const id = 'editField_' + field.key;
   const val = (currentVal === null || currentVal === undefined) ? '' : currentVal;
@@ -5704,6 +5833,11 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
     }
     html += '</select>';
     return html;
+  }
+
+  // dropdown_new 対象フィールド
+  if (DROPDOWN_NEW_FIELDS[field.key]) {
+    return buildDropdownNewHtml(field.key, String(val), id);
   }
 
   if (field.format === 'date' || field.format === 'dateExpiry') {
@@ -5749,6 +5883,7 @@ async function startEditSection(catId) {
   const meta = await fetchEmployeeFields();
   if (!meta) { showToast('フィールド情報の取得に失敗', 'error'); return; }
   editKeyMap = buildFieldKeyMap(meta);
+  await loadEditDropdownOptions(editKeyMap);
 
   const cat = PROFILE_CATEGORIES.find(c => c.id === catId);
   if (!cat) return;
@@ -5840,7 +5975,13 @@ async function saveEditSection(catId) {
       if (!odataKey || !internalName) return;
 
       const oldVal = emp[odataKey];
-      let newVal = inputEl.value.trim();
+      // dropdown_new: 「＋ 新規入力」選択時はカスタム入力欄の値を取得
+      let newVal;
+      if (inputEl.dataset.dropdownNew === '1') {
+        newVal = getEditDropdownNewValue(field.key);
+      } else {
+        newVal = inputEl.value.trim();
+      }
 
       // Convert based on format
       if (inputEl.dataset.format === 'date' && newVal) {
@@ -5896,6 +6037,7 @@ async function saveEditSection(catId) {
     }
 
     showToast('保存しました', 'success');
+    _editDropdownCache = {}; // 次回編集時に最新値を再取得
     // Re-render profile
     await loadEmployeeProfile();
 
@@ -6935,7 +7077,17 @@ async function openTaishaForm() {
   const kyuryo = emp[keyMap['seikyu']] || '';
   const hakenTaishaVal = emp[F.hakenTaisha] ? emp[F.hakenTaisha].substring(0, 10) : today;
   const yukyuTaishaVal = emp[F.yukyuTaisha] ? emp[F.yukyuTaisha].substring(0, 10) : today;
-  const shahoVal = emp[keyMap['shahoSoushitsu']] ? String(emp[keyMap['shahoSoushitsu']]).substring(0, 10) : today;
+  // 社保喪失日デフォルト: 有給使用後退社日の翌日
+  var shahoVal;
+  if (emp[keyMap['shahoSoushitsu']]) {
+    shahoVal = String(emp[keyMap['shahoSoushitsu']]).substring(0, 10);
+  } else if (emp[F.yukyuTaisha]) {
+    var d = new Date(emp[F.yukyuTaisha]);
+    d.setDate(d.getDate() + 1);
+    shahoVal = toLocalDateStr(d);
+  } else {
+    shahoVal = today;
+  }
 
   // Additional info for header
   const kenpoShutoku = emp[keyMap['kenpoShutoku']] ? String(emp[keyMap['kenpoShutoku']]).substring(0, 10) : '';
@@ -7008,11 +7160,6 @@ async function openTaishaForm() {
             '<option value="">選択してください</option>' +
             buildOptions(jikaiSaiyouChoices) +
           '</select>' +
-        '</div>' +
-        '<div class="taisha-notice">⚠️ 健康保険証を回収して下さい。</div>' +
-        '<div class="taisha-check-row">' +
-          '<input type="checkbox" id="taisha_hokenCheck">' +
-          '<label for="taisha_hokenCheck">健康保険証を回収済み</label>' +
         '</div>' +
       '</div>' +
       '<div class="taisha-footer">' +
@@ -7151,6 +7298,16 @@ async function openShahoForm() {
   const buka = emp[keyMap['buka']] || '';
   const nyushaDate = emp[F.nyushaDate] ? emp[F.nyushaDate].substring(0, 10) : '';
 
+  // 健保資格取得日チェック（既に取得済みの場合エラー）
+  const kenpoShutokuVal = emp[keyMap['kenpoShutoku']] || '';
+  if (kenpoShutokuVal) {
+    var kenpoDate = new Date(kenpoShutokuVal);
+    if (!isNaN(kenpoDate)) {
+      showToast('⚠️ この社員は既に健保資格を取得済みです（' + kenpoDate.toISOString().substring(0,10) + '）', 'error');
+      return;
+    }
+  }
+
   // 加入予定日: next month 1st
   const now = new Date();
   const kanyuYotei = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -7181,8 +7338,8 @@ async function openShahoForm() {
       '</div>' +
       '<div class="taisha-body">' +
         '<div class="taisha-field">' +
-          '<label>加入日</label>' +
-          '<input type="date" id="shaho_kanyuubi" value="' + today + '">' +
+          '<label>加入日（加入予定日）</label>' +
+          '<input type="date" id="shaho_kanyuubi" value="' + kanyuYoteiStr + '">' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>扶養</label>' +
@@ -8389,13 +8546,191 @@ async function executeSaveVehicleEdit(idx) {
 
 // 車両フォルダーを開く（親フォルダURL直接アクセス方式 — API不要で確実）
 var VEHICLE_FOLDER_BASE = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FTeamStepup%2FShared%20Documents%2F%E7%A4%BE%E5%93%A1%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB%2F%E2%98%85%E8%BB%8A%E4%B8%A1%E7%AE%A1%E7%90%86%E3%80%80%E9%80%81%E8%BF%8E%2F%E8%BB%8A%E4%B8%A1%E7%AE%A1%E7%90%86%2Dsyaryou%20kaisya';
+var VEHICLE_FOLDER_SEARCH_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル/★車両管理　送迎/車両管理-syaryou kaisya';
+var TEAMSTEPUP_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
 
-function openVehicleFolderByNo1(numberStr) {
+async function openVehicleFolderByNo1(numberStr) {
   var digits = String(numberStr || '').replace(/[^0-9]/g, '');
   if (!digits) { showToast('ナンバーが取得できません', 'error'); return; }
-  // 親フォルダURLにsearch=数字を付けてSharePoint内で絞り込み
-  var url = VEHICLE_FOLDER_BASE + '&search=' + encodeURIComponent(digits);
-  window.open(url, '_blank');
+
+  // フォルダーパネルを表示
+  var panelId = 'vehicleFolderPanel';
+  var existing = document.getElementById(panelId);
+  if (existing) existing.remove();
+
+  var panel = document.createElement('div');
+  panel.id = panelId;
+  panel.style.cssText = 'margin:12px;background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);overflow:hidden;';
+  panel.innerHTML = '<div style="padding:12px 16px;background:var(--primary);color:#fff;display:flex;justify-content:space-between;align-items:center;">' +
+    '<span style="font-weight:700;font-size:14px;">📁 フォルダー (' + escHtml(digits) + ')</span>' +
+    '<div style="display:flex;gap:8px;align-items:center;">' +
+      '<button onclick="var url=VEHICLE_FOLDER_BASE+\'&search=\'+encodeURIComponent(\'' + digits + '\');window.open(url,\'_blank\');" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">SP で開く</button>' +
+      '<button onclick="document.getElementById(\'' + panelId + '\').remove();" style="background:none;color:#fff;border:none;font-size:18px;cursor:pointer;">✕</button>' +
+    '</div></div>' +
+    '<div id="vehicleFolderContent" style="padding:12px 16px;"><div style="text-align:center;color:var(--text-light);padding:16px;">🔍 検索中...</div></div>';
+
+  // 車両詳細画面のコンテンツの末尾に挿入
+  var detailContent = document.getElementById('vehicleDetailContent');
+  if (detailContent) {
+    detailContent.appendChild(panel);
+  }
+
+  // SharePoint Search API でファイルを検索
+  try {
+    var token = await getToken();
+    if (!token) { throw new Error('認証エラー'); }
+
+    // Search API: TeamStepupサイトでナンバー(数字)をキーワード検索、パス制限付き
+    var searchUrl = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup/_api/search/query' +
+      '?querytext=%27' + encodeURIComponent(digits + ' path:"' + VEHICLE_FOLDER_SEARCH_PATH + '"') + '%27' +
+      '&selectproperties=%27Title,Path,FileExtension,Size,LastModifiedTime,IsFolder,IsDocument%27' +
+      '&rowlimit=30&sortlist=%27LastModifiedTime:descending%27';
+
+    var resp = await fetch(searchUrl, {
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+      },
+    });
+
+    if (!resp.ok) {
+      // Search API失敗 → フォールバック: GetFolderByServerRelativeUrl で直接取得を試みる
+      throw new Error('Search API: ' + resp.status);
+    }
+
+    var data = await resp.json();
+    var rows = data.d && data.d.query && data.d.query.PrimaryQueryResult &&
+               data.d.query.PrimaryQueryResult.RelevantResults &&
+               data.d.query.PrimaryQueryResult.RelevantResults.Table &&
+               data.d.query.PrimaryQueryResult.RelevantResults.Table.Rows &&
+               data.d.query.PrimaryQueryResult.RelevantResults.Table.Rows.results || [];
+
+    var files = [];
+    rows.forEach(function(row) {
+      var item = {};
+      (row.Cells.results || []).forEach(function(cell) {
+        item[cell.Key] = cell.Value;
+      });
+      // フォルダは除外、ファイルのみ
+      if (item.IsDocument === 'true' || (item.FileExtension && item.FileExtension !== '')) {
+        files.push(item);
+      }
+    });
+
+    renderVehicleFolderFiles(files, digits);
+  } catch (e) {
+    console.error('Vehicle folder search error:', e);
+    // フォールバック: 直接フォルダAPIを試す
+    try {
+      await searchVehicleFolderDirect(digits, token);
+    } catch (e2) {
+      console.error('Vehicle folder direct error:', e2);
+      var content = document.getElementById('vehicleFolderContent');
+      if (content) {
+        content.innerHTML = '<div style="text-align:center;padding:16px;">' +
+          '<div style="color:var(--danger);margin-bottom:8px;">⚠️ ファイル検索に失敗しました</div>' +
+          '<button onclick="var url=VEHICLE_FOLDER_BASE+\'&search=\'+encodeURIComponent(\'' + digits + '\');window.open(url,\'_blank\');" ' +
+          'style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;">📁 SharePointで開く</button>' +
+          '</div>';
+      }
+    }
+  }
+}
+
+async function searchVehicleFolderDirect(digits, token) {
+  if (!token) token = await getToken();
+  // フォルダ一覧を取得して、ナンバーに一致するフォルダを探す
+  var folderUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
+    encodeURIComponent(VEHICLE_FOLDER_SEARCH_PATH) + "')/Folders?$select=Name,ServerRelativeUrl&$top=200";
+
+  var resp = await fetch(folderUrl, {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' },
+  });
+  if (!resp.ok) throw new Error('Folder API: ' + resp.status);
+
+  var data = await resp.json();
+  var folders = (data.d.results || []);
+  // ナンバーの数字がフォルダ名に含まれるものを探す
+  var matchFolder = folders.find(function(f) {
+    return f.Name.indexOf(digits) >= 0;
+  });
+
+  if (!matchFolder) {
+    var content = document.getElementById('vehicleFolderContent');
+    if (content) {
+      content.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-light);">「' + escHtml(digits) + '」に一致するフォルダが見つかりません</div>';
+    }
+    return;
+  }
+
+  // 一致するフォルダ内のファイルを取得
+  var filesUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
+    encodeURIComponent(matchFolder.ServerRelativeUrl) + "')/Files?$select=Name,ServerRelativeUrl,Length,TimeLastModified&$orderby=TimeLastModified desc&$top=50";
+
+  var resp2 = await fetch(filesUrl, {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' },
+  });
+  if (!resp2.ok) throw new Error('Files API: ' + resp2.status);
+
+  var data2 = await resp2.json();
+  var spFiles = (data2.d.results || []);
+
+  var files = spFiles.map(function(f) {
+    var ext = (f.Name.match(/\.([^.]+)$/) || [])[1] || '';
+    return {
+      Title: f.Name,
+      Path: 'https://teamstepupcom774.sharepoint.com' + f.ServerRelativeUrl,
+      FileExtension: ext,
+      Size: f.Length,
+      LastModifiedTime: f.TimeLastModified,
+    };
+  });
+
+  renderVehicleFolderFiles(files, digits);
+}
+
+function renderVehicleFolderFiles(files, digits) {
+  var content = document.getElementById('vehicleFolderContent');
+  if (!content) return;
+
+  if (files.length === 0) {
+    content.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-light);">「' + escHtml(digits) + '」に一致するファイルが見つかりません</div>';
+    return;
+  }
+
+  var fileIcons = {
+    pdf: '📄', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊',
+    jpg: '🖼️', jpeg: '🖼️', png: '🖼️', gif: '🖼️',
+    mp4: '🎬', mov: '🎬', txt: '📃', csv: '📊',
+  };
+
+  var html = '<div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">' + files.length + '件のファイル</div>';
+  files.forEach(function(f) {
+    var name = f.Title || '';
+    var ext = (f.FileExtension || '').toLowerCase();
+    var icon = fileIcons[ext] || '📎';
+    var size = f.Size ? formatFileSize(parseInt(f.Size)) : '';
+    var date = f.LastModifiedTime ? formatDate(f.LastModifiedTime) : '';
+    var url = f.Path || '';
+
+    html += '<div onclick="window.open(\'' + escHtml(url) + '\',\'_blank\')" style="display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" ontouchstart="this.style.background=\'#f0f4ff\'" ontouchend="this.style.background=\'\'" onmouseenter="this.style.background=\'#f0f4ff\'" onmouseleave="this.style.background=\'\'">' +
+      '<span style="font-size:24px;flex-shrink:0;">' + icon + '</span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(name) + '</div>' +
+        '<div style="font-size:11px;color:var(--text-light);">' + escHtml(date) + (size ? ' · ' + size : '') + '</div>' +
+      '</div>' +
+      '<span style="color:var(--primary);font-size:16px;flex-shrink:0;">›</span>' +
+    '</div>';
+  });
+
+  content.innerHTML = html;
+}
+
+function formatFileSize(bytes) {
+  if (!bytes || isNaN(bytes)) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
 // ============================================================
@@ -9218,7 +9553,7 @@ async function generateZaishokuDocument(lang) {
       }
 
       // Layout: A4=595pt, margins 40pt each side → 515pt usable
-      var LX = 40, VX = 170, RH = 50, Y0 = 178;
+      var LX = 40, VX = 190, RH = 50, Y0 = 178;
       var MAXW = 515;
       var VMAXW = MAXW - (VX - LX);
 
@@ -9769,8 +10104,222 @@ document.getElementById('searchInput').addEventListener('input', function() {
   document.getElementById('searchClearBtn').style.display = this.value ? 'block' : 'none';
 });
 
-// Initialize
-initMsal();
+// ============================================================
+// Preview Mode (モックデータでUI確認)
+// URL に ?preview=1 を付けると有効化
+// ============================================================
+var PREVIEW_MODE = /[?&]preview=1/.test(location.search);
+
+if (PREVIEW_MODE) {
+  (function() {
+    console.log('%c[PREVIEW MODE] モックデータで動作中', 'color:#e53935;font-size:14px;font-weight:bold;');
+
+    // モック社員データ
+    var mockEmployees = [
+      {
+        Id: 1, Title: '山田 太郎',
+        [F.syainNo]: 1001,
+        [F.nyushaDate]: '2022-04-01T00:00:00Z',
+        [F.kisanDate]: '2022-04-01T00:00:00Z',
+        [F.hakenTaisha]: null,
+        [F.yukyuTaisha]: null,
+        [F.fullDayHours]: 8, [F.amHours]: 4, [F.pmHours]: 4,
+        [F.zaiyokuSyubetu]: '一般派遣',
+        OData__x90e8__x8ab2_: '101:テスト工場A',
+        OData__x751f__x5e74__x6708__x65e5_: '1990-05-15T00:00:00Z',
+        OData__x6027__x5225_: '男',
+        OData__x643a__x5e2f__x96fb__x8a71_: '090-1234-5678',
+        OData__xff25__x30e1__x30fc__x30eb_: 'yamada@example.com',
+        OData__x90f5__x4fbf__x756a__x53f7_: '420-0001',
+        OData__x4f4f__x6240_: '静岡県静岡市葵区1-2-3',
+        OData__x7d66__x4e0e__xff1a__x9280__x88: 'みずほ銀行',
+        OData__x7d66__x4e0e__xff1a__x652f__x5e: '静岡支店',
+        OData__x7d66__x4e0e__xff1a__x53e3__x5e: '1234567',
+        OData__x53e3__x5ea7__x6c0f__x540d__x30: 'ヤマダ タロウ',
+      },
+      {
+        Id: 2, Title: '鈴木 花子',
+        [F.syainNo]: 1002,
+        [F.nyushaDate]: '2023-01-10T00:00:00Z',
+        [F.kisanDate]: '2023-01-10T00:00:00Z',
+        [F.hakenTaisha]: null,
+        [F.yukyuTaisha]: null,
+        [F.fullDayHours]: 8, [F.amHours]: 4, [F.pmHours]: 4,
+        [F.zaiyokuSyubetu]: '一般派遣',
+        OData__x90e8__x8ab2_: '202:テスト工場B',
+        OData__x751f__x5e74__x6708__x65e5_: '1995-11-20T00:00:00Z',
+        OData__x6027__x5225_: '女',
+      },
+      {
+        Id: 3, Title: 'Silva Carlos',
+        [F.syainNo]: 1003,
+        [F.nyushaDate]: '2021-07-01T00:00:00Z',
+        [F.kisanDate]: '2021-07-01T00:00:00Z',
+        [F.hakenTaisha]: '2026-03-31T00:00:00Z',
+        [F.yukyuTaisha]: '2026-04-15T00:00:00Z',
+        [F.fullDayHours]: 8, [F.amHours]: 4, [F.pmHours]: 4,
+        [F.zaiyokuSyubetu]: '一般派遣',
+        OData__x90e8__x8ab2_: '101:テスト工場A',
+        OData__x751f__x5e74__x6708__x65e5_: '1988-03-10T00:00:00Z',
+        OData__x6027__x5225_: '男',
+      },
+    ];
+
+    // モック有給申請データ
+    var mockLeaveRecords = [
+      { Id: 101, [F.syainNo]: '1001', [F.shimei]: '山田 太郎', [F.leaveDate]: '2026-03-10T00:00:00Z', [F.leaveType]: '1日', [F.leaveHours]: 8, [F.hourlyRate]: 1200, [F.amount]: 9600, [F.category]: '有給', [F.closingDay]: '月末' },
+      { Id: 102, [F.syainNo]: '1001', [F.shimei]: '山田 太郎', [F.leaveDate]: '2026-02-14T00:00:00Z', [F.leaveType]: '半日(AM)', [F.leaveHours]: 4, [F.hourlyRate]: 1200, [F.amount]: 4800, [F.category]: '有給', [F.closingDay]: '月末' },
+    ];
+
+    // モック前払いデータ
+    var mockMaebariRecords = [
+      { Id: 201, [MF.syainNo]: '1001', [MF.name]: '山田 太郎', [MF.hakensaki]: '101:テスト工場A', [MF.payDate]: new Date().toISOString(), [MF.amount]: '30000', [MF.fee]: '275', [MF.total]: 30275, [MF.bank]: 'みずほ銀行', [MF.branch]: '静岡支店', [MF.account]: '1234567', [MF.meigi]: 'ヤマダ タロウ', Author: { Title: '管理者' } },
+      { Id: 202, [MF.syainNo]: '1001', [MF.name]: '山田 太郎', [MF.hakensaki]: '101:テスト工場A', [MF.payDate]: new Date().toISOString(), [MF.amount]: '20000', [MF.fee]: '', [MF.total]: 20000, [MF.bank]: 'みずほ銀行', [MF.branch]: '静岡支店', [MF.account]: '1234567', [MF.meigi]: 'ヤマダ タロウ', Author: { Title: '管理者' } },
+    ];
+
+    // モックフィールドメタデータ
+    var mockFieldsMeta = {};
+    // 基本的なフィールドを登録
+    var mockFieldDefs = [
+      { internal: '_x793e__x54e1__x756a__x53f7_', title: '社員番号', type: 'Number' },
+      { internal: '_x5165__x793e__x65e5_', title: '入社日', type: 'DateTime' },
+      { internal: '_x30b9__x30c6__x30c3__x30d7__x30', title: '有休付与起算日', type: 'DateTime' },
+      { internal: '_x6d3e__x9063__x5148__x9000__x79', title: '派遣先退社日', type: 'DateTime' },
+      { internal: '_x9000__x8077__x5e74__x6708__x65', title: '有給使用後退社日', type: 'DateTime' },
+      { internal: '_x6709__x4f11__xff08__xff11__x65', title: '有休（１日時間）', type: 'Number' },
+      { internal: '_x6709__x4f11__xff08__x5348__x52', title: '有休（AM時間）', type: 'Number' },
+      { internal: '_x6709__x4f11__xff08__x5348__x5f', title: '有休（PM時間）', type: 'Number' },
+      { internal: '_x63a1__x7528__x7a2e__x5225_syub', title: '採用種別', type: 'Text' },
+      { internal: '_x90e8__x8ab2_', title: '部課', type: 'Text' },
+      { internal: '_x6027__x5225_', title: '性別', type: 'Choice', choices: ['男', '女'] },
+      { internal: '_x751f__x5e74__x6708__x65e5_', title: '生年月日', type: 'DateTime' },
+      { internal: '_x643a__x5e2f__x96fb__x8a71_', title: '携帯電話', type: 'Text' },
+      { internal: '_xff25__x30e1__x30fc__x30eb_', title: 'Ｅメール', type: 'Text' },
+      { internal: '_x90f5__x4fbf__x756a__x53f7_', title: '郵便番号', type: 'Text' },
+      { internal: '_x4f4f__x6240_', title: '住所', type: 'Text' },
+      { internal: '_x7d66__x4e0e__xff1a__x9280__x88', title: '振込先：銀行', type: 'Text' },
+      { internal: '_x7d66__x4e0e__xff1a__x652f__x5e', title: '振込先：支店', type: 'Text' },
+      { internal: '_x7d66__x4e0e__xff1a__x53e3__x5e', title: '振込先：口座番号', type: 'Text' },
+      { internal: '_x53e3__x5ea7__x6c0f__x540d__x30', title: '振込先氏名フリガナ', type: 'Text' },
+      { internal: '_x7279__x8a18__x4e8b__x9805__xff11_', title: '特記事項１', type: 'Text' },
+      { internal: '_x672c__x56fd__x7c4d_', title: '本(国)籍', type: 'Text' },
+      { internal: '_x5728__x7559__x8cc7__x683c_', title: '在留資格', type: 'Choice', choices: ['技術・人文知識・国際業務', '特定技能', '永住者', '日本人の配偶者等', '定住者'] },
+      { internal: '_x5728__x7559__x671f__x9650_', title: '在留期限', type: 'DateTime' },
+      { internal: '_x5065__x4fdd__xff1a__x88ab__x4f', title: '健保：被保険者', type: 'Text' },
+      { internal: '_x5065__x4fdd__xff1a__x8cc7__x68', title: '健保：資格取得日', type: 'DateTime' },
+      { internal: '_x7d44__x7e54__x5358__x4f4d_', title: '組織単位ｿｼｷﾀﾝｲ', type: 'Text' },
+      { internal: '_x793e__x54e1__x30d5__x30a1__x30', title: '社員ファイル', type: 'URL' },
+    ];
+    mockFieldDefs.forEach(function(f) {
+      mockFieldsMeta[f.internal] = {
+        title: f.title,
+        type: f.type,
+        entityPropertyName: f.internal,
+        choices: f.choices || null
+      };
+    });
+
+    // API関数をオーバーライド
+    accessToken = 'PREVIEW_TOKEN';
+
+    window._origGetToken = getToken;
+    getToken = async function() { return 'PREVIEW_TOKEN'; };
+
+    window._origSpGet = spGet;
+    spGet = async function(listGuid, query) {
+      console.log('[PREVIEW] spGet:', listGuid, query);
+      if (listGuid === LIST_EMPLOYEES_GUID) {
+        // フィルタから社員番号を抽出
+        if (query && query.indexOf('eq') >= 0) {
+          var numMatch = query.match(/eq\s+(\d+)/);
+          if (numMatch) {
+            var no = parseInt(numMatch[1]);
+            return mockEmployees.filter(function(e) { return e[F.syainNo] === no; });
+          }
+        }
+        // 名前検索
+        if (query && query.indexOf('substringof') >= 0) {
+          var nameMatch = query.match(/substringof\('([^']+)'/);
+          if (nameMatch) {
+            var q = nameMatch[1];
+            return mockEmployees.filter(function(e) { return (e.Title || '').indexOf(q) >= 0; });
+          }
+        }
+        return mockEmployees;
+      }
+      if (listGuid === LIST_LEAVE_GUID) {
+        if (query && query.indexOf(F.syainNo) >= 0) {
+          var lMatch = query.match(/eq\s+'?(\d+)'?/);
+          var sNo = lMatch ? lMatch[1] : '';
+          return mockLeaveRecords.filter(function(r) { return r[F.syainNo] === sNo; });
+        }
+        return mockLeaveRecords;
+      }
+      if (listGuid === LIST_MAEBARI_GUID) {
+        if (query && query.indexOf(MF.syainNo) >= 0) {
+          var mMatch = query.match(/eq\s+'(\d+)'/);
+          var mNo = mMatch ? mMatch[1] : '';
+          return mockMaebariRecords.filter(function(r) { return r[MF.syainNo] === mNo; });
+        }
+        return mockMaebariRecords;
+      }
+      return [];
+    };
+
+    window._origSpGetAll = spGetAll;
+    spGetAll = async function(listGuid, query) {
+      console.log('[PREVIEW] spGetAll:', listGuid, query);
+      if (listGuid === LIST_EMPLOYEES_GUID) return mockEmployees;
+      return [];
+    };
+
+    window._origSpPost = spPost;
+    spPost = async function(listGuid, body) {
+      console.log('[PREVIEW] spPost:', listGuid, body);
+      showToast('[プレビュー] データは保存されません', 'success');
+      return { d: { Id: 999 } };
+    };
+
+    window._origSpPatchEmployee = spPatchEmployee;
+    spPatchEmployee = async function(itemId, body) {
+      console.log('[PREVIEW] spPatchEmployee:', itemId, body);
+      showToast('[プレビュー] データは保存されません', 'success');
+    };
+
+    window._origFetchEmployeeFields = fetchEmployeeFields;
+    fetchEmployeeFields = async function() {
+      if (employeeFieldsCache) return employeeFieldsCache;
+      employeeFieldsCache = mockFieldsMeta;
+      return mockFieldsMeta;
+    };
+
+    // bukaODataKeyを設定
+    bukaODataKey = 'OData__x90e8__x8ab2_';
+
+    // 更新チェックを無効化
+    checkForUpdate = function() {};
+
+    // 自動ログイン（検索画面へ）
+    setTimeout(function() {
+      document.getElementById('authBtn').textContent = 'logout';
+      // hakenSelectにダミーデータを設定
+      var sel = document.getElementById('hakenSelect');
+      if (sel) {
+        sel.innerHTML = '<option value="">派遣先(部課)を選択...</option>';
+        ['テスト工場A', 'テスト工場B'].forEach(function(h) {
+          var opt = document.createElement('option');
+          opt.value = h; opt.textContent = h;
+          sel.appendChild(opt);
+        });
+      }
+      switchScreen('searchScreen');
+      showToast('🔍 プレビューモード（モックデータ）', 'success');
+    }, 300);
+  })();
+} else {
+  // Initialize (通常モード)
+  initMsal();
+}
 </script>
 </body>
 </html>
