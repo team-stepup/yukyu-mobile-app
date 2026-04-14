@@ -2693,7 +2693,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '2b1ecf2';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -10618,6 +10618,9 @@ async function extractMatchingPages(buffer, empNo, onProgress) {
   var totalTextLen = 0;
   var sampleText = '';
   var sampleCompact = '';
+  var diagLabels = [];      // PDF全体から見つかった「社員番号系」ラベル
+  var diagSearchHit = '';   // 検索番号がヒットしたページの周辺テキスト
+  var diagShainCtx = '';    // 「社員」が初めて出現するページの周辺
 
   // 正規化: 数字のみ抽出 → 先頭ゼロを除去した「コア番号」を取得
   // PDF側が "70381" "070381" "0070381" のどの表記でもマッチさせるため、
@@ -10653,8 +10656,33 @@ async function extractMatchingPages(buffer, empNo, onProgress) {
 
     totalTextLen += textConcat.length;
     if (i === 1) {
-      sampleText = textJoined.substring(0, 400);
-      sampleCompact = textCompact.substring(0, 200);
+      sampleText = textJoined.substring(0, 2000);
+      sampleCompact = textCompact.substring(0, 1000);
+    }
+
+    // 診断: 「社員番号」「社員ｺｰﾄﾞ」など社員系ラベルを抽出
+    var labelRe = /社員[番号ｺｰﾄﾞｺｰﾄコード№NoＮｏ]{0,5}[\s::\.\-_]*\d{3,8}/g;
+    var labelHits = textConcat.match(labelRe);
+    if (labelHits) {
+      labelHits.forEach(function(m) {
+        if (diagLabels.indexOf(m) === -1 && diagLabels.length < 12) diagLabels.push(m);
+      });
+    }
+    if (!diagShainCtx) {
+      var shIdx = textConcat.indexOf('社員');
+      if (shIdx >= 0) {
+        var s1 = Math.max(0, shIdx - 30);
+        diagShainCtx = '(p.' + i + ') ' + textConcat.substring(s1, shIdx + 80);
+      }
+    }
+    if (!diagSearchHit) {
+      var searchRe = new RegExp('0*' + coreEsc + '(?![0-9])');
+      var sh = textConcat.match(searchRe);
+      if (sh) {
+        var idx = textConcat.indexOf(sh[0]);
+        var s2 = Math.max(0, idx - 40);
+        diagSearchHit = '(p.' + i + ') ...' + textConcat.substring(s2, idx + sh[0].length + 40) + '...';
+      }
     }
 
     var matched = false;
@@ -10683,7 +10711,10 @@ async function extractMatchingPages(buffer, empNo, onProgress) {
     totalPages: pdf.numPages,
     totalTextLen: totalTextLen,
     sampleText: sampleText,
-    sampleCompact: sampleCompact
+    sampleCompact: sampleCompact,
+    diagLabels: diagLabels,
+    diagSearchHit: diagSearchHit,
+    diagShainCtx: diagShainCtx
   };
 }
 
@@ -10766,7 +10797,8 @@ async function openChinginExtractor(empNo, empName) {
         if (ext.matches.length === 0) {
           results.push({
             label: s.label, ok: true, count: 0, totalPages: ext.totalPages,
-            isImagePdf: isImagePdf, sampleText: ext.sampleText, sampleCompact: ext.sampleCompact
+            isImagePdf: isImagePdf, sampleText: ext.sampleText, sampleCompact: ext.sampleCompact,
+            diagLabels: ext.diagLabels, diagSearchHit: ext.diagSearchHit, diagShainCtx: ext.diagShainCtx
           });
           continue;
         }
@@ -10847,12 +10879,33 @@ function renderChinginResults(results, empNo, empName) {
     }
     if (r.count === 0) {
       var debugBlock = '';
-      if (r.sampleText) {
+      if (r.sampleText || r.diagLabels) {
+        var diagHtml = '';
+        if (r.diagLabels && r.diagLabels.length > 0) {
+          diagHtml += '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:6px 8px;margin-bottom:6px;">' +
+            '<strong style="color:#2e7d32;">PDFから見つかった「社員番号系」ラベル(' + r.diagLabels.length + '件):</strong><br>' +
+            r.diagLabels.map(function(l) { return '・' + escHtml(l); }).join('<br>') +
+            '</div>';
+        } else {
+          diagHtml += '<div style="background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;padding:6px 8px;margin-bottom:6px;color:#c62828;">' +
+            '⚠️ PDF全体から「社員番号」「社員ｺｰﾄﾞ」等のラベルが検出できませんでした<br>' +
+            '<span style="font-size:10px;">→ ラベル部分が画像化されている可能性</span>' +
+            '</div>';
+        }
+        if (r.diagShainCtx) {
+          diagHtml += '<div style="margin-bottom:6px;"><strong>「社員」初出現位置:</strong><br>' + escHtml(r.diagShainCtx) + '</div>';
+        }
+        if (r.diagSearchHit) {
+          diagHtml += '<div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:6px 8px;margin-bottom:6px;">' +
+            '<strong style="color:#ef6c00;">⚡ 検索番号は見つかりました:</strong><br>' + escHtml(r.diagSearchHit) +
+            '</div>';
+        }
         debugBlock = '<details style="margin-top:8px;border:1px dashed #ccc;border-radius:8px;padding:6px 10px;background:#fafafa;">' +
-          '<summary style="font-size:11px;color:#666;cursor:pointer;">🔍 デバッグ: 1ページ目の抽出テキスト</summary>' +
+          '<summary style="font-size:11px;color:#666;cursor:pointer;">🔍 デバッグ情報</summary>' +
           '<div style="font-size:10px;color:#555;margin-top:6px;word-break:break-all;line-height:1.5;">' +
-          '<strong>そのまま結合:</strong><br>' + escHtml(r.sampleText) +
-          '<br><br><strong>空白除去:</strong><br>' + escHtml(r.sampleCompact || '(なし)') +
+          diagHtml +
+          '<strong>1ページ目テキスト(2000文字):</strong><br>' + escHtml(r.sampleText || '(なし)') +
+          '<br><br><strong>空白除去版(1000文字):</strong><br>' + escHtml(r.sampleCompact || '(なし)') +
           '</div></details>';
       }
       html += '<div style="border:1px solid #eee;background:#fafafa;border-radius:12px;padding:10px 12px;">' +
