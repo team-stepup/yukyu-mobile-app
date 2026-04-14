@@ -4354,7 +4354,7 @@ var SHIRYOU_CATEGORIES = [
     items: [
       { icon: '📄', label: '源泉徴収票', sub: '社員番号で全年度検索', action: 'openGensenSearch' },
       { icon: '💴', label: '給料明細', sub: '社員番号で全年月検索', action: 'openKyuryouSearch' },
-      { icon: '📒', label: '賃金台帳', sub: '毎月15日更新予定', url: 'https://teamstepupcom774.sharepoint.com/:f:/s/TeamStepup/IgANCR0EYtP_SYkIHU6JILgAAfc71cbvugf9mI-4Vwv_UCw' },
+      { icon: '📒', label: '賃金台帳', sub: '毎月15日更新予定', action: 'openChinginViewer' },
       { icon: '🌐', label: '給料明細 翻訳', url: 'https://acrobat.adobe.com/id/urn:aaid:sc:ap:ce9938d7-2baf-452d-858f-e6acd473bc56' }
     ]
   },
@@ -10367,6 +10367,38 @@ function formatFileSize(bytes) {
 var _sfNavStack = [];
 var _sfCurrentSubfolders = [];
 
+// 賃金台帳ビューア — 社員ファイル直下から「賃金」を含むフォルダを動的に検出して開く
+async function openChinginViewer() {
+  showSpinner();
+  try {
+    var token = await getToken();
+    var parentPath = '/sites/TeamStepup/Shared Documents/社員ファイル';
+    var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
+      encodeURIComponent(parentPath) + "')/Folders?$select=Name,ServerRelativeUrl&$top=500";
+    var resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) throw new Error('Folder API: ' + resp.status);
+    var data = await resp.json();
+    var folders = (data.d.results || []);
+    var match = folders.find(function(f) {
+      var n = f.Name || '';
+      return /賃金|chingin|チンギン/i.test(n);
+    });
+    hideSpinner();
+    if (!match) {
+      showToast('賃金台帳フォルダが見つかりません', 'error');
+      return;
+    }
+    var fullUrl = 'https://teamstepupcom774.sharepoint.com' + match.ServerRelativeUrl;
+    openSyainFolderViewer(fullUrl, '', '賃金台帳');
+  } catch (e) {
+    hideSpinner();
+    console.error('Chingin viewer error:', e);
+    showToast('賃金台帳を開けませんでした', 'error');
+  }
+}
+
 function openSyainFolderFromPayload(payloadJson) {
   try {
     var p = JSON.parse(payloadJson);
@@ -10393,14 +10425,17 @@ async function openSyainFolderViewer(rawUrl, empNo, empName) {
   // 末尾のスラッシュとクエリを除去
   srUrl = srUrl.replace(/\?.*$/, '').replace(/\/+$/, '');
 
+  var titleText = (empNo ? '社員ファイル' : (empName || 'フォルダ'));
+  var subText = empNo ? ((empNo || '') + ' ' + (empName || '')) : '';
+
   var overlay = document.createElement('div');
   overlay.className = 'gensen-overlay';
   overlay.innerHTML = '<div class="gensen-popup">' +
     '<div class="gensen-header" style="background:linear-gradient(135deg,#1565c0 0%,#1976d2 50%,#42a5f5 100%);">' +
       '<div class="gensen-header-icon">📂</div>' +
       '<div style="flex:1;min-width:0;">' +
-        '<div class="gensen-title">社員ファイル</div>' +
-        '<div class="gensen-subtitle">' + escHtml((empNo || '') + ' ' + (empName || '')) + '</div>' +
+        '<div class="gensen-title">' + escHtml(titleText) + '</div>' +
+        (subText ? '<div class="gensen-subtitle">' + escHtml(subText) + '</div>' : '') +
       '</div>' +
       '<button class="gensen-close" onclick="this.closest(\'.gensen-overlay\').remove()">✕</button>' +
     '</div>' +
