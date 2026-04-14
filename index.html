@@ -1707,6 +1707,44 @@ body {
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(21,101,192,0.3);
 }
+.vfolder-matched {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+  border-left: 3px solid #2e7d32;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+}
+.vfolder-matched-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #2e7d32;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.vfolder-matched-label {
+  font-size: 10px;
+  color: #2e7d32;
+  font-weight: 600;
+}
+.vfolder-matched-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1b5e20;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
 .vfolder-summary {
   display: flex;
   align-items: center;
@@ -8529,7 +8567,7 @@ function openVehicleDetail(idx) {
   html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;margin-bottom:10px;">' + escHtml(displayNumber) + '</div>';
   html += '<div style="display:flex;gap:6px;justify-content:center;">';
   html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">✏️ 編集</button>';
-  html += '<button id="vehicleFolderBtn" onclick="openVehicleFolderByNo1(\'' + escHtml(displayNumber) + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📁 フォルダー</button>';
+  html += '<button id="vehicleFolderBtn" onclick="openVehicleFolderByNo1(\'' + escHtml(no1 || '') + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📁 フォルダー</button>';
   html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">🔧 点検記録</button>';
   html += '</div>';
   html += '</div>';
@@ -9227,7 +9265,10 @@ var VEHICLE_FOLDER_SEARCH_PATH = '/sites/TeamStepup/Shared Documents/社員フ�
 var TEAMSTEPUP_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
 
 async function openVehicleFolderByNo1(numberStr) {
+  // No1（ナンバープレートの4桁・3桁部分）から数字のみ抽出
+  // 例: "・1234" → "1234", "12-34" → "1234", "・ 123" → "123"
   var digits = String(numberStr || '').replace(/[^0-9]/g, '');
+  if (digits.length > 4) digits = digits.slice(-4); // 安全装置: 4桁を超えたら末尾4桁
   if (!digits) { showToast('ナンバーが取得できません', 'error'); return; }
 
   // フォルダーパネルを表示
@@ -9269,56 +9310,41 @@ async function openVehicleFolderByNo1(numberStr) {
     return;
   }
 
-  // SharePoint Search API でファイルを検索
+  // フォルダ直接検索を優先（ナンバー4桁/3桁でフォルダを選択する方式）
+  var token;
   try {
-    var token = await getToken();
+    token = await getToken();
     if (!token) { throw new Error('認証エラー'); }
-
-    // Search API: TeamStepupサイトでナンバー(数字)をキーワード検索、パス制限付き
-    var searchUrl = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup/_api/search/query' +
-      '?querytext=%27' + encodeURIComponent(digits + ' path:"' + VEHICLE_FOLDER_SEARCH_PATH + '"') + '%27' +
-      '&selectproperties=%27Title,Path,FileExtension,Size,LastModifiedTime,IsFolder,IsDocument%27' +
-      '&rowlimit=30&sortlist=%27LastModifiedTime:descending%27';
-
-    var resp = await fetch(searchUrl, {
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Accept': 'application/json;odata=verbose',
-      },
-    });
-
-    if (!resp.ok) {
-      // Search API失敗 → フォールバック: GetFolderByServerRelativeUrl で直接取得を試みる
-      throw new Error('Search API: ' + resp.status);
-    }
-
-    var data = await resp.json();
-    var rows = data.d && data.d.query && data.d.query.PrimaryQueryResult &&
-               data.d.query.PrimaryQueryResult.RelevantResults &&
-               data.d.query.PrimaryQueryResult.RelevantResults.Table &&
-               data.d.query.PrimaryQueryResult.RelevantResults.Table.Rows &&
-               data.d.query.PrimaryQueryResult.RelevantResults.Table.Rows.results || [];
-
-    var files = [];
-    rows.forEach(function(row) {
-      var item = {};
-      (row.Cells.results || []).forEach(function(cell) {
-        item[cell.Key] = cell.Value;
-      });
-      // フォルダは除外、ファイルのみ
-      if (item.IsDocument === 'true' || (item.FileExtension && item.FileExtension !== '')) {
-        files.push(item);
-      }
-    });
-
-    renderVehicleFolderFiles(files, digits);
+    await searchVehicleFolderDirect(digits, token);
   } catch (e) {
-    console.error('Vehicle folder search error:', e);
-    // フォールバック: 直接フォルダAPIを試す
+    console.error('Vehicle folder direct error:', e);
+    // フォールバック: Search API
     try {
-      await searchVehicleFolderDirect(digits, token);
+      var searchUrl = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup/_api/search/query' +
+        '?querytext=%27' + encodeURIComponent(digits + ' path:"' + VEHICLE_FOLDER_SEARCH_PATH + '"') + '%27' +
+        '&selectproperties=%27Title,Path,FileExtension,Size,LastModifiedTime,IsFolder,IsDocument%27' +
+        '&rowlimit=30&sortlist=%27LastModifiedTime:descending%27';
+      var resp = await fetch(searchUrl, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' },
+      });
+      if (!resp.ok) throw new Error('Search API: ' + resp.status);
+      var data = await resp.json();
+      var rows = data.d && data.d.query && data.d.query.PrimaryQueryResult &&
+                 data.d.query.PrimaryQueryResult.RelevantResults &&
+                 data.d.query.PrimaryQueryResult.RelevantResults.Table &&
+                 data.d.query.PrimaryQueryResult.RelevantResults.Table.Rows &&
+                 data.d.query.PrimaryQueryResult.RelevantResults.Table.Rows.results || [];
+      var files = [];
+      rows.forEach(function(row) {
+        var item = {};
+        (row.Cells.results || []).forEach(function(cell) { item[cell.Key] = cell.Value; });
+        if (item.IsDocument === 'true' || (item.FileExtension && item.FileExtension !== '')) {
+          files.push(item);
+        }
+      });
+      renderVehicleFolderFiles(files, digits);
     } catch (e2) {
-      console.error('Vehicle folder direct error:', e2);
+      console.error('Vehicle folder search error:', e2);
       var content = document.getElementById('vehicleFolderContent');
       if (content) {
         content.innerHTML = '<div class="vfolder-empty">' +
@@ -9344,15 +9370,25 @@ async function searchVehicleFolderDirect(digits, token) {
 
   var data = await resp.json();
   var folders = (data.d.results || []);
-  // ナンバーの数字がフォルダ名に含まれるものを探す
-  var matchFolder = folders.find(function(f) {
-    return f.Name.indexOf(digits) >= 0;
-  });
+
+  // ナンバー4桁/3桁でフォルダを照合
+  // 1) 完全一致 (例: "1234")
+  // 2) 前方一致 + 区切り文字 (例: "1234 トヨタ", "1234_ハイエース", "1234-車種")
+  // 3) 単語境界一致 (フォルダ名のどこかに digits が独立した数字として含まれる)
+  // 4) 部分一致（最後のフォールバック）
+  var matchFolder =
+    folders.find(function(f) { return f.Name === digits; }) ||
+    folders.find(function(f) { return new RegExp('^' + digits + '(?:[^0-9]|$)').test(f.Name); }) ||
+    folders.find(function(f) { return new RegExp('(?:^|[^0-9])' + digits + '(?:[^0-9]|$)').test(f.Name); }) ||
+    folders.find(function(f) { return f.Name.indexOf(digits) >= 0; });
 
   if (!matchFolder) {
     var content = document.getElementById('vehicleFolderContent');
     if (content) {
-      content.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-light);">「' + escHtml(digits) + '」に一致するフォルダが見つかりません</div>';
+      content.innerHTML = '<div class="vfolder-empty">' +
+        '<div class="vfolder-empty-icon">📭</div>' +
+        '<div class="vfolder-empty-text">「' + escHtml(digits) + '」に一致するフォルダが見つかりません</div>' +
+        '</div>';
     }
     return;
   }
@@ -9380,10 +9416,10 @@ async function searchVehicleFolderDirect(digits, token) {
     };
   });
 
-  renderVehicleFolderFiles(files, digits);
+  renderVehicleFolderFiles(files, digits, matchFolder.Name);
 }
 
-function renderVehicleFolderFiles(files, digits) {
+function renderVehicleFolderFiles(files, digits, folderName) {
   var content = document.getElementById('vehicleFolderContent');
   if (!content) return;
 
@@ -9429,7 +9465,13 @@ function renderVehicleFolderFiles(files, digits) {
     typeCounts[meta.label] = (typeCounts[meta.label] || 0) + 1;
   });
 
-  var html = '<div class="vfolder-summary">' +
+  var html = '';
+  if (folderName) {
+    html += '<div class="vfolder-matched"><span class="vfolder-matched-icon">✓</span>' +
+      '<span class="vfolder-matched-label">フォルダ:</span>' +
+      '<span class="vfolder-matched-name">' + escHtml(folderName) + '</span></div>';
+  }
+  html += '<div class="vfolder-summary">' +
     '<span class="vfolder-summary-count">' + sorted.length + '</span>' +
     '<span class="vfolder-summary-label">件のファイル</span>';
   Object.keys(typeCounts).forEach(function(label) {
