@@ -2011,7 +2011,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'c3f7b37';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -8196,9 +8196,13 @@ function openTenkenAddForm() {
   }
 
   var h = '<div style="background:#fff;border-radius:16px;width:92%;max-width:420px;max-height:85vh;overflow-y:auto;padding:20px;">';
-  h += '<div style="text-align:center;margin-bottom:14px;">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">';
+  h += '<div style="width:32px;"></div>';
+  h += '<div style="text-align:center;flex:1;">';
   h += '<div style="font-size:16px;font-weight:700;color:#2e7d32;">🔧 新規点検記録</div>';
   if (preNumber) h += '<div style="font-size:13px;color:var(--text-light);margin-top:2px;">' + escHtml(preNumber) + '</div>';
+  h += '</div>';
+  h += '<button onclick="document.getElementById(\'tenkenAddOverlay\').remove()" style="width:32px;height:32px;border-radius:50%;background:#f0f0f0;border:none;font-size:18px;cursor:pointer;color:#666;">✕</button>';
   h += '</div>';
 
   // ナンバー（プリフィル・読み取り専用風）
@@ -8238,7 +8242,7 @@ function openTenkenAddForm() {
   }
   h += '<div style="' + DS + '"><label style="' + LS + '">免許証現物確認</label>';
   h += '<select id="tadd_license" data-prop="' + escHtml(fLicenseCheck) + '" data-type="text" style="' + IS + '">';
-  h += '<option value="確認済み" selected>確認済み</option><option value="未確認">未確認</option></select></div>';
+  h += '<option value="未確認" selected>未確認</option><option value="確認済み">確認済み</option></select></div>';
 
   // 点検項目（全てデフォルト: ○異常なし）
   var checkItems = [
@@ -8263,7 +8267,7 @@ function openTenkenAddForm() {
     h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;' + (idx < checkItems.length - 1 ? 'border-bottom:1px solid #e8e8e8;' : '') + '">';
     h += '<span style="font-size:13px;font-weight:500;">' + ci.label + '</span>';
     h += '<select id="tadd_check_' + idx + '" data-prop="' + escHtml(prop) + '" data-type="text" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;">';
-    h += '<option value="○異常なし" selected>○ 異常なし</option><option value="×異常あり">× 異常あり</option></select>';
+    h += '<option value="" selected>—</option><option value="○異常なし">○ 異常なし</option><option value="×異常あり">× 異常あり</option></select>';
     h += '</div>';
   });
   h += '</div>';
@@ -8271,6 +8275,15 @@ function openTenkenAddForm() {
   // 車検有効期限（車両台帳から参照・読み取り専用）
   h += '<div style="' + DS + '"><label style="' + LS + '">車検有効期限</label>';
   h += '<input type="date" id="tadd_syaken" value="' + escHtml(preSyaken) + '" style="' + IS + 'background:#f5f5f5;" disabled></div>';
+
+  // 異常箇所・対応（テキスト）
+  var fIjou = '';
+  if (fields.length) {
+    var ijouField = fields.find(function(f) { return f.Title && (f.Title.indexOf('異常') >= 0 || f.Title.indexOf('対応') >= 0 || f.Title.indexOf('箇所') >= 0); });
+    if (ijouField) fIjou = ijouField.EntityPropertyName;
+  }
+  h += '<div style="' + DS + '"><label style="' + LS + '">異常箇所・対応</label>';
+  h += '<textarea id="tadd_ijou" data-prop="' + escHtml(fIjou) + '" data-type="text" rows="3" placeholder="異常がある場合、箇所と対応を記入" style="' + IS + 'resize:vertical;"></textarea></div>';
 
   // 備考
   var fNote = '';
@@ -8313,6 +8326,19 @@ async function executeSaveTenkenAdd() {
     var metaData = await metaResp.json();
     var entityType = metaData.d.ListItemEntityTypeFullName;
 
+    // フィールドメタデータを取得して有効なプロパティ名のセットを作る
+    var fieldsResp = await fetch(listApi + "/fields?$filter=Hidden eq false&$select=EntityPropertyName,InternalName,TypeAsString&$top=200", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    var validProps = new Set();
+    if (fieldsResp.ok) {
+      var fieldsData = await fieldsResp.json();
+      (fieldsData.d.results || []).forEach(function(f) {
+        validProps.add(f.EntityPropertyName);
+        validProps.add(f.InternalName);
+      });
+    }
+
     var body = { '__metadata': { type: entityType } };
     var inputs = document.querySelectorAll('[id^="tadd_"]');
     inputs.forEach(function(el) {
@@ -8320,12 +8346,18 @@ async function executeSaveTenkenAdd() {
       var type = el.getAttribute('data-type');
       var val = el.value;
       if (!prop || prop === '' || val === '') return;
-      if (el.disabled) return; // 読み取り専用はスキップ
+      if (el.disabled || el.readOnly) return; // 読み取り専用はスキップ
+      // 有効なプロパティ名かチェック
+      if (validProps.size > 0 && !validProps.has(prop)) {
+        console.warn('Skipping invalid prop:', prop);
+        return;
+      }
       if (type === 'date') body[prop] = val + 'T00:00:00Z';
       else if (type === 'number') body[prop] = parseFloat(val) || 0;
       else if (type === 'boolean') body[prop] = val === 'true';
       else body[prop] = val;
     });
+    console.log('Tenken save body:', JSON.stringify(body));
 
     var resp = await fetch(listApi + "/items", {
       method: 'POST',
