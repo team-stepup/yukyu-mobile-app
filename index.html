@@ -2011,7 +2011,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '35d6e54';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2724,12 +2724,19 @@ async function searchEmployee() {
 
     document.getElementById('hakenSectionCard').style.display = 'none';
     document.getElementById('addEmpBtn').style.display = 'none';
-    container.innerHTML = results.map(emp => {
+    // 在職中を上、退職済みを下にソート（同じグループ内は元の順序を維持）
+    const sortedResults = results.slice().sort((a, b) => {
+      const ar = isResigned(a) ? 1 : 0;
+      const br = isResigned(b) ? 1 : 0;
+      return ar - br;
+    });
+    container.innerHTML = sortedResults.map(emp => {
       const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
       const resigned = isResigned(emp);
       const hakensaki = getHakensaki(emp);
+      const resignedStyle = resigned ? 'background:#f0f0f0;opacity:0.75;' : '';
       return `
-        <div class="card card-clickable" onclick='selectEmployee(${JSON.stringify(emp).replace(/'/g, "&#39;")})'>
+        <div class="card card-clickable" style="${resignedStyle}" onclick='selectEmployee(${JSON.stringify(emp).replace(/'/g, "&#39;")})'>
           <div class="emp-card-arrow">&#8250;</div>
           <div class="emp-card-name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
           <div class="emp-card-num">社員番号: ${emp[F.syainNo] || ''}</div>
