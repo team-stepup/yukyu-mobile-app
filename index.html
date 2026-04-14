@@ -2011,7 +2011,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'e541425';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -2890,28 +2890,27 @@ function applyUsageFIFO(grants, leaveRecords) {
 }
 
 function getRecordDays(record) {
-  // Use leaveTypeDetail (取得日数時間) as primary source: "1  日（定時）", "0.5日AM", "0.5日PM"
+  // 半日キーワードがどちらかのフィールドにあれば0.5日（'1'検出より優先）
+  const type = (record[F.leaveType] || '').trim();
   const detail = (record[F.leaveTypeDetail] || '').trim();
-  if (detail) {
-    if (detail.indexOf('0.5') >= 0) return 0.5;
-    if (detail.indexOf('1') >= 0) return 1;
+  const combined = type + ' ' + detail;
+  if (combined.indexOf('半日') >= 0 ||
+      combined.indexOf('午前') >= 0 ||
+      combined.indexOf('午後') >= 0 ||
+      combined.indexOf('AM') >= 0 ||
+      combined.indexOf('PM') >= 0 ||
+      combined.indexOf('0.5') >= 0) {
+    return 0.5;
   }
-  // Fallback to leaveType
-  const type = record[F.leaveType] || '';
-  if (type.indexOf('半日') >= 0 || type.indexOf('午前') >= 0 || type.indexOf('午後') >= 0) return 0.5;
   return 1;
 }
 
 function getRecordTypeLabel(record) {
+  const type = (record[F.leaveType] || '').trim();
   const detail = (record[F.leaveTypeDetail] || '').trim();
-  if (detail) {
-    if (detail.indexOf('AM') >= 0 || detail.indexOf('午前') >= 0) return 'AM有給';
-    if (detail.indexOf('PM') >= 0 || detail.indexOf('午後') >= 0) return 'PM有給';
-    if (detail.indexOf('1') >= 0) return '1日';
-  }
-  const type = record[F.leaveType] || '';
-  if (type.indexOf('午前') >= 0) return 'AM有給';
-  if (type.indexOf('午後') >= 0) return 'PM有給';
+  const combined = type + ' ' + detail;
+  if (combined.indexOf('午前') >= 0 || combined.indexOf('AM') >= 0) return 'AM有給';
+  if (combined.indexOf('午後') >= 0 || combined.indexOf('PM') >= 0) return 'PM有給';
   return '1日';
 }
 
@@ -5582,6 +5581,11 @@ async function submitLeaveApplication() {
   let successCount = 0;
   let errorCount = 0;
 
+  // leaveTypeDetail を leaveType から導出（半日記録を確実に0.5日とカウントするため）
+  let leaveTypeDetail = '';
+  if (leaveType === '半日（午前）') leaveTypeDetail = '午前';
+  else if (leaveType === '半日（午後）') leaveTypeDetail = '午後';
+
   const leaveEntityType = await getListItemEntityType(LIST_LEAVE_GUID);
   for (const dateStr of selectedDates) {
     try {
@@ -5593,6 +5597,7 @@ async function submitLeaveApplication() {
         [F.shimei]: emp.Title || '',
         [F.leaveDate]: dateStr + 'T00:00:00Z',
         [F.leaveType]: leaveType,
+        [F.leaveTypeDetail]: leaveTypeDetail,
         [F.hourlyRate]: hourlyRate,
         [F.amount]: amount,
         [F.category]: category,
