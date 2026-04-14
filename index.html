@@ -2025,6 +2025,8 @@ body {
 .gensen-btn-view { background: linear-gradient(135deg, #1565c0, #42a5f5); color: #fff; }
 .gensen-btn-download { background: linear-gradient(135deg, #2e7d32, #66bb6a); color: #fff; }
 .gensen-btn-copy { background: linear-gradient(135deg, #ef6c00, #ffa726); color: #fff; }
+.gensen-btn-share { background: linear-gradient(135deg, #6a1b9a, #ab47bc); color: #fff; }
+.gensen-btn-share:disabled { opacity: 0.7; cursor: wait; }
 .kyuryou-header { background: linear-gradient(135deg, #c62828 0%, #e53935 50%, #ef5350 100%) !important; }
 .kyuryou-input { border-color: #ffcdd2 !important; color: #c62828 !important; }
 .kyuryou-input:focus { border-color: #e53935 !important; }
@@ -4548,12 +4550,13 @@ function renderGensenResults(matches, empNo) {
     '</div>';
 
   html += '<div class="gensen-list">';
-  matches.forEach(function(m) {
+  matches.forEach(function(m, i) {
     var dateStr = m.date ? formatDate(m.date) : '';
     var sizeStr = m.size ? formatFileSize(parseInt(m.size)) : '';
     var viewUrl = 'https://teamstepupcom774.sharepoint.com' + m.serverRelativeUrl;
     var dlUrl = TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(m.serverRelativeUrl);
-    html += '<div class="gensen-item">' +
+    // PDFをsharePoint Web Share API用にdataset attributeで保持
+    html += '<div class="gensen-item" data-srurl="' + escHtml(m.serverRelativeUrl) + '" data-fname="' + escHtml(m.name) + '">' +
       '<div class="gensen-item-top">' +
         '<span class="gensen-item-year">📅 ' + escHtml(m.folder) + '</span>' +
         (dateStr ? '<span class="gensen-item-date">' + escHtml(dateStr) + '</span>' : '') +
@@ -4563,12 +4566,87 @@ function renderGensenResults(matches, empNo) {
       '<div class="gensen-item-actions">' +
         '<a class="gensen-btn gensen-btn-view" href="' + escHtml(viewUrl) + '" target="_blank" rel="noopener">📖 開く</a>' +
         '<a class="gensen-btn gensen-btn-download" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener">⬇️ DL</a>' +
-        '<button class="gensen-btn gensen-btn-copy" onclick="copyGensenUrl(\'' + escHtml(viewUrl).replace(/'/g, "\\'") + '\')">📋 URL</button>' +
+        '<button class="gensen-btn gensen-btn-share" onclick="sharePdfFromItem(this)">📤 PDF</button>' +
       '</div>' +
     '</div>';
   });
   html += '</div>';
   el.innerHTML = html;
+}
+
+// PDFを共有 (Web Share API) — LINE等のSNSに添付として送れる
+async function sharePdfFromItem(btn) {
+  var item = btn.closest('.gensen-item') || btn.closest('.kyuryou-item');
+  if (!item) return;
+  var srurl = item.getAttribute('data-srurl');
+  var fname = item.getAttribute('data-fname') || 'document.pdf';
+  if (!srurl) { showToast('ファイル情報がありません', 'error'); return; }
+
+  var orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '📥 取得中...';
+
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var url = 'https://teamstepupcom774.sharepoint.com' + srurl;
+    var resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/pdf' }
+    });
+    if (!resp.ok) throw new Error('ダウンロード失敗: ' + resp.status);
+    var blob = await resp.blob();
+    var file = new File([blob], fname, { type: blob.type || 'application/pdf' });
+
+    btn.textContent = '📤 共有中...';
+
+    // 1) Web Share API (Level 2 - files): モバイルでネイティブ共有シート → LINE/SNS等に直接添付
+    if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+      try {
+        await navigator.share({ files: [file], title: fname });
+        btn.textContent = '✅';
+        setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 1500);
+        return;
+      } catch (shareErr) {
+        // ユーザーがキャンセルした場合は何もしない
+        if (shareErr.name === 'AbortError') {
+          btn.textContent = orig;
+          btn.disabled = false;
+          return;
+        }
+        throw shareErr;
+      }
+    }
+
+    // 2) Clipboard API (PDF blob) — デスクトップで貼り付け可能なケース
+    if (navigator.clipboard && window.ClipboardItem) {
+      try {
+        var ci = new ClipboardItem({ 'application/pdf': blob });
+        await navigator.clipboard.write([ci]);
+        showToast('✅ PDFをコピーしました');
+        btn.textContent = '✅';
+        setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 1500);
+        return;
+      } catch (_) { /* fall through */ }
+    }
+
+    // 3) フォールバック: ダウンロードしてユーザーに案内
+    var blobUrl = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
+    showToast('共有未対応のためDLしました');
+    btn.textContent = orig;
+    btn.disabled = false;
+  } catch (e) {
+    console.error('Share PDF error:', e);
+    showToast('共有失敗: ' + (e.message || e), 'error');
+    btn.textContent = orig;
+    btn.disabled = false;
+  }
 }
 
 function copyGensenUrl(url) {
