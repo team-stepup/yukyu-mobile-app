@@ -1994,10 +1994,26 @@ body {
   box-shadow: 0 2px 6px rgba(21,101,192,0.25);
 }
 .syain-file-btn:active { transform: scale(0.96); }
+.gensen-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px 12px;
+  overflow-y: auto;
+  animation: gensenOverlayFadeIn 0.18s ease;
+}
+@keyframes gensenOverlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .gensen-popup {
   background: #fff;
   border-radius: 18px;
-  width: 92%;
+  width: 100%;
   max-width: 460px;
   max-height: 88vh;
   display: flex;
@@ -2005,6 +2021,7 @@ body {
   overflow: hidden;
   box-shadow: 0 10px 40px rgba(0,0,0,0.25);
   animation: vfolderFadeIn 0.25s ease;
+  margin: auto;
 }
 .gensen-header {
   background: linear-gradient(135deg, #ef6c00 0%, #f57c00 50%, #ffa726 100%);
@@ -2676,7 +2693,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'ec01fc8';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6928,6 +6945,16 @@ function escHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ポップアップ外のボタン/リンククリックで開いている gensen-overlay を閉じる
+document.addEventListener('click', function(e) {
+  if (!document.querySelector('.gensen-overlay')) return;
+  if (e.target.closest('.gensen-popup')) return;
+  if (e.target.classList && e.target.classList.contains('gensen-overlay')) return;
+  if (e.target.closest('button, a, [role="button"], [onclick]')) {
+    document.querySelectorAll('.gensen-overlay').forEach(function(o) { o.remove(); });
+  }
+}, true);
 
 function getHakensakiCode(emp) {
   const val = emp[F.hakensaki];
