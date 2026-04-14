@@ -8101,6 +8101,8 @@ function openVehicleDetail(idx) {
   html += row('使用区分', getVal(vf.usage));
   html += row('初年度登録', fmtDate(fRegDate));
   html += row('所有者', getVal(fOwner));
+  // 最新走行距離（点検記録から非同期取得して埋め込む）
+  html += '<div id="vehicleLatestMileageRow"></div>';
   html += '</div>';
 
   // 運行情報
@@ -8139,12 +8141,58 @@ function openVehicleDetail(idx) {
 
   document.getElementById('vehicleDetailBody').innerHTML = html;
   switchScreen('vehicleDetailScreen');
+
+  // 点検記録から最新の走行距離を取得して埋め込む
+  fetchLatestTenkenMileage(number).then(function(latest) {
+    var slot = document.getElementById('vehicleLatestMileageRow');
+    if (!slot || !latest || latest.mileage === undefined || latest.mileage === null || latest.mileage === '') return;
+    var mileageNum = Number(latest.mileage);
+    var mileageStr = isNaN(mileageNum) ? String(latest.mileage) : mileageNum.toLocaleString() + ' km';
+    var dateStr = '';
+    if (latest.date) {
+      var d = new Date(latest.date);
+      if (!isNaN(d)) dateStr = d.toLocaleDateString('ja-JP');
+    }
+    var displayVal = mileageStr + (dateStr ? '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(' + dateStr + ')</span>' : '');
+    slot.outerHTML = '<div style="' + R + '"><span style="' + L + '">走行距離</span><span style="font-weight:600;text-align:right;">' + displayVal + '</span></div>';
+  });
 }
 
 function openTenkenForVehicle(number) {
   document.getElementById('tenkenSearchInput').value = number;
   switchScreen('tenkenListScreen');
   searchTenken();
+}
+
+// 指定ナンバーの点検記録から最新の走行距離(と日付)を取得
+async function fetchLatestTenkenMileage(number) {
+  if (!number) return null;
+  try {
+    var token = await getToken();
+    var fields = await fetchTenkenFields();
+    function findProp(titleSubstr) {
+      var hit = fields.find(function(f) { return f.Title && f.Title.indexOf(titleSubstr) >= 0; });
+      return hit ? hit.EntityPropertyName : null;
+    }
+    var fNumber = findProp('ナンバー') || 'Title';
+    var fMileage = findProp('走行') || findProp('距離');
+    if (!fMileage) return null;
+
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List2')";
+    var filterStr = "$filter=substringof('" + encodeURIComponent(number) + "'," + fNumber + ")";
+    var url = listApi + "/items?" + filterStr + "&$orderby=Created desc&$top=1&$select=Created," + fMileage;
+    var resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    var items = data.d.results || [];
+    if (items.length === 0) return null;
+    return { mileage: items[0][fMileage], date: items[0]['Created'] };
+  } catch(e) {
+    console.warn('fetchLatestTenkenMileage error:', e);
+    return null;
+  }
 }
 
 var _tenkenData = [];
