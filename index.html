@@ -10589,31 +10589,74 @@ async function extractMatchingPages(buffer, empNo, onProgress) {
   var pdf = await pdfjsLib.getDocument({ data: buffer.slice(0) }).promise;
   var matches = [];
   var totalTextLen = 0;
+  var sampleText = '';
+  var sampleCompact = '';
 
   var empNoStr = String(empNo).replace(/\D/g, '');
   var empNoNoZero = empNoStr.replace(/^0+/, '');
-  var patterns = [
-    new RegExp('社員番号[\\s::\\.\\-]*' + empNoStr + '(?![0-9])'),
-    new RegExp('社員\\s*No[\\.\\s::]*' + empNoStr + '(?![0-9])', 'i')
-  ];
-  if (empNoNoZero && empNoNoZero !== empNoStr) {
-    patterns.push(new RegExp('社員番号[\\s::\\.\\-]*' + empNoNoZero + '(?![0-9])'));
-  }
+  var nums = [empNoStr];
+  if (empNoNoZero && empNoNoZero !== empNoStr) nums.push(empNoNoZero);
+
+  // 厳密: 「社員番号」ラベル + 番号
+  var strictPatterns = [];
+  nums.forEach(function(n) {
+    strictPatterns.push(new RegExp('社員番号[\\s::\\.\\-_／/、,]*' + n + '(?![0-9])'));
+    strictPatterns.push(new RegExp('社員\\s*ｺｰﾄﾞ[\\s::\\.\\-_]*' + n + '(?![0-9])'));
+    strictPatterns.push(new RegExp('社員\\s*コード[\\s::\\.\\-_]*' + n + '(?![0-9])'));
+    strictPatterns.push(new RegExp('社員\\s*No[\\s::\\.\\-_]*' + n + '(?![0-9])', 'i'));
+    strictPatterns.push(new RegExp('No[\\s::\\.\\-_]*' + n + '(?![0-9])', 'i'));
+  });
+
+  // ゆるい: 単独数字 (1ページ1社員前提)
+  var loosePatterns = [];
+  nums.forEach(function(n) {
+    loosePatterns.push(new RegExp('(?:^|[^0-9])' + n + '(?![0-9])'));
+  });
 
   for (var i = 1; i <= pdf.numPages; i++) {
     var page = await pdf.getPage(i);
     var content = await page.getTextContent();
-    var text = content.items.map(function(it) { return it.str; }).join(' ');
-    totalTextLen += text.length;
-    for (var j = 0; j < patterns.length; j++) {
-      if (patterns[j].test(text)) {
-        matches.push(i - 1);
-        break;
+    var items = content.items || [];
+
+    // 3通りの結合方法を試す
+    var textJoined = items.map(function(it) { return it.str; }).join(' ');
+    var textConcat = items.map(function(it) { return it.str; }).join('');
+    var textCompact = textConcat.replace(/\s+/g, '');
+
+    totalTextLen += textConcat.length;
+    if (i === 1) {
+      sampleText = textJoined.substring(0, 400);
+      sampleCompact = textCompact.substring(0, 200);
+    }
+
+    var matched = false;
+    for (var j = 0; j < strictPatterns.length && !matched; j++) {
+      if (strictPatterns[j].test(textJoined) ||
+          strictPatterns[j].test(textConcat) ||
+          strictPatterns[j].test(textCompact)) {
+        matched = true;
       }
     }
+    if (!matched) {
+      for (var k = 0; k < loosePatterns.length && !matched; k++) {
+        if (loosePatterns[k].test(textJoined) ||
+            loosePatterns[k].test(textConcat) ||
+            loosePatterns[k].test(textCompact)) {
+          matched = true;
+        }
+      }
+    }
+
+    if (matched) matches.push(i - 1);
     if (onProgress && (i % 3 === 0 || i === pdf.numPages)) onProgress(i, pdf.numPages);
   }
-  return { matches: matches, totalPages: pdf.numPages, totalTextLen: totalTextLen };
+  return {
+    matches: matches,
+    totalPages: pdf.numPages,
+    totalTextLen: totalTextLen,
+    sampleText: sampleText,
+    sampleCompact: sampleCompact
+  };
 }
 
 async function buildPdfFromPages(buffer, pageIndices) {
@@ -10693,7 +10736,10 @@ async function openChinginExtractor(empNo, empName) {
         var isImagePdf = avgTextPerPage < 30;
 
         if (ext.matches.length === 0) {
-          results.push({ label: s.label, ok: true, count: 0, totalPages: ext.totalPages, isImagePdf: isImagePdf });
+          results.push({
+            label: s.label, ok: true, count: 0, totalPages: ext.totalPages,
+            isImagePdf: isImagePdf, sampleText: ext.sampleText, sampleCompact: ext.sampleCompact
+          });
           continue;
         }
 
@@ -10772,15 +10818,28 @@ function renderChinginResults(results, empNo, empName) {
       return;
     }
     if (r.count === 0) {
-      html += '<div class="vfolder-file" style="border-color:#eee;background:#fafafa;opacity:0.7;">' +
-        '<div class="vfolder-file-icon" style="background:#f5f5f5;color:#999;">📭</div>' +
-        '<div class="vfolder-file-info">' +
-          '<div class="vfolder-file-name">' + escHtml(r.label) + '</div>' +
-          '<div class="vfolder-file-meta">' +
-            '<span>該当ページなし</span>' +
-            '<span>(全' + r.totalPages + 'ページ)</span>' +
+      var debugBlock = '';
+      if (r.sampleText) {
+        debugBlock = '<details style="margin-top:8px;border:1px dashed #ccc;border-radius:8px;padding:6px 10px;background:#fafafa;">' +
+          '<summary style="font-size:11px;color:#666;cursor:pointer;">🔍 デバッグ: 1ページ目の抽出テキスト</summary>' +
+          '<div style="font-size:10px;color:#555;margin-top:6px;word-break:break-all;line-height:1.5;">' +
+          '<strong>そのまま結合:</strong><br>' + escHtml(r.sampleText) +
+          '<br><br><strong>空白除去:</strong><br>' + escHtml(r.sampleCompact || '(なし)') +
+          '</div></details>';
+      }
+      html += '<div style="border:1px solid #eee;background:#fafafa;border-radius:12px;padding:10px 12px;">' +
+        '<div style="display:flex;align-items:center;gap:11px;">' +
+          '<div class="vfolder-file-icon" style="background:#f5f5f5;color:#999;">📭</div>' +
+          '<div class="vfolder-file-info">' +
+            '<div class="vfolder-file-name">' + escHtml(r.label) + '</div>' +
+            '<div class="vfolder-file-meta">' +
+              '<span>該当ページなし</span>' +
+              '<span>(全' + r.totalPages + 'ページ)</span>' +
+            '</div>' +
           '</div>' +
-        '</div></div>';
+        '</div>' +
+        debugBlock +
+      '</div>';
       return;
     }
     var url = URL.createObjectURL(r.blob);
