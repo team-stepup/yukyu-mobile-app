@@ -2629,7 +2629,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'c896445';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -3639,6 +3639,7 @@ async function loadLeaveDetails() {
   var empNoStr = String(emp[F.syainNo] || '');
   var empNameStr = String(emp.Title || '');
   var sfBtnB64 = syainFileUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ url: syainFileUrl, no: empNoStr, name: empNameStr })))) : '';
+  var empBtnB64 = btoa(unescape(encodeURIComponent(JSON.stringify({ no: empNoStr, name: empNameStr }))));
 
   // Header (shared between all tabs)
   document.getElementById('detailHeader').innerHTML = `
@@ -3656,9 +3657,9 @@ async function loadLeaveDetails() {
       </div>
       <div class="profile-quick-actions">
         ${syainFileUrl ? `<button class="profile-quick-btn pq-folder" onclick="openSyainFolderFromPayload('${sfBtnB64}')"><span class="pq-icon">📂</span><span class="pq-label">社員ファイル</span></button>` : ''}
-        <button class="profile-quick-btn pq-gensen" onclick="openGensenSearch()"><span class="pq-icon">📄</span><span class="pq-label">源泉</span></button>
-        <button class="profile-quick-btn pq-kyuryou" onclick="openKyuryouSearch()"><span class="pq-icon">💴</span><span class="pq-label">給料明細</span></button>
-        <button class="profile-quick-btn pq-chingin" onclick="openChinginViewer()"><span class="pq-icon">📒</span><span class="pq-label">賃金台帳</span></button>
+        <button class="profile-quick-btn pq-gensen" onclick="openEmpViewer('gensen','${empBtnB64}')"><span class="pq-icon">📄</span><span class="pq-label">源泉</span></button>
+        <button class="profile-quick-btn pq-kyuryou" onclick="openEmpViewer('kyuryou','${empBtnB64}')"><span class="pq-icon">💴</span><span class="pq-label">給料明細</span></button>
+        <button class="profile-quick-btn pq-chingin" onclick="openEmpViewer('chingin','${empBtnB64}')"><span class="pq-icon">📒</span><span class="pq-label">賃金台帳</span></button>
       </div>
     </div>
   `;
@@ -10432,36 +10433,262 @@ function formatFileSize(bytes) {
 var _sfNavStack = [];
 var _sfCurrentSubfolders = [];
 
-// 賃金台帳ビューア — 社員ファイル直下から「賃金」を含むフォルダを動的に検出して開く
-async function openChinginViewer() {
-  showSpinner();
+// ============================================================
+// 統合社員ファイルブラウザ — 源泉/給料明細/賃金台帳
+// ============================================================
+function openEmpViewer(type, payloadB64) {
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(payloadB64))));
+    if (type === 'gensen') openGensenForEmp(p.no, p.name);
+    else if (type === 'kyuryou') openKyuryouForEmp(p.no, p.name);
+    else if (type === 'chingin') openChinginForEmp(p.no, p.name);
+  } catch(e) {
+    console.error('openEmpViewer error:', e);
+    showToast('情報を解析できません', 'error');
+  }
+}
+
+function openGensenForEmp(empNo, empName) {
+  openEmpFileBrowser({
+    title: '源泉徴収票',
+    icon: '📄',
+    headerStyle: 'background:linear-gradient(135deg,#ef6c00 0%,#f57c00 50%,#ffa726 100%);',
+    basePath: '/sites/TeamStepup/Shared Documents/社員ファイル/※※源泉　gensen',
+    empNo: normalizeGensenEmpNo(empNo),
+    empName: empName,
+    maxDepth: 3
+  });
+}
+
+function openKyuryouForEmp(empNo, empName) {
+  openEmpFileBrowser({
+    title: '給料明細',
+    icon: '💴',
+    headerStyle: 'background:linear-gradient(135deg,#c62828 0%,#d32f2f 50%,#ef5350 100%);',
+    basePath: '/sites/TeamStepup/Shared Documents/社員ファイル/給与明細データ',
+    empNo: normalizeGensenEmpNo(empNo),
+    empName: empName,
+    maxDepth: 3
+  });
+}
+
+function openChinginForEmp(empNo, empName) {
+  openEmpFileBrowser({
+    title: '賃金台帳',
+    icon: '📒',
+    headerStyle: 'background:linear-gradient(135deg,#6a1b9a 0%,#8e24aa 50%,#ab47bc 100%);',
+    basePathCandidates: [
+      '/sites/TeamStepup/Shared Documents/社員ファイル/賃金台帳',
+      '/sites/TeamStepup/Shared Documents/社員ファイル/★賃金台帳',
+      '/sites/TeamStepup/Shared Documents/社員ファイル/※※賃金台帳',
+      '/sites/TeamStepup/Shared Documents/社員ファイル/※※賃金　chingin',
+      '/sites/TeamStepup/Shared Documents/社員ファイル/賃金',
+      '/sites/TeamStepup/Shared Documents/社員ファイル/chingin'
+    ],
+    basePathDiscover: { parent: '/sites/TeamStepup/Shared Documents/社員ファイル', match: /賃金|chingin|チンギン/i },
+    empNo: normalizeGensenEmpNo(empNo),
+    empName: empName,
+    maxDepth: 3
+  });
+}
+
+// 後方互換: 旧ボタンから呼ばれる可能性
+function openChinginViewer() { openChinginForEmp('', ''); }
+
+async function openEmpFileBrowser(opts) {
+  // ポップアップを即座に表示
+  var overlay = document.createElement('div');
+  overlay.className = 'gensen-overlay';
+  var headerStyle = opts.headerStyle || 'background:linear-gradient(135deg,#1565c0 0%,#1976d2 50%,#42a5f5 100%);';
+  var subText = (opts.empNo || '') + (opts.empName ? ' ' + opts.empName : '');
+  overlay.innerHTML = '<div class="gensen-popup">' +
+    '<div class="gensen-header" style="' + headerStyle + '">' +
+      '<div class="gensen-header-icon">' + (opts.icon || '📂') + '</div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div class="gensen-title">' + escHtml(opts.title || 'ファイル') + '</div>' +
+        (subText.trim() ? '<div class="gensen-subtitle">' + escHtml(subText) + '</div>' : '') +
+      '</div>' +
+      '<button class="gensen-close" onclick="this.closest(\'.gensen-overlay\').remove()">✕</button>' +
+    '</div>' +
+    '<div class="gensen-body" style="padding:14px;">' +
+      '<div id="empBrowserContent">' +
+        '<div class="vfolder-loading"><div class="vfolder-spinner"></div><div>検索中...</div></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
   try {
     var token = await getToken();
-    var parentPath = '/sites/TeamStepup/Shared Documents/社員ファイル';
-    var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
-      encodeURIComponent(parentPath) + "')/Folders?$select=Name,ServerRelativeUrl&$top=500";
-    var resp = await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
-    });
-    if (!resp.ok) throw new Error('Folder API: ' + resp.status);
-    var data = await resp.json();
-    var folders = (data.d.results || []);
-    var match = folders.find(function(f) {
-      var n = f.Name || '';
-      return /賃金|chingin|チンギン/i.test(n);
-    });
-    hideSpinner();
-    if (!match) {
-      showToast('賃金台帳フォルダが見つかりません', 'error');
-      return;
+    if (!token) throw new Error('認証エラー');
+
+    var basePath = await resolveEmpFileBasePath(token, opts);
+    if (!basePath) throw new Error('フォルダが見つかりません');
+
+    var matches = await scanEmpFiles(token, basePath, opts.empNo, opts.maxDepth || 3);
+
+    // 0件だったら empNo フィルタを外して再試行（賃金台帳など命名が違う場合の保険）
+    if (matches.length === 0 && opts.empNo) {
+      var content0 = document.getElementById('empBrowserContent');
+      if (content0) content0.innerHTML = '<div class="vfolder-loading"><div class="vfolder-spinner"></div><div>全ファイルを検索中...</div></div>';
+      matches = await scanEmpFiles(token, basePath, '', opts.maxDepth || 3);
     }
-    var fullUrl = 'https://teamstepupcom774.sharepoint.com' + match.ServerRelativeUrl;
-    openSyainFolderViewer(fullUrl, '', '賃金台帳');
-  } catch (e) {
-    hideSpinner();
-    console.error('Chingin viewer error:', e);
-    showToast('賃金台帳を開けませんでした', 'error');
+
+    renderEmpBrowserResults(matches, opts);
+  } catch(e) {
+    console.error('EmpFileBrowser error:', e);
+    var content = document.getElementById('empBrowserContent');
+    if (content) {
+      content.innerHTML = '<div class="vfolder-empty">' +
+        '<div class="vfolder-empty-icon">⚠️</div>' +
+        '<div class="vfolder-empty-text">読み込みに失敗しました<br><span style="font-size:10px;">' + escHtml(String(e.message || e)) + '</span></div>' +
+        '</div>';
+    }
   }
+}
+
+async function resolveEmpFileBasePath(token, opts) {
+  var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
+  if (opts.basePath) {
+    try {
+      var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodeURIComponent(opts.basePath) + "')?$select=ServerRelativeUrl";
+      var r = await fetch(url, { headers: headers });
+      if (r.ok) return opts.basePath;
+    } catch(_) {}
+  }
+  if (opts.basePathCandidates) {
+    for (var i = 0; i < opts.basePathCandidates.length; i++) {
+      try {
+        var url2 = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodeURIComponent(opts.basePathCandidates[i]) + "')?$select=ServerRelativeUrl";
+        var r2 = await fetch(url2, { headers: headers });
+        if (r2.ok) return opts.basePathCandidates[i];
+      } catch(_) {}
+    }
+  }
+  if (opts.basePathDiscover) {
+    try {
+      var listUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodeURIComponent(opts.basePathDiscover.parent) + "')/Folders?$select=Name,ServerRelativeUrl&$top=500";
+      var lr = await fetch(listUrl, { headers: headers });
+      if (lr.ok) {
+        var ld = await lr.json();
+        var folders = ld.d.results || [];
+        var pattern = opts.basePathDiscover.match;
+        var found = folders.find(function(f) { return pattern.test(f.Name || ''); });
+        if (found) return found.ServerRelativeUrl;
+      }
+    } catch(_) {}
+  }
+  return null;
+}
+
+async function scanEmpFiles(token, basePath, empNo, maxDepth) {
+  var matches = [];
+  var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
+
+  async function recurse(path, folderLabel, depth) {
+    try {
+      var filesUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodeURIComponent(path) + "')/Files?$select=Name,ServerRelativeUrl,Length,TimeLastModified&$top=2000";
+      var promises = [fetch(filesUrl, { headers: headers })];
+      if (depth < maxDepth) {
+        var foldersUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodeURIComponent(path) + "')/Folders?$select=Name,ServerRelativeUrl&$top=200";
+        promises.push(fetch(foldersUrl, { headers: headers }));
+      }
+      var results = await Promise.all(promises);
+
+      var fr = results[0];
+      if (fr.ok) {
+        var fd = await fr.json();
+        (fd.d.results || []).forEach(function(f) {
+          if (!empNo || matchGensenFilename(f.Name, empNo)) {
+            matches.push({
+              name: f.Name,
+              folder: folderLabel,
+              srUrl: f.ServerRelativeUrl,
+              size: f.Length,
+              date: f.TimeLastModified
+            });
+          }
+        });
+      }
+
+      if (results[1] && results[1].ok) {
+        var fdd = await results[1].json();
+        var subs = (fdd.d.results || []).filter(function(f) {
+          return f.Name && f.Name !== 'Forms' && !f.Name.startsWith('_');
+        });
+        await Promise.all(subs.map(function(s) {
+          var nextLabel = folderLabel ? folderLabel + ' / ' + s.Name : s.Name;
+          return recurse(s.ServerRelativeUrl, nextLabel, depth + 1);
+        }));
+      }
+    } catch(e) { console.error('scanEmpFiles recurse:', path, e); }
+  }
+
+  await recurse(basePath, '', 0);
+  return matches;
+}
+
+function renderEmpBrowserResults(matches, opts) {
+  var content = document.getElementById('empBrowserContent');
+  if (!content) return;
+
+  if (matches.length === 0) {
+    content.innerHTML = '<div class="vfolder-empty">' +
+      '<div class="vfolder-empty-icon">📭</div>' +
+      '<div class="vfolder-empty-text">該当するファイルが見つかりません' +
+        (opts.empNo ? '<br><span style="font-size:11px;">社員番号: ' + escHtml(opts.empNo) + '</span>' : '') +
+      '</div></div>';
+    return;
+  }
+
+  matches.sort(function(a, b) {
+    var da = a.date ? new Date(a.date).getTime() : 0;
+    var db = b.date ? new Date(b.date).getTime() : 0;
+    return db - da;
+  });
+
+  var fileMeta = {
+    pdf:{icon:'📄',color:'#e53935',label:'PDF'},
+    doc:{icon:'📝',color:'#1565c0',label:'Word'},docx:{icon:'📝',color:'#1565c0',label:'Word'},
+    xls:{icon:'📊',color:'#2e7d32',label:'Excel'},xlsx:{icon:'📊',color:'#2e7d32',label:'Excel'},xlsm:{icon:'📊',color:'#2e7d32',label:'Excel'},
+    csv:{icon:'📊',color:'#2e7d32',label:'CSV'},
+    jpg:{icon:'🖼️',color:'#6a1b9a',label:'画像'},jpeg:{icon:'🖼️',color:'#6a1b9a',label:'画像'},
+    png:{icon:'🖼️',color:'#6a1b9a',label:'画像'},gif:{icon:'🖼️',color:'#6a1b9a',label:'画像'},
+    txt:{icon:'📃',color:'#546e7a',label:'Text'}
+  };
+
+  var html = '<div class="vfolder-summary">' +
+    '<span class="vfolder-summary-count">' + matches.length + '</span>' +
+    '<span class="vfolder-summary-label">件</span>' +
+    (opts.empNo ? '<span class="vfolder-type-chip">No. ' + escHtml(opts.empNo) + '</span>' : '') +
+    '</div>';
+
+  html += '<div class="vfolder-list">';
+  matches.forEach(function(m) {
+    var ext = ((m.name.match(/\.([^.]+)$/) || [])[1] || '').toLowerCase();
+    var meta = fileMeta[ext] || { icon: '📎', color: '#78909c', label: ext.toUpperCase() || 'FILE' };
+    var size = m.size ? formatFileSize(parseInt(m.size)) : '';
+    var date = m.date ? formatDate(m.date) : '';
+    var url = 'https://teamstepupcom774.sharepoint.com' + m.srUrl;
+
+    html += '<a class="vfolder-file" href="' + escHtml(url) + '" target="_blank" rel="noopener">' +
+      '<div class="vfolder-file-icon" style="background:' + meta.color + '20;color:' + meta.color + ';">' + meta.icon + '</div>' +
+      '<div class="vfolder-file-info">' +
+        '<div class="vfolder-file-name">' + escHtml(m.name) + '</div>' +
+        '<div class="vfolder-file-meta">' +
+          '<span class="vfolder-file-badge" style="background:' + meta.color + ';">' + escHtml(meta.label) + '</span>' +
+          (m.folder ? '<span>📁 ' + escHtml(m.folder) + '</span>' : '') +
+          (date ? '<span>' + escHtml(date) + '</span>' : '') +
+          (size ? '<span>' + escHtml(size) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
+      '<span class="vfolder-file-arrow">›</span>' +
+    '</a>';
+  });
+  html += '</div>';
+
+  content.innerHTML = html;
 }
 
 function openSyainFolderFromPayload(payloadB64) {
