@@ -9156,26 +9156,44 @@ async function openIdouForm() {
   const koyouShutoku = val('koyouShutoku') ? String(val('koyouShutoku')).substring(0, 10) : '';
   const kenpoHihokensha = val('kenpoHihokensha');
 
-  // 派遣先選択肢: 全社員データから収集
+  // 派遣先選択肢 + 派遣先×組織×職種の連動マップを社員データから構築
   let hakenChoices = [];
+  // _idouCascade: { buka -> { soshiki -> Set<syokusyu>, _allSyokusyu: Set } }
+  window._idouCascade = {};
   try {
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=2000');
     const set = new Set();
+    const soshikiKey = keyMap['soshikiTani'];
+    const syokusyuKey = keyMap['syokusyu'];
     allEmps.forEach(function(e) {
       const b = getBukaValue(e);
-      if (b) set.add(b);
+      if (!b) return;
+      set.add(b);
+      const s = soshikiKey ? (e[soshikiKey] || '') : '';
+      const j = syokusyuKey ? (e[syokusyuKey] || '') : '';
+      if (!window._idouCascade[b]) window._idouCascade[b] = { _allSyokusyu: new Set() };
+      const node = window._idouCascade[b];
+      if (s) {
+        if (!node[s]) node[s] = new Set();
+        if (j) node[s].add(j);
+      }
+      if (j) node._allSyokusyu.add(j);
     });
     hakenChoices = Array.from(set).sort();
   } catch (e) {
-    console.warn('haken list fetch failed:', e);
+    console.warn('haken cascade fetch failed:', e);
   }
 
-  // 各 choice 列の選択肢
+  // 各 choice 列の選択肢(SharePoint側のデフォルト一覧)
   const zaiyokuChoices = getCh('zaiyokuSyubetu') || [];
   const soshikiChoices = getCh('soshikiTani') || [];
   const syokusyuChoices = getCh('syokusyu') || [];
   const kyuyoChoices = getCh('kyuyoTaikei') || [];
   const yuukiChoices = getCh('yuukiMuki') || [];
+
+  // 連動用のフォールバック値(派遣先未選択時に表示するデフォルト)
+  window._idouAllSoshiki = soshikiChoices;
+  window._idouAllSyokusyu = syokusyuChoices;
 
   const overlay = document.createElement('div');
   overlay.className = 'taisha-overlay';
@@ -9226,27 +9244,23 @@ async function openIdouForm() {
       // ───── 派遣先(部課) ─────
       '<div class="taisha-field">' +
         '<label>派遣先(部課) <span style="color:var(--danger);">*</span></label>' +
-        '<select id="idou_buka"><option value="">選択してください</option>' +
+        '<select id="idou_buka" onchange="onIdouBukaChange()"><option value="">選択してください</option>' +
           hakenChoices.map(function(h) {
             return '<option value="' + escHtml(h) + '">' + escHtml(h) + '</option>';
           }).join('') +
         '</select>' +
       '</div>' +
 
-      // ───── 組織単位 ─────
+      // ───── 組織単位(派遣先で連動) ─────
       '<div class="taisha-field">' +
-        '<label>組織単位</label>' +
-        (soshikiChoices.length > 0
-          ? '<select id="idou_soshikiTani"><option value="">選択してください</option>' + buildOpts(soshikiChoices) + '</select>'
-          : '<input type="text" id="idou_soshikiTani" placeholder="例: 浜松製造部 製造課">') +
+        '<label>組織単位 <span style="font-size:10px;color:var(--text-light);">(派遣先で絞込)</span></label>' +
+        '<select id="idou_soshikiTani" onchange="onIdouSoshikiChange()"><option value="">先に派遣先を選択</option></select>' +
       '</div>' +
 
-      // ───── 職種 ─────
+      // ───── 職種(派遣先+組織で連動) ─────
       '<div class="taisha-field">' +
-        '<label>職種</label>' +
-        (syokusyuChoices.length > 0
-          ? '<select id="idou_syokusyu"><option value="">選択してください</option>' + buildOpts(syokusyuChoices) + '</select>'
-          : '<input type="text" id="idou_syokusyu">') +
+        '<label>職種 <span style="font-size:10px;color:var(--text-light);">(派遣先+組織で絞込)</span></label>' +
+        '<select id="idou_syokusyu"><option value="">先に派遣先を選択</option></select>' +
       '</div>' +
 
       // ───── 請求単価 ─────
@@ -9315,6 +9329,58 @@ async function openIdouForm() {
 function closeIdouForm() {
   const el = document.getElementById('idouOverlay');
   if (el) el.remove();
+}
+
+// 派遣先変更 → 組織単位を絞込・職種を派遣先全体で初期化
+function onIdouBukaChange() {
+  const buka = (document.getElementById('idou_buka') || {}).value || '';
+  const soshikiSel = document.getElementById('idou_soshikiTani');
+  const syokusyuSel = document.getElementById('idou_syokusyu');
+  if (!soshikiSel || !syokusyuSel) return;
+
+  const node = (window._idouCascade || {})[buka];
+  let soshikiList = [];
+  let syokusyuList = [];
+  if (node) {
+    soshikiList = Object.keys(node).filter(function(k) { return k !== '_allSyokusyu'; }).sort();
+    syokusyuList = Array.from(node._allSyokusyu).sort();
+  }
+  // データに無ければSP Choice列のフォールバック
+  if (soshikiList.length === 0) soshikiList = window._idouAllSoshiki || [];
+  if (syokusyuList.length === 0) syokusyuList = window._idouAllSyokusyu || [];
+
+  function fill(sel, list, placeholder) {
+    let html = '<option value="">' + placeholder + '</option>';
+    list.forEach(function(v) {
+      html += '<option value="' + escHtml(v) + '">' + escHtml(v) + '</option>';
+    });
+    sel.innerHTML = html;
+  }
+  fill(soshikiSel, soshikiList, buka ? '選択してください' : '先に派遣先を選択');
+  fill(syokusyuSel, syokusyuList, buka ? '選択してください' : '先に派遣先を選択');
+}
+
+// 組織単位変更 → 職種をさらに絞込
+function onIdouSoshikiChange() {
+  const buka = (document.getElementById('idou_buka') || {}).value || '';
+  const soshiki = (document.getElementById('idou_soshikiTani') || {}).value || '';
+  const syokusyuSel = document.getElementById('idou_syokusyu');
+  if (!syokusyuSel) return;
+
+  const node = (window._idouCascade || {})[buka];
+  let syokusyuList = [];
+  if (node && soshiki && node[soshiki]) {
+    syokusyuList = Array.from(node[soshiki]).sort();
+  } else if (node) {
+    syokusyuList = Array.from(node._allSyokusyu).sort();
+  }
+  if (syokusyuList.length === 0) syokusyuList = window._idouAllSyokusyu || [];
+
+  let html = '<option value="">選択してください</option>';
+  syokusyuList.forEach(function(v) {
+    html += '<option value="' + escHtml(v) + '">' + escHtml(v) + '</option>';
+  });
+  syokusyuSel.innerHTML = html;
 }
 
 async function submitIdouForm() {
