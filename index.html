@@ -689,6 +689,69 @@ body {
 .soumu-pink-icon { font-size: 30px; line-height: 1; margin-bottom: 6px; }
 .soumu-pink-title { font-size: 14px; font-weight: 800; letter-spacing: 0.4px; }
 
+/* 産休育休 ピンクカード - 横並びレイアウト (バッジ付き) */
+.sankyu-pink-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  padding: 16px 18px;
+}
+.sankyu-pink-icon-big {
+  font-size: 36px;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.18));
+}
+.sankyu-pink-text { flex: 1; min-width: 0; }
+.sankyu-pink-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sankyu-pink-title-main {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  flex: 1;
+  min-width: 0;
+}
+.sankyu-pink-count-pill {
+  background: rgba(255,255,255,0.95);
+  color: #d81b60;
+  font-size: 14px;
+  font-weight: 900;
+  padding: 3px 11px;
+  border-radius: 999px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.12);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.sankyu-pink-count-unit {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.sankyu-pink-sub {
+  font-size: 11px;
+  opacity: 0.92;
+  margin-top: 3px;
+}
+.sankyu-pink-alert {
+  font-size: 11.5px;
+  font-weight: 700;
+  margin-top: 5px;
+  padding: 4px 9px;
+  background: rgba(255, 235, 59, 0.92);
+  color: #b71c1c;
+  border-radius: 8px;
+  display: inline-block;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.sankyu-pink-alert b { font-weight: 900; font-size: 13px; }
+
 /* リストオーバーレイ */
 .soumu-list-item {
   display: flex;
@@ -5588,6 +5651,7 @@ var SOUMU_SEISAN_LIST_PATH = '/sites/PowerApps/Lists/List6';
 var _soumuAllEmps = null;
 var _soumuKeyMap = null;
 var _soumuSeisanCount = 0;
+var _soumuSankyuSummary = { active: 0, upcoming: 0 };
 
 function openSoumuScreen() {
   switchScreen('soumuScreen');
@@ -5607,16 +5671,73 @@ async function loadSoumuDashboard() {
     var results = await Promise.all([
       spGetAll(LIST_EMPLOYEES_GUID, '$top=500').catch(function() { return []; }),
       fetchEmployeeFields().catch(function() { return {}; }),
-      fetchSoumuSeisanCount().catch(function() { return 0; })
+      fetchSoumuSeisanCount().catch(function() { return 0; }),
+      fetchSankyuSummary().catch(function() { return { active: 0, upcoming: 0 }; })
     ]);
     _soumuAllEmps = results[0] || [];
     var meta = results[1] || {};
     _soumuKeyMap = (meta && Object.keys(meta).length > 0) ? buildFieldKeyMap(meta) : {};
     _soumuSeisanCount = results[2] || 0;
+    _soumuSankyuSummary = results[3] || { active: 0, upcoming: 0 };
     renderSoumuDashboard();
   } catch (e) {
     console.error('loadSoumuDashboard error:', e);
     body.innerHTML = '<div style="padding:20px;color:#c62828;">読み込み失敗: ' + escHtml(e.message || String(e)) + '</div>';
+  }
+}
+
+// 産休育休 (List52) のサマリー取得
+//   active : 状況が「終了/完了」でない件数
+//   upcoming : 出産予定日が今日〜30日以内 の件数
+async function fetchSankyuSummary() {
+  try {
+    var token = await getToken();
+    if (!token) return { active: 0, upcoming: 0 };
+
+    // フィールドメタを先に取得 (キャッシュ済みなら即返る)
+    var meta = await fetchSankyuFields();
+    if (!meta) return { active: 0, upcoming: 0 };
+
+    // 必要な内部名を解決
+    var statusKey = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+    var yoteiKey  = sankyuKeyByTitle('出産予定日');
+
+    // 軽量なフィールドだけ取得 ($select で絞り込み)
+    var selectFields = ['Id'];
+    if (statusKey) selectFields.push(statusKey);
+    if (yoteiKey)  selectFields.push(yoteiKey);
+
+    var url = SP_SITE_URL + "/_api/web/GetList('" + SANKYU_LIST_PATH + "')/items?$top=500&$select=" + selectFields.join(',');
+    var resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) return { active: 0, upcoming: 0 };
+    var data = await resp.json();
+    var items = (data.d.results || []);
+
+    var now = new Date();
+    var todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    var limit30Ms = todayMs + 30 * 86400000;
+
+    var active = 0, upcoming = 0;
+    items.forEach(function(it) {
+      var s = String((statusKey && it[statusKey]) || '');
+      var isOwari = s.indexOf('終了') >= 0 || s.indexOf('完了') >= 0;
+      if (!isOwari) active++;
+      if (yoteiKey && it[yoteiKey] && !isOwari) {
+        try {
+          var d = new Date(it[yoteiKey]);
+          if (!isNaN(d)) {
+            var ms = d.getTime();
+            if (ms >= todayMs && ms <= limit30Ms) upcoming++;
+          }
+        } catch(_) {}
+      }
+    });
+    return { active: active, upcoming: upcoming };
+  } catch (e) {
+    console.warn('fetchSankyuSummary error:', e);
+    return { active: 0, upcoming: 0 };
   }
 }
 
@@ -5783,12 +5904,23 @@ function renderSoumuDashboard() {
   html += '</div>';
 
   // 🌸 産休育休 (1枚 / アプリ内画面)
+  var sankyuActive = (_soumuSankyuSummary && _soumuSankyuSummary.active) || 0;
+  var sankyuUpcoming = (_soumuSankyuSummary && _soumuSankyuSummary.upcoming) || 0;
   html += '<div class="soumu-section-label">産休・育休</div>';
-  html += '<div class="soumu-pink-card" onclick="openSankyuScreen()" style="display:flex;align-items:center;gap:14px;text-align:left;padding:16px 18px;">';
-  html +=   '<div class="soumu-pink-icon" style="margin:0;font-size:34px;">🌸</div>';
-  html +=   '<div style="flex:1;min-width:0;">';
-  html +=     '<div class="soumu-pink-title" style="font-size:15px;">産休・育休 一覧</div>';
-  html +=     '<div style="font-size:11px;opacity:0.92;margin-top:2px;">対象者の状況・申請日を確認 ▸</div>';
+  html += '<div class="soumu-pink-card sankyu-pink-row" onclick="openSankyuScreen()">';
+  html +=   '<div class="sankyu-pink-icon-big">🌸</div>';
+  html +=   '<div class="sankyu-pink-text">';
+  html +=     '<div class="sankyu-pink-title-row">';
+  html +=       '<span class="sankyu-pink-title-main">産休・育休 一覧</span>';
+  if (sankyuActive > 0) {
+    html +=     '<span class="sankyu-pink-count-pill">' + sankyuActive + '<span class="sankyu-pink-count-unit">名</span></span>';
+  }
+  html +=     '</div>';
+  if (sankyuUpcoming > 0) {
+    html +=   '<div class="sankyu-pink-alert">⚠️ 30日以内に出産予定 <b>' + sankyuUpcoming + '名</b></div>';
+  } else {
+    html +=   '<div class="sankyu-pink-sub">対象者の状況・申請日を確認 ▸</div>';
+  }
   html +=   '</div>';
   html += '</div>';
 
