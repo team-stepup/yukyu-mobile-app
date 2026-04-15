@@ -945,22 +945,38 @@ body {
   z-index: 1;
 }
 .sankyu-detail-folder {
-  margin-top: 6px;
+  margin-top: 10px;
   position: relative;
   z-index: 1;
 }
-.sankyu-detail-folder-link {
-  display: inline-block;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #fff;
-  background: rgba(255,255,255,0.22);
-  padding: 4px 10px;
-  border-radius: 999px;
-  text-decoration: none;
-  border: 1px solid rgba(255,255,255,0.35);
+.sankyu-folder-big-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 14px;
+  background: #fff;
+  color: #d81b60;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
-.sankyu-detail-folder-link:active { background: rgba(255,255,255,0.35); }
+.sankyu-folder-big-btn:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+}
+.sankyu-folder-big-btn-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.sankyu-folder-big-btn-text {
+  letter-spacing: 0.3px;
+}
 .sankyu-detail-sub {
   font-size: 12px;
   opacity: 0.92;
@@ -4145,7 +4161,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'a51bf7c';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -8864,11 +8880,18 @@ function renderSankyuDetail(item) {
     html += '</div>';
     html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)') + '</div>';
     if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
-    // 社員フォルダ リンク
+    // 社員フォルダ ボタン (社員プロフィールと同じビューアで開く)
     if (folderUrl) {
-      html += '<div class="sankyu-detail-folder">';
-      html +=   '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener noreferrer" class="sankyu-detail-folder-link">🗂 社員フォルダを開く</a>';
-      html += '</div>';
+      try {
+        var _sankyuSfPayload = JSON.stringify({ url: folderUrl, no: no, name: name });
+        var _sankyuSfB64 = btoa(unescape(encodeURIComponent(_sankyuSfPayload)));
+        html += '<div class="sankyu-detail-folder">';
+        html +=   '<button class="sankyu-folder-big-btn" onclick="openSyainFolderFromPayload(\'' + _sankyuSfB64 + '\')">';
+        html +=     '<span class="sankyu-folder-big-btn-icon">📂</span>';
+        html +=     '<span class="sankyu-folder-big-btn-text">社員ファイルを開く</span>';
+        html +=   '</button>';
+        html += '</div>';
+      } catch(e) { console.warn('sankyu folder button payload error:', e); }
     }
     // 出産予定日 / 出産日 (ヘッダー内)
     html += '<div class="sankyu-detail-birth">';
