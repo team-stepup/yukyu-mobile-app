@@ -1362,6 +1362,13 @@ select.sankyu-edit-input {
 }
 .sankyu-app-card-period-date.empty,
 .sankyu-app-card-main-date.empty { color: #ccc; font-weight: 400; }
+.sankyu-app-card-synth-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #888;
+  margin-top: 3px;
+  padding-left: 2px;
+}
 
 /* 編集モード時のカード内入力 */
 .sankyu-app-card-period .sankyu-edit-input,
@@ -4133,7 +4140,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'ecda94e';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -8173,6 +8180,69 @@ function _sankyuFormatSynthDate(d) {
   return y + '/' + m + '/' + dd;
 }
 
+// 法律に基づく合成期間: 出産日から法定期間を計算して該当カードに設定
+//   対象: 社保免除期間変更(出産後), 出産一時金申請, 出産手当金申請,
+//         育休開始社保免除, 社保免除期間変更1歳6ヶ月まで, 社保免除期間変更 2歳まで
+function _sankyuComputeLegalPeriods(cards, birthRaw) {
+  if (!cards || !cards.length || !birthRaw) return;
+  if (_sankyuIsEmptyDateRaw(birthRaw)) return;
+  var birth = new Date(birthRaw);
+  if (isNaN(birth)) return;
+
+  var birthday1   = _sankyuAddYears(birth, 1);      // 1歳誕生日
+  var birthday1_5 = _sankyuAddMonths(birth, 18);    // 1歳6ヶ月誕生日
+  var birthday2   = _sankyuAddYears(birth, 2);      // 2歳誕生日
+
+  cards.forEach(function(c) {
+    var title = (c.main && c.main.title) || c.title || '';
+    if (!title) return;
+
+    // 1. 育休開始社保免除 (産後休業翌日 〜 1歳に達する日の前日)
+    //    "育休開始" が含まれるものを先に判定 (社保免除期間変更 とは別)
+    if (/育休開始社保免除/.test(title)) {
+      c.synthPeriodStart = _sankyuAddDays(birth, 57);
+      c.synthPeriodEnd   = _sankyuAddDays(birthday1, -1);
+      c.synthPeriodLabel = '産後休業翌日〜1歳前日';
+      return;
+    }
+    // 2. 社保免除期間変更（出産後） (実出産日ベースの産前産後期間)
+    if (/社保免除期間変更.*出産後|出産後.*社保免除期間変更/.test(title)) {
+      c.synthPeriodStart = _sankyuAddDays(birth, -42);
+      c.synthPeriodEnd   = _sankyuAddDays(birth, 56);
+      c.synthPeriodLabel = '産前42日〜産後56日 (実出産日)';
+      return;
+    }
+    // 3. 社保免除期間変更 2歳まで (1歳6ヶ月〜2歳に達する日の前日)
+    if (/社保免除期間変更.*2歳|2歳.*社保免除期間変更/.test(title)) {
+      c.synthPeriodStart = new Date(birthday1_5);
+      c.synthPeriodEnd   = _sankyuAddDays(birthday2, -1);
+      c.synthPeriodLabel = '1歳6ヶ月〜2歳前日';
+      return;
+    }
+    // 4. 社保免除期間変更1歳6ヶ月まで (1歳〜1歳6ヶ月に達する日の前日)
+    if (/社保免除期間変更.*1歳|1歳6.{0,2}月|1歳.{0,2}月.*社保免除期間変更/.test(title)) {
+      c.synthPeriodStart = new Date(birthday1);
+      c.synthPeriodEnd   = _sankyuAddDays(birthday1_5, -1);
+      c.synthPeriodLabel = '1歳〜1歳6ヶ月前日';
+      return;
+    }
+    // 5. 出産一時金申請 (申請可能期間: 出産日翌日から2年以内)
+    if (/出産一時金/.test(title)) {
+      c.synthPeriodStart = new Date(birth);
+      c.synthPeriodEnd   = _sankyuAddDays(_sankyuAddYears(birth, 2), -1);
+      c.synthPeriodLabel = '申請可能期間 (2年以内)';
+      return;
+    }
+    // 6. 出産手当金申請 (対象期間: 産前42日〜産後56日)
+    if (/出産手当金/.test(title)) {
+      c.synthPeriodStart = _sankyuAddDays(birth, -42);
+      c.synthPeriodEnd   = _sankyuAddDays(birth, 56);
+      c.synthPeriodLabel = '対象期間 (産前42日〜産後56日)';
+      return;
+    }
+  });
+}
+
 // 1枚のカードを描画
 function renderSankyuAppCard(card, isEdit) {
   var html = '';
@@ -8241,6 +8311,9 @@ function renderSankyuAppCard(card, isEdit) {
           html +=   '<span class="sankyu-app-card-tilde">〜</span>';
           html +=   '<div class="sankyu-app-card-period-date">' + escHtml(eStr) + '</div>';
           html += '</div>';
+          if (card.synthPeriodLabel) {
+            html += '<div class="sankyu-app-card-synth-label">📐 ' + escHtml(card.synthPeriodLabel) + '</div>';
+          }
         } else {
           html += '<div class="sankyu-app-card-main-date' + (mEmpty ? ' empty' : '') + '">' + (mEmpty ? '—' : escHtml(mv.text)) + '</div>';
         }
@@ -8918,6 +8991,10 @@ function renderSankyuDetail(item) {
       //   期間 = (前のカードの日付 + 1日) 〜 (当カードの日付) として表示
       //   起点は 育休開始社保免除 (あれば) → それ以前は空
       _sankyuComputeMonthlyPeriods(_builtCards);
+      // 法律に基づく合成期間を計算 (出産日ベース)
+      //   社保免除期間変更(出産後), 出産一時金申請, 出産手当金申請,
+      //   育休開始社保免除, 社保免除期間変更1歳6ヶ月まで/2歳まで
+      _sankyuComputeLegalPeriods(_builtCards, birthRaw);
       // 進捗カウント
       var totalWithSub = 0, doneCount = 0;
       _builtCards.forEach(function(c) {
