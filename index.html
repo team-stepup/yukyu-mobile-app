@@ -1301,6 +1301,37 @@ select.sankyu-edit-input {
   color: #616161;
 }
 
+/* 申請日 クリアボタン */
+.sankyu-quick-clear-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid #e0e0e0;
+  background: #fff;
+  color: #e57373;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-left: 4px;
+  transition: transform .12s ease, background .12s ease, border-color .12s ease;
+}
+.sankyu-quick-clear-btn:hover:not(:disabled) {
+  background: #ffebee;
+  border-color: #ef5350;
+  color: #c62828;
+}
+.sankyu-quick-clear-btn:active:not(:disabled) { transform: scale(0.9); }
+.sankyu-quick-clear-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  color: #bbb;
+}
+
 /* セクション内のカード用に section 余白を調整 */
 .sankyu-section.sankyu-section-cards { padding-bottom: 6px; }
 .sankyu-section.sankyu-section-cards .sankyu-app-card:last-child { margin-bottom: 4px; }
@@ -3979,7 +4010,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '57e01d2';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7232,6 +7263,15 @@ async function saveSankyuEdit() {
   }
 }
 
+// 申請日 フィールドのクリア (確認ダイアログ付き)
+async function clearSankyuSubmitted(internalName) {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
+  var meta = _sankyuFieldsMeta[internalName];
+  if (!meta) return;
+  if (!confirm('この項目の申請日をクリアしますか？\n(「未申請」状態に戻ります)')) return;
+  await quickSaveSankyuSubmitted(internalName, '');
+}
+
 // 申請日 フィールドをインライン保存 (閲覧モードから直接)
 async function quickSaveSankyuSubmitted(internalName, dateValue) {
   if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
@@ -7326,10 +7366,10 @@ function formatSankyuValue(val, type) {
 // ─────────────────────────────────────────
 // 正規表現: 申請日 / 実施日 等の「完了マーカー」フィールド
 var _SANKYU_SUBMIT_RE = /(申請日|実施日|提出日|完了日|記入日|実行日|渡した日|もらった日|受取日|受領日)/;
-// 正規表現: 期間の 開始 側
-var _SANKYU_START_RE = /(開始|始め|はじめ|から|From|from|Start|start)/;
-// 正規表現: 期間の 終了 側
-var _SANKYU_END_RE   = /(終了|終わり|おわり|まで|末|To|to|End|end)/;
+// 正規表現: 期間の 開始 側 (単独 "始" も含める)
+var _SANKYU_START_RE = /(開始|始め|はじめ|始|From|from|Start|start|から)/;
+// 正規表現: 期間の 終了 側 (単独 "終" "末" も含める)
+var _SANKYU_END_RE   = /(終了|終わり|おわり|終|末|To|to|End|end|まで)/;
 
 // Power Apps の「NULL 相当」日付 (2001/12/31 など) を空として扱う
 function _sankyuIsEmptyDateRaw(raw) {
@@ -7346,14 +7386,28 @@ function _sankyuIsEmptyDateRaw(raw) {
   return false;
 }
 
-// タイトルから「期間/申請日」のサフィックスを剥がして ベース文字列 を得る
+// タイトル内で最初にヒットするマーカーの「直前まで」を base として抜く
+//   例: "延長申請5回目開始日" + _SANKYU_START_RE → "延長申請5回目"
+//   例: "育休初回申請申請日" + _SANKYU_SUBMIT_RE → "育休初回申請"
+function _sankyuExtractBase(title, markerRe) {
+  if (!title) return '';
+  var t = String(title);
+  var m = t.match(markerRe);
+  if (!m) return t;
+  var idx = t.indexOf(m[0]);
+  if (idx <= 0) return t;
+  var base = t.substring(0, idx);
+  // 末尾の空白・助詞・括弧を削る
+  base = base.replace(/[\s　のの\(（\)）:：・\-ー、,]+$/, '');
+  return base.trim();
+}
+
+// 互換用 (古いコードから呼ばれる場合に備え) : 末尾サフィックスを剥がす
 function _sankyuStripSuffix(title) {
   if (!title) return '';
   var t = String(title);
-  // 申請日系の丸ごと除去 (例: "〇〇申請日" → "〇〇")
-  t = t.replace(/[\s　]*[\(（]?(申請日|実施日|提出日|完了日|記入日|実行日|渡した日|もらった日|受取日|受領日)[\)）]?$/, '');
-  // 開始/終了系の除去
-  t = t.replace(/[\s　]*[\(（]?(開始|始め|はじめ|から|From|from|Start|start|終了|終わり|おわり|まで|末|To|to|End|end)[\)）]?$/, '');
+  t = t.replace(/[\s　]*[\(（]?(申請日|実施日|提出日|完了日|記入日|実行日|渡した日|もらった日|受取日|受領日)[\)）]?[日]?$/, '');
+  t = t.replace(/[\s　]*[\(（]?(開始|始め|はじめ|始|から|From|from|Start|start|終了|終わり|おわり|終|末|まで|To|to|End|end)[\)）]?[日]?$/, '');
   return t.trim();
 }
 
@@ -7367,38 +7421,43 @@ function _sankyuBuildCards(fields) {
   // インデックス付きコピー
   var arr = fields.map(function(f, i) { return { f: f, i: i }; });
 
-  function findSibling(baseTitle, predTitleRe, excludeIdx) {
+  // base で始まる DateTime フィールドを検索 (マーカー付き)
+  function findPrefixedSibling(baseTitle, markerRe, excludeIdx) {
     for (var j = 0; j < arr.length; j++) {
       if (used[j]) continue;
       if (excludeIdx && excludeIdx.indexOf(j) >= 0) continue;
       var g = arr[j].f;
       if (g.type !== 'DateTime') continue;
       if (!g.title) continue;
-      if (g.title.indexOf(baseTitle) < 0) continue;
-      if (!predTitleRe.test(g.title)) continue;
-      // 期間/申請日マーカーを含む必要あり
+      if (g.title.indexOf(baseTitle) !== 0) continue; // 先頭一致
+      if (!markerRe.test(g.title)) continue;
       return j;
     }
     return -1;
   }
 
-  // 1st pass: 期間 ( start + end) ペアの検出
+  // 1st pass: 期間 (開始 + 終了) ペアの検出
+  //   開始フィールドの「マーカー直前までの文字列」を base として終了/申請日を探す
   for (var i = 0; i < arr.length; i++) {
     if (used[i]) continue;
     var f = arr[i].f;
     if (f.type !== 'DateTime') continue;
     if (!f.title) continue;
+    if (_SANKYU_SUBMIT_RE.test(f.title)) continue; // 申請日は除外 (先にスキップ)
     if (!_SANKYU_START_RE.test(f.title)) continue;
-    if (_SANKYU_SUBMIT_RE.test(f.title)) continue; // 申請日 は除外
 
-    var base = _sankyuStripSuffix(f.title);
+    // base = マーカー直前まで
+    var base = _sankyuExtractBase(f.title, _SANKYU_START_RE);
     if (!base || base.length < 2) continue;
 
-    // end を探す
-    var endIdx = findSibling(base, _SANKYU_END_RE, [i]);
+    // end を探す: 同じ base で始まり END マーカーを含む
+    var endIdx = findPrefixedSibling(base, _SANKYU_END_RE, [i]);
     if (endIdx < 0) continue;
+    // ただし end フィールドも 申請日 マーカーを持っていたら除外
+    if (_SANKYU_SUBMIT_RE.test(arr[endIdx].f.title)) continue;
+
     // 申請日 を探す
-    var subIdx = findSibling(base, _SANKYU_SUBMIT_RE, [i, endIdx]);
+    var subIdx = findPrefixedSibling(base, _SANKYU_SUBMIT_RE, [i, endIdx]);
 
     cards.push({
       type: 'period',
@@ -7416,14 +7475,23 @@ function _sankyuBuildCards(fields) {
   for (var k = 0; k < arr.length; k++) {
     if (used[k]) continue;
     var g = arr[k].f;
-    // 未消費の 申請日 フィールド → 単体カード (親が見つからなかった孤児)
-    var isSubmitOnly = (g.type === 'DateTime' && g.title && _SANKYU_SUBMIT_RE.test(g.title));
+    if (!g.title) {
+      cards.push({ type: 'single', title: g.title, main: g, submitted: null });
+      used[k] = true;
+      continue;
+    }
 
-    if (!isSubmitOnly && g.type === 'DateTime' && g.title) {
+    var isSubmitOnly = (g.type === 'DateTime' && _SANKYU_SUBMIT_RE.test(g.title));
+
+    if (!isSubmitOnly && g.type === 'DateTime') {
       // メイン日付 + 申請日 ペアを探す
-      var base2 = _sankyuStripSuffix(g.title);
+      // base は 自身のタイトル全体 (サフィックス無しのケース) もしくは 末尾の "日"/助詞を除いたもの
+      var base2 = g.title.replace(/[\s　のの\(（\)）:：・\-ー、,]+$/, '').trim();
       var subIdx2 = -1;
-      if (base2) subIdx2 = findSibling(base2, _SANKYU_SUBMIT_RE, [k]);
+      if (base2 && base2.length >= 2) {
+        // g.title と完全に異なるタイトルで base2 から始まり 申請日 マーカー を持つ兄弟を探す
+        subIdx2 = findPrefixedSibling(base2, _SANKYU_SUBMIT_RE, [k]);
+      }
       cards.push({
         type: 'single',
         title: g.title,
@@ -7519,6 +7587,7 @@ function renderSankyuAppCard(card, isEdit) {
       // インラインクイック編集 (onchange で自動保存)
       var subIname = card.submitted.meta.internalName;
       var subDateStr = '';
+      var subHasValue = false;
       if (!_sankyuIsEmptyDateRaw(card.submitted.raw)) {
         try {
           var _sd = new Date(card.submitted.raw);
@@ -7527,10 +7596,13 @@ function renderSankyuAppCard(card, isEdit) {
             var _smo = ('0' + (_sd.getMonth() + 1)).slice(-2);
             var _sdd = ('0' + _sd.getDate()).slice(-2);
             subDateStr = _sy + '-' + _smo + '-' + _sdd;
+            subHasValue = true;
           }
         } catch(_) {}
       }
       html += '<input type="date" id="sankyuQuickField_' + subIname + '" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + subDateStr + '" onchange="quickSaveSankyuSubmitted(\'' + subIname + '\', this.value)">';
+      // クリアボタン (値が入っているときのみ有効)
+      html += '<button class="sankyu-quick-clear-btn" title="申請日をクリア" ' + (subHasValue ? '' : 'disabled ') + 'onclick="clearSankyuSubmitted(\'' + subIname + '\')">✕</button>';
     }
     html += '</div>';
   }
