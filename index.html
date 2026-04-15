@@ -908,6 +908,14 @@ body {
   opacity: 0.13;
   pointer-events: none;
 }
+.sankyu-detail-top-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
 .sankyu-detail-no {
   font-size: 11px;
   font-weight: 700;
@@ -916,11 +924,25 @@ body {
   border-radius: 999px;
   display: inline-block;
 }
+.sankyu-detail-haken {
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(255,255,255,0.2);
+  padding: 2px 9px;
+  border-radius: 999px;
+  display: inline-block;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sankyu-detail-name {
   font-size: 19px;
   font-weight: 900;
   margin-top: 6px;
   letter-spacing: 0.5px;
+  position: relative;
+  z-index: 1;
 }
 .sankyu-detail-sub {
   font-size: 12px;
@@ -7499,10 +7521,13 @@ function classifySankyuField(title) {
   if (/^状況$/.test(t)) return 'hidden';
   // 社員番号・氏名・派遣先もヘッダーで表示済み
   if (/^(社員番号|氏名|社員氏名|派遣先)$/.test(t)) return 'hidden';
-  // 出産予定日・出産日・性別 は 基本情報 に昇格 (ヘッダーでも値表示するがフォームは basic に)
+  // 出産予定日・出産日 は 基本情報 に昇格 (ヘッダーでも値表示するがフォームは basic に)
   if (/^出産予定日$/.test(t)) return 'basic';
   if (/^出産日$/.test(t)) return 'basic';
-  if (/性別/.test(t)) return 'basic';
+  // 性別（子）は child へ、性別（親）は basic へ
+  if (/性別.*[(（]\s*子\s*[)）]/.test(t)) return 'child';
+  if (/性別.*[(（]\s*親\s*[)）]/.test(t)) return 'basic';
+  if (/性別/.test(t)) return 'basic'; // デフォルト: 親扱い
   if (/子供|子の/.test(t)) return 'child';
   if (/銀行|支店|口座/.test(t)) return 'bank';
   if (/健保|健康保険|被保険者|整理番号|雇用保険(取得|番号)/.test(t)) return 'insurance';
@@ -7777,6 +7802,45 @@ function _sankyuBuildCards(fields) {
     }
   }
 
+  // 1.9th pass: 隣接順序ベース (最終フォールバック)
+  //   SharePoint の列順で 開始 → 終了 → 申請日 が並んでいる前提で
+  //   未使用の start を、その後ろに最も近い未使用 end と総当たりペアリング
+  for (var adj = 0; adj < arr.length; adj++) {
+    if (used[adj]) continue;
+    var af = arr[adj].f;
+    if (af.type !== 'DateTime') continue;
+    if (!af.title) continue;
+    if (_sankyuTitleRole(af.title) !== 'start') continue;
+
+    // 後ろにある最も近い 未使用 end を探す (次の start までに出てくるもの)
+    var adjEndIdx = -1;
+    var adjSubIdx = -1;
+    for (var look = adj + 1; look < arr.length; look++) {
+      if (used[look]) continue;
+      var lf = arr[look].f;
+      if (lf.type !== 'DateTime') continue;
+      if (!lf.title) continue;
+      var lrole = _sankyuTitleRole(lf.title);
+      if (lrole === 'start') break; // 次の start に到達 → 打ち切り
+      if (lrole === 'end' && adjEndIdx < 0) adjEndIdx = look;
+      else if (lrole === 'submit' && adjSubIdx < 0) adjSubIdx = look;
+    }
+    if (adjEndIdx < 0) continue;
+
+    // base は start タイトルから抽出 (表示用)
+    var adjBase = _sankyuExtractBase(af.title, _SANKYU_START_RE) || af.title;
+    cards.push({
+      type: 'period',
+      title: adjBase,
+      start: af,
+      end: arr[adjEndIdx].f,
+      submitted: adjSubIdx >= 0 ? arr[adjSubIdx].f : null
+    });
+    used[adj] = true;
+    used[adjEndIdx] = true;
+    if (adjSubIdx >= 0) used[adjSubIdx] = true;
+  }
+
   // 2nd pass: 残りのフィールドを単体カードに
   for (var k = 0; k < arr.length; k++) {
     if (used[k]) continue;
@@ -7820,8 +7884,28 @@ function _sankyuBuildCards(fields) {
     used[k] = true;
   }
 
+  // デバッグ出力 (console で確認可)
+  if (typeof console !== 'undefined' && console.log && window.__sankyuDebug) {
+    console.log('[sankyuBuildCards] fields:', fields.map(function(f) {
+      return { title: f.title, type: f.type, role: _sankyuTitleRole(f.title), pn: _sankyuExtractPrefixNum(f.title) };
+    }));
+    console.log('[sankyuBuildCards] cards:', cards.map(function(c) {
+      return { type: c.type, title: c.title,
+        start: c.start ? c.start.title : null,
+        end: c.end ? c.end.title : null,
+        main: c.main ? c.main.title : null,
+        submitted: c.submitted ? c.submitted.title : null
+      };
+    }));
+  }
+
   return cards;
 }
+
+// ブラウザコンソールから手動で有効化: 一度実行すると次の再描画から診断ログが流れる
+//   使い方: デバッグ時 window.sankyuDebugOn(); → 詳細画面を閲覧 → console 確認
+window.sankyuDebugOn  = function() { window.__sankyuDebug = true;  console.log('[sankyu] debug ON'); if (typeof _sankyuCurrentItem !== 'undefined' && _sankyuCurrentItem) renderSankyuDetail(_sankyuCurrentItem); };
+window.sankyuDebugOff = function() { window.__sankyuDebug = false; console.log('[sankyu] debug OFF'); };
 
 // 1枚のカードを描画
 function renderSankyuAppCard(card, isEdit) {
@@ -8382,9 +8466,12 @@ function renderSankyuDetail(item) {
   // ヘッダーカード (新規モードでは社員未選択なら非表示)
   if (!isNew || _sankyuPickedEmp) {
     html += '<div class="sankyu-detail-header">';
-    if (no)     html += '<div class="sankyu-detail-no">No.' + escHtml(no) + '</div>';
-                  html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)') + '</div>';
-    if (haken)  html += '<div class="sankyu-detail-sub">📍 ' + escHtml(haken) + '</div>';
+    // No. + 派遣先 (部課) を同じ行に
+    html += '<div class="sankyu-detail-top-row">';
+    if (no)    html += '<span class="sankyu-detail-no">No.' + escHtml(no) + '</span>';
+    if (haken) html += '<span class="sankyu-detail-haken">📍 ' + escHtml(haken) + '</span>';
+    html += '</div>';
+    html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)') + '</div>';
     if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
     // 出産予定日 / 出産日 (ヘッダー内)
     html += '<div class="sankyu-detail-birth">';
