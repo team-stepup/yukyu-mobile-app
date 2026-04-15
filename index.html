@@ -6338,7 +6338,7 @@ var _sankyuCurrentItem = null;    // 現在表示中の item
 var _sankyuNewMode = false;       // true なら新規追加モード (POST)
 var _sankyuPickedEmp = null;      // 新規モードで選択中の社員 (emp オブジェクト)
 
-// 状況 → カテゴリー判定
+// 状況 → カテゴリー判定 (文字列のみ。下位互換で残す)
 function sankyuStatusCategory(status) {
   var s = String(status || '');
   if (!s) return 'kyugyo';
@@ -6346,6 +6346,19 @@ function sankyuStatusCategory(status) {
   if (s.indexOf('産前') >= 0 || s.indexOf('産後') >= 0) return 'sango';
   if (s.indexOf('育児') >= 0 || s.indexOf('育休') >= 0) return 'ikuji';
   return 'kyugyo';
+}
+
+// item 単位のカテゴリー判定 (kyugyo を 出産日有無で sango/ikuji に振り分け)
+//   戻り値: 'sango' | 'ikuji' | 'owari'
+function sankyuItemCategory(item, kStatus, kBirth) {
+  var status = String((item && kStatus && item[kStatus]) || '');
+  if (status.indexOf('終了') >= 0 || status.indexOf('完了') >= 0) return 'owari';
+  if (status.indexOf('産前') >= 0 || status.indexOf('産後') >= 0) return 'sango';
+  if (status.indexOf('育児') >= 0 || status.indexOf('育休') >= 0) return 'ikuji';
+  // ambiguous: 出産日 が入っていれば 育児休業中、未入力なら 産前産後休業中
+  var birth = kBirth ? item[kBirth] : null;
+  if (birth) return 'ikuji';
+  return 'sango';
 }
 
 // List52 のフィールドメタを取得
@@ -6577,21 +6590,20 @@ function renderSankyuList() {
   var kYotei = sankyuKeyByTitle('出産予定日');
   var kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
 
-  // チップ集計
-  var counts = { all: _sankyuItems.length, sango: 0, ikuji: 0, kyugyo: 0, owari: 0 };
+  // チップ集計 (item 単位のカテゴリで kyugyo→sango/ikuji へ振り分け)
+  var counts = { all: _sankyuItems.length, sango: 0, ikuji: 0, owari: 0 };
   _sankyuItems.forEach(function(it) {
-    var cat = sankyuStatusCategory(it[kStatus]);
+    var cat = sankyuItemCategory(it, kStatus, kBirth);
     counts[cat] = (counts[cat] || 0) + 1;
   });
 
   // チップ描画
   if (chipsEl) {
     var chipDefs = [
-      { key: 'all',    label: '全て',     icon: '📋' },
-      { key: 'sango',  label: '産前産後', icon: '🤰' },
-      { key: 'ikuji',  label: '育児休業', icon: '👶' },
-      { key: 'kyugyo', label: '休業中',   icon: '🌸' },
-      { key: 'owari',  label: '休業終了', icon: '✓' }
+      { key: 'all',   label: '全て',         icon: '📋' },
+      { key: 'sango', label: '産前産後休業中', icon: '🤰' },
+      { key: 'ikuji', label: '育児休業中',     icon: '👶' },
+      { key: 'owari', label: '休業終了',       icon: '✓' }
     ];
     chipsEl.innerHTML = chipDefs.map(function(c) {
       var active = (_sankyuCurrentFilter === c.key) ? ' active' : '';
@@ -6608,7 +6620,7 @@ function renderSankyuList() {
 
   // フィルタ
   var filtered = _sankyuItems.filter(function(it) {
-    var cat = sankyuStatusCategory(it[kStatus]);
+    var cat = sankyuItemCategory(it, kStatus, kBirth);
     if (_sankyuCurrentFilter !== 'all' && _sankyuCurrentFilter !== cat) return false;
     if (q) {
       var no = String(it[kSyainNo] || '');
@@ -6621,8 +6633,17 @@ function renderSankyuList() {
 
   if (countLabel) countLabel.textContent = '(' + filtered.length + ' / ' + _sankyuItems.length + '名)';
 
-  // 並べ替え: 出産予定日昇順 (近い順)、未設定は末尾
+  // 並べ替え:
+  //  1) 休業中 (sango/ikuji) を上、休業終了 (owari) を下
+  //  2) 休業中グループ内: 産前産後 → 育児休業 の順
+  //  3) 同じグループ内: 出産予定日 昇順 (近い順、未設定は末尾)
+  var _catRank = { sango: 0, ikuji: 1, owari: 2 };
   filtered.sort(function(a, b) {
+    var ca = sankyuItemCategory(a, kStatus, kBirth);
+    var cb = sankyuItemCategory(b, kStatus, kBirth);
+    var ra = _catRank[ca] != null ? _catRank[ca] : 9;
+    var rb = _catRank[cb] != null ? _catRank[cb] : 9;
+    if (ra !== rb) return ra - rb;
     var da = a[kYotei] ? new Date(a[kYotei]).getTime() : Infinity;
     var db = b[kYotei] ? new Date(b[kYotei]).getTime() : Infinity;
     return da - db;
@@ -6645,7 +6666,11 @@ function renderSankyuList() {
     var status = String(it[kStatus] || '');
     var yotei  = it[kYotei] ? formatDate(it[kYotei]) : '';
     var birth  = it[kBirth] ? formatDate(it[kBirth]) : '';
-    var cat = sankyuStatusCategory(status);
+    var cat = sankyuItemCategory(it, kStatus, kBirth);
+    // 状況文字列が未設定 / 曖昧 (休業中 だけ等) の場合、カテゴリからラベルを補完
+    if (!status || status === '休業中') {
+      status = (cat === 'sango') ? '産前産後休業中' : (cat === 'ikuji') ? '育児休業中' : (cat === 'owari') ? '休業終了' : status;
+    }
 
     html += '<div class="sankyu-card status-' + cat + '" onclick="openSankyuDetail(' + it.Id + ')">';
     html +=   '<div class="sankyu-card-head">';
@@ -7420,12 +7445,17 @@ function renderSankyuDetail(item) {
   var kHakensaki = sankyuKeyByTitle('派遣先') || 'Title';
   var kShimei = sankyuKeyByTitle('氏名') || sankyuKeyByTitle('社員氏名');
   var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+  var kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
 
   var no = String(item[kSyainNo] || '');
   var name = String(item[kShimei] || '');
   var haken = String(item[kHakensaki] || '');
   var status = String(item[kStatus] || '');
-  var cat = sankyuStatusCategory(status);
+  var cat = sankyuItemCategory(item, kStatus, kBirth);
+  // 状況文字列が未設定 / 曖昧 (休業中 だけ等) の場合、カテゴリからラベルを補完
+  if (!status || status === '休業中') {
+    status = (cat === 'sango') ? '産前産後休業中' : (cat === 'ikuji') ? '育児休業中' : (cat === 'owari') ? '休業終了' : status;
+  }
 
   var html = '';
   // 戻る + 編集ボタン
