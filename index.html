@@ -1029,6 +1029,20 @@ body {
   text-align: center;
   transition: transform 0.15s ease;
 }
+.sankyu-sec-diag-btn {
+  margin-left: auto;
+  margin-right: 4px;
+  padding: 4px 10px;
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 1.5px solid #90caf9;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.sankyu-sec-diag-btn:active { background: #bbdefb; }
 .sankyu-section.closed .sankyu-section-body { display: none; }
 .sankyu-section.closed { box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
 .sankyu-section.closed .sankyu-section-head { border-bottom: none; }
@@ -4102,7 +4116,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'ffcfc28';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7941,6 +7955,152 @@ function _sankyuBuildCards(fields) {
 window.sankyuDebugOn  = function() { window.__sankyuDebug = true;  console.log('[sankyu] debug ON'); if (typeof _sankyuCurrentItem !== 'undefined' && _sankyuCurrentItem) renderSankyuDetail(_sankyuCurrentItem); };
 window.sankyuDebugOff = function() { window.__sankyuDebug = false; console.log('[sankyu] debug OFF'); };
 
+// ─────────────────────────────────────────
+// 画面上 診断オーバーレイ (コンソール不要)
+// ─────────────────────────────────────────
+function openSankyuDiag() {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) {
+    showToast('詳細画面を開いてから診断してください', 'warn');
+    return;
+  }
+
+  // 全 DateTime フィールドの情報を収集
+  var meta = _sankyuFieldsMeta;
+  var dateFields = [];
+  Object.keys(meta).forEach(function(k) {
+    var f = meta[k];
+    if (f.type !== 'DateTime') return;
+    var rawVal = _sankyuCurrentItem[f.dataKey];
+    var cat = classifySankyuField(f.title);
+    if (cat === 'hidden') return;
+    dateFields.push({
+      title: f.title || f.internalName,
+      role: _sankyuTitleRole(f.title),
+      pn: _sankyuExtractPrefixNum(f.title),
+      cat: cat,
+      raw: rawVal,
+      empty: _sankyuIsEmptyDateRaw(rawVal)
+    });
+  });
+
+  // apps セクションのフィールドでカードを再構築
+  var appsFields = [];
+  Object.keys(meta).forEach(function(k) {
+    var f = meta[k];
+    var cat = classifySankyuField(f.title);
+    if (['sango','ikukyu','choki','fukki'].indexOf(cat) < 0) return;
+    var rawVal = _sankyuCurrentItem[f.dataKey];
+    appsFields.push({
+      title: f.title || f.internalName,
+      raw: rawVal,
+      type: f.type,
+      meta: f,
+      origCat: cat
+    });
+  });
+  var cards = _sankyuBuildCards(appsFields);
+
+  // HTML 組み立て
+  var roleLabel = { start: '開始', end: '終了', submit: '申請日', none: '単体' };
+  var h = '';
+  h += '<div style="padding:16px 16px 24px;max-height:88vh;overflow:auto;">';
+  h += '<div style="font-size:15px;font-weight:800;margin-bottom:10px;color:#d81b60;">🔍 申請カード診断</div>';
+
+  h += '<div style="font-size:12px;font-weight:700;margin:10px 0 5px;color:#555;">📋 日付フィールド一覧 (' + dateFields.length + '件)</div>';
+  h += '<div style="font-size:10.5px;line-height:1.5;background:#f9f9f9;border-radius:8px;padding:8px 10px;border:1px solid #eee;">';
+  dateFields.forEach(function(df) {
+    var dateStr = df.empty ? '(未入力)' : formatDate(df.raw);
+    var pnStr = df.pn ? (df.pn.prefix + '/' + df.pn.num) : '-';
+    h += '<div style="padding:3px 0;border-bottom:1px dotted #ddd;">';
+    h += '<span style="display:inline-block;min-width:40px;font-weight:700;color:#d81b60;">[' + escHtml(roleLabel[df.role] || df.role) + ']</span> ';
+    h += '<span style="color:#333;">' + escHtml(df.title) + '</span> ';
+    h += '<span style="color:#888;"> — ' + escHtml(dateStr) + ' / cat=' + escHtml(df.cat) + ' / pn=' + escHtml(pnStr) + '</span>';
+    h += '</div>';
+  });
+  h += '</div>';
+
+  h += '<div style="font-size:12px;font-weight:700;margin:14px 0 5px;color:#555;">🌸 構築されたカード (' + cards.length + '件)</div>';
+  h += '<div style="font-size:10.5px;line-height:1.5;background:#fff8e1;border-radius:8px;padding:8px 10px;border:1px solid #ffe082;">';
+  cards.forEach(function(c, i) {
+    h += '<div style="padding:4px 0;border-bottom:1px dotted #ffd54f;">';
+    h += '<b>#' + (i + 1) + ' [' + escHtml(c.type) + ']</b> ' + escHtml(c.title || '(無題)');
+    if (c.type === 'period') {
+      h += '<br><span style="margin-left:12px;">📅 開始: ' + escHtml(c.start ? c.start.title : '—') + '</span>';
+      h += '<br><span style="margin-left:12px;">📅 終了: ' + escHtml(c.end ? c.end.title : '—') + '</span>';
+    } else {
+      h += '<br><span style="margin-left:12px;">📄 メイン: ' + escHtml(c.main ? c.main.title : '—') + '</span>';
+    }
+    h += '<br><span style="margin-left:12px;">📝 申請日: ' + escHtml(c.submitted ? c.submitted.title : '(なし)') + '</span>';
+    h += '</div>';
+  });
+  h += '</div>';
+
+  h += '<div style="margin-top:12px;display:flex;gap:8px;">';
+  h += '<button onclick="copySankyuDiag()" style="flex:1;padding:10px;background:#1976d2;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:13px;">📋 テキストコピー</button>';
+  h += '<button onclick="document.getElementById(\'sankyuDiagOverlay\').remove()" style="flex:1;padding:10px;background:#d81b60;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:13px;">閉じる</button>';
+  h += '</div>';
+  h += '</div>';
+
+  // オーバーレイ
+  var ex = document.getElementById('sankyuDiagOverlay');
+  if (ex) ex.remove();
+  var ov = document.createElement('div');
+  ov.id = 'sankyuDiagOverlay';
+  ov.className = 'confirm-overlay';
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:92vw;width:460px;overflow:hidden;">' + h + '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+
+  // テキストコピー用データを保存
+  var txt = '=== 申請カード 診断 ===\n\n';
+  txt += '【日付フィールド一覧】\n';
+  dateFields.forEach(function(df) {
+    var pnStr = df.pn ? (df.pn.prefix + '/' + df.pn.num) : '-';
+    txt += '[' + (roleLabel[df.role] || df.role) + '] ' + df.title +
+           ' / ' + (df.empty ? '未入力' : formatDate(df.raw)) +
+           ' / cat=' + df.cat + ' / pn=' + pnStr + '\n';
+  });
+  txt += '\n【構築カード】\n';
+  cards.forEach(function(c, i) {
+    txt += '#' + (i + 1) + ' [' + c.type + '] ' + (c.title || '(無題)') + '\n';
+    if (c.type === 'period') {
+      txt += '  開始: ' + (c.start ? c.start.title : '—') + '\n';
+      txt += '  終了: ' + (c.end ? c.end.title : '—') + '\n';
+    } else {
+      txt += '  メイン: ' + (c.main ? c.main.title : '—') + '\n';
+    }
+    txt += '  申請日: ' + (c.submitted ? c.submitted.title : '(なし)') + '\n';
+  });
+  window.__sankyuDiagText = txt;
+}
+
+function copySankyuDiag() {
+  var txt = window.__sankyuDiagText || '';
+  if (!txt) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function() {
+        showToast('✓ コピーしました', 'success');
+      }).catch(function() {
+        _fallbackCopy(txt);
+      });
+    } else {
+      _fallbackCopy(txt);
+    }
+  } catch(_) { _fallbackCopy(txt); }
+}
+function _fallbackCopy(txt) {
+  var ta = document.createElement('textarea');
+  ta.value = txt;
+  ta.style.position = 'fixed';
+  ta.style.top = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); showToast('✓ コピーしました', 'success'); }
+  catch(e) { showToast('コピー失敗', 'error'); }
+  ta.remove();
+}
+
 // カテゴリ → アイコン・ラベル・カラー
 var _SANKYU_CAT_INFO = {
   sango:  { icon: '🤰', label: '産前産後', color: '#f06292' },
@@ -8665,6 +8825,10 @@ function renderSankyuDetail(item) {
       if (totalWithSub > 0) {
         html += '<span class="sankyu-sec-progress">' + doneCount + ' / ' + totalWithSub + ' 申請済</span>';
       }
+    }
+    // 申請カード セクションには診断ボタン (閲覧モードのみ)
+    if (!isEdit && secKey === 'apps') {
+      html += '<button class="sankyu-sec-diag-btn" onclick="event.stopPropagation();openSankyuDiag();" title="診断">🔍</button>';
     }
     // 開閉矢印 (閲覧モードのみ)
     if (!isEdit) {
