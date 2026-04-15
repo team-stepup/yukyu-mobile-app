@@ -2991,7 +2991,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '07be513';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -3429,21 +3429,20 @@ async function openTeamsActivity() {
     }
   }
 
-  // Teams アプリのアクティビティフィードを直接開く URL
-  // モバイル: msteams:// → アプリ起動
-  // デスクトップ: https://teams.microsoft.com → ブラウザ/アプリ
-  var deepLink = 'msteams://teams.microsoft.com/_#/activity';
+  // Teams アプリを開く。モバイル Teams アプリは "msteams://teams.microsoft.com/_#/activity"
+  // 形式を理解せず「リンクがサポートされていません」ダイアログが出るため、
+  // モバイルではシンプルに msteams:// のみ使用してアプリを起動(前回タブが開く)。
+  // ユーザーはアプリ下部のタブでアクティビティ/チャットを切り替え可能。
+  var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  var deepLink = isMobile ? 'msteams://' : 'msteams://teams.microsoft.com/_#/activity';
   var webFallback = 'https://teams.microsoft.com/_#/activity';
 
-  // iOS/Android でアプリ未インストール時のフォールバック用
-  var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
   if (isMobile) {
-    // モバイル: まずdeep link、失敗したらwebへ
+    // モバイル: msteams:// でアプリ起動 → アプリが開けば OS が処理
     var ts = Date.now();
     window.location.href = deepLink;
     setTimeout(function() {
-      // 500ms経ってもまだページに居れば Teams アプリ未インストールと推定
+      // 1.5秒経ってもまだこのページにフォーカスが残っていれば Teams 未インストール → Web へ
       if (Date.now() - ts < 2000 && document.visibilityState === 'visible') {
         window.open(webFallback, '_blank');
       }
