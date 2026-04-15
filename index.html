@@ -2572,7 +2572,7 @@ body {
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
   <button class="update-badge" id="updateBadge" onclick="headerUpdateClick()" title="更新する">⟳</button>
-  <button class="teams-btn" id="teamsBtn" onclick="openTeamsActivity()" title="Teams アクティビティ">
+  <button class="teams-btn" id="teamsBtn" data-needs-consent="1" onclick="openTeamsActivity()" title="Teams アクティビティ">
     💬
     <span class="teams-badge-count" id="teamsBadge"></span>
   </button>
@@ -3270,6 +3270,11 @@ async function onLoginSuccess(resp) {
   populateHakenDropdown();
   loadHomeBadges();
   loadSharedConfig();
+  // Teams 未読バッジ初期化
+  updateTeamsBadge();
+  if (!window._teamsBadgeInterval) {
+    window._teamsBadgeInterval = setInterval(updateTeamsBadge, 2 * 60 * 1000);
+  }
 }
 
 async function acquireToken() {
