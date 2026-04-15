@@ -1107,6 +1107,50 @@ select.sankyu-edit-input {
   cursor: wait;
 }
 
+/* 自動入力 バナー */
+.sankyu-autofill-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #fff8e1 0%, #ffe0b2 100%);
+  border: 1.5px solid #ffb74d;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.18);
+}
+.sankyu-autofill-text { flex: 1; min-width: 0; }
+.sankyu-autofill-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #e65100;
+  letter-spacing: 0.4px;
+}
+.sankyu-autofill-sub {
+  font-size: 10.5px;
+  color: #6d4c41;
+  margin-top: 2px;
+  font-weight: 600;
+}
+.sankyu-autofill-btn {
+  background: linear-gradient(135deg, #ffb300, #f57c00);
+  color: #fff;
+  border: none;
+  padding: 9px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(245, 124, 0, 0.32);
+  transition: transform .12s ease;
+  flex-shrink: 0;
+}
+.sankyu-autofill-btn:active {
+  transform: scale(0.95);
+  box-shadow: 0 1px 4px rgba(245, 124, 0, 0.3);
+}
+
 /* Home Search Card */
 .home-search-card {
   background: #fff;
@@ -6659,6 +6703,274 @@ function formatSankyuValue(val, type) {
   return { text: String(val), cls: '' };
 }
 
+// ============================================================
+// 産休育休 自動計算 (フェーズ3)
+// ============================================================
+
+// 日付ヘルパー
+function _sankyuAddDays(d, n) {
+  var r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+function _sankyuAddMonth(d) {
+  var y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+  var nextM = m + 1, nextY = y;
+  if (nextM > 11) { nextM -= 12; nextY++; }
+  var lastDay = new Date(nextY, nextM + 1, 0).getDate();
+  return new Date(nextY, nextM, Math.min(day, lastDay));
+}
+function _sankyuAddMonths(d, n) {
+  var r = new Date(d);
+  for (var i = 0; i < n; i++) r = _sankyuAddMonth(r);
+  return r;
+}
+function _sankyuAddYears(d, n) {
+  var r = new Date(d);
+  r.setFullYear(r.getFullYear() + n);
+  return r;
+}
+
+// DOM input ヘルパー
+function _sankyuGetDateInput(internalName) {
+  var el = document.getElementById('sankyuField_' + internalName);
+  if (!el || !el.value) return null;
+  try {
+    var d = new Date(el.value + 'T00:00:00');
+    return isNaN(d) ? null : d;
+  } catch(_) { return null; }
+}
+function _sankyuSetDateInput(internalName, dateObj) {
+  var el = document.getElementById('sankyuField_' + internalName);
+  if (!el) return false;
+  if (dateObj instanceof Date && !isNaN(dateObj)) {
+    var y = dateObj.getFullYear();
+    var m = ('0' + (dateObj.getMonth() + 1)).slice(-2);
+    var dd = ('0' + dateObj.getDate()).slice(-2);
+    el.value = y + '-' + m + '-' + dd;
+  } else {
+    el.value = '';
+  }
+  // 黄色フラッシュで視覚フィードバック
+  el.style.transition = 'background-color 0.4s ease';
+  el.style.backgroundColor = '#fff59d';
+  setTimeout(function() { el.style.backgroundColor = ''; }, 1800);
+  return true;
+}
+
+// タイトル → InternalName 検索 (完全一致)
+function _sankyuFindFieldExact(title) {
+  if (!_sankyuFieldsMeta) return null;
+  var keys = Object.keys(_sankyuFieldsMeta);
+  for (var i = 0; i < keys.length; i++) {
+    if (_sankyuFieldsMeta[keys[i]].title === title) return _sankyuFieldsMeta[keys[i]];
+  }
+  return null;
+}
+
+// タイトル正規表現 → 全フィールド (DateTime限定)
+function _sankyuFindFields(regex) {
+  if (!_sankyuFieldsMeta) return [];
+  var found = [];
+  Object.keys(_sankyuFieldsMeta).forEach(function(k) {
+    var f = _sankyuFieldsMeta[k];
+    if (f.type !== 'DateTime') return;
+    if (f.title && regex.test(f.title)) found.push(f);
+  });
+  return found;
+}
+
+// 開始/終了 ペア検出: prefix を含むタイトルから 開始 と 終了 を探す
+function _sankyuFindPair(prefix) {
+  var startF = null, endF = null;
+  if (!_sankyuFieldsMeta) return { start: null, end: null };
+  Object.keys(_sankyuFieldsMeta).forEach(function(k) {
+    var f = _sankyuFieldsMeta[k];
+    if (f.type !== 'DateTime') return;
+    if (!f.title || f.title.indexOf(prefix) < 0) return;
+    if (/(開始|始め|始|From|from|Start|start)/.test(f.title)) {
+      if (!startF) startF = f;
+    } else if (/(終了|終わり|終|To|to|End|end)/.test(f.title)) {
+      if (!endF) endF = f;
+    }
+  });
+  return { start: startF, end: endF };
+}
+
+// 全 DateTime フィールドのタイトル一覧 (デバッグ用)
+function _sankyuListDateTitles() {
+  if (!_sankyuFieldsMeta) return [];
+  var titles = [];
+  Object.keys(_sankyuFieldsMeta).forEach(function(k) {
+    var f = _sankyuFieldsMeta[k];
+    if (f.type === 'DateTime') titles.push({ title: f.title, internalName: f.internalName });
+  });
+  return titles;
+}
+
+// 自動計算メイン
+function sankyuAutoFill() {
+  if (!_sankyuFieldsMeta) {
+    showToast('フィールドメタが未取得です', 'error');
+    return;
+  }
+
+  // 出産予定日 / 出産日 を取得
+  var fYotei = _sankyuFindFieldExact('出産予定日');
+  var fBirth = _sankyuFindFieldExact('出産日');
+
+  var yotei = fYotei ? _sankyuGetDateInput(fYotei.internalName) : null;
+  var birth = fBirth ? _sankyuGetDateInput(fBirth.internalName) : null;
+
+  if (!yotei && !birth) {
+    showToast('出産予定日 か 出産日 を入力してください', 'warn');
+    return;
+  }
+
+  console.log('=== 産休育休 自動計算 ===');
+  console.log('出産予定日:', yotei);
+  console.log('出産日:', birth);
+  console.log('利用可能な DateTime フィールド:', _sankyuListDateTitles());
+
+  // 派生計算の基準日
+  var birthOrYotei = birth || yotei; // 出産日があればそちら、なければ予定日
+  var changes = 0;
+  var skipped = [];
+
+  // ─────────────────────────────────────────
+  // 1. 産前産後免除期間（社保）
+  //    開始 = 出産予定日 - 42日
+  //    終了 = 出産日 + 56日 (産後8週)
+  // ─────────────────────────────────────────
+  if (yotei || birth) {
+    var pair1 = _sankyuFindPair('産前産後免除期間');
+    if (pair1.start && yotei) {
+      _sankyuSetDateInput(pair1.start.internalName, _sankyuAddDays(yotei, -42));
+      changes++;
+    } else if (!pair1.start) {
+      skipped.push('産前産後免除期間 開始');
+    }
+    if (pair1.end && birthOrYotei) {
+      _sankyuSetDateInput(pair1.end.internalName, _sankyuAddDays(birthOrYotei, 56));
+      changes++;
+    } else if (!pair1.end) {
+      skipped.push('産前産後免除期間 終了');
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // 出産日が必要な計算 (以下すべて 出産日 必須)
+  // ─────────────────────────────────────────
+  if (!birth) {
+    // 出産日未入力なら 産前産後 のみ自動入力で終了
+    if (changes > 0) {
+      showToast('出産予定日から ' + changes + ' 項目を自動入力しました', 'success');
+    } else {
+      showToast('該当フィールドが見つかりませんでした', 'warn');
+    }
+    if (skipped.length > 0) console.log('スキップ:', skipped);
+    return;
+  }
+
+  // 育休開始日 = 出産日 + 57日 (産後休業終了の翌日)
+  var ikukyuStart = _sankyuAddDays(birth, 57);
+  // 子の1歳誕生日
+  var birthday1 = _sankyuAddYears(birth, 1);
+  // 1歳に達する日 = 1歳誕生日の前日
+  var age1Reach = _sankyuAddDays(birthday1, -1);
+  // 1歳に達する日の前日 = 1歳誕生日の前々日
+  var age1ReachPrev = _sankyuAddDays(birthday1, -2);
+  // 子の1歳6ヶ月誕生日
+  var birthday1_5 = _sankyuAddMonths(birth, 18);
+  // 1歳6ヶ月に達する日の前日 = 前々日
+  var age1_5ReachPrev = _sankyuAddDays(birthday1_5, -2);
+  // 子の2歳誕生日
+  var birthday2 = _sankyuAddYears(birth, 2);
+  // 2歳に達する日の前日 = 前々日
+  var age2ReachPrev = _sankyuAddDays(birthday2, -2);
+
+  // ─────────────────────────────────────────
+  // 2. 育休開始社保免除
+  //    開始 = 出産日 + 57日
+  //    終了 = 1歳に達する日の前日 (= 1歳誕生日 - 2日)
+  // ─────────────────────────────────────────
+  var pair2 = _sankyuFindPair('育休開始社保免除');
+  if (pair2.start) { _sankyuSetDateInput(pair2.start.internalName, ikukyuStart); changes++; }
+  else skipped.push('育休開始社保免除 開始');
+  if (pair2.end)   { _sankyuSetDateInput(pair2.end.internalName,   age1ReachPrev); changes++; }
+  else skipped.push('育休開始社保免除 終了');
+
+  // ─────────────────────────────────────────
+  // 3. 育休 初回〜11回目申請 (1ヶ月チャンク)
+  //    1回目開始 = 育休開始日
+  //    n回目終了 = addMonth(開始) - 1日
+  //    (n+1)回目開始 = n回目終了 + 1日
+  // ─────────────────────────────────────────
+  var chunkStart = ikukyuStart;
+  var chunkEnd;
+  // 初回
+  var pair3a = _sankyuFindPair('育休初回申請');
+  chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
+  if (pair3a.start) { _sankyuSetDateInput(pair3a.start.internalName, chunkStart); changes++; }
+  if (pair3a.end)   { _sankyuSetDateInput(pair3a.end.internalName,   chunkEnd);   changes++; }
+  if (!pair3a.start) skipped.push('育休初回申請 開始');
+  if (!pair3a.end)   skipped.push('育休初回申請 終了');
+
+  // 2〜11回目
+  for (var n = 2; n <= 11; n++) {
+    chunkStart = _sankyuAddDays(chunkEnd, 1);
+    chunkEnd   = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
+    var pairN = _sankyuFindPair('育休' + n + '回目申請');
+    if (pairN.start) { _sankyuSetDateInput(pairN.start.internalName, chunkStart); changes++; }
+    if (pairN.end)   { _sankyuSetDateInput(pairN.end.internalName,   chunkEnd);   changes++; }
+    if (!pairN.start && !pairN.end) skipped.push('育休' + n + '回目申請');
+  }
+
+  // ─────────────────────────────────────────
+  // 4. 社保免除期間変更1歳6ヶ月まで
+  //    開始 = 子の1歳誕生日
+  //    終了 = 1歳6ヶ月に達する日の前日 (= 1歳6ヶ月誕生日 - 2日)
+  // ─────────────────────────────────────────
+  var pair4 = _sankyuFindPair('1歳6ヶ月');
+  if (pair4.start) { _sankyuSetDateInput(pair4.start.internalName, birthday1); changes++; }
+  else skipped.push('1歳6ヶ月まで 開始');
+  if (pair4.end)   { _sankyuSetDateInput(pair4.end.internalName,   age1_5ReachPrev); changes++; }
+  else skipped.push('1歳6ヶ月まで 終了');
+
+  // ─────────────────────────────────────────
+  // 5. 延長申請 1〜12回目 (育休11回目の続き、1ヶ月チャンク)
+  //    11回目終了 = chunkEnd (上のループ後)
+  // ─────────────────────────────────────────
+  for (var k = 1; k <= 12; k++) {
+    chunkStart = _sankyuAddDays(chunkEnd, 1);
+    chunkEnd   = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
+    var pairE = _sankyuFindPair('延長申請' + (k < 10 ? '\\s*' + k : k)) || _sankyuFindPair('延長申請');
+    // 延長申請には番号が複数あるので、別途検索
+    var foundStart = null, foundEnd = null;
+    Object.keys(_sankyuFieldsMeta).forEach(function(ik) {
+      var f = _sankyuFieldsMeta[ik];
+      if (f.type !== 'DateTime' || !f.title) return;
+      if (f.title.indexOf('延長') < 0) return;
+      // タイトルに 数字 (k) が含まれているか
+      var hasNum = new RegExp('(?:^|[^0-9])' + k + '(?:[^0-9]|$)').test(f.title);
+      if (!hasNum) return;
+      if (/(開始|始|From|from|Start|start)/.test(f.title)) foundStart = f;
+      else if (/(終了|終|To|to|End|end)/.test(f.title)) foundEnd = f;
+    });
+    if (foundStart) { _sankyuSetDateInput(foundStart.internalName, chunkStart); changes++; }
+    if (foundEnd)   { _sankyuSetDateInput(foundEnd.internalName,   chunkEnd);   changes++; }
+    if (!foundStart && !foundEnd) skipped.push('延長申請 ' + k + '回目');
+  }
+
+  // 終了
+  if (changes > 0) {
+    showToast('✨ ' + changes + ' 項目を自動入力しました', 'success');
+  } else {
+    showToast('該当する項目が見つかりませんでした', 'warn');
+  }
+  if (skipped.length > 0) console.log('未検出フィールド:', skipped);
+}
+
 // 編集モード用: 入力フィールド HTML を生成
 function renderSankyuFieldInput(f, rawVal) {
   var inputId = 'sankyuField_' + f.internalName;
@@ -6747,6 +7059,17 @@ function renderSankyuDetail(item) {
   if (haken)  html += '<div class="sankyu-detail-sub">📍 ' + escHtml(haken) + '</div>';
   if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
   html += '</div>';
+
+  // 編集モード時の自動入力バナー
+  if (isEdit) {
+    html += '<div class="sankyu-autofill-bar">';
+    html +=   '<div class="sankyu-autofill-text">';
+    html +=     '<div class="sankyu-autofill-title">✨ 自動計算</div>';
+    html +=     '<div class="sankyu-autofill-sub">出産予定日 / 出産日 から各種期間を一括計算</div>';
+    html +=   '</div>';
+    html +=   '<button class="sankyu-autofill-btn" onclick="sankyuAutoFill()">日付を自動入力</button>';
+    html += '</div>';
+  }
 
   // フィールドをセクション分け
   var sections = {
