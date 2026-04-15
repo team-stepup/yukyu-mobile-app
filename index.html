@@ -1464,10 +1464,13 @@ select.sankyu-edit-input {
   box-shadow: none;
 }
 
-/* 備考 フローティングボタン (スクロール追従) */
+/* 備考 フローティングボタン (スクロール追従)
+   body は max-width:500px で中央寄せのため、PC では FAB を
+   アプリコンテナの右端内側に合わせる (50vw - (500/2 - 18)) */
 .sankyu-note-fab {
   position: fixed;
-  right: 18px;
+  /* モバイル: 18px / PC: 画面中央 + 250 - (buttonWidth+margin) */
+  right: max(18px, calc(50vw - 232px));
   bottom: 78px;
   display: flex;
   align-items: center;
@@ -4296,7 +4299,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'dc6f716';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7835,6 +7838,7 @@ function classifySankyuField(title) {
   if (!t) return 'misc';
   // 状況はヘッダーで表示済みなので hidden へ
   if (/^状況$/.test(t)) return 'hidden';
+  if (/^状況\s*2$/.test(t) || /^状況2$/.test(t)) return 'hidden';
   // 社員番号・氏名・派遣先もヘッダーで表示済み
   if (/^(社員番号|氏名|社員氏名|派遣先)$/.test(t)) return 'hidden';
   // 社員フォルダ・部課 もヘッダーで表示 (名前カードに統合)
@@ -7842,6 +7846,11 @@ function classifySankyuField(title) {
   if (/^(部課|部署|部課名)$/.test(t)) return 'hidden';
   // 出産予定日記載母子手帳PDF は不要 (出産予定日母子手帳 に統合)
   if (/出産予定日記載母子手帳/.test(t)) return 'hidden';
+  // SharePoint の不要なシステム/管理用フィールドは非表示
+  if (/^Title$/i.test(t)) return 'hidden';
+  if (/色タグ|カラータグ|Color\s*Tag/i.test(t)) return 'hidden';
+  if (/コンプライアンス資産/.test(t)) return 'hidden';
+  if (/レコードとして登録されているアイテム|Record.*Item|記録アイテム/.test(t)) return 'hidden';
   // 出産予定日・出産日 は 基本情報 に昇格 (ヘッダーでも値表示するがフォームは basic に)
   if (/^出産予定日$/.test(t)) return 'basic';
   if (/^出産日$/.test(t)) return 'basic';
@@ -8583,11 +8592,15 @@ function renderSankyuAppCard(card, isEdit) {
 
   html += '<div class="sankyu-app-card-body">';
 
-  // 延長申請6回目 の注意書き (期間の上に赤字で表示)
+  // 延長申請6回目 / 育休11回目 の注意書き (期間の上に赤字で表示)
+  //   これらのタイミングで「延長」か「終了」の判断が必要
   var _sankyuChokiWarn = false;
   try {
-    var _ctForWarn = (card.title || '') + ' ' + ((card.start && card.start.title) || '') + ' ' + ((card.end && card.end.title) || '');
+    var _ctForWarn = (card.title || '') + ' ' + ((card.start && card.start.title) || '') + ' ' + ((card.end && card.end.title) || '') + ' ' + ((card.main && card.main.title) || '');
     if (/延長申請\s*6\s*回目/.test(_ctForWarn) || /延長.*6\s*回目/.test(_ctForWarn)) {
+      _sankyuChokiWarn = true;
+    }
+    if (/育休\s*11\s*回目/.test(_ctForWarn)) {
       _sankyuChokiWarn = true;
     }
   } catch(_) {}
