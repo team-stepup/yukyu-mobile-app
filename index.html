@@ -484,6 +484,56 @@ body {
 .ql-text { font-size: 11px; font-weight: 700; color: var(--text); letter-spacing: 0.5px; }
 .ql-badge { position:absolute;top:4px;right:4px;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 4px;line-height:16px;text-align:center; }
 
+/* 総務部 ダッシュボード */
+.soumu-ext-btn, .soumu-tool-btn, .soumu-count-btn, .soumu-big-btn {
+  background: #fff;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 10px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #333;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  transition: transform .1s ease;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 50px;
+}
+.soumu-ext-btn:active, .soumu-tool-btn:active,
+.soumu-count-btn:active, .soumu-big-btn:active { transform: scale(0.97); }
+.soumu-ext-btn { background: linear-gradient(135deg,#f5f5fa,#ffffff); }
+.soumu-tool-btn { background: linear-gradient(135deg,#ede7f6,#f3e5f5); color:#5e35b1; border-color:#d1c4e9; }
+.soumu-count-btn { min-height: 68px; padding: 8px 4px; }
+.soumu-count-label { font-size: 11px; font-weight: 700; opacity: 0.85; }
+.soumu-count-num { font-size: 20px; font-weight: 800; margin-top: 2px; }
+.soumu-big-btn { min-height: 88px; padding: 10px 6px; }
+.soumu-big-label { font-size: 13px; font-weight: 700; }
+.soumu-big-num { font-size: 22px; font-weight: 800; background:#fff; color:#333; padding:2px 12px; border-radius:10px; margin:3px 0; box-shadow:0 1px 2px rgba(0,0,0,0.1); }
+.soumu-big-sub { font-size: 10px; opacity: 0.9; }
+/* 配色 */
+.soumu-count-btn.soumu-blue,
+.soumu-big-btn.soumu-blue { background: linear-gradient(135deg,#1e88e5,#1565c0); color:#fff; border-color:#0d47a1; }
+.soumu-count-btn.soumu-cyan { background: linear-gradient(135deg,#4fc3f7,#29b6f6); color:#fff; border-color:#0288d1; }
+.soumu-count-btn.soumu-red,
+.soumu-big-btn.soumu-red { background: linear-gradient(135deg,#e53935,#c62828); color:#fff; border-color:#b71c1c; }
+.soumu-big-btn.soumu-maroon { background: linear-gradient(135deg,#8d6e63,#6d4c41); color:#fff; border-color:#4e342e; }
+.soumu-big-btn.soumu-pink { background: linear-gradient(135deg,#ec407a,#d81b60); color:#fff; border-color:#ad1457; }
+.soumu-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+.soumu-list-item:hover { background:#f9f9ff; }
+.soumu-list-item:last-child { border-bottom: none; }
+
 /* Home Search Card */
 .home-search-card {
   background: #fff;
@@ -2641,6 +2691,11 @@ body {
         <span class="ql-icon">📂</span>
         <span class="ql-text">資料</span>
       </button>
+      <button class="quick-link-btn" onclick="openSoumuScreen()" style="position:relative;">
+        <span class="ql-icon">🏢</span>
+        <span class="ql-text">総務部</span>
+        <span id="soumuBadgeCount" class="ql-badge" style="background:#7b1fa2;display:none;"></span>
+      </button>
     </div>
 
     <div class="home-search-card">
@@ -2717,6 +2772,15 @@ body {
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">📂 資料</h2>
     </div>
     <div id="shiryouBody"></div>
+  </div>
+
+  <!-- Screen: 総務部 -->
+  <div class="screen" id="soumuScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🏢 総務部</h2>
+      <button onclick="loadSoumuDashboard()" title="更新" style="margin-left:auto;background:none;border:none;font-size:18px;color:var(--primary);cursor:pointer;">⟳</button>
+    </div>
+    <div id="soumuBody"></div>
   </div>
 
   <!-- Screen: 期限注意リスト -->
@@ -2991,7 +3055,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '7e8f052';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -3752,7 +3816,7 @@ function switchScreen(screenId, skipHistory) {
   document.getElementById(screenId).classList.add('active');
   window.scrollTo(0, 0);
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', soumuScreen: '総務部' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -5089,6 +5153,404 @@ function renderShiryouScreen() {
 function toggleShiryouCat(catId) {
   var el = document.getElementById('shiryouCat_' + catId);
   if (el) el.classList.toggle('open');
+}
+
+// ============================================================
+// 総務部 ダッシュボード
+// ============================================================
+// 外部サービス URL (ユーザーが必要に応じて編集可能)
+var SOUMU_EXT = {
+  trex: '',           // T-REX (URL を設定)
+  goodjob: '',        // グッジョブ
+  touchontime: '',    // Touch On Time
+  seikyusho: '',      // 請求書
+  sankyuIkukyu: '',   // 産休育休
+  sankyuIkukyuKanri: '', // 産休育休管理
+  stepup: 'https://www.team-stepup.com/'  // STEP・UP コーポレートサイト
+};
+
+var _soumuAllEmps = null;
+var _soumuKeyMap = null;
+
+function openSoumuScreen() {
+  switchScreen('soumuScreen');
+  var body = document.getElementById('soumuBody');
+  if (body) body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">📊 データ読み込み中...</div>';
+  loadSoumuDashboard();
+}
+
+async function loadSoumuDashboard() {
+  var body = document.getElementById('soumuBody');
+  if (!body) return;
+  try {
+    var results = await Promise.all([
+      spGetAll(LIST_EMPLOYEES_GUID, '$top=500').catch(function() { return []; }),
+      fetchEmployeeFields().catch(function() { return {}; })
+    ]);
+    _soumuAllEmps = results[0] || [];
+    var meta = results[1] || {};
+    _soumuKeyMap = (meta && Object.keys(meta).length > 0) ? buildFieldKeyMap(meta) : {};
+    renderSoumuDashboard();
+  } catch (e) {
+    console.error('loadSoumuDashboard error:', e);
+    body.innerHTML = '<div style="padding:20px;color:#c62828;">読み込み失敗: ' + escHtml(e.message || String(e)) + '</div>';
+  }
+}
+
+// 指定フィールドの値でフィルターした件数をカウント
+function soumuCount(badgeKey, matcher) {
+  if (!_soumuAllEmps || !_soumuKeyMap) return 0;
+  var odKey = _soumuKeyMap[badgeKey];
+  if (!odKey) return 0;
+  var count = 0;
+  _soumuAllEmps.forEach(function(emp) {
+    if (isResigned(emp)) return;
+    var val = String(emp[odKey] || '');
+    if (!val) return;
+    if (matcher(val)) count++;
+  });
+  return count;
+}
+
+function renderSoumuDashboard() {
+  var body = document.getElementById('soumuBody');
+  if (!body) return;
+
+  // 各種カウント (badgeフィールドの値で集計)
+  var mKoyou = function(v) { return v.indexOf('申請中') >= 0; };
+  var mRishoku = function(v) { return v.indexOf('申請中') >= 0; };
+  var mShaho = function(v) { return v.indexOf('申請中') >= 0; };
+  var mKoyouIn = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
+  var mKoyouOut = function(v) { return v.indexOf('喪失') >= 0; };
+  var mShahoIn = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
+  var mShahoOut = function(v) { return v.indexOf('喪失') >= 0; };
+  var mRishokuhyou = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
+
+  var c = {
+    koyouMochuu: soumuCount('soumuKoyou', mKoyou),
+    rishokuMochuu: soumuCount('soumuRishoku', mRishoku),
+    shahoMochuu: soumuCount('soumuShaho', mShaho),
+    koyouIn: soumuCount('soumuKoyou', mKoyouIn),
+    koyouOut: soumuCount('soumuKoyou', mKoyouOut),
+    shahoIn: soumuCount('soumuShaho', mShahoIn),
+    shahoOut: soumuCount('soumuShaho', mShahoOut),
+    rishokuhyou: soumuCount('soumuRishoku', mRishokuhyou),
+    kyuryoSeisan: 0  // TODO: データ元が未指定
+  };
+
+  var html = '';
+  // Row 1: 外部サービス
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">';
+  html += '<button class="soumu-ext-btn" onclick="soumuOpenExt(\'trex\')">🦖<br>T-REX</button>';
+  html += '<button class="soumu-ext-btn" onclick="soumuOpenExt(\'goodjob\')">✨<br>グッジョブ</button>';
+  html += '<button class="soumu-ext-btn" onclick="soumuOpenExt(\'touchontime\')">⏰<br>Touch On Time</button>';
+  html += '</div>';
+
+  // Row 2: 請求書 (横長)
+  html += '<button class="soumu-ext-btn" onclick="soumuOpenExt(\'seikyusho\')" style="width:100%;margin-bottom:10px;padding:8px;flex-direction:row;gap:6px;">📑 請求書</button>';
+
+  // Row 3: 申請中カウント (3列)
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">';
+  html += '<button class="soumu-count-btn soumu-blue" onclick="openSoumuFilterList(\'koyou-mochuu\')">';
+  html +=   '<div class="soumu-count-label">雇用 申請中</div>';
+  html +=   '<div class="soumu-count-num">' + c.koyouMochuu + ' 名</div>';
+  html += '</button>';
+  html += '<button class="soumu-count-btn soumu-cyan" onclick="openSoumuFilterList(\'rishoku-mochuu\')">';
+  html +=   '<div class="soumu-count-label">離票 申請中</div>';
+  html +=   '<div class="soumu-count-num">' + c.rishokuMochuu + ' 名</div>';
+  html += '</button>';
+  html += '<button class="soumu-count-btn soumu-red" onclick="openSoumuFilterList(\'shaho-mochuu\')">';
+  html +=   '<div class="soumu-count-label">社保 申請中</div>';
+  html +=   '<div class="soumu-count-num">' + c.shahoMochuu + ' 名</div>';
+  html += '</button>';
+  html += '</div>';
+
+  // Row 4: ツール (3列)
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">';
+  html += '<button class="soumu-tool-btn" onclick="openSoumuCalendarTool()">西暦⇔和暦</button>';
+  html += '<button class="soumu-tool-btn" onclick="openSoumuZipTool()">〒住所漢字</button>';
+  html += '<button class="soumu-tool-btn" onclick="soumuOpenExt(\'stepup\')">STEP・UP</button>';
+  html += '</div>';
+
+  // Row 5: 雇用 加入/喪失 (2列)
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px;">';
+  html += '<button class="soumu-big-btn soumu-blue" onclick="openSoumuFilterList(\'koyou-kanyuu\')">';
+  html +=   '<div class="soumu-big-label">雇用　加入</div>';
+  html +=   '<div class="soumu-big-num">' + c.koyouIn + ' 名</div>';
+  html +=   '<div class="soumu-big-sub">（毎月3日提出）</div>';
+  html += '</button>';
+  html += '<button class="soumu-big-btn soumu-blue" onclick="openSoumuFilterList(\'koyou-soushitsu\')">';
+  html +=   '<div class="soumu-big-label">雇用　喪失</div>';
+  html +=   '<div class="soumu-big-num">' + c.koyouOut + ' 名</div>';
+  html +=   '<div class="soumu-big-sub">（毎月15日、1日提出）</div>';
+  html += '</button>';
+  html += '</div>';
+
+  // Row 6: 社保 加入/喪失 (2列)
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px;">';
+  html += '<button class="soumu-big-btn soumu-red" onclick="openSoumuFilterList(\'shaho-kanyuu\')">';
+  html +=   '<div class="soumu-big-label">社保　加入</div>';
+  html +=   '<div class="soumu-big-num">' + c.shahoIn + ' 名</div>';
+  html +=   '<div class="soumu-big-sub">（毎月5日提出）</div>';
+  html += '</button>';
+  html += '<button class="soumu-big-btn soumu-red" onclick="openSoumuFilterList(\'shaho-soushitsu\')">';
+  html +=   '<div class="soumu-big-label">社保　喪失</div>';
+  html +=   '<div class="soumu-big-num">' + c.shahoOut + ' 名</div>';
+  html +=   '<div class="soumu-big-sub">（毎週金曜日提出）</div>';
+  html += '</button>';
+  html += '</div>';
+
+  // Row 7: 離職票 / 給料精算 (2列)
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px;">';
+  html += '<button class="soumu-big-btn soumu-maroon" onclick="openSoumuFilterList(\'rishokuhyou\')">';
+  html +=   '<div class="soumu-big-label">離職票</div>';
+  html +=   '<div class="soumu-big-num">' + c.rishokuhyou + ' 名</div>';
+  html +=   '<div class="soumu-big-sub">給料計算が終わり次第速やかに</div>';
+  html += '</button>';
+  html += '<button class="soumu-big-btn soumu-maroon" onclick="openSoumuFilterList(\'kyuryo-seisan\')">';
+  html +=   '<div class="soumu-big-label">給料精算</div>';
+  html +=   '<div class="soumu-big-num">' + c.kyuryoSeisan + ' 名</div>';
+  html +=   '<div class="soumu-big-sub">クリックして確認</div>';
+  html += '</button>';
+  html += '</div>';
+
+  // Row 8: 産休育休 (2列)
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">';
+  html += '<button class="soumu-big-btn soumu-pink" onclick="soumuOpenExt(\'sankyuIkukyu\')">';
+  html +=   '<div class="soumu-big-label">産休育休</div>';
+  html += '</button>';
+  html += '<button class="soumu-big-btn soumu-pink" onclick="soumuOpenExt(\'sankyuIkukyuKanri\')">';
+  html +=   '<div class="soumu-big-label">産休育休管理</div>';
+  html += '</button>';
+  html += '</div>';
+
+  body.innerHTML = html;
+}
+
+// 外部URL (未設定なら案内トースト)
+function soumuOpenExt(key) {
+  var url = SOUMU_EXT[key];
+  if (!url) {
+    showToast('「' + key + '」のURLが未設定です。SOUMU_EXT を編集してください。', 'warn');
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
+// フィルター済み社員リストを overlay で表示
+function openSoumuFilterList(filterKey) {
+  if (!_soumuAllEmps || !_soumuKeyMap) { showToast('データ未取得', 'warn'); return; }
+  var matcher, title, badgeKey;
+  switch (filterKey) {
+    case 'koyou-mochuu':
+      badgeKey = 'soumuKoyou'; title = '雇用 申請中';
+      matcher = function(v) { return v.indexOf('申請中') >= 0; };
+      break;
+    case 'rishoku-mochuu':
+      badgeKey = 'soumuRishoku'; title = '離票 申請中';
+      matcher = function(v) { return v.indexOf('申請中') >= 0; };
+      break;
+    case 'shaho-mochuu':
+      badgeKey = 'soumuShaho'; title = '社保 申請中';
+      matcher = function(v) { return v.indexOf('申請中') >= 0; };
+      break;
+    case 'koyou-kanyuu':
+      badgeKey = 'soumuKoyou'; title = '雇用 加入';
+      matcher = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
+      break;
+    case 'koyou-soushitsu':
+      badgeKey = 'soumuKoyou'; title = '雇用 喪失';
+      matcher = function(v) { return v.indexOf('喪失') >= 0; };
+      break;
+    case 'shaho-kanyuu':
+      badgeKey = 'soumuShaho'; title = '社保 加入';
+      matcher = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
+      break;
+    case 'shaho-soushitsu':
+      badgeKey = 'soumuShaho'; title = '社保 喪失';
+      matcher = function(v) { return v.indexOf('喪失') >= 0; };
+      break;
+    case 'rishokuhyou':
+      badgeKey = 'soumuRishoku'; title = '離職票';
+      matcher = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
+      break;
+    case 'kyuryo-seisan':
+      showToast('給料精算のデータ元が未指定です', 'warn');
+      return;
+  }
+  var odKey = _soumuKeyMap[badgeKey];
+  if (!odKey) { showToast('フィールド「' + badgeKey + '」が見つかりません', 'error'); return; }
+
+  var list = _soumuAllEmps.filter(function(emp) {
+    if (isResigned(emp)) return false;
+    var val = String(emp[odKey] || '');
+    return val && matcher(val);
+  });
+  openSoumuListOverlay(title, list, odKey);
+}
+
+function openSoumuListOverlay(title, list, badgeField) {
+  var existing = document.getElementById('soumuListOverlay');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'soumuListOverlay';
+  ov.className = 'confirm-overlay';
+  var itemsHtml = '';
+  if (list.length === 0) {
+    itemsHtml = '<div style="text-align:center;padding:30px;color:var(--text-light);">該当者なし</div>';
+  } else {
+    list.forEach(function(emp) {
+      var name = emp.Title || '';
+      var no = emp[F.syainNo] || '';
+      var haken = getHakensaki(emp) || '';
+      var badge = badgeField ? (emp[badgeField] || '') : '';
+      var safeEmp = JSON.stringify(emp).replace(/'/g, '&#39;');
+      itemsHtml += '<div class="soumu-list-item" onclick=\'document.getElementById("soumuListOverlay").remove();selectEmployee(' + safeEmp + ')\'>';
+      itemsHtml +=   '<div style="flex:1;min-width:0;">';
+      itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(name) + '</div>';
+      itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);">No.' + escHtml(no) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
+      itemsHtml +=   '</div>';
+      if (badge) itemsHtml += '<div style="font-size:11px;background:#f0f0f0;padding:3px 8px;border-radius:10px;white-space:nowrap;">' + escHtml(badge) + '</div>';
+      itemsHtml += '</div>';
+    });
+  }
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:92vw;width:500px;max-height:85vh;display:flex;flex-direction:column;">' +
+      '<div style="padding:14px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;">' +
+        '<div style="font-size:15px;font-weight:700;flex:1;">📋 ' + escHtml(title) + ' (' + list.length + '名)</div>' +
+        '<button onclick="document.getElementById(\'soumuListOverlay\').remove()" style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;">×</button>' +
+      '</div>' +
+      '<div style="overflow-y:auto;padding:10px 14px;flex:1;">' + itemsHtml + '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+}
+
+// ============================================================
+// 総務部 ツール: 西暦⇔和暦 変換
+// ============================================================
+function openSoumuCalendarTool() {
+  var ex = document.getElementById('calendarToolOverlay');
+  if (ex) ex.remove();
+  var ov = document.createElement('div');
+  ov.id = 'calendarToolOverlay';
+  ov.className = 'confirm-overlay';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:90vw;width:360px;padding:18px;">' +
+      '<div style="font-size:15px;font-weight:700;margin-bottom:12px;">📅 西暦⇔和暦 変換</div>' +
+      '<div style="margin-bottom:10px;">' +
+        '<label style="font-size:12px;color:var(--text-light);">西暦 (日付)</label>' +
+        '<input type="date" id="calSeirekiInput" oninput="convertSeirekiToWareki()" style="width:100%;padding:8px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;box-sizing:border-box;">' +
+      '</div>' +
+      '<div id="calWarekiResult" style="padding:10px;background:#f5f5f5;border-radius:8px;font-size:14px;margin-bottom:14px;min-height:20px;">和暦: —</div>' +
+      '<div style="margin-bottom:10px;">' +
+        '<label style="font-size:12px;color:var(--text-light);">和暦（元号 + 年月日）</label>' +
+        '<div style="display:flex;gap:4px;margin-top:4px;">' +
+          '<select id="calGengouInput" onchange="convertWarekiToSeireki()" style="padding:8px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;">' +
+            '<option value="令和">令和</option><option value="平成">平成</option><option value="昭和">昭和</option><option value="大正">大正</option><option value="明治">明治</option>' +
+          '</select>' +
+          '<input type="number" id="calWYear" placeholder="年" oninput="convertWarekiToSeireki()" style="width:55px;padding:8px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;">' +
+          '<input type="number" id="calWMonth" placeholder="月" oninput="convertWarekiToSeireki()" style="width:55px;padding:8px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;">' +
+          '<input type="number" id="calWDay" placeholder="日" oninput="convertWarekiToSeireki()" style="width:55px;padding:8px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;">' +
+        '</div>' +
+      '</div>' +
+      '<div id="calSeirekiResult" style="padding:10px;background:#f5f5f5;border-radius:8px;font-size:14px;margin-bottom:14px;min-height:20px;">西暦: —</div>' +
+      '<button onclick="document.getElementById(\'calendarToolOverlay\').remove()" style="width:100%;padding:10px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-weight:700;">閉じる</button>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+}
+
+function convertSeirekiToWareki() {
+  var input = document.getElementById('calSeirekiInput');
+  var out = document.getElementById('calWarekiResult');
+  if (!input || !out) return;
+  if (!input.value) { out.textContent = '和暦: —'; return; }
+  var d = new Date(input.value);
+  if (isNaN(d)) { out.textContent = '和暦: 無効な日付'; return; }
+  var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+  var gengou, wy;
+  // 境界: 令和 2019-05-01, 平成 1989-01-08, 昭和 1926-12-25, 大正 1912-07-30, 明治 1868-01-25
+  var cmp = y * 10000 + m * 100 + day;
+  if (cmp >= 20190501) { gengou = '令和'; wy = y - 2018; }
+  else if (cmp >= 19890108) { gengou = '平成'; wy = y - 1988; }
+  else if (cmp >= 19261225) { gengou = '昭和'; wy = y - 1925; }
+  else if (cmp >= 19120730) { gengou = '大正'; wy = y - 1911; }
+  else { gengou = '明治'; wy = y - 1867; }
+  out.textContent = '和暦: ' + gengou + (wy === 1 ? '元' : wy) + '年 ' + m + '月 ' + day + '日';
+}
+
+function convertWarekiToSeireki() {
+  var gEl = document.getElementById('calGengouInput');
+  var yEl = document.getElementById('calWYear');
+  var mEl = document.getElementById('calWMonth');
+  var dEl = document.getElementById('calWDay');
+  var out = document.getElementById('calSeirekiResult');
+  if (!out) return;
+  var g = gEl ? gEl.value : '';
+  var wy = yEl ? parseInt(yEl.value) : NaN;
+  var m = mEl && mEl.value ? parseInt(mEl.value) : 1;
+  var d = dEl && dEl.value ? parseInt(dEl.value) : 1;
+  if (!wy || isNaN(wy)) { out.textContent = '西暦: —'; return; }
+  var base;
+  if (g === '令和') base = 2018;
+  else if (g === '平成') base = 1988;
+  else if (g === '昭和') base = 1925;
+  else if (g === '大正') base = 1911;
+  else if (g === '明治') base = 1867;
+  else { out.textContent = '西暦: —'; return; }
+  var sy = base + wy;
+  out.textContent = '西暦: ' + sy + '年 ' + m + '月 ' + d + '日 (' + sy + '-' + ('0'+m).slice(-2) + '-' + ('0'+d).slice(-2) + ')';
+}
+
+// ============================================================
+// 総務部 ツール: 〒郵便番号 → 住所 (zipcloud API)
+// ============================================================
+function openSoumuZipTool() {
+  var ex = document.getElementById('zipToolOverlay');
+  if (ex) ex.remove();
+  var ov = document.createElement('div');
+  ov.id = 'zipToolOverlay';
+  ov.className = 'confirm-overlay';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:90vw;width:360px;padding:18px;">' +
+      '<div style="font-size:15px;font-weight:700;margin-bottom:12px;">🏠 〒住所漢字検索</div>' +
+      '<div style="margin-bottom:10px;">' +
+        '<label style="font-size:12px;color:var(--text-light);">郵便番号 (7桁)</label>' +
+        '<div style="display:flex;gap:6px;margin-top:4px;">' +
+          '<input type="text" id="zipInput" placeholder="1234567 または 123-4567" maxlength="8" inputmode="numeric" style="flex:1;padding:8px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:14px;" onkeydown="if(event.key===\'Enter\')lookupZip()">' +
+          '<button onclick="lookupZip()" style="padding:8px 14px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-weight:700;">検索</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="zipResult" style="padding:10px;background:#f5f5f5;border-radius:8px;font-size:14px;margin-bottom:14px;min-height:30px;">住所: —</div>' +
+      '<button onclick="document.getElementById(\'zipToolOverlay\').remove()" style="width:100%;padding:10px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-weight:700;">閉じる</button>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  setTimeout(function() { var el = document.getElementById('zipInput'); if (el) el.focus(); }, 100);
+}
+
+async function lookupZip() {
+  var input = document.getElementById('zipInput');
+  var out = document.getElementById('zipResult');
+  if (!input || !out) return;
+  var zip = input.value.replace(/[^0-9]/g, '');
+  if (zip.length !== 7) { out.textContent = '7桁の数字を入力してください'; return; }
+  out.textContent = '検索中...';
+  try {
+    var resp = await fetch('https://zipcloud.ibsnet.co.jp/api/search?zipcode=' + zip);
+    var data = await resp.json();
+    if (data.status !== 200 || !data.results || data.results.length === 0) {
+      out.textContent = '該当住所なし';
+      return;
+    }
+    var r = data.results[0];
+    out.innerHTML = '<div style="font-size:12px;color:var(--text-light);">〒' + zip.slice(0,3) + '-' + zip.slice(3) + '</div>' +
+      '<div style="font-weight:700;margin-top:4px;">' + escHtml(r.address1 + r.address2 + r.address3) + '</div>' +
+      '<div style="font-size:11px;color:var(--text-light);margin-top:4px;">' + escHtml((r.kana1 || '') + (r.kana2 || '') + (r.kana3 || '')) + '</div>';
+  } catch (e) {
+    out.textContent = '検索エラー: ' + escHtml(e.message || String(e));
+  }
 }
 
 // ============================================================
