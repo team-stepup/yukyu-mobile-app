@@ -4302,7 +4302,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '604fdb0';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7709,6 +7709,23 @@ function openSankyuNoteModal(internalName) {
   var curVal = _sankyuCurrentItem[meta.dataKey];
   if (curVal === null || curVal === undefined) curVal = '';
 
+  // 出産日 を取得 (入力があれば備考の上に表示)
+  var birthHtml = '';
+  try {
+    var kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+    if (kBirth && _sankyuCurrentItem && !_sankyuIsEmptyDateRaw(_sankyuCurrentItem[kBirth])) {
+      var bd = new Date(_sankyuCurrentItem[kBirth]);
+      if (!isNaN(bd)) {
+        var bStr = bd.getFullYear() + '/' + ('0' + (bd.getMonth() + 1)).slice(-2) + '/' + ('0' + bd.getDate()).slice(-2);
+        birthHtml =
+          '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;margin-bottom:10px;background:#fff3f7;border:1.5px solid #f8bbd0;border-radius:10px;">' +
+            '<span style="font-size:12px;font-weight:800;color:#c2185b;">👶 出産日</span>' +
+            '<span style="flex:1;text-align:right;font-size:15px;font-weight:900;color:#d81b60;">' + escHtml(bStr) + '</span>' +
+          '</div>';
+      }
+    }
+  } catch(_) {}
+
   var ex = document.getElementById('sankyuNoteModal');
   if (ex) ex.remove();
 
@@ -7718,6 +7735,7 @@ function openSankyuNoteModal(internalName) {
   ov.innerHTML =
     '<div style="background:#fff;border-radius:16px;max-width:92vw;width:460px;padding:18px;display:flex;flex-direction:column;max-height:85vh;">' +
       '<div style="font-size:16px;font-weight:800;margin-bottom:10px;color:#d81b60;">📝 ' + escHtml(title) + '</div>' +
+      birthHtml +
       '<textarea id="sankyuNoteModalText" rows="10" placeholder="備考を入力..." style="width:100%;padding:12px;border:1.5px solid #f8bbd0;border-radius:10px;font-size:14px;resize:vertical;box-sizing:border-box;flex:1;min-height:180px;font-family:inherit;"></textarea>' +
       '<div style="display:flex;gap:8px;margin-top:14px;">' +
         '<button onclick="document.getElementById(\'sankyuNoteModal\').remove()" style="flex:1;padding:12px;border-radius:10px;background:#e0e0e0;color:#424242;border:none;font-weight:700;font-size:14px;cursor:pointer;">キャンセル</button>' +
