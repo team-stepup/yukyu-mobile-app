@@ -1284,6 +1284,22 @@ select.sankyu-edit-input {
   flex: 1;
   background: #fff;
 }
+/* 閲覧モードのクイック申請日入力: 少し強調 */
+.sankyu-quick-submit {
+  cursor: pointer;
+  border-color: #b0bec5 !important;
+  background: #fff !important;
+  font-weight: 700;
+  color: #37474f;
+  transition: border-color .15s ease, background .15s ease;
+}
+.sankyu-quick-submit:hover { border-color: #d81b60 !important; }
+.sankyu-quick-submit:disabled { opacity: 0.7; cursor: wait; }
+.sankyu-app-card.done .sankyu-quick-submit {
+  background: #eeeeee !important;
+  border-color: #bbb !important;
+  color: #616161;
+}
 
 /* セクション内のカード用に section 余白を調整 */
 .sankyu-section.sankyu-section-cards { padding-bottom: 6px; }
@@ -7216,6 +7232,59 @@ async function saveSankyuEdit() {
   }
 }
 
+// 申請日 フィールドをインライン保存 (閲覧モードから直接)
+async function quickSaveSankyuSubmitted(internalName, dateValue) {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
+  var meta = _sankyuFieldsMeta[internalName];
+  if (!meta) { showToast('フィールドが見つかりません', 'error'); return; }
+
+  // YYYY-MM-DD → ISO
+  var typed = null;
+  if (dateValue) {
+    try {
+      var d = new Date(dateValue + 'T00:00:00');
+      typed = isNaN(d) ? null : d.toISOString();
+    } catch(_) { typed = null; }
+  }
+
+  var inputEl = document.getElementById('sankyuQuickField_' + internalName);
+  var prevBg = '';
+  if (inputEl) {
+    prevBg = inputEl.style.background;
+    inputEl.style.background = '#fff9c4'; // 保存中 (黄)
+    inputEl.disabled = true;
+  }
+
+  try {
+    var body = {};
+    body[meta.dataKey] = typed;
+    await spPatchSankyuItem(_sankyuCurrentItem.Id, body);
+
+    // ローカル反映
+    _sankyuCurrentItem[meta.dataKey] = typed;
+    if (_sankyuItems) {
+      for (var i = 0; i < _sankyuItems.length; i++) {
+        if (_sankyuItems[i].Id === _sankyuCurrentItem.Id) {
+          _sankyuItems[i] = _sankyuCurrentItem;
+          break;
+        }
+      }
+    }
+    _soumuSankyuSummary = null;
+
+    showToast(typed ? '✓ 申請済として登録しました' : '申請日をクリアしました', 'success');
+    // 再描画 (グレー化 / 進捗カウンタ更新)
+    renderSankyuDetail(_sankyuCurrentItem);
+  } catch (e) {
+    console.error('quickSaveSankyuSubmitted error:', e);
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    if (inputEl) {
+      inputEl.style.background = prevBg;
+      inputEl.disabled = false;
+    }
+  }
+}
+
 // フィールドをセクションに振り分け (タイトルパターンマッチ)
 function classifySankyuField(title) {
   var t = String(title || '');
@@ -7440,16 +7509,28 @@ function renderSankyuAppCard(card, isEdit) {
     }
   }
 
-  // 申請日 バー
+  // 申請日 バー (閲覧モードでもインライン編集可能 → その場で申請済マーク)
   if (card.submitted) {
     html += '<div class="sankyu-app-card-submitted">';
     html +=   '<div class="sankyu-app-card-submitted-label">📝 申請日</div>';
     if (isEdit) {
       html += renderSankyuFieldInput(card.submitted.meta, card.submitted.raw);
     } else {
-      var subEmpty = _sankyuIsEmptyDateRaw(card.submitted.raw);
-      var subv = formatSankyuValue(card.submitted.raw, 'DateTime');
-      html += '<div class="sankyu-app-card-submitted-value' + (subEmpty ? ' empty' : '') + '">' + (subEmpty ? '未申請' : escHtml(subv.text)) + '</div>';
+      // インラインクイック編集 (onchange で自動保存)
+      var subIname = card.submitted.meta.internalName;
+      var subDateStr = '';
+      if (!_sankyuIsEmptyDateRaw(card.submitted.raw)) {
+        try {
+          var _sd = new Date(card.submitted.raw);
+          if (!isNaN(_sd)) {
+            var _sy = _sd.getFullYear();
+            var _smo = ('0' + (_sd.getMonth() + 1)).slice(-2);
+            var _sdd = ('0' + _sd.getDate()).slice(-2);
+            subDateStr = _sy + '-' + _smo + '-' + _sdd;
+          }
+        } catch(_) {}
+      }
+      html += '<input type="date" id="sankyuQuickField_' + subIname + '" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + subDateStr + '" onchange="quickSaveSankyuSubmitted(\'' + subIname + '\', this.value)">';
     }
     html += '</div>';
   }
