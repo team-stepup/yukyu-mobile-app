@@ -1385,6 +1385,36 @@ select.sankyu-edit-input {
   margin-top: 3px;
   padding-left: 2px;
 }
+.sankyu-app-card-schedule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: #fff3f7;
+  border: 1px solid #f8bbd0;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+.sankyu-app-card.done .sankyu-app-card-schedule {
+  background: #f5f5f5;
+  border-color: #ddd;
+}
+.sankyu-app-card-schedule-lbl {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #c2185b;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+.sankyu-app-card.done .sankyu-app-card-schedule-lbl { color: #888; }
+.sankyu-app-card-schedule-val {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 800;
+  color: #d81b60;
+  text-align: right;
+}
+.sankyu-app-card.done .sankyu-app-card-schedule-val { color: #757575; }
 
 /* 編集モード時のカード内入力 */
 .sankyu-app-card-period .sankyu-edit-input,
@@ -4161,7 +4191,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '2deec00';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7610,6 +7640,8 @@ function classifySankyuField(title) {
   // 社員フォルダ・部課 もヘッダーで表示 (名前カードに統合)
   if (/^(社員フォルダ|社員フォルダー|フォルダ|フォルダー)$/.test(t)) return 'hidden';
   if (/^(部課|部署|部課名)$/.test(t)) return 'hidden';
+  // 出産予定日記載母子手帳PDF は不要 (出産予定日母子手帳 に統合)
+  if (/出産予定日記載母子手帳/.test(t)) return 'hidden';
   // 出産予定日・出産日 は 基本情報 に昇格 (ヘッダーでも値表示するがフォームは basic に)
   if (/^出産予定日$/.test(t)) return 'basic';
   if (/^出産日$/.test(t)) return 'basic';
@@ -8176,6 +8208,18 @@ var _SANKYU_CAT_INFO = {
   misc:   { icon: '📌', label: 'その他',   color: '#90a4ae' }
 };
 
+// カード表示タイトルの上書き (元のフィールド名 → 画面表示用タイトル)
+function _sankyuDisplayTitle(origTitle) {
+  if (!origTitle) return origTitle;
+  var t = String(origTitle);
+  // 完全一致
+  if (/^出産予定日母子手帳$/.test(t)) return '出産予定日の記載がある母子手帳PDFをもらう';
+  if (/^産休育休説明$/.test(t)) return '産前産後休業の説明と書類を渡す';
+  // 産前産後免除 (期間カードのベース名にも対応)
+  if (/^産前産後免除$/.test(t) || /^産前産後免除期間$/.test(t)) return '産前産後免除 社保免除申請';
+  return origTitle;
+}
+
 // 月次チェーン: 育休N回目 / 延長申請N回目 などの連続申請カードに
 // 合成期間 (前のカードの日付 + 1日 〜 当カードの日付) を付与する
 function _sankyuComputeMonthlyPeriods(cards) {
@@ -8212,6 +8256,27 @@ function _sankyuFormatSynthDate(d) {
   var m = ('0' + (d.getMonth() + 1)).slice(-2);
   var dd = ('0' + d.getDate()).slice(-2);
   return y + '/' + m + '/' + dd;
+}
+
+// 予定日ベースの合成予定日 (出産予定日 - 7ヶ月) を該当カードに付与
+//   対象: 出産予定日母子手帳, 産休育休説明
+//   さらに、これらのカードは main フィールドを「取得日」として扱う
+function _sankyuComputeScheduleDates(cards, yoteiRaw) {
+  if (!cards || !cards.length || !yoteiRaw) return;
+  if (_sankyuIsEmptyDateRaw(yoteiRaw)) return;
+  var yotei = new Date(yoteiRaw);
+  if (isNaN(yotei)) return;
+  var sevenMonthsBefore = _sankyuAddMonths(yotei, -7);
+
+  cards.forEach(function(c) {
+    var title = (c.main && c.main.title) || c.title || '';
+    if (!title) return;
+    if (/出産予定日母子手帳|産休育休説明/.test(title)) {
+      c.synthScheduleDate = sevenMonthsBefore;
+      c.synthScheduleLabel = '予定日の7ヶ月前';
+      c.isReceivable = true; // main フィールドを「取得日」として扱う
+    }
+  });
 }
 
 // 法律に基づく合成期間: 出産日から法定期間を計算して該当カードに設定
@@ -8282,8 +8347,13 @@ function renderSankyuAppCard(card, isEdit) {
   var html = '';
 
   // 「申請済み」判定: 申請日 が入っていれば done
+  //   isReceivable カードは main 自体が「取得日」なので main に値があれば 済
   var isDone = false;
-  if (card.submitted && !_sankyuIsEmptyDateRaw(card.submitted.raw)) isDone = true;
+  if (card.isReceivable) {
+    if (card.main && !_sankyuIsEmptyDateRaw(card.main.raw)) isDone = true;
+  } else if (card.submitted && !_sankyuIsEmptyDateRaw(card.submitted.raw)) {
+    isDone = true;
+  }
 
   var catInfo = _SANKYU_CAT_INFO[card.sourceCat] || _SANKYU_CAT_INFO.misc;
 
@@ -8292,10 +8362,17 @@ function renderSankyuAppCard(card, isEdit) {
   // カテゴリバッジ (統合セクションで種別を区別)
   html += '<div class="sankyu-app-card-cat-badge" style="background:' + catInfo.color + ';">' + catInfo.icon + ' ' + escHtml(catInfo.label) + '</div>';
 
-  // タイトル + バッジ
+  // タイトル + バッジ (表示用タイトルへ上書き)
+  var displayTitle = _sankyuDisplayTitle(card.title || '(無題)');
   html += '<div class="sankyu-app-card-title">';
-  html +=   '<span class="sankyu-app-card-title-text">' + escHtml(card.title || '(無題)') + '</span>';
-  if (card.submitted) {
+  html +=   '<span class="sankyu-app-card-title-text">' + escHtml(displayTitle) + '</span>';
+  if (card.isReceivable) {
+    if (isDone) {
+      html += '<span class="sankyu-app-card-done-badge">✓ 済</span>';
+    } else {
+      html += '<span class="sankyu-app-card-active-badge">● 未</span>';
+    }
+  } else if (card.submitted) {
     if (isDone) {
       html += '<span class="sankyu-app-card-done-badge">✓ 申請済</span>';
     } else {
@@ -8336,8 +8413,40 @@ function renderSankyuAppCard(card, isEdit) {
         : (m.raw === null || m.raw === undefined || m.raw === '');
       var mv = formatSankyuValue(m.raw, m.type);
       if (m.type === 'DateTime') {
+        // isReceivable: 予定日 (読み取り専用) + 取得日 (インライン編集)
+        if (card.isReceivable) {
+          // 予定日表示
+          if (card.synthScheduleDate) {
+            var schStr = _sankyuFormatSynthDate(card.synthScheduleDate);
+            html += '<div class="sankyu-app-card-schedule">';
+            html +=   '<span class="sankyu-app-card-schedule-lbl">📅 予定日</span>';
+            html +=   '<span class="sankyu-app-card-schedule-val">' + escHtml(schStr) + '</span>';
+            html += '</div>';
+            if (card.synthScheduleLabel) {
+              html += '<div class="sankyu-app-card-synth-label">📐 ' + escHtml(card.synthScheduleLabel) + '</div>';
+            }
+          }
+          // 取得日インライン編集 (main フィールドを使用)
+          var recvIname = m.meta.internalName;
+          var recvDateStr = '';
+          var recvHasValue = false;
+          if (!_sankyuIsEmptyDateRaw(m.raw)) {
+            try {
+              var _rd = new Date(m.raw);
+              if (!isNaN(_rd)) {
+                recvDateStr = _rd.getFullYear() + '-' + ('0' + (_rd.getMonth() + 1)).slice(-2) + '-' + ('0' + _rd.getDate()).slice(-2);
+                recvHasValue = true;
+              }
+            } catch(_) {}
+          }
+          html += '<div class="sankyu-app-card-submitted">';
+          html +=   '<div class="sankyu-app-card-submitted-label">📥 取得日</div>';
+          html +=   '<input type="date" id="sankyuBasicDate_' + recvIname + '" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + recvDateStr + '" onchange="quickSaveSankyuBasicDate(\'' + recvIname + '\', this.value, \'' + escHtml(m.title || '') + '\')">';
+          html +=   '<button class="sankyu-quick-clear-btn" title="取得日をクリア" ' + (recvHasValue ? '' : 'disabled ') + 'onclick="clearSankyuBasicDate(\'' + recvIname + '\', \'' + escHtml(m.title || '') + '\')">✕</button>';
+          html += '</div>';
+        }
         // 合成期間があれば 「開始 〜 終了」 の表記で表示
-        if (card.synthPeriodStart && card.synthPeriodEnd) {
+        else if (card.synthPeriodStart && card.synthPeriodEnd) {
           var sStr = _sankyuFormatSynthDate(card.synthPeriodStart);
           var eStr = _sankyuFormatSynthDate(card.synthPeriodEnd);
           html += '<div class="sankyu-app-card-period">';
@@ -9036,6 +9145,9 @@ function renderSankyuDetail(item) {
       //   社保免除期間変更(出産後), 出産一時金申請, 出産手当金申請,
       //   育休開始社保免除, 社保免除期間変更1歳6ヶ月まで/2歳まで
       _sankyuComputeLegalPeriods(_builtCards, birthRaw);
+      // 予定日ベースの合成予定日 (出産予定日 - 7ヶ月)
+      //   対象: 出産予定日母子手帳, 産休育休説明
+      _sankyuComputeScheduleDates(_builtCards, yoteiRaw);
       // 進捗カウント
       var totalWithSub = 0, doneCount = 0;
       _builtCards.forEach(function(c) {
