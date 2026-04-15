@@ -937,6 +937,38 @@ body {
   border-radius: 999px;
   margin-top: 8px;
 }
+.sankyu-detail-birth {
+  margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+.sankyu-detail-birth-row {
+  background: rgba(255,255,255,0.22);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 10px;
+  padding: 5px 9px 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #fff;
+  backdrop-filter: blur(2px);
+}
+.sankyu-detail-birth-lbl {
+  font-weight: 700;
+  opacity: 0.9;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+.sankyu-detail-birth-val {
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+.sankyu-detail-birth-val.empty { opacity: 0.55; font-weight: 700; }
 
 /* 詳細セクション */
 .sankyu-section {
@@ -959,6 +991,30 @@ body {
   letter-spacing: 0.4px;
 }
 .sankyu-section-head .sankyu-sec-icon { font-size: 14px; }
+.sankyu-section-head-btn { cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+.sankyu-section-head-btn:active { background: linear-gradient(180deg, #f8bbd0, #fff); }
+.sankyu-sec-progress {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #888;
+}
+.sankyu-sec-chevron {
+  margin-left: 6px;
+  font-size: 14px;
+  color: #d81b60;
+  width: 14px;
+  text-align: center;
+  transition: transform 0.15s ease;
+}
+.sankyu-section.closed .sankyu-section-body { display: none; }
+.sankyu-section.closed { box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.sankyu-section.closed .sankyu-section-head { border-bottom: none; }
+.sankyu-field-inline .sankyu-field-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .sankyu-field-row {
   display: flex;
   padding: 9px 14px;
@@ -6522,6 +6578,16 @@ var _sankyuEditMode = false;      // true なら詳細画面が編集モード
 var _sankyuCurrentItem = null;    // 現在表示中の item
 var _sankyuNewMode = false;       // true なら新規追加モード (POST)
 var _sankyuPickedEmp = null;      // 新規モードで選択中の社員 (emp オブジェクト)
+// アコーディオン開閉状態 (再描画後も維持)
+//   デフォルト: basic/child/insurance/bank は閉じる、他は開く
+var _sankyuAccordion = {
+  basic: false, child: false, insurance: false, bank: false,
+  sango: true,  ikukyu: true, choki: true, fukki: true, memo: true, misc: true
+};
+function _sankyuToggleSection(key) {
+  _sankyuAccordion[key] = !_sankyuAccordion[key];
+  if (_sankyuCurrentItem) renderSankyuDetail(_sankyuCurrentItem);
+}
 
 // 状況 → カテゴリー判定 (文字列のみ。下位互換で残す)
 function sankyuStatusCategory(status) {
@@ -7272,6 +7338,106 @@ async function clearSankyuSubmitted(internalName) {
   await quickSaveSankyuSubmitted(internalName, '');
 }
 
+// 基本情報の 出産予定日 / 出産日 インラインクリア
+async function clearSankyuBasicDate(internalName, title) {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
+  if (!confirm(title + ' をクリアしますか？')) return;
+  await quickSaveSankyuBasicDate(internalName, '', title);
+}
+
+// 基本情報の 出産予定日 / 出産日 インライン保存
+//   出産日 or 出産予定日 が入力されたら 全申請日付を自動計算 → 一括 PATCH
+async function quickSaveSankyuBasicDate(internalName, dateValue, title) {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
+  var meta = _sankyuFieldsMeta[internalName];
+  if (!meta) { showToast('フィールドが見つかりません', 'error'); return; }
+
+  // YYYY-MM-DD → Date & ISO
+  var typed = null;
+  var dObj = null;
+  if (dateValue) {
+    try {
+      dObj = new Date(dateValue + 'T00:00:00');
+      if (!isNaN(dObj)) typed = dObj.toISOString();
+      else dObj = null;
+    } catch(_) { dObj = null; typed = null; }
+  }
+
+  var inputEl = document.getElementById('sankyuBasicDate_' + internalName);
+  var prevBg = '';
+  if (inputEl) {
+    prevBg = inputEl.style.background;
+    inputEl.style.background = '#fff9c4';
+    inputEl.disabled = true;
+  }
+
+  try {
+    var body = {};
+    body[meta.dataKey] = typed;
+
+    // 出産日 or 出産予定日 が入った場合は 自動計算して一括 PATCH
+    var isYotei = /^出産予定日$/.test(title);
+    var isBirth = /^出産日$/.test(title);
+    var autoCount = 0;
+
+    if (typed && (isYotei || isBirth)) {
+      // 現在値を反映 (計算の基準として)
+      var baseYotei = null, baseBirth = null;
+      var kYotei = sankyuKeyByTitle('出産予定日', true);
+      var kBirth = sankyuKeyByTitle('出産日', true);
+      if (isYotei) {
+        baseYotei = dObj;
+        if (kBirth && !_sankyuIsEmptyDateRaw(_sankyuCurrentItem[kBirth])) {
+          try { var b = new Date(_sankyuCurrentItem[kBirth]); if (!isNaN(b)) baseBirth = b; } catch(_) {}
+        }
+      } else {
+        baseBirth = dObj;
+        if (kYotei && !_sankyuIsEmptyDateRaw(_sankyuCurrentItem[kYotei])) {
+          try { var y = new Date(_sankyuCurrentItem[kYotei]); if (!isNaN(y)) baseYotei = y; } catch(_) {}
+        }
+      }
+
+      var plan = _sankyuComputeDates(baseYotei, baseBirth);
+      plan.forEach(function(p) {
+        if (!p || !p.field || !p.date) return;
+        body[p.field.dataKey] = p.date.toISOString();
+        autoCount++;
+      });
+    }
+
+    await spPatchSankyuItem(_sankyuCurrentItem.Id, body);
+
+    // ローカル反映
+    Object.keys(body).forEach(function(k) {
+      if (k === '__metadata') return;
+      _sankyuCurrentItem[k] = body[k];
+    });
+    if (_sankyuItems) {
+      for (var i = 0; i < _sankyuItems.length; i++) {
+        if (_sankyuItems[i].Id === _sankyuCurrentItem.Id) {
+          _sankyuItems[i] = _sankyuCurrentItem;
+          break;
+        }
+      }
+    }
+    _soumuSankyuSummary = null;
+
+    if (autoCount > 0) {
+      showToast('✨ ' + title + ' を保存し ' + autoCount + ' 項目を自動計算しました', 'success');
+    } else {
+      showToast(typed ? ('✓ ' + title + ' を保存しました') : (title + ' をクリアしました'), 'success');
+    }
+    renderSankyuDetail(_sankyuCurrentItem);
+  } catch (e) {
+    console.error('quickSaveSankyuBasicDate error:', e);
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    if (inputEl) {
+      inputEl.style.background = prevBg;
+      inputEl.disabled = false;
+    }
+  }
+}
+
 // 申請日 フィールドをインライン保存 (閲覧モードから直接)
 async function quickSaveSankyuSubmitted(internalName, dateValue) {
   if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
@@ -7329,11 +7495,18 @@ async function quickSaveSankyuSubmitted(internalName, dateValue) {
 function classifySankyuField(title) {
   var t = String(title || '');
   if (!t) return 'misc';
-  if (/社員番号|氏名|派遣先|状況/.test(t)) return 'basic';
-  if (/子供|子の|性別/.test(t)) return 'child';
+  // 状況はヘッダーで表示済みなので hidden へ
+  if (/^状況$/.test(t)) return 'hidden';
+  // 社員番号・氏名・派遣先もヘッダーで表示済み
+  if (/^(社員番号|氏名|社員氏名|派遣先)$/.test(t)) return 'hidden';
+  // 出産予定日・出産日・性別 は 基本情報 に昇格 (ヘッダーでも値表示するがフォームは basic に)
+  if (/^出産予定日$/.test(t)) return 'basic';
+  if (/^出産日$/.test(t)) return 'basic';
+  if (/性別/.test(t)) return 'basic';
+  if (/子供|子の/.test(t)) return 'child';
   if (/銀行|支店|口座/.test(t)) return 'bank';
   if (/健保|健康保険|被保険者|整理番号|雇用保険(取得|番号)/.test(t)) return 'insurance';
-  if (/出産予定|出産日$|母子手帳|説明書|産前産後|出産一時金|出産手当金|社保免除期間変更（出産後）/.test(t)) return 'sango';
+  if (/母子手帳|説明書|産前産後|出産一時金|出産手当金|社保免除期間変更（出産後）/.test(t)) return 'sango';
   if (/育休|社保免除期間変更1歳/.test(t)) return 'ikukyu';
   if (/延長/.test(t)) return 'choki';
   if (/保育園|仕事復帰/.test(t)) return 'fukki';
@@ -7386,20 +7559,53 @@ function _sankyuIsEmptyDateRaw(raw) {
   return false;
 }
 
-// タイトル内で最初にヒットするマーカーの「直前まで」を base として抜く
+// タイトル内で「最後に」ヒットするマーカーの「直前まで」を base として抜く
 //   例: "延長申請5回目開始日" + _SANKYU_START_RE → "延長申請5回目"
+//   例: "育休開始社保免除開始日" + _SANKYU_START_RE → "育休開始社保免除" (最後の 開始 だけをマーカーとして使う)
 //   例: "育休初回申請申請日" + _SANKYU_SUBMIT_RE → "育休初回申請"
 function _sankyuExtractBase(title, markerRe) {
   if (!title) return '';
   var t = String(title);
-  var m = t.match(markerRe);
-  if (!m) return t;
-  var idx = t.indexOf(m[0]);
-  if (idx <= 0) return t;
-  var base = t.substring(0, idx);
+  var flags = 'g' + (markerRe.ignoreCase ? 'i' : '');
+  var globalRe = new RegExp(markerRe.source, flags);
+  var lastIdx = -1;
+  var match;
+  while ((match = globalRe.exec(t)) !== null) {
+    lastIdx = match.index;
+    if (match.index === globalRe.lastIndex) globalRe.lastIndex++;
+  }
+  if (lastIdx <= 0) return t;
+  var base = t.substring(0, lastIdx);
   // 末尾の空白・助詞・括弧を削る
   base = base.replace(/[\s　のの\(（\)）:：・\-ー、,]+$/, '');
   return base.trim();
+}
+
+// タイトル末尾における役割を判定 ('start' | 'end' | 'submit' | 'none')
+//   例: "育休開始社保免除終了日" → 'end' (終了 が末尾に一番近い)
+//   例: "延長申請5回目申請日"   → 'submit'
+function _sankyuTitleRole(title) {
+  if (!title) return 'none';
+  var t = String(title);
+  function lastHit(re) {
+    var flags = 'g' + (re.ignoreCase ? 'i' : '');
+    var gr = new RegExp(re.source, flags);
+    var last = -1, m;
+    while ((m = gr.exec(t)) !== null) {
+      last = m.index + m[0].length;
+      if (m.index === gr.lastIndex) gr.lastIndex++;
+    }
+    return last;
+  }
+  var sE = lastHit(_SANKYU_SUBMIT_RE);
+  var eE = lastHit(_SANKYU_END_RE);
+  var stE = lastHit(_SANKYU_START_RE);
+  // 最も末尾に近い (= index が大きい) マーカーを優先
+  var best = 'none', bestIdx = -1;
+  if (sE  > bestIdx) { bestIdx = sE;  best = 'submit'; }
+  if (eE  > bestIdx) { bestIdx = eE;  best = 'end';    }
+  if (stE > bestIdx) { bestIdx = stE; best = 'start';  }
+  return best;
 }
 
 // 互換用 (古いコードから呼ばれる場合に備え) : 末尾サフィックスを剥がす
@@ -7421,8 +7627,9 @@ function _sankyuBuildCards(fields) {
   // インデックス付きコピー
   var arr = fields.map(function(f, i) { return { f: f, i: i }; });
 
-  // base で始まる DateTime フィールドを検索 (マーカー付き)
-  function findPrefixedSibling(baseTitle, markerRe, excludeIdx) {
+  // base で始まる DateTime フィールドを検索 (役割指定)
+  //   wantedRole: 'start' | 'end' | 'submit'
+  function findPrefixedSibling(baseTitle, wantedRole, excludeIdx) {
     for (var j = 0; j < arr.length; j++) {
       if (used[j]) continue;
       if (excludeIdx && excludeIdx.indexOf(j) >= 0) continue;
@@ -7430,34 +7637,31 @@ function _sankyuBuildCards(fields) {
       if (g.type !== 'DateTime') continue;
       if (!g.title) continue;
       if (g.title.indexOf(baseTitle) !== 0) continue; // 先頭一致
-      if (!markerRe.test(g.title)) continue;
+      if (_sankyuTitleRole(g.title) !== wantedRole) continue;
       return j;
     }
     return -1;
   }
 
   // 1st pass: 期間 (開始 + 終了) ペアの検出
-  //   開始フィールドの「マーカー直前までの文字列」を base として終了/申請日を探す
+  //   タイトル末尾の役割が 'start' のフィールドを起点に base 抽出 → end/submit を探す
   for (var i = 0; i < arr.length; i++) {
     if (used[i]) continue;
     var f = arr[i].f;
     if (f.type !== 'DateTime') continue;
     if (!f.title) continue;
-    if (_SANKYU_SUBMIT_RE.test(f.title)) continue; // 申請日は除外 (先にスキップ)
-    if (!_SANKYU_START_RE.test(f.title)) continue;
+    if (_sankyuTitleRole(f.title) !== 'start') continue;
 
-    // base = マーカー直前まで
+    // base = 末尾の 開始 マーカー直前まで
     var base = _sankyuExtractBase(f.title, _SANKYU_START_RE);
     if (!base || base.length < 2) continue;
 
-    // end を探す: 同じ base で始まり END マーカーを含む
-    var endIdx = findPrefixedSibling(base, _SANKYU_END_RE, [i]);
+    // end を探す: 同じ base で始まり 役割 'end'
+    var endIdx = findPrefixedSibling(base, 'end', [i]);
     if (endIdx < 0) continue;
-    // ただし end フィールドも 申請日 マーカーを持っていたら除外
-    if (_SANKYU_SUBMIT_RE.test(arr[endIdx].f.title)) continue;
 
     // 申請日 を探す
-    var subIdx = findPrefixedSibling(base, _SANKYU_SUBMIT_RE, [i, endIdx]);
+    var subIdx = findPrefixedSibling(base, 'submit', [i, endIdx]);
 
     cards.push({
       type: 'period',
@@ -7481,7 +7685,8 @@ function _sankyuBuildCards(fields) {
       continue;
     }
 
-    var isSubmitOnly = (g.type === 'DateTime' && _SANKYU_SUBMIT_RE.test(g.title));
+    var gRole = _sankyuTitleRole(g.title);
+    var isSubmitOnly = (g.type === 'DateTime' && gRole === 'submit');
 
     if (!isSubmitOnly && g.type === 'DateTime') {
       // メイン日付 + 申請日 ペアを探す
@@ -7489,8 +7694,8 @@ function _sankyuBuildCards(fields) {
       var base2 = g.title.replace(/[\s　のの\(（\)）:：・\-ー、,]+$/, '').trim();
       var subIdx2 = -1;
       if (base2 && base2.length >= 2) {
-        // g.title と完全に異なるタイトルで base2 から始まり 申請日 マーカー を持つ兄弟を探す
-        subIdx2 = findPrefixedSibling(base2, _SANKYU_SUBMIT_RE, [k]);
+        // g.title と完全に異なるタイトルで base2 から始まり 申請日 役割 を持つ兄弟を探す
+        subIdx2 = findPrefixedSibling(base2, 'submit', [k]);
       }
       cards.push({
         type: 'single',
@@ -7715,6 +7920,77 @@ function _sankyuListDateTitles() {
     if (f.type === 'DateTime') titles.push({ title: f.title, internalName: f.internalName });
   });
   return titles;
+}
+
+// ─────────────────────────────────────────
+// 純粋計算: (yotei, birth) → [{ field, date }]
+//   DOM に依存せず、PATCH body を組み立てるために使う
+// ─────────────────────────────────────────
+function _sankyuComputeDates(yotei, birth) {
+  var plan = [];
+  if (!yotei && !birth) return plan;
+  if (!_sankyuFieldsMeta) return plan;
+
+  var birthOrYotei = birth || yotei;
+
+  function pushPair(prefix, startDate, endDate) {
+    var pair = _sankyuFindPair(prefix);
+    if (pair.start && startDate) plan.push({ field: pair.start, date: startDate });
+    if (pair.end   && endDate)   plan.push({ field: pair.end,   date: endDate   });
+  }
+
+  // 1. 産前産後免除期間
+  if (yotei) {
+    var pair1 = _sankyuFindPair('産前産後免除期間');
+    if (pair1.start && yotei) plan.push({ field: pair1.start, date: _sankyuAddDays(yotei, -42) });
+    if (pair1.end && birthOrYotei) plan.push({ field: pair1.end, date: _sankyuAddDays(birthOrYotei, 56) });
+  }
+
+  // 以下 出産日 必須
+  if (!birth) return plan;
+
+  var ikukyuStart    = _sankyuAddDays(birth, 57);
+  var birthday1      = _sankyuAddYears(birth, 1);
+  var age1ReachPrev  = _sankyuAddDays(birthday1, -2);
+  var birthday1_5    = _sankyuAddMonths(birth, 18);
+  var age1_5ReachPrev = _sankyuAddDays(birthday1_5, -2);
+
+  // 2. 育休開始社保免除
+  pushPair('育休開始社保免除', ikukyuStart, age1ReachPrev);
+
+  // 3. 育休 初回〜11回目
+  var chunkStart = ikukyuStart;
+  var chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
+  pushPair('育休初回申請', chunkStart, chunkEnd);
+  for (var n = 2; n <= 11; n++) {
+    chunkStart = _sankyuAddDays(chunkEnd, 1);
+    chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
+    pushPair('育休' + n + '回目申請', chunkStart, chunkEnd);
+  }
+
+  // 4. 1歳6ヶ月まで
+  pushPair('1歳6ヶ月', birthday1, age1_5ReachPrev);
+
+  // 5. 延長申請 1〜12回目 (タイトル中の番号で検索)
+  for (var k = 1; k <= 12; k++) {
+    chunkStart = _sankyuAddDays(chunkEnd, 1);
+    chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
+    var foundStart = null, foundEnd = null;
+    Object.keys(_sankyuFieldsMeta).forEach(function(ik) {
+      var f = _sankyuFieldsMeta[ik];
+      if (f.type !== 'DateTime' || !f.title) return;
+      if (f.title.indexOf('延長') < 0) return;
+      var hasNum = new RegExp('(?:^|[^0-9])' + k + '(?:[^0-9]|$)').test(f.title);
+      if (!hasNum) return;
+      var role = _sankyuTitleRole(f.title);
+      if (role === 'start' && !foundStart) foundStart = f;
+      else if (role === 'end' && !foundEnd) foundEnd = f;
+    });
+    if (foundStart) plan.push({ field: foundStart, date: chunkStart });
+    if (foundEnd)   plan.push({ field: foundEnd,   date: chunkEnd   });
+  }
+
+  return plan;
 }
 
 // 自動計算メイン
@@ -7944,6 +8220,7 @@ function renderSankyuDetail(item) {
   var kShimei = sankyuKeyByTitle('氏名') || sankyuKeyByTitle('社員氏名');
   var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
   var kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+  var kYotei = sankyuKeyByTitle('出産予定日', true) || sankyuKeyByTitle('出産予定日');
 
   var no = String(item[kSyainNo] || '');
   var name = String(item[kShimei] || '');
@@ -7954,6 +8231,13 @@ function renderSankyuDetail(item) {
   if (!status || status === '休業中') {
     status = (cat === 'sango') ? '産前産後休業中' : (cat === 'ikuji') ? '育児休業中' : (cat === 'owari') ? '休業終了' : status;
   }
+  // 出産予定日 / 出産日 の値 (ヘッダー表示用)
+  var yoteiRaw = kYotei ? item[kYotei] : null;
+  var birthRaw = kBirth ? item[kBirth] : null;
+  var yoteiEmpty = _sankyuIsEmptyDateRaw(yoteiRaw);
+  var birthEmpty = _sankyuIsEmptyDateRaw(birthRaw);
+  var yoteiText = yoteiEmpty ? '—' : formatDate(yoteiRaw);
+  var birthText = birthEmpty ? '—' : formatDate(birthRaw);
 
   var html = '';
   // 戻る + 編集ボタン
@@ -8000,6 +8284,11 @@ function renderSankyuDetail(item) {
                   html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)') + '</div>';
     if (haken)  html += '<div class="sankyu-detail-sub">📍 ' + escHtml(haken) + '</div>';
     if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
+    // 出産予定日 / 出産日 (ヘッダー内)
+    html += '<div class="sankyu-detail-birth">';
+    html +=   '<div class="sankyu-detail-birth-row"><span class="sankyu-detail-birth-lbl">出産予定日</span><span class="sankyu-detail-birth-val' + (yoteiEmpty ? ' empty' : '') + '">' + escHtml(yoteiText) + '</span></div>';
+    html +=   '<div class="sankyu-detail-birth-row"><span class="sankyu-detail-birth-lbl">出産日</span><span class="sankyu-detail-birth-val' + (birthEmpty ? ' empty' : '') + '">' + escHtml(birthText) + '</span></div>';
+    html += '</div>';
     html += '</div>';
   }
 
@@ -8028,16 +8317,16 @@ function renderSankyuDetail(item) {
 
   // フィールドをセクション分け
   var sections = {
-    basic:     { title: '基本情報',   icon: '👤', fields: [] },
-    child:     { title: '子供',       icon: '👶', fields: [] },
-    sango:     { title: '産前産後',   icon: '🤰', fields: [] },
+    basic:     { title: '基本情報',     icon: '👤', fields: [] },
+    insurance: { title: '保険情報',     icon: '🏥', fields: [] },
+    bank:      { title: '振込先',       icon: '🏦', fields: [] },
+    child:     { title: '子供',         icon: '👶', fields: [] },
+    sango:     { title: '産前産後',     icon: '🤰', fields: [] },
     ikukyu:    { title: '育児休業申請', icon: '🌸', fields: [] },
-    choki:     { title: '延長申請',   icon: '📅', fields: [] },
+    choki:     { title: '延長申請',     icon: '📅', fields: [] },
     fukki:     { title: '復帰・保育園', icon: '🏠', fields: [] },
-    insurance: { title: '保険情報',   icon: '🏥', fields: [] },
-    bank:      { title: '振込先',     icon: '🏦', fields: [] },
-    memo:      { title: '備考',       icon: '📝', fields: [] },
-    misc:      { title: 'その他',     icon: '📌', fields: [] }
+    memo:      { title: '備考',         icon: '📝', fields: [] },
+    misc:      { title: 'その他',       icon: '📌', fields: [] }
   };
 
   Object.keys(meta).forEach(function(internalName) {
@@ -8047,8 +8336,9 @@ function renderSankyuDetail(item) {
     if (['ID','Id','GUID','FileSystemObjectType','SyncClientId'].indexOf(internalName) >= 0) return;
     // 編集モードでは ReadOnly フィールドを非表示
     if (isEdit && f.readOnly) return;
-    var rawVal = item[f.dataKey];
     var cat2 = classifySankyuField(f.title);
+    if (cat2 === 'hidden') return; // ヘッダーで表示済み
+    var rawVal = item[f.dataKey];
     if (!sections[cat2]) cat2 = 'misc';
     sections[cat2].fields.push({
       title: f.title || f.internalName,
@@ -8058,47 +8348,105 @@ function renderSankyuDetail(item) {
     });
   });
 
-  // セクションごとに描画
+  // basic セクション内の並び順: 出産予定日 → 出産日 → 性別 → その他
+  if (sections.basic && sections.basic.fields.length > 1) {
+    var basicRank = function(title) {
+      if (/^出産予定日$/.test(title)) return 0;
+      if (/^出産日$/.test(title)) return 1;
+      if (/性別/.test(title)) return 2;
+      return 10;
+    };
+    sections.basic.fields.sort(function(a, b) {
+      var ra = basicRank(a.title), rb = basicRank(b.title);
+      if (ra !== rb) return ra - rb;
+      return 0;
+    });
+  }
+
+  // セクションごとに描画 (アコーディオン)
   //   申請フロー系 (sango/ikukyu/choki/fukki) → カード表示
-  //   それ以外 (basic/child/insurance/bank/memo/misc) → 従来の行表示
+  //   それ以外 (basic/child/insurance/bank/memo/misc) → 行表示
   var cardSectionKeys = { sango: true, ikukyu: true, choki: true, fukki: true };
-  var order = ['basic','child','sango','ikukyu','choki','fukki','insurance','bank','memo','misc'];
+  //   新順序: 基本情報 → 保険情報 → 振込先 → 子供 → 産前産後 → 育児休業申請 → 延長申請 → 復帰 → 備考 → その他
+  var order = ['basic','insurance','bank','child','sango','ikukyu','choki','fukki','memo','misc'];
   order.forEach(function(secKey) {
     var sec = sections[secKey];
     if (!sec || sec.fields.length === 0) return;
     if (!isEdit) {
       // 表示モード: 内容のあるセクションだけ (basic/memo は常に)
-      var hasValue = sec.fields.some(function(f) { return f.raw !== null && f.raw !== undefined && f.raw !== ''; });
+      var hasValue = sec.fields.some(function(f) {
+        if (f.type === 'DateTime') return !_sankyuIsEmptyDateRaw(f.raw);
+        return f.raw !== null && f.raw !== undefined && f.raw !== '';
+      });
       if (!hasValue && secKey !== 'basic' && secKey !== 'memo') return;
     }
 
     var useCards = !!cardSectionKeys[secKey];
-    html += '<div class="sankyu-section' + (useCards ? ' sankyu-section-cards' : '') + '">';
-    html += '<div class="sankyu-section-head"><span class="sankyu-sec-icon">' + sec.icon + '</span>' + escHtml(sec.title);
+    var isOpen = (_sankyuAccordion[secKey] !== false);
+    // 編集モードでは全開き
+    if (isEdit) isOpen = true;
+
+    html += '<div class="sankyu-section' + (useCards ? ' sankyu-section-cards' : '') + (isOpen ? ' open' : ' closed') + '">';
+    if (isEdit) {
+      html += '<div class="sankyu-section-head">';
+    } else {
+      html += '<div class="sankyu-section-head sankyu-section-head-btn" onclick="_sankyuToggleSection(\'' + secKey + '\')">';
+    }
+    html +=   '<span class="sankyu-sec-icon">' + sec.icon + '</span>' + escHtml(sec.title);
+
+    // カード系の進捗カウント (閉じていても表示)
     if (useCards) {
-      // 進捗カウント (申請済 / 申請日あるカードのみ対象)
-      var _cardsPre = _sankyuBuildCards(sec.fields);
+      var _cardsCount = _sankyuBuildCards(sec.fields);
       var totalWithSub = 0, doneCount = 0;
-      _cardsPre.forEach(function(c) {
+      _cardsCount.forEach(function(c) {
         if (!c.submitted) return;
         totalWithSub++;
         if (!_sankyuIsEmptyDateRaw(c.submitted.raw)) doneCount++;
       });
       if (totalWithSub > 0) {
-        html += '<span style="margin-left:auto;font-size:10.5px;font-weight:700;color:#888;">' + doneCount + ' / ' + totalWithSub + ' 申請済</span>';
+        html += '<span class="sankyu-sec-progress">' + doneCount + ' / ' + totalWithSub + ' 申請済</span>';
       }
-      html += '</div>';
-      // カード本体
+    }
+    // 開閉矢印 (閲覧モードのみ)
+    if (!isEdit) {
+      html += '<span class="sankyu-sec-chevron">' + (isOpen ? '▾' : '▸') + '</span>';
+    }
+    html += '</div>';
+
+    // 本体 (閉じていても DOM に含めて CSS で hide)
+    html += '<div class="sankyu-section-body">';
+    if (useCards) {
+      var _cardsPre = _sankyuBuildCards(sec.fields);
       _cardsPre.forEach(function(c) {
         html += renderSankyuAppCard(c, isEdit);
       });
     } else {
-      html += '</div>';
       sec.fields.forEach(function(f) {
         if (isEdit) {
           html += '<div class="sankyu-field-row sankyu-field-edit">';
           html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
           html +=   '<div class="sankyu-field-value">' + renderSankyuFieldInput(f.meta, f.raw) + '</div>';
+          html += '</div>';
+        } else if (secKey === 'basic' && f.type === 'DateTime' && /^(出産予定日|出産日)$/.test(f.title)) {
+          // 基本情報の 出産予定日 / 出産日 はインライン編集可能
+          var iname = f.meta.internalName;
+          var dstr = '';
+          var hasVal = false;
+          if (!_sankyuIsEmptyDateRaw(f.raw)) {
+            try {
+              var _bd = new Date(f.raw);
+              if (!isNaN(_bd)) {
+                dstr = _bd.getFullYear() + '-' + ('0' + (_bd.getMonth() + 1)).slice(-2) + '-' + ('0' + _bd.getDate()).slice(-2);
+                hasVal = true;
+              }
+            } catch(_) {}
+          }
+          html += '<div class="sankyu-field-row sankyu-field-inline">';
+          html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
+          html +=   '<div class="sankyu-field-value">';
+          html +=     '<input type="date" id="sankyuBasicDate_' + iname + '" class="sankyu-edit-input sankyu-edit-date" value="' + dstr + '" onchange="quickSaveSankyuBasicDate(\'' + iname + '\', this.value, \'' + escHtml(f.title) + '\')">';
+          html +=     '<button class="sankyu-quick-clear-btn" title="クリア" ' + (hasVal ? '' : 'disabled ') + 'onclick="clearSankyuBasicDate(\'' + iname + '\', \'' + escHtml(f.title) + '\')">✕</button>';
+          html +=   '</div>';
           html += '</div>';
         } else {
           var v = formatSankyuValue(f.raw, f.type);
@@ -8109,7 +8457,8 @@ function renderSankyuDetail(item) {
         }
       });
     }
-    html += '</div>';
+    html += '</div>'; // body
+    html += '</div>'; // section
   });
 
   // 編集モード: 保存ボタン
