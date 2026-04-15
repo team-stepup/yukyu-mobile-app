@@ -944,6 +944,23 @@ body {
   position: relative;
   z-index: 1;
 }
+.sankyu-detail-folder {
+  margin-top: 6px;
+  position: relative;
+  z-index: 1;
+}
+.sankyu-detail-folder-link {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255,255,255,0.22);
+  padding: 4px 10px;
+  border-radius: 999px;
+  text-decoration: none;
+  border: 1px solid rgba(255,255,255,0.35);
+}
+.sankyu-detail-folder-link:active { background: rgba(255,255,255,0.35); }
 .sankyu-detail-sub {
   font-size: 12px;
   opacity: 0.92;
@@ -4116,7 +4133,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '5e4b9d7';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7549,6 +7566,9 @@ function classifySankyuField(title) {
   if (/^状況$/.test(t)) return 'hidden';
   // 社員番号・氏名・派遣先もヘッダーで表示済み
   if (/^(社員番号|氏名|社員氏名|派遣先)$/.test(t)) return 'hidden';
+  // 社員フォルダ・部課 もヘッダーで表示 (名前カードに統合)
+  if (/^(社員フォルダ|社員フォルダー|フォルダ|フォルダー)$/.test(t)) return 'hidden';
+  if (/^(部課|部署|部課名)$/.test(t)) return 'hidden';
   // 出産予定日・出産日 は 基本情報 に昇格 (ヘッダーでも値表示するがフォームは basic に)
   if (/^出産予定日$/.test(t)) return 'basic';
   if (/^出産日$/.test(t)) return 'basic';
@@ -7557,14 +7577,19 @@ function classifySankyuField(title) {
   if (/性別.*[(（]\s*親\s*[)）]/.test(t)) return 'basic';
   if (/性別/.test(t)) return 'basic'; // デフォルト: 親扱い
   if (/子供|子の/.test(t)) return 'child';
+  // 住所 / 電話番号 / 生年月日 は 基本情報 に
+  if (/住所/.test(t)) return 'basic';
+  if (/電話|ＴＥＬ|TEL|tel/.test(t)) return 'basic';
+  if (/生年月日/.test(t)) return 'basic';
   if (/銀行|支店|口座/.test(t)) return 'bank';
-  if (/健保|健康保険|被保険者|整理番号|雇用保険(取得|番号)/.test(t)) return 'insurance';
+  if (/健保|健康保険|被保険者|整理番号|雇用保険/.test(t)) return 'insurance';
   if (/母子手帳|説明書|産前産後|出産一時金|出産手当金|社保免除期間変更（出産後）/.test(t)) return 'sango';
   if (/育休|社保免除期間変更/.test(t)) return 'ikukyu';
   if (/延長/.test(t)) return 'choki';
   if (/保育園|仕事復帰/.test(t)) return 'fukki';
   if (/備考/.test(t)) return 'memo';
-  return 'misc';
+  // 不明なフィールドは 基本情報 (その他カードは廃止)
+  return 'basic';
 }
 
 // 値を整形
@@ -8664,11 +8689,26 @@ function renderSankyuDetail(item) {
   var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
   var kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
   var kYotei = sankyuKeyByTitle('出産予定日', true) || sankyuKeyByTitle('出産予定日');
+  var kBuka = sankyuKeyByTitle('部課') || sankyuKeyByTitle('部署') || sankyuKeyByTitle('部課名');
+  var kFolder = sankyuKeyByTitle('社員フォルダ') || sankyuKeyByTitle('社員フォルダー') || sankyuKeyByTitle('フォルダ') || sankyuKeyByTitle('フォルダー');
 
   var no = String(item[kSyainNo] || '');
   var name = String(item[kShimei] || '');
   var haken = String(item[kHakensaki] || '');
   var status = String(item[kStatus] || '');
+  var buka = kBuka ? String(item[kBuka] || '') : '';
+  // 社員フォルダ は Hyperlink 型 ({ Url, Description }) または文字列
+  var folderUrl = '', folderLabel = '';
+  if (kFolder) {
+    var fv = item[kFolder];
+    if (fv && typeof fv === 'object') {
+      folderUrl = String(fv.Url || fv.url || '');
+      folderLabel = String(fv.Description || fv.description || folderUrl);
+    } else if (fv) {
+      folderUrl = String(fv);
+      folderLabel = folderUrl;
+    }
+  }
   var cat = sankyuItemCategory(item, kStatus, kBirth);
   // 状況文字列が未設定 / 曖昧 (休業中 だけ等) の場合、カテゴリからラベルを補完
   if (!status || status === '休業中') {
@@ -8726,10 +8766,19 @@ function renderSankyuDetail(item) {
     // No. + 派遣先 (部課) を同じ行に
     html += '<div class="sankyu-detail-top-row">';
     if (no)    html += '<span class="sankyu-detail-no">No.' + escHtml(no) + '</span>';
-    if (haken) html += '<span class="sankyu-detail-haken">📍 ' + escHtml(haken) + '</span>';
+    // 派遣先 (部課) の合体表記
+    var hakenLabel = haken;
+    if (buka) hakenLabel += (haken ? ' (' + buka + ')' : buka);
+    if (hakenLabel) html += '<span class="sankyu-detail-haken">📍 ' + escHtml(hakenLabel) + '</span>';
     html += '</div>';
     html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)') + '</div>';
     if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
+    // 社員フォルダ リンク
+    if (folderUrl) {
+      html += '<div class="sankyu-detail-folder">';
+      html +=   '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener noreferrer" class="sankyu-detail-folder-link">🗂 社員フォルダを開く</a>';
+      html += '</div>';
+    }
     // 出産予定日 / 出産日 (ヘッダー内)
     html += '<div class="sankyu-detail-birth">';
     html +=   '<div class="sankyu-detail-birth-row"><span class="sankyu-detail-birth-lbl">出産予定日</span><span class="sankyu-detail-birth-val' + (yoteiEmpty ? ' empty' : '') + '">' + escHtml(yoteiText) + '</span></div>';
@@ -8763,21 +8812,21 @@ function renderSankyuDetail(item) {
 
   // フィールドをセクション分け
   //   sango/ikukyu/choki/fukki は「統合申請カードセクション (apps)」にまとめる
+  //   その他 (misc) セクションは廃止 → 不明なフィールドは basic に統合
   var sections = {
     basic:     { title: '基本情報',     icon: '👤', fields: [] },
     insurance: { title: '保険情報',     icon: '🏥', fields: [] },
     bank:      { title: '振込先',       icon: '🏦', fields: [] },
     child:     { title: '子供',         icon: '👶', fields: [] },
     apps:      { title: '申請カード',   icon: '🌸', fields: [] },
-    memo:      { title: '備考',         icon: '📝', fields: [] },
-    misc:      { title: 'その他',       icon: '📌', fields: [] }
+    memo:      { title: '備考',         icon: '📝', fields: [] }
   };
 
   // 分類結果 → 実セクションのマッピング (申請フロー系は apps にまとめる)
   var _catToSection = {
     basic: 'basic', insurance: 'insurance', bank: 'bank', child: 'child',
     sango: 'apps', ikukyu: 'apps', choki: 'apps', fukki: 'apps',
-    memo: 'memo', misc: 'misc'
+    memo: 'memo', misc: 'basic'
   };
 
   Object.keys(meta).forEach(function(internalName) {
@@ -8820,7 +8869,7 @@ function renderSankyuDetail(item) {
   //   それ以外 (basic/child/insurance/bank/memo/misc) → 行表示
   var cardSectionKeys = { apps: true };
   //   順序: 基本情報 → 保険情報 → 振込先 → 子供 → 申請カード (統合) → 備考 → その他
-  var order = ['basic','insurance','bank','child','apps','memo','misc'];
+  var order = ['basic','insurance','bank','child','apps','memo'];
   order.forEach(function(secKey) {
     var sec = sections[secKey];
     if (!sec || sec.fields.length === 0) return;
