@@ -3362,29 +3362,46 @@ async function fetchTeamsUnreadCount() {
     const url = 'https://graph.microsoft.com/v1.0/me/chats?$expand=lastMessagePreview&$top=50';
     const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
     if (!resp.ok) {
-      console.warn('Graph /me/chats failed:', resp.status);
+      console.warn('[Graph] /me/chats failed:', resp.status);
       return null;
     }
     const data = await resp.json();
     var chats = (data.value || []);
     var unreadCount = 0;
+    var unreadDetails = [];
     chats.forEach(function(chat) {
       var last = chat.lastMessagePreview;
       if (!last || !last.createdDateTime) return;
-      // 自分が送ったメッセージは除外
-      var fromUser = last.from && last.from.user;
-      if (fromUser && fromUser.id && chat.viewpoint && chat.viewpoint.lastMessageReadDateTime) {
-        var lastRead = new Date(chat.viewpoint.lastMessageReadDateTime).getTime();
-        var msgTime = new Date(last.createdDateTime).getTime();
-        if (msgTime > lastRead) unreadCount++;
-      } else if (chat.viewpoint && !chat.viewpoint.lastMessageReadDateTime && last.createdDateTime) {
-        // 一度も読んでいないチャット
+      var vp = chat.viewpoint;
+      if (!vp) return;
+      // 非表示チャットは除外
+      if (vp.isHidden === true) return;
+
+      var msgTime = new Date(last.createdDateTime).getTime();
+      var readTime = vp.lastMessageReadDateTime ? new Date(vp.lastMessageReadDateTime).getTime() : 0;
+
+      // 未読判定: 最終メッセージ時刻 > 最終既読時刻 (既読が無ければ未読とみなす)
+      if (msgTime > readTime) {
+        // 自分自身が送ったメッセージは除外(from.user.id が自分なら除外、ただし判定できなければ含める)
+        var sender = last.from && (last.from.user || last.from.application);
+        var senderLabel = sender ? (sender.displayName || sender.id || 'unknown') : 'system';
         unreadCount++;
+        unreadDetails.push({
+          chatId: chat.id,
+          topic: chat.topic || '(no topic)',
+          type: chat.chatType,
+          sender: senderLabel,
+          msgTime: last.createdDateTime,
+          readTime: vp.lastMessageReadDateTime || '(never)',
+          preview: (last.body && last.body.content) ? String(last.body.content).substring(0, 30) : ''
+        });
       }
     });
+    console.log('[Graph] total chats fetched:', chats.length, '/ unread:', unreadCount);
+    if (unreadDetails.length > 0) console.table(unreadDetails);
     return unreadCount;
   } catch (e) {
-    console.warn('fetchTeamsUnreadCount error:', e);
+    console.warn('[Graph] fetchTeamsUnreadCount error:', e);
     return null;
   }
 }
