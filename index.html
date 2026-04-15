@@ -1385,6 +1385,111 @@ select.sankyu-edit-input {
   margin-top: 3px;
   padding-left: 2px;
 }
+.sankyu-app-card-warn {
+  font-size: 12px;
+  font-weight: 900;
+  color: #d32f2f;
+  background: #fff3f3;
+  border: 1.5px solid #ef9a9a;
+  border-radius: 6px;
+  padding: 6px 9px;
+  margin-bottom: 5px;
+  text-align: center;
+  letter-spacing: 0.5px;
+  animation: sankyuWarnPulse 1.8s ease-in-out infinite;
+}
+@keyframes sankyuWarnPulse {
+  0%, 100% { background: #fff3f3; }
+  50%      { background: #ffebeb; }
+}
+
+/* 備考インライン編集 */
+.sankyu-field-memo {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 6px !important;
+}
+.sankyu-field-memo .sankyu-field-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #c2185b;
+}
+.sankyu-memo-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 12px;
+  border: 1.5px solid #f8bbd0;
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+  background: #fff;
+  line-height: 1.5;
+}
+.sankyu-memo-textarea:focus {
+  outline: none;
+  border-color: #d81b60;
+  box-shadow: 0 0 0 3px rgba(216, 27, 96, 0.15);
+}
+.sankyu-memo-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.sankyu-memo-expand-btn,
+.sankyu-memo-save-btn {
+  padding: 9px 14px;
+  border: none;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.sankyu-memo-expand-btn {
+  background: #fff;
+  color: #d81b60;
+  border: 1.5px solid #f8bbd0;
+  flex: 1;
+}
+.sankyu-memo-save-btn {
+  background: linear-gradient(135deg, #f06292, #d81b60);
+  color: #fff;
+  flex: 1.2;
+  box-shadow: 0 3px 10px rgba(216, 27, 96, 0.3);
+}
+.sankyu-memo-save-btn:disabled {
+  background: #bdbdbd;
+  cursor: wait;
+  box-shadow: none;
+}
+
+/* 備考 フローティングボタン (スクロール追従) */
+.sankyu-note-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 78px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #f06292, #d81b60);
+  color: #fff;
+  border: none;
+  border-radius: 28px;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(216, 27, 96, 0.45);
+  z-index: 100;
+  letter-spacing: 0.5px;
+}
+.sankyu-note-fab:active {
+  transform: scale(0.95);
+  box-shadow: 0 3px 10px rgba(216, 27, 96, 0.4);
+}
+.sankyu-note-fab-icon { font-size: 18px; }
+.sankyu-note-fab-text { white-space: nowrap; }
 .sankyu-app-card-schedule {
   display: flex;
   align-items: center;
@@ -4191,7 +4296,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'cc9585e';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7483,6 +7588,101 @@ async function clearSankyuBasicDate(internalName, title) {
   await quickSaveSankyuBasicDate(internalName, '', title);
 }
 
+// 備考 (Note / Text) フィールドのインライン保存
+//   textValue: 保存する文字列 (空文字でクリア)
+async function quickSaveSankyuNote(internalName, textValue, title) {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
+  var meta = _sankyuFieldsMeta[internalName];
+  if (!meta) { showToast('フィールドが見つかりません', 'error'); return; }
+
+  var val = (textValue === null || textValue === undefined) ? '' : String(textValue);
+  // 変更フラグ用
+  var btnIds = ['sankyuNoteSaveBtn_' + internalName, 'sankyuNoteModalSaveBtn'];
+  btnIds.forEach(function(id) {
+    var b = document.getElementById(id);
+    if (b) { b.disabled = true; b.textContent = '保存中...'; }
+  });
+
+  try {
+    var body = {};
+    body[meta.dataKey] = val === '' ? null : val;
+    await spPatchSankyuItem(_sankyuCurrentItem.Id, body);
+
+    // ローカル反映
+    Object.keys(body).forEach(function(k) {
+      if (k === '__metadata') return;
+      _sankyuCurrentItem[k] = body[k];
+    });
+    if (_sankyuItems) {
+      for (var i = 0; i < _sankyuItems.length; i++) {
+        if (_sankyuItems[i].Id === _sankyuCurrentItem.Id) {
+          _sankyuItems[i] = _sankyuCurrentItem;
+          break;
+        }
+      }
+    }
+    _soumuSankyuSummary = null;
+    showToast(val === '' ? ((title || '備考') + ' をクリアしました') : ('✓ ' + (title || '備考') + ' を保存しました'), 'success');
+
+    // モーダルが開いている場合は閉じる
+    var modal = document.getElementById('sankyuNoteModal');
+    if (modal) modal.remove();
+
+    renderSankyuDetail(_sankyuCurrentItem);
+  } catch (e) {
+    console.error('quickSaveSankyuNote error:', e);
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    btnIds.forEach(function(id) {
+      var b = document.getElementById(id);
+      if (b) { b.disabled = false; b.textContent = '💾 保存'; }
+    });
+  }
+}
+
+// 備考モーダルを開く (フローティングボタンから)
+//   internalName を渡さず、メタから最初の備考フィールドを自動選択
+function openSankyuNoteModal(internalName) {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) { showToast('データ未読込', 'error'); return; }
+
+  // internalName 指定なし → 備考らしいフィールドを自動検索
+  var targetIname = internalName || null;
+  if (!targetIname) {
+    var keys = Object.keys(_sankyuFieldsMeta);
+    for (var i = 0; i < keys.length; i++) {
+      var mm = _sankyuFieldsMeta[keys[i]];
+      if (!mm || !mm.title) continue;
+      if (/備考|メモ|note/i.test(mm.title)) { targetIname = keys[i]; break; }
+    }
+  }
+  if (!targetIname) { showToast('備考フィールドが見つかりません', 'error'); return; }
+
+  var meta = _sankyuFieldsMeta[targetIname];
+  var title = meta.title || '備考';
+  var curVal = _sankyuCurrentItem[meta.dataKey];
+  if (curVal === null || curVal === undefined) curVal = '';
+
+  var ex = document.getElementById('sankyuNoteModal');
+  if (ex) ex.remove();
+
+  var ov = document.createElement('div');
+  ov.id = 'sankyuNoteModal';
+  ov.className = 'confirm-overlay';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:16px;max-width:92vw;width:460px;padding:18px;display:flex;flex-direction:column;max-height:85vh;">' +
+      '<div style="font-size:16px;font-weight:800;margin-bottom:10px;color:#d81b60;">📝 ' + escHtml(title) + '</div>' +
+      '<textarea id="sankyuNoteModalText" rows="10" placeholder="備考を入力..." style="width:100%;padding:12px;border:1.5px solid #f8bbd0;border-radius:10px;font-size:14px;resize:vertical;box-sizing:border-box;flex:1;min-height:180px;font-family:inherit;"></textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button onclick="document.getElementById(\'sankyuNoteModal\').remove()" style="flex:1;padding:12px;border-radius:10px;background:#e0e0e0;color:#424242;border:none;font-weight:700;font-size:14px;cursor:pointer;">キャンセル</button>' +
+        '<button id="sankyuNoteModalSaveBtn" onclick="(function(){var t=document.getElementById(\'sankyuNoteModalText\');if(t)quickSaveSankyuNote(\'' + targetIname + '\', t.value, \'' + escHtml(title) + '\');})()" style="flex:1.4;padding:12px;border-radius:10px;background:linear-gradient(135deg,#f06292,#d81b60);color:#fff;border:none;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 3px 10px rgba(216,27,96,0.35);">💾 保存</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  // 値セット (改行保持のため value で)
+  var ta = document.getElementById('sankyuNoteModalText');
+  if (ta) { ta.value = curVal; setTimeout(function(){ ta.focus(); }, 50); }
+}
+
 // 基本情報の 出産予定日 / 出産日 インライン保存
 //   出産日 or 出産予定日 が入力されたら 全申請日付を自動計算 → 一括 PATCH
 async function quickSaveSankyuBasicDate(internalName, dateValue, title) {
@@ -8383,6 +8583,18 @@ function renderSankyuAppCard(card, isEdit) {
 
   html += '<div class="sankyu-app-card-body">';
 
+  // 延長申請6回目 の注意書き (期間の上に赤字で表示)
+  var _sankyuChokiWarn = false;
+  try {
+    var _ctForWarn = (card.title || '') + ' ' + ((card.start && card.start.title) || '') + ' ' + ((card.end && card.end.title) || '');
+    if (/延長申請\s*6\s*回目/.test(_ctForWarn) || /延長.*6\s*回目/.test(_ctForWarn)) {
+      _sankyuChokiWarn = true;
+    }
+  } catch(_) {}
+  if (_sankyuChokiWarn) {
+    html += '<div class="sankyu-app-card-warn">※注意事項　延長か終了か</div>';
+  }
+
   if (card.type === 'period') {
     // 期間 (開始 〜 終了)
     if (isEdit) {
@@ -9182,6 +9394,20 @@ function renderSankyuDetail(item) {
           html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
           html +=   '<div class="sankyu-field-value">' + renderSankyuFieldInput(f.meta, f.raw) + '</div>';
           html += '</div>';
+        } else if (secKey === 'memo' && (f.type === 'Note' || f.type === 'Text' || /備考|メモ/.test(f.title))) {
+          // 備考: インライン編集可能な textarea
+          var iname2 = f.meta.internalName;
+          var curNote = (f.raw === null || f.raw === undefined) ? '' : String(f.raw);
+          html += '<div class="sankyu-field-row sankyu-field-memo">';
+          html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
+          html +=   '<div class="sankyu-field-value">';
+          html +=     '<textarea id="sankyuNoteInline_' + iname2 + '" class="sankyu-memo-textarea" rows="4" placeholder="備考を入力...">' + escHtml(curNote) + '</textarea>';
+          html +=     '<div class="sankyu-memo-btns">';
+          html +=       '<button class="sankyu-memo-expand-btn" onclick="openSankyuNoteModal(\'' + iname2 + '\')" title="大きく開く">🔍 拡大</button>';
+          html +=       '<button id="sankyuNoteSaveBtn_' + iname2 + '" class="sankyu-memo-save-btn" onclick="(function(){var t=document.getElementById(\'sankyuNoteInline_' + iname2 + '\');if(t)quickSaveSankyuNote(\'' + iname2 + '\', t.value, \'' + escHtml(f.title) + '\');})()">💾 保存</button>';
+          html +=     '</div>';
+          html +=   '</div>';
+          html += '</div>';
         } else if (secKey === 'basic' && f.type === 'DateTime' && /^(出産予定日|出産日)$/.test(f.title)) {
           // 基本情報の 出産予定日 / 出産日 はインライン編集可能
           var iname = f.meta.internalName;
@@ -9224,7 +9450,26 @@ function renderSankyuDetail(item) {
     html += '</div>';
   }
 
-  html += '<div style="height:30px;"></div>';
+  html += '<div style="height:90px;"></div>';
+
+  // 備考 フローティングボタン (スクロール追従)
+  //   閲覧モードのみ / 備考フィールドが 1つ以上存在する場合に限る
+  if (!isEdit) {
+    var hasNoteField = false;
+    if (_sankyuFieldsMeta) {
+      Object.keys(_sankyuFieldsMeta).forEach(function(k) {
+        var mm = _sankyuFieldsMeta[k];
+        if (mm && mm.title && /備考|メモ/.test(mm.title)) hasNoteField = true;
+      });
+    }
+    if (hasNoteField) {
+      html += '<button class="sankyu-note-fab" onclick="openSankyuNoteModal()" title="備考を開く">';
+      html +=   '<span class="sankyu-note-fab-icon">📝</span>';
+      html +=   '<span class="sankyu-note-fab-text">備考</span>';
+      html += '</button>';
+    }
+  }
+
   body.innerHTML = html;
 }
 
