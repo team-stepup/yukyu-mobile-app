@@ -4145,7 +4145,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '9fad40f';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6027,13 +6027,14 @@ async function loadHomeBadges() {
   var mFilter = "$filter=" + MF.payDate + " ge datetime'" + friStart.toISOString() + "' and " + MF.payDate + " le datetime'" + friEnd.toISOString() + "'&$top=500";
   var yFilter = "$filter=" + F.leaveDate + " ge datetime'" + monthStart.toISOString() + "' and " + F.leaveDate + " le datetime'" + todayEnd.toISOString() + "'&$top=500";
 
-  // 5つのAPI呼び出しを同時実行
+  // 6つのAPI呼び出しを同時実行
   var results = await Promise.allSettled([
     spGet(LIST_MAEBARI_GUID, mFilter).catch(function(e) { console.log('Maebari badge error:', e); return []; }),
     spGetAll(LIST_EMPLOYEES_GUID, '$top=500').catch(function(e) { console.log('Employee fetch error:', e); return []; }),
     spGet(LIST_LEAVE_GUID, yFilter).catch(function(e) { console.log('Yukyu badge error:', e); return []; }),
     fetchEmployeeFields().catch(function(e) { console.log('Fields fetch error:', e); return []; }),
-    loadVehicleBadgeData().catch(function(e) { console.log('Vehicle badge error:', e); return null; })
+    loadVehicleBadgeData().catch(function(e) { console.log('Vehicle badge error:', e); return null; }),
+    fetchSankyuSummary().catch(function(e) { console.log('Sankyu badge error:', e); return null; })
   ]);
 
   var mRecs = results[0].value || [];
@@ -6041,6 +6042,7 @@ async function loadHomeBadges() {
   var yRecs = results[2].value || [];
   var meta = results[3].value || [];
   var vehicleResult = results[4].value;
+  var sankyuResult = results[5].value;
 
   // 前払いバッジ
   var mBadge = document.getElementById('maebariBadgeCount');
@@ -6110,6 +6112,17 @@ async function loadHomeBadges() {
     if (vBS) {
       if (vehicleResult.syaken > 0) { vBS.textContent = vehicleResult.syaken; vBS.style.display = 'inline-block'; }
       else { vBS.style.display = 'none'; }
+    }
+  }
+
+  // 産休育休バッジ (休業中の人数)
+  var sBadge = document.getElementById('sankyuBadgeCount');
+  if (sBadge && sankyuResult) {
+    if (sankyuResult.active > 0) {
+      sBadge.textContent = sankyuResult.active;
+      sBadge.style.display = 'inline-block';
+    } else {
+      sBadge.style.display = 'none';
     }
   }
 }
