@@ -4116,7 +4116,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'de9c272';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7560,7 +7560,7 @@ function classifySankyuField(title) {
   if (/銀行|支店|口座/.test(t)) return 'bank';
   if (/健保|健康保険|被保険者|整理番号|雇用保険(取得|番号)/.test(t)) return 'insurance';
   if (/母子手帳|説明書|産前産後|出産一時金|出産手当金|社保免除期間変更（出産後）/.test(t)) return 'sango';
-  if (/育休|社保免除期間変更1歳/.test(t)) return 'ikukyu';
+  if (/育休|社保免除期間変更/.test(t)) return 'ikukyu';
   if (/延長/.test(t)) return 'choki';
   if (/保育園|仕事復帰/.test(t)) return 'fukki';
   if (/備考/.test(t)) return 'memo';
@@ -8110,6 +8110,44 @@ var _SANKYU_CAT_INFO = {
   misc:   { icon: '📌', label: 'その他',   color: '#90a4ae' }
 };
 
+// 月次チェーン: 育休N回目 / 延長申請N回目 などの連続申請カードに
+// 合成期間 (前のカードの日付 + 1日 〜 当カードの日付) を付与する
+function _sankyuComputeMonthlyPeriods(cards) {
+  if (!cards || !cards.length) return;
+  // チェーン対象: single カードで ikukyu または choki、かつ回目/初回/開始 のパターン
+  var chainRe = /(\d|[０-９])+回目|初回|育休開始/;
+  var chain = [];
+  cards.forEach(function(c) {
+    if (c.type !== 'single') return;
+    if (c.sourceCat !== 'ikukyu' && c.sourceCat !== 'choki') return;
+    var title = (c.main && c.main.title) || c.title || '';
+    if (!chainRe.test(title)) return;
+    var d = _sankyuCardSortDate(c);
+    if (d === null) return;
+    chain.push({ card: c, date: d });
+  });
+  if (chain.length < 2) return;
+  // 日付順にソート (既にソートされているが念のため)
+  chain.sort(function(a, b) { return a.date - b.date; });
+  // 2番目以降のカードに合成期間を設定
+  for (var i = 1; i < chain.length; i++) {
+    var prev = chain[i - 1];
+    var cur  = chain[i];
+    var startDate = new Date(prev.date);
+    startDate.setDate(startDate.getDate() + 1);
+    var endDate = new Date(cur.date);
+    cur.card.synthPeriodStart = startDate;
+    cur.card.synthPeriodEnd   = endDate;
+  }
+}
+function _sankyuFormatSynthDate(d) {
+  if (!d) return '';
+  var y = d.getFullYear();
+  var m = ('0' + (d.getMonth() + 1)).slice(-2);
+  var dd = ('0' + d.getDate()).slice(-2);
+  return y + '/' + m + '/' + dd;
+}
+
 // 1枚のカードを描画
 function renderSankyuAppCard(card, isEdit) {
   var html = '';
@@ -8169,7 +8207,18 @@ function renderSankyuAppCard(card, isEdit) {
         : (m.raw === null || m.raw === undefined || m.raw === '');
       var mv = formatSankyuValue(m.raw, m.type);
       if (m.type === 'DateTime') {
-        html += '<div class="sankyu-app-card-main-date' + (mEmpty ? ' empty' : '') + '">' + (mEmpty ? '—' : escHtml(mv.text)) + '</div>';
+        // 合成期間があれば 「開始 〜 終了」 の表記で表示
+        if (card.synthPeriodStart && card.synthPeriodEnd) {
+          var sStr = _sankyuFormatSynthDate(card.synthPeriodStart);
+          var eStr = _sankyuFormatSynthDate(card.synthPeriodEnd);
+          html += '<div class="sankyu-app-card-period">';
+          html +=   '<div class="sankyu-app-card-period-date">' + escHtml(sStr) + '</div>';
+          html +=   '<span class="sankyu-app-card-tilde">〜</span>';
+          html +=   '<div class="sankyu-app-card-period-date">' + escHtml(eStr) + '</div>';
+          html += '</div>';
+        } else {
+          html += '<div class="sankyu-app-card-main-date' + (mEmpty ? ' empty' : '') + '">' + (mEmpty ? '—' : escHtml(mv.text)) + '</div>';
+        }
       } else {
         html += '<div style="font-size:13px;font-weight:700;color:#222;word-break:break-word;white-space:pre-wrap;">' + (mEmpty ? '<span style="color:#ccc;">—</span>' : escHtml(mv.text)) + '</div>';
       }
@@ -8815,6 +8864,11 @@ function renderSankyuDetail(item) {
         if (db === null) return -1;
         return da - db;
       });
+      // 月次チェーン用の合成期間を計算
+      //   育休N回目 / 延長申請N回目 は連続する月次申請で、
+      //   期間 = (前のカードの日付 + 1日) 〜 (当カードの日付) として表示
+      //   起点は 育休開始社保免除 (あれば) → それ以前は空
+      _sankyuComputeMonthlyPeriods(_builtCards);
       // 進捗カウント
       var totalWithSub = 0, doneCount = 0;
       _builtCards.forEach(function(c) {
