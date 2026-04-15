@@ -4066,7 +4066,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '485d8cb';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7559,6 +7559,44 @@ function _sankyuIsEmptyDateRaw(raw) {
   return false;
 }
 
+// タイトル正規化: 全角数字→半角、空白除去、括弧類除去
+//   ペア検出を空白や全角・半角差に強くするため
+function _sankyuNormTitle(title) {
+  if (!title) return '';
+  var t = String(title);
+  // 全角数字 → 半角
+  t = t.replace(/[０-９]/g, function(c) {
+    return String.fromCharCode(c.charCodeAt(0) - 0xFF10 + 0x30);
+  });
+  // 空白 (半角・全角)
+  t = t.replace(/[\s　]+/g, '');
+  // 装飾的括弧
+  t = t.replace(/[\(（\)）]/g, '');
+  return t;
+}
+
+// タイトルから (prefix, 番号) を抽出 — 番号ベースのグルーピング用
+//   例: "延長申請5回目開始日"     → { prefix: "延長申請", num: 5 }
+//   例: "育休初回申請開始日"       → { prefix: "育休", num: 1 }     (初回 → 1)
+//   例: "育休7回目申請終了日"      → { prefix: "育休", num: 7 }
+//   例: "延長申請12回目申請日"     → { prefix: "延長申請", num: 12 }
+function _sankyuExtractPrefixNum(title) {
+  if (!title) return null;
+  var t = _sankyuNormTitle(title);
+  // 「初回」= 1 として扱う
+  t = t.replace(/初回/g, '1回目');
+  // 最初の数字 + (回目)? を探す
+  var m = t.match(/^(.*?)(\d+)(?:回目)?/);
+  if (!m) return null;
+  var prefix = m[1];
+  var num = parseInt(m[2], 10);
+  if (!prefix || isNaN(num)) return null;
+  // prefix から 末尾の助詞類 / 接続文字 を除去
+  prefix = prefix.replace(/[のの・\-ー、,]+$/, '').trim();
+  if (!prefix) return null;
+  return { prefix: prefix, num: num };
+}
+
 // タイトル内で「最後に」ヒットするマーカーの「直前まで」を base として抜く
 //   例: "延長申請5回目開始日" + _SANKYU_START_RE → "延長申請5回目"
 //   例: "育休開始社保免除開始日" + _SANKYU_START_RE → "育休開始社保免除" (最後の 開始 だけをマーカーとして使う)
@@ -7627,16 +7665,18 @@ function _sankyuBuildCards(fields) {
   // インデックス付きコピー
   var arr = fields.map(function(f, i) { return { f: f, i: i }; });
 
-  // base で始まる DateTime フィールドを検索 (役割指定)
+  // base で始まる DateTime フィールドを検索 (役割指定, 正規化比較)
   //   wantedRole: 'start' | 'end' | 'submit'
   function findPrefixedSibling(baseTitle, wantedRole, excludeIdx) {
+    var nBase = _sankyuNormTitle(baseTitle);
     for (var j = 0; j < arr.length; j++) {
       if (used[j]) continue;
       if (excludeIdx && excludeIdx.indexOf(j) >= 0) continue;
       var g = arr[j].f;
       if (g.type !== 'DateTime') continue;
       if (!g.title) continue;
-      if (g.title.indexOf(baseTitle) !== 0) continue; // 先頭一致
+      var nG = _sankyuNormTitle(g.title);
+      if (nG.indexOf(nBase) !== 0) continue; // 正規化した先頭一致
       if (_sankyuTitleRole(g.title) !== wantedRole) continue;
       return j;
     }
@@ -7673,6 +7713,68 @@ function _sankyuBuildCards(fields) {
     used[i] = true;
     used[endIdx] = true;
     if (subIdx >= 0) used[subIdx] = true;
+  }
+
+  // 1.5th pass: 番号ベースのペア検出 (延長申請N回目 / 育休N回目 等)
+  //   prefix-based で取り損ねた start/end/submit を (prefix, num) でグルーピング
+  var numGroups = {}; // key = "prefix|num" → { start, end, submit, representative }
+  for (var p = 0; p < arr.length; p++) {
+    if (used[p]) continue;
+    var fp = arr[p].f;
+    if (fp.type !== 'DateTime') continue;
+    if (!fp.title) continue;
+    var pn = _sankyuExtractPrefixNum(fp.title);
+    if (!pn) continue;
+    var key = pn.prefix + '|' + pn.num;
+    if (!numGroups[key]) numGroups[key] = { startIdx: -1, endIdx: -1, subIdx: -1, prefix: pn.prefix, num: pn.num };
+    var role = _sankyuTitleRole(fp.title);
+    if (role === 'start' && numGroups[key].startIdx < 0) numGroups[key].startIdx = p;
+    else if (role === 'end' && numGroups[key].endIdx < 0) numGroups[key].endIdx = p;
+    else if (role === 'submit' && numGroups[key].subIdx < 0) numGroups[key].subIdx = p;
+  }
+  Object.keys(numGroups).forEach(function(key) {
+    var grp = numGroups[key];
+    // start + end がそろっていれば period カード
+    if (grp.startIdx >= 0 && grp.endIdx >= 0) {
+      if (used[grp.startIdx] || used[grp.endIdx]) return;
+      var titleLabel = grp.prefix + grp.num + '回目';
+      cards.push({
+        type: 'period',
+        title: titleLabel,
+        start: arr[grp.startIdx].f,
+        end: arr[grp.endIdx].f,
+        submitted: grp.subIdx >= 0 && !used[grp.subIdx] ? arr[grp.subIdx].f : null
+      });
+      used[grp.startIdx] = true;
+      used[grp.endIdx] = true;
+      if (grp.subIdx >= 0) used[grp.subIdx] = true;
+    }
+  });
+
+  // 1.7th pass: 孤児 submit の 既存カードへの接続
+  //   残った submit フィールドを (prefix, num) で既存カードとマッチ → そのカードに ぶら下げる
+  for (var s = 0; s < arr.length; s++) {
+    if (used[s]) continue;
+    var sf = arr[s].f;
+    if (sf.type !== 'DateTime') continue;
+    if (_sankyuTitleRole(sf.title) !== 'submit') continue;
+    var spn = _sankyuExtractPrefixNum(sf.title);
+    if (!spn) continue;
+    // 既存カードの中から (prefix, num) が一致するものを探す
+    for (var ci = 0; ci < cards.length; ci++) {
+      var card = cards[ci];
+      if (card.submitted) continue; // 既に埋まっている
+      // カードの代表フィールド (period は start, single は main) からも pn 抽出
+      var rep = card.start || card.main;
+      if (!rep || !rep.title) continue;
+      var rpn = _sankyuExtractPrefixNum(rep.title);
+      if (!rpn) continue;
+      if (rpn.prefix === spn.prefix && rpn.num === spn.num) {
+        card.submitted = sf;
+        used[s] = true;
+        break;
+      }
+    }
   }
 
   // 2nd pass: 残りのフィールドを単体カードに
