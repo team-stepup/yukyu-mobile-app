@@ -4302,7 +4302,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'dfc61ca';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6828,10 +6828,10 @@ var _sankyuCurrentItem = null;    // 現在表示中の item
 var _sankyuNewMode = false;       // true なら新規追加モード (POST)
 var _sankyuPickedEmp = null;      // 新規モードで選択中の社員 (emp オブジェクト)
 // アコーディオン開閉状態 (再描画後も維持)
-//   デフォルト: basic/child/insurance/bank は閉じる、他は開く
+//   デフォルト: basic/child/insurance/bank/memo は閉じる、apps は開く
 var _sankyuAccordion = {
-  basic: false, child: false, insurance: false, bank: false,
-  apps:  true,  memo: true, misc: true
+  basic: false, child: false, insurance: false, bank: false, memo: false,
+  apps:  true, misc: true
 };
 function _sankyuToggleSection(key) {
   _sankyuAccordion[key] = !_sankyuAccordion[key];
@@ -7594,6 +7594,48 @@ async function clearSankyuBasicDate(internalName, title) {
   await quickSaveSankyuBasicDate(internalName, '', title);
 }
 
+// 汎用: Text フィールドをインライン保存 (担当者等)
+async function quickSaveSankyuText(internalName, textValue, title) {
+  if (!_sankyuCurrentItem || !_sankyuFieldsMeta) return;
+  var meta = _sankyuFieldsMeta[internalName];
+  if (!meta) { showToast('フィールドが見つかりません', 'error'); return; }
+  var val = (textValue === null || textValue === undefined) ? '' : String(textValue);
+  var inputEl = document.getElementById('sankyuCareStaff_' + internalName);
+  var prevBg = '';
+  if (inputEl) {
+    prevBg = inputEl.style.background;
+    inputEl.style.background = '#fff9c4';
+    inputEl.disabled = true;
+  }
+  try {
+    var body = {};
+    body[meta.dataKey] = val === '' ? null : val;
+    await spPatchSankyuItem(_sankyuCurrentItem.Id, body);
+    Object.keys(body).forEach(function(k) {
+      if (k === '__metadata') return;
+      _sankyuCurrentItem[k] = body[k];
+    });
+    if (_sankyuItems) {
+      for (var i = 0; i < _sankyuItems.length; i++) {
+        if (_sankyuItems[i].Id === _sankyuCurrentItem.Id) {
+          _sankyuItems[i] = _sankyuCurrentItem;
+          break;
+        }
+      }
+    }
+    _soumuSankyuSummary = null;
+    showToast(val === '' ? ((title || '項目') + ' をクリアしました') : ('✓ ' + (title || '項目') + ' を保存しました'), 'success');
+    renderSankyuDetail(_sankyuCurrentItem);
+  } catch (e) {
+    console.error('quickSaveSankyuText error:', e);
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    if (inputEl) {
+      inputEl.style.background = prevBg;
+      inputEl.disabled = false;
+    }
+  }
+}
+
 // 備考 (Note / Text) フィールドのインライン保存
 //   textValue: 保存する文字列 (空文字でクリア)
 async function quickSaveSankyuNote(internalName, textValue, title) {
@@ -7871,6 +7913,10 @@ function classifySankyuField(title) {
   if (/母子手帳|説明書|産前産後|出産一時金|出産手当金|社保免除期間変更（出産後）/.test(t)) return 'sango';
   if (/育休|社保免除期間変更/.test(t)) return 'ikukyu';
   if (/延長/.test(t)) return 'choki';
+  // 保育園申請依頼 の 申請日1/2 は PDFカード内にインライン表示するため 単独カードとしては非表示
+  if (/保育園申請依頼.*申請日/.test(t)) return 'hidden';
+  // 保育園申請依頼 の 担当者 フィールドも PDFカード内にインライン表示
+  if (/保育園申請依頼.*担当者.*[１1２2]?$/.test(t) && !/ＰＤＦ|PDF/.test(t)) return 'hidden';
   if (/保育園|仕事復帰/.test(t)) return 'fukki';
   if (/備考/.test(t)) return 'memo';
   // 不明なフィールドは 基本情報 (その他カードは廃止)
@@ -8491,6 +8537,58 @@ function _sankyuComputeScheduleDates(cards, yoteiRaw) {
   });
 }
 
+// _sankyuFieldsMeta からタイトル条件に合うフィールドを検索
+function _sankyuLookupFieldByTest(testFn) {
+  if (!_sankyuFieldsMeta || typeof testFn !== 'function') return null;
+  var keys = Object.keys(_sankyuFieldsMeta);
+  for (var i = 0; i < keys.length; i++) {
+    var f = _sankyuFieldsMeta[keys[i]];
+    if (!f || !f.title) continue;
+    try {
+      if (testFn(f)) return f;
+    } catch(_) {}
+  }
+  return null;
+}
+
+// 保育園申請依頼PDFカード用: 依頼日 (DateTime) + 担当者 (Text) をカードに紐付け
+//   対象: 保育園申請依頼→担当者（...をお願いするＰＤＦ）(1/2)
+function _sankyuComputeCareRequestCards(cards) {
+  if (!cards || !cards.length) return;
+  cards.forEach(function(c) {
+    var title = (c.main && c.main.title) || c.title || '';
+    if (!title) return;
+    if (!/保育園申請依頼/.test(title)) return;
+    if (!/ＰＤＦ|PDF/.test(title)) return;
+
+    // PDFカードの番号判定 (末尾に 2 がつけば round=2, それ以外 1)
+    var round = /２$|2$|ＰＤＦ[）\)]?\s*2$|ＰＤＦ[）\)]?\s*２$/.test(title) ? 2 : 1;
+
+    // 依頼日フィールド (申請日1 / 申請日2)
+    var reqDateField = _sankyuLookupFieldByTest(function(f) {
+      if (f.type !== 'DateTime') return false;
+      if (!/保育園申請依頼/.test(f.title)) return false;
+      if (round === 2) return /２\s*申請日|2\s*申請日|申請日\s*2|申請日\s*２/.test(f.title);
+      return /１\s*申請日|1\s*申請日|申請日\s*1|申請日\s*１/.test(f.title) && !/[２2]\s*申請日/.test(f.title);
+    });
+
+    // 担当者フィールド (Text)
+    var staffField = _sankyuLookupFieldByTest(function(f) {
+      if (f.type !== 'Text' && f.type !== 'Note') return false;
+      if (!/担当者/.test(f.title)) return false;
+      // PDF タイトルを含む担当者フィールドは除外 (PDFカード自体と混同しないため)
+      if (/ＰＤＦ|PDF/.test(f.title)) return false;
+      if (round === 2) return /２|2/.test(f.title);
+      return !/[２2]/.test(f.title) || /[１1]/.test(f.title);
+    });
+
+    c.isCareRequest = true;
+    c.careRound = round;
+    c.careReqDateField = reqDateField; // null 可
+    c.careStaffField   = staffField;   // null 可
+  });
+}
+
 // 法律に基づく合成期間: 出産日から法定期間を計算して該当カードに設定
 //   対象: 社保免除期間変更(出産後), 出産一時金申請, 出産手当金申請,
 //         育休開始社保免除, 社保免除期間変更1歳6ヶ月まで, 社保免除期間変更 2歳まで
@@ -8560,8 +8658,13 @@ function renderSankyuAppCard(card, isEdit) {
 
   // 「申請済み」判定: 申請日 が入っていれば done
   //   isReceivable カードは main 自体が「取得日」なので main に値があれば 済
+  //   isCareRequest カードは 依頼日 + 担当者 の両方が入っていれば 依頼済
   var isDone = false;
-  if (card.isReceivable) {
+  if (card.isCareRequest) {
+    var _cdReq = card.careReqDateField ? _sankyuCurrentItem && _sankyuCurrentItem[card.careReqDateField.dataKey] : null;
+    var _cdStaff = card.careStaffField ? _sankyuCurrentItem && _sankyuCurrentItem[card.careStaffField.dataKey] : null;
+    if (!_sankyuIsEmptyDateRaw(_cdReq) && _cdStaff && String(_cdStaff).trim() !== '') isDone = true;
+  } else if (card.isReceivable) {
     if (card.main && !_sankyuIsEmptyDateRaw(card.main.raw)) isDone = true;
   } else if (card.submitted && !_sankyuIsEmptyDateRaw(card.submitted.raw)) {
     isDone = true;
@@ -8578,7 +8681,13 @@ function renderSankyuAppCard(card, isEdit) {
   var displayTitle = _sankyuDisplayTitle(card.title || '(無題)');
   html += '<div class="sankyu-app-card-title">';
   html +=   '<span class="sankyu-app-card-title-text">' + escHtml(displayTitle) + '</span>';
-  if (card.isReceivable) {
+  if (card.isCareRequest) {
+    if (isDone) {
+      html += '<span class="sankyu-app-card-done-badge">✓ 依頼済</span>';
+    } else {
+      html += '<span class="sankyu-app-card-active-badge">● 未依頼</span>';
+    }
+  } else if (card.isReceivable) {
     if (isDone) {
       html += '<span class="sankyu-app-card-done-badge">✓ 済</span>';
     } else {
@@ -8640,7 +8749,43 @@ function renderSankyuAppCard(card, isEdit) {
         ? _sankyuIsEmptyDateRaw(m.raw)
         : (m.raw === null || m.raw === undefined || m.raw === '');
       var mv = formatSankyuValue(m.raw, m.type);
-      if (m.type === 'DateTime') {
+      // isCareRequest: 依頼日 (カレンダー) + 担当者 (テキスト) インライン編集
+      if (card.isCareRequest) {
+        // 依頼日
+        var careReqIname = card.careReqDateField ? card.careReqDateField.internalName : null;
+        var careReqVal = (careReqIname && _sankyuCurrentItem) ? _sankyuCurrentItem[card.careReqDateField.dataKey] : null;
+        var careReqDateStr = '';
+        if (!_sankyuIsEmptyDateRaw(careReqVal)) {
+          try {
+            var _crd = new Date(careReqVal);
+            if (!isNaN(_crd)) {
+              careReqDateStr = _crd.getFullYear() + '-' + ('0' + (_crd.getMonth() + 1)).slice(-2) + '-' + ('0' + _crd.getDate()).slice(-2);
+            }
+          } catch(_) {}
+        }
+        html += '<div class="sankyu-app-card-submitted">';
+        html +=   '<div class="sankyu-app-card-submitted-label">📅 依頼日</div>';
+        if (careReqIname) {
+          html += '<input type="date" id="sankyuBasicDate_' + careReqIname + '" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + careReqDateStr + '" onchange="quickSaveSankyuBasicDate(\'' + careReqIname + '\', this.value, \'' + escHtml(card.careReqDateField.title || '依頼日') + '\')">';
+        } else {
+          html += '<div style="flex:1;color:#bbb;font-size:11px;">申請日フィールドが見つかりません</div>';
+        }
+        html += '</div>';
+
+        // 担当者
+        var careStaffIname = card.careStaffField ? card.careStaffField.internalName : null;
+        var careStaffVal = (careStaffIname && _sankyuCurrentItem) ? _sankyuCurrentItem[card.careStaffField.dataKey] : '';
+        if (careStaffVal === null || careStaffVal === undefined) careStaffVal = '';
+        html += '<div class="sankyu-app-card-submitted">';
+        html +=   '<div class="sankyu-app-card-submitted-label">👤 担当者</div>';
+        if (careStaffIname) {
+          html += '<input type="text" id="sankyuCareStaff_' + careStaffIname + '" class="sankyu-edit-input sankyu-quick-submit" placeholder="担当者名" value="' + escHtml(String(careStaffVal)) + '" onchange="quickSaveSankyuText(\'' + careStaffIname + '\', this.value, \'' + escHtml(card.careStaffField.title || '担当者') + '\')">';
+        } else {
+          html += '<div style="flex:1;color:#bbb;font-size:11px;">担当者フィールドが見つかりません</div>';
+        }
+        html += '</div>';
+      }
+      else if (m.type === 'DateTime') {
         // isReceivable: 予定日 (読み取り専用) + 取得日 (インライン編集)
         if (card.isReceivable) {
           // 予定日表示
@@ -9376,6 +9521,8 @@ function renderSankyuDetail(item) {
       // 予定日ベースの合成予定日 (出産予定日 - 7ヶ月)
       //   対象: 出産予定日母子手帳, 産休育休説明
       _sankyuComputeScheduleDates(_builtCards, yoteiRaw);
+      // 保育園申請依頼PDFカードに依頼日+担当者フィールドを紐付け
+      _sankyuComputeCareRequestCards(_builtCards);
       // 進捗カウント
       var totalWithSub = 0, doneCount = 0;
       _builtCards.forEach(function(c) {
