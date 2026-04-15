@@ -993,6 +993,120 @@ body {
 }
 .sankyu-empty-icon { font-size: 36px; margin-bottom: 8px; }
 
+/* 編集モードボタン */
+.sankyu-edit-btn {
+  background: linear-gradient(135deg, #f06292, #d81b60);
+  color: #fff;
+  border: none;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(216, 27, 96, 0.28);
+  transition: transform .12s ease;
+}
+.sankyu-edit-btn:active { transform: scale(0.95); }
+.sankyu-cancel-btn {
+  background: #fff;
+  color: #888;
+  border: 1.5px solid #ddd;
+  box-shadow: none;
+}
+.sankyu-cancel-btn:active { background: #f5f5f5; }
+
+/* 編集 行 */
+.sankyu-field-row.sankyu-field-edit {
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 14px;
+}
+.sankyu-field-row.sankyu-field-edit .sankyu-field-label {
+  flex: none;
+  width: 100%;
+  font-size: 11px;
+  color: #d81b60;
+  font-weight: 700;
+}
+.sankyu-field-row.sankyu-field-edit .sankyu-field-value {
+  width: 100%;
+}
+
+/* 編集 入力 */
+.sankyu-edit-input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1.5px solid #f8bbd0;
+  border-radius: 9px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+  box-sizing: border-box;
+  font-family: inherit;
+  color: #222;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sankyu-edit-input:focus {
+  border-color: #d81b60;
+  box-shadow: 0 0 0 3px rgba(216, 27, 96, 0.12);
+}
+.sankyu-edit-textarea { resize: vertical; min-height: 60px; line-height: 1.45; }
+.sankyu-edit-date { color: #1976d2; font-weight: 700; }
+select.sankyu-edit-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23d81b60' d='M2 4l4 4 4-4z'/></svg>") right 10px center / 12px no-repeat;
+  padding-right: 28px;
+}
+.sankyu-edit-checklbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #fce4ec;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #d81b60;
+  font-weight: 700;
+}
+
+/* 保存バー */
+.sankyu-save-bar {
+  position: sticky;
+  bottom: 10px;
+  margin-top: 14px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 14px;
+  box-shadow: 0 -3px 16px rgba(0, 0, 0, 0.08);
+  z-index: 5;
+}
+.sankyu-save-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #f06292, #d81b60);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(216, 27, 96, 0.35);
+  transition: transform .12s ease, box-shadow .12s ease;
+  letter-spacing: 0.5px;
+}
+.sankyu-save-btn:active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 8px rgba(216, 27, 96, 0.3);
+}
+.sankyu-save-btn:disabled {
+  background: #bdbdbd;
+  box-shadow: none;
+  cursor: wait;
+}
+
 /* Home Search Card */
 .home-search-card {
   background: #fff;
@@ -3533,7 +3647,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '552b814';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6041,6 +6155,8 @@ var SANKYU_LIST_PATH = '/sites/PowerApps/Lists/List52';
 var _sankyuFieldsMeta = null;     // { internalName: { title, type, entityPropertyName, choices } }
 var _sankyuItems = null;          // raw items from List52
 var _sankyuCurrentFilter = 'all'; // all | sango | ikuji | kyugyo | owari
+var _sankyuEditMode = false;      // true なら詳細画面が編集モード
+var _sankyuCurrentItem = null;    // 現在表示中の item
 
 // 状況 → カテゴリー判定
 function sankyuStatusCategory(status) {
@@ -6058,7 +6174,7 @@ async function fetchSankyuFields() {
   try {
     var token = await getToken();
     if (!token) return null;
-    var url = SP_SITE_URL + "/_api/web/GetList('" + SANKYU_LIST_PATH + "')/fields?$filter=Hidden eq false&$select=InternalName,EntityPropertyName,Title,TypeAsString,Choices&$top=300";
+    var url = SP_SITE_URL + "/_api/web/GetList('" + SANKYU_LIST_PATH + "')/fields?$filter=Hidden eq false&$select=InternalName,EntityPropertyName,Title,TypeAsString,Choices,ReadOnlyField,Required&$top=300";
     var resp = await fetch(url, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
@@ -6087,6 +6203,8 @@ async function fetchSankyuFields() {
         internalName: iname,
         entityPropertyName: f.EntityPropertyName || iname,
         dataKey: dataKey,
+        readOnly: !!f.ReadOnlyField,
+        required: !!f.Required,
         choices: f.Choices ? (f.Choices.results || f.Choices) : null
       };
     });
@@ -6096,6 +6214,94 @@ async function fetchSankyuFields() {
     console.error('fetchSankyuFields error:', e);
     return null;
   }
+}
+
+// List52 の ListItemEntityType を取得 (PATCH に必要)
+var _sankyuEntityType = null;
+async function getSankyuEntityType() {
+  if (_sankyuEntityType) return _sankyuEntityType;
+  try {
+    var token = await getToken();
+    if (!token) return null;
+    var url = SP_SITE_URL + "/_api/web/GetList('" + SANKYU_LIST_PATH + "')?$select=ListItemEntityTypeFullName";
+    var resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) throw new Error('Entity type fetch failed: ' + resp.status);
+    var data = await resp.json();
+    _sankyuEntityType = data.d.ListItemEntityTypeFullName;
+    return _sankyuEntityType;
+  } catch (e) {
+    console.warn('getSankyuEntityType error:', e);
+    return null;
+  }
+}
+
+// 産休育休 PATCH (MERGE)
+var _sankyuBadFields = {};
+async function spPatchSankyuItem(itemId, body) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var entityType = await getSankyuEntityType();
+  if (!entityType) throw new Error('エンティティ型取得失敗');
+
+  // EntityPropertyName へ変換 (InternalName と異なる場合)
+  if (_sankyuFieldsMeta) {
+    Object.keys(body).forEach(function(k) {
+      if (k === '__metadata') return;
+      // dataKey で渡される (OData_ + InternalName)
+      // 元の InternalName を抜き出す
+      var iname = k.indexOf('OData_') === 0 ? k.substring(6) : k;
+      var meta = _sankyuFieldsMeta[iname];
+      if (meta && meta.entityPropertyName && meta.entityPropertyName !== iname) {
+        // EntityPropertyName で書き直す (前述の ODataプレフィックスは付けない)
+        body[meta.entityPropertyName] = body[k];
+        if (meta.entityPropertyName !== k) delete body[k];
+      }
+    });
+  }
+
+  var url = SP_SITE_URL + "/_api/web/GetList('" + SANKYU_LIST_PATH + "')/items(" + itemId + ")";
+
+  async function attempt() {
+    body['__metadata'] = { type: entityType };
+    Object.keys(_sankyuBadFields).forEach(function(k) { delete body[k]; });
+    return await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE'
+      },
+      body: JSON.stringify(body)
+    });
+  }
+
+  for (var i = 0; i < 8; i++) {
+    var resp = await attempt();
+    if (resp.ok) return true;
+    var errText = await resp.text();
+    console.error('Sankyu PATCH error (attempt ' + (i + 1) + '):', errText);
+    var msgValue = errText;
+    try {
+      var errJson = JSON.parse(errText);
+      msgValue = (errJson && errJson.error && errJson.error.message && errJson.error.message.value) || errText;
+    } catch(_) {}
+    var m = msgValue.match(/プロパティ\s*'([^']+)'/) || msgValue.match(/property\s*'([^']+)'/i);
+    if (!m) m = msgValue.match(/'(_x[0-9a-fA-F_]+)'/);
+    if (m && m[1] && body[m[1]] !== undefined) {
+      console.warn('Removing unwritable sankyu field:', m[1]);
+      _sankyuBadFields[m[1]] = true;
+      delete body[m[1]];
+      var remaining = Object.keys(body).filter(function(k) { return k !== '__metadata'; });
+      if (remaining.length === 0) throw new Error('書き込み可能なフィールドがありません');
+      continue;
+    }
+    throw new Error('更新失敗: ' + resp.status + ' ' + msgValue);
+  }
+  throw new Error('更新失敗: リトライ上限');
 }
 
 // List52 のアイテムを取得
@@ -6290,8 +6496,131 @@ function openSankyuDetail(itemId) {
     if (_sankyuItems[i].Id === itemId) { item = _sankyuItems[i]; break; }
   }
   if (!item) { showToast('項目が見つかりません', 'error'); return; }
+  _sankyuCurrentItem = item;
+  _sankyuEditMode = false;
   switchScreen('sankyuDetailScreen');
   renderSankyuDetail(item);
+}
+
+// 編集モード切替
+function toggleSankyuEdit() {
+  if (!_sankyuCurrentItem) return;
+  _sankyuEditMode = !_sankyuEditMode;
+  renderSankyuDetail(_sankyuCurrentItem);
+  // スクロールを上に戻す
+  window.scrollTo(0, 0);
+}
+
+// 編集をキャンセル
+function cancelSankyuEdit() {
+  if (!_sankyuCurrentItem) return;
+  _sankyuEditMode = false;
+  renderSankyuDetail(_sankyuCurrentItem);
+  window.scrollTo(0, 0);
+}
+
+// 編集を保存
+async function saveSankyuEdit() {
+  if (!_sankyuCurrentItem) return;
+  var btn = document.getElementById('sankyuSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+  try {
+    var meta = _sankyuFieldsMeta || {};
+    var body = {};
+    var changed = 0;
+
+    Object.keys(meta).forEach(function(iname) {
+      var f = meta[iname];
+      if (f.readOnly) return;
+      if (['ID','Id','GUID','FileSystemObjectType','SyncClientId'].indexOf(f.entityPropertyName) >= 0) return;
+      if (['ID','Id','GUID','FileSystemObjectType','SyncClientId'].indexOf(iname) >= 0) return;
+      var inputId = 'sankyuField_' + iname;
+      var el = document.getElementById(inputId);
+      if (!el) return;
+
+      var newVal = el.value;
+      var oldRaw = _sankyuCurrentItem[f.dataKey];
+
+      // 型変換
+      var typed = null;
+      if (f.type === 'DateTime') {
+        if (newVal) {
+          // YYYY-MM-DD → ISO (時刻は 00:00 のローカル)
+          try {
+            var d = new Date(newVal + 'T00:00:00');
+            typed = isNaN(d) ? null : d.toISOString();
+          } catch(_) { typed = null; }
+        } else {
+          typed = null;
+        }
+      } else if (f.type === 'Number' || f.type === 'Currency') {
+        if (newVal === '' || newVal === null) {
+          typed = null;
+        } else {
+          var n = parseFloat(newVal);
+          typed = isNaN(n) ? null : n;
+        }
+      } else if (f.type === 'Boolean') {
+        typed = !!el.checked;
+      } else {
+        // Text / Note / Choice / etc.
+        typed = (newVal === '' || newVal === null) ? null : String(newVal);
+      }
+
+      // 変更検出 (oldRaw との比較)
+      var oldComparable = oldRaw;
+      if (f.type === 'DateTime' && oldRaw) {
+        try {
+          var od = new Date(oldRaw);
+          if (!isNaN(od)) oldComparable = od.toISOString();
+        } catch(_) {}
+      }
+      if (oldComparable === undefined) oldComparable = null;
+      if (oldComparable === '') oldComparable = null;
+
+      // 何も変更なしなら body に含めない
+      if (typed === oldComparable) return;
+      if (typed === null && (oldComparable === null || oldComparable === undefined || oldComparable === '')) return;
+
+      body[f.dataKey] = typed;
+      changed++;
+    });
+
+    if (changed === 0) {
+      showToast('変更はありません', 'info');
+      _sankyuEditMode = false;
+      renderSankyuDetail(_sankyuCurrentItem);
+      return;
+    }
+
+    await spPatchSankyuItem(_sankyuCurrentItem.Id, body);
+
+    // ローカルキャッシュ更新
+    Object.keys(body).forEach(function(k) {
+      if (k === '__metadata') return;
+      _sankyuCurrentItem[k] = body[k];
+    });
+    // _sankyuItems 配列内も同期 (同じ参照なので自動だが念のため)
+    if (_sankyuItems) {
+      for (var i = 0; i < _sankyuItems.length; i++) {
+        if (_sankyuItems[i].Id === _sankyuCurrentItem.Id) {
+          _sankyuItems[i] = _sankyuCurrentItem;
+          break;
+        }
+      }
+    }
+    // 総務部サマリーは次回ダッシュボード遷移時に再フェッチさせる
+    _soumuSankyuSummary = null;
+
+    showToast('保存しました (' + changed + '項目)', 'success');
+    _sankyuEditMode = false;
+    renderSankyuDetail(_sankyuCurrentItem);
+    window.scrollTo(0, 0);
+  } catch (e) {
+    console.error('saveSankyuEdit error:', e);
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+  }
 }
 
 // フィールドをセクションに振り分け (タイトルパターンマッチ)
@@ -6330,10 +6659,62 @@ function formatSankyuValue(val, type) {
   return { text: String(val), cls: '' };
 }
 
+// 編集モード用: 入力フィールド HTML を生成
+function renderSankyuFieldInput(f, rawVal) {
+  var inputId = 'sankyuField_' + f.internalName;
+  // DateTime → date input
+  if (f.type === 'DateTime') {
+    var dateStr = '';
+    if (rawVal) {
+      try {
+        var d = new Date(rawVal);
+        if (!isNaN(d)) {
+          var y = d.getFullYear();
+          var m = ('0' + (d.getMonth() + 1)).slice(-2);
+          var dd = ('0' + d.getDate()).slice(-2);
+          dateStr = y + '-' + m + '-' + dd;
+        }
+      } catch(_) {}
+    }
+    return '<input type="date" id="' + inputId + '" class="sankyu-edit-input sankyu-edit-date" value="' + dateStr + '">';
+  }
+  // Choice → select
+  if (f.type === 'Choice' && f.choices && f.choices.length > 0) {
+    var current = rawVal == null ? '' : String(rawVal);
+    var html = '<select id="' + inputId + '" class="sankyu-edit-input">';
+    html += '<option value=""' + (current === '' ? ' selected' : '') + '>(未設定)</option>';
+    f.choices.forEach(function(c) {
+      var sel = (c === current) ? ' selected' : '';
+      html += '<option value="' + escHtml(c) + '"' + sel + '>' + escHtml(c) + '</option>';
+    });
+    html += '</select>';
+    return html;
+  }
+  // Number / Currency
+  if (f.type === 'Number' || f.type === 'Currency') {
+    var nv = (rawVal == null) ? '' : String(rawVal);
+    return '<input type="number" inputmode="decimal" id="' + inputId + '" class="sankyu-edit-input" value="' + escHtml(nv) + '">';
+  }
+  // Boolean
+  if (f.type === 'Boolean') {
+    var checked = rawVal ? ' checked' : '';
+    return '<label class="sankyu-edit-checklbl"><input type="checkbox" id="' + inputId + '"' + checked + '> はい</label>';
+  }
+  // Note (multi-line text)
+  if (f.type === 'Note') {
+    var tv = (rawVal == null) ? '' : String(rawVal);
+    return '<textarea id="' + inputId + '" class="sankyu-edit-input sankyu-edit-textarea" rows="3">' + escHtml(tv) + '</textarea>';
+  }
+  // Text / default
+  var v = (rawVal == null) ? '' : String(rawVal);
+  return '<input type="text" id="' + inputId + '" class="sankyu-edit-input" value="' + escHtml(v) + '">';
+}
+
 function renderSankyuDetail(item) {
   var body = document.getElementById('sankyuDetailBody');
   if (!body) return;
   var meta = _sankyuFieldsMeta || {};
+  var isEdit = !!_sankyuEditMode;
 
   // ヘッダー情報
   var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
@@ -6348,10 +6729,15 @@ function renderSankyuDetail(item) {
   var cat = sankyuStatusCategory(status);
 
   var html = '';
-  // 戻る
+  // 戻る + 編集ボタン
   html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">';
   html +=   '<button class="back-btn" onclick="switchScreen(\'sankyuScreen\')">←</button>';
-  html +=   '<h2 style="font-size:15px;font-weight:800;color:#d81b60;margin:0;flex:1;">🌸 産休・育休 詳細</h2>';
+  html +=   '<h2 style="font-size:15px;font-weight:800;color:#d81b60;margin:0;flex:1;">🌸 産休・育休 ' + (isEdit ? '編集' : '詳細') + '</h2>';
+  if (!isEdit) {
+    html += '<button class="sankyu-edit-btn" onclick="toggleSankyuEdit()">✏️ 編集</button>';
+  } else {
+    html += '<button class="sankyu-edit-btn sankyu-cancel-btn" onclick="cancelSankyuEdit()">✕ キャンセル</button>';
+  }
   html += '</div>';
 
   // ヘッダーカード
@@ -6378,38 +6764,58 @@ function renderSankyuDetail(item) {
 
   Object.keys(meta).forEach(function(internalName) {
     var f = meta[internalName];
-    var rawVal = item[f.dataKey];
     // ID等のシステム的なものはスキップ
     if (['ID','Id','GUID','FileSystemObjectType','ServerRedirectedEmbedUri','ServerRedirectedEmbedUrl','OData__UIVersionString','SyncClientId'].indexOf(f.entityPropertyName) >= 0) return;
+    if (['ID','Id','GUID','FileSystemObjectType','SyncClientId'].indexOf(internalName) >= 0) return;
+    // 編集モードでは ReadOnly フィールドを非表示
+    if (isEdit && f.readOnly) return;
+    var rawVal = item[f.dataKey];
     var cat2 = classifySankyuField(f.title);
     if (!sections[cat2]) cat2 = 'misc';
     sections[cat2].fields.push({
       title: f.title || f.internalName,
       raw: rawVal,
-      type: f.type
+      type: f.type,
+      meta: f
     });
   });
 
-  // セクションごとに描画 (内容のあるものだけ)
+  // セクションごとに描画
   var order = ['basic','child','sango','ikukyu','choki','fukki','insurance','bank','memo','misc'];
   order.forEach(function(secKey) {
     var sec = sections[secKey];
     if (!sec || sec.fields.length === 0) return;
-    // 全フィールドが空なら省略 (basic と memo は常に表示)
-    var hasValue = sec.fields.some(function(f) { return f.raw !== null && f.raw !== undefined && f.raw !== ''; });
-    if (!hasValue && secKey !== 'basic' && secKey !== 'memo') return;
+    if (!isEdit) {
+      // 表示モード: 内容のあるセクションだけ (basic/memo は常に)
+      var hasValue = sec.fields.some(function(f) { return f.raw !== null && f.raw !== undefined && f.raw !== ''; });
+      if (!hasValue && secKey !== 'basic' && secKey !== 'memo') return;
+    }
 
     html += '<div class="sankyu-section">';
     html += '<div class="sankyu-section-head"><span class="sankyu-sec-icon">' + sec.icon + '</span>' + escHtml(sec.title) + '</div>';
     sec.fields.forEach(function(f) {
-      var v = formatSankyuValue(f.raw, f.type);
-      html += '<div class="sankyu-field-row">';
-      html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
-      html +=   '<div class="sankyu-field-value' + (v.cls ? ' ' + v.cls : '') + '">' + (v.text ? escHtml(v.text) : '—') + '</div>';
-      html += '</div>';
+      if (isEdit) {
+        html += '<div class="sankyu-field-row sankyu-field-edit">';
+        html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
+        html +=   '<div class="sankyu-field-value">' + renderSankyuFieldInput(f.meta, f.raw) + '</div>';
+        html += '</div>';
+      } else {
+        var v = formatSankyuValue(f.raw, f.type);
+        html += '<div class="sankyu-field-row">';
+        html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
+        html +=   '<div class="sankyu-field-value' + (v.cls ? ' ' + v.cls : '') + '">' + (v.text ? escHtml(v.text) : '—') + '</div>';
+        html += '</div>';
+      }
     });
     html += '</div>';
   });
+
+  // 編集モード: 保存ボタン
+  if (isEdit) {
+    html += '<div class="sankyu-save-bar">';
+    html +=   '<button id="sankyuSaveBtn" class="sankyu-save-btn" onclick="saveSankyuEdit()">💾 保存</button>';
+    html += '</div>';
+  }
 
   html += '<div style="height:30px;"></div>';
   body.innerHTML = html;
