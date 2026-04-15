@@ -112,6 +112,45 @@ body {
 .home-btn:active { background: rgba(255,255,255,0.35); }
 .home-btn svg { width: 18px; height: 18px; }
 
+/* Teams 未読ボタン(ヘッダー内) */
+.teams-btn {
+  position: relative;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  width: 34px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0;
+}
+.teams-btn:active { background: rgba(255,255,255,0.35); transform: scale(0.95); }
+.teams-badge-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: #e53935;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  border: 1.5px solid #fff;
+  line-height: 1;
+}
+
 /* Main Content */
 .main-content {
   flex: 1;
@@ -2520,6 +2559,10 @@ body {
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
   <button class="update-badge" id="updateBadge" onclick="headerUpdateClick()" title="更新する">⟳</button>
+  <button class="teams-btn" id="teamsBtn" onclick="openTeamsActivity()" title="Teams アクティビティ">
+    💬
+    <span class="teams-badge-count" id="teamsBadge"></span>
+  </button>
   <span class="header-version" id="versionDisplay" onclick="onVersionClick()"><span id="versionText">…</span></span>
   <button class="header-logout-sm" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
@@ -2857,6 +2900,9 @@ const MSAL_CONFIG = {
 
 const SP_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/PowerApps';
 const SP_SCOPES = ['https://teamstepupcom774.sharepoint.com/AllSites.Write'];
+// Microsoft Graph スコープ(Teams 未読チャット取得用)
+// 必須: Chat.Read (Azure ADアプリに追加 + 管理者承認が必要)
+const GRAPH_SCOPES = ['https://graph.microsoft.com/Chat.Read'];
 const LIST_EMPLOYEES_GUID = '05a5a986-5958-4664-bb0d-7c1cfaedf845';
 const LIST_LEAVE_GUID = 'fe50ad49-5069-401d-ab2f-8d94fa826d1d';
 const LIST_MAEBARI_GUID = 'd34be315-365a-460f-976e-fb8da6977cec';
@@ -3141,9 +3187,15 @@ async function clearCacheAndReload(reloadUrl) {
 
 // Check when user returns to the app (tab switch, phone unlock)
 document.addEventListener('visibilitychange', function() {
-  if (document.visibilityState === 'visible') checkForUpdate();
+  if (document.visibilityState === 'visible') {
+    checkForUpdate();
+    if (typeof updateTeamsBadge === 'function') updateTeamsBadge();
+  }
 });
-window.addEventListener('focus', checkForUpdate);
+window.addEventListener('focus', function() {
+  checkForUpdate();
+  if (typeof updateTeamsBadge === 'function') updateTeamsBadge();
+});
 // Initial baseline fetch after 3 seconds
 setTimeout(checkForUpdate, 3000);
 // Also poll every 3 minutes as fallback
@@ -3213,6 +3265,12 @@ async function acquireToken() {
     switchScreen('searchScreen');
     loadHomeBadges();
     loadSharedConfig();
+    // Teams 未読数取得(権限なくても静かに失敗するだけ)
+    updateTeamsBadge();
+    // 2分毎にポーリング
+    if (!window._teamsBadgeInterval) {
+      window._teamsBadgeInterval = setInterval(updateTeamsBadge, 2 * 60 * 1000);
+    }
     return resp.accessToken;
   } catch (e) {
     try {
@@ -3228,6 +3286,107 @@ async function acquireToken() {
 async function getToken() {
   if (accessToken) return accessToken;
   return await acquireToken();
+}
+
+// ============================================================
+// Microsoft Graph トークン取得 (Teams 未読チャット用)
+// ============================================================
+var graphAccessToken = null;
+async function getGraphToken() {
+  if (!msalInstance) return null;
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) return null;
+  try {
+    const resp = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
+    graphAccessToken = resp.accessToken;
+    return resp.accessToken;
+  } catch (e) {
+    // サイレント取得に失敗 → 同意が必要 or スコープ未登録
+    console.warn('Graph token silent acquisition failed:', e.errorCode || e.message);
+    return null;
+  }
+}
+
+// Teams 未読メッセージ数を Graph API から取得
+// 権限(Chat.Read)が無い場合は null を返すので呼び出し側でハンドリング
+async function fetchTeamsUnreadCount() {
+  try {
+    const token = await getGraphToken();
+    if (!token) return null;
+    // 自分のチャット一覧 + lastMessagePreview を取得
+    const url = 'https://graph.microsoft.com/v1.0/me/chats?$expand=lastMessagePreview&$top=50';
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!resp.ok) {
+      console.warn('Graph /me/chats failed:', resp.status);
+      return null;
+    }
+    const data = await resp.json();
+    var chats = (data.value || []);
+    var unreadCount = 0;
+    chats.forEach(function(chat) {
+      var last = chat.lastMessagePreview;
+      if (!last || !last.createdDateTime) return;
+      // 自分が送ったメッセージは除外
+      var fromUser = last.from && last.from.user;
+      if (fromUser && fromUser.id && chat.viewpoint && chat.viewpoint.lastMessageReadDateTime) {
+        var lastRead = new Date(chat.viewpoint.lastMessageReadDateTime).getTime();
+        var msgTime = new Date(last.createdDateTime).getTime();
+        if (msgTime > lastRead) unreadCount++;
+      } else if (chat.viewpoint && !chat.viewpoint.lastMessageReadDateTime && last.createdDateTime) {
+        // 一度も読んでいないチャット
+        unreadCount++;
+      }
+    });
+    return unreadCount;
+  } catch (e) {
+    console.warn('fetchTeamsUnreadCount error:', e);
+    return null;
+  }
+}
+
+// Teams 未読バッジを更新
+async function updateTeamsBadge() {
+  var badge = document.getElementById('teamsBadge');
+  if (!badge) return;
+  var count = await fetchTeamsUnreadCount();
+  if (count === null) {
+    // 権限なし → バッジ非表示(ボタンは残る)
+    badge.style.display = 'none';
+    return;
+  }
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// Teams アプリを起動(アクティビティ/未読画面)
+function openTeamsActivity() {
+  // Teams アプリのアクティビティフィードを直接開く URL
+  // モバイル: msteams:// → アプリ起動
+  // デスクトップ: https://teams.microsoft.com → ブラウザ/アプリ
+  var deepLink = 'msteams://teams.microsoft.com/_#/activity';
+  var webFallback = 'https://teams.microsoft.com/_#/activity';
+
+  // iOS/Android でアプリ未インストール時のフォールバック用
+  var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  if (isMobile) {
+    // モバイル: まずdeep link、失敗したらwebへ
+    var ts = Date.now();
+    window.location.href = deepLink;
+    setTimeout(function() {
+      // 500ms経ってもまだページに居れば Teams アプリ未インストールと推定
+      if (Date.now() - ts < 2000 && document.visibilityState === 'visible') {
+        window.open(webFallback, '_blank');
+      }
+    }, 1500);
+  } else {
+    // PC: 新しいタブで Teams Web を開く
+    window.open(webFallback, '_blank');
+  }
 }
 
 // ============================================================
