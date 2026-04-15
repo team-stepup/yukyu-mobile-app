@@ -131,6 +131,19 @@ body {
   padding: 0;
 }
 .teams-btn:active { background: rgba(255,255,255,0.35); transform: scale(0.95); }
+/* 未同意時: ボタン右上に小さな黄色ドットで「タップしてね」を示す */
+.teams-btn[data-needs-consent="1"]::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffc107;
+  border: 1.5px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+}
 .teams-badge-count {
   position: absolute;
   top: -5px;
@@ -2978,7 +2991,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '7239652';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -3232,7 +3245,11 @@ async function handleAuth() {
   }
   try {
     showSpinner();
-    await msalInstance.loginRedirect({ scopes: SP_SCOPES });
+    // SP_SCOPES で主トークンを取得、GRAPH_SCOPES(Chat.Read) も同時に同意取得しておく
+    await msalInstance.loginRedirect({
+      scopes: SP_SCOPES,
+      extraScopesToConsent: GRAPH_SCOPES
+    });
   } catch (e) {
     console.error('Login error:', e);
     showToast('ログインに失敗しました', 'error');
@@ -3292,18 +3309,41 @@ async function getToken() {
 // Microsoft Graph トークン取得 (Teams 未読チャット用)
 // ============================================================
 var graphAccessToken = null;
-async function getGraphToken() {
-  if (!msalInstance) return null;
+// interactive=true の場合は同意ポップアップを表示してトークン取得を試みる
+async function getGraphToken(interactive) {
+  if (!msalInstance) { console.warn('[Graph] msalInstance not ready'); return null; }
   const accounts = msalInstance.getAllAccounts();
-  if (accounts.length === 0) return null;
+  if (accounts.length === 0) { console.warn('[Graph] no accounts'); return null; }
   try {
     const resp = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: accounts[0] });
     graphAccessToken = resp.accessToken;
+    console.log('[Graph] silent token OK');
     return resp.accessToken;
   } catch (e) {
     // サイレント取得に失敗 → 同意が必要 or スコープ未登録
-    console.warn('Graph token silent acquisition failed:', e.errorCode || e.message);
-    return null;
+    console.warn('[Graph] silent failed:', e.errorCode || e.name || e.message);
+    if (!interactive) return null;
+    // 対話的取得: まず Popup を試みて、ブロックされたら Redirect
+    try {
+      console.log('[Graph] trying acquireTokenPopup…');
+      const resp2 = await msalInstance.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: accounts[0] });
+      graphAccessToken = resp2.accessToken;
+      console.log('[Graph] popup token OK');
+      return resp2.accessToken;
+    } catch (e2) {
+      console.warn('[Graph] popup failed:', e2.errorCode || e2.name || e2.message);
+      // ポップアップがブロックされた or ユーザーがキャンセル → Redirect
+      if (e2 && (e2.errorCode === 'popup_window_error' || e2.errorCode === 'empty_window_error' || e2.name === 'BrowserAuthError')) {
+        try {
+          console.log('[Graph] falling back to acquireTokenRedirect');
+          await msalInstance.acquireTokenRedirect({ scopes: GRAPH_SCOPES, account: accounts[0] });
+          return null; // リダイレクト中
+        } catch (e3) {
+          console.error('[Graph] redirect failed:', e3);
+        }
+      }
+      return null;
+    }
   }
 }
 
@@ -3347,13 +3387,17 @@ async function fetchTeamsUnreadCount() {
 // Teams 未読バッジを更新
 async function updateTeamsBadge() {
   var badge = document.getElementById('teamsBadge');
+  var btn = document.getElementById('teamsBtn');
   if (!badge) return;
   var count = await fetchTeamsUnreadCount();
+  console.log('[Graph] teams unread count =', count);
   if (count === null) {
-    // 権限なし → バッジ非表示(ボタンは残る)
+    // 権限なし → バッジ非表示、ボタンに「！」マークで未許可を示す
     badge.style.display = 'none';
+    if (btn) btn.setAttribute('data-needs-consent', '1');
     return;
   }
+  if (btn) btn.removeAttribute('data-needs-consent');
   if (count > 0) {
     badge.textContent = count > 99 ? '99+' : String(count);
     badge.style.display = 'flex';
@@ -3363,7 +3407,23 @@ async function updateTeamsBadge() {
 }
 
 // Teams アプリを起動(アクティビティ/未読画面)
-function openTeamsActivity() {
+async function openTeamsActivity() {
+  // 初回タップ: Graph 権限(Chat.Read) が未取得なら同意フローを起動してバッジを有効化
+  var btn = document.getElementById('teamsBtn');
+  if (btn && btn.getAttribute('data-needs-consent') === '1') {
+    showToast('Teams 連携を有効化しています…', 'info');
+    var token = await getGraphToken(true);
+    if (token) {
+      // 同意成功 → バッジを即時更新
+      await updateTeamsBadge();
+      showToast('Teams 連携が有効になりました', 'success');
+      return; // この初回タップは同意だけで終わる(次回タップで Teams を開く)
+    } else {
+      showToast('Teams 連携の有効化に失敗しました。Teamsを直接開きます。', 'warn');
+      // そのまま Teams を開くフォールバックへ進む
+    }
+  }
+
   // Teams アプリのアクティビティフィードを直接開く URL
   // モバイル: msteams:// → アプリ起動
   // デスクトップ: https://teams.microsoft.com → ブラウザ/アプリ
