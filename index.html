@@ -1151,6 +1151,139 @@ select.sankyu-edit-input {
   box-shadow: 0 1px 4px rgba(245, 124, 0, 0.3);
 }
 
+/* + 新規追加 ボタン (一覧画面ヘッダー) */
+.sankyu-new-btn {
+  margin-left: auto;
+  background: linear-gradient(135deg, #f06292, #d81b60);
+  color: #fff;
+  border: none;
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(216, 27, 96, 0.3);
+  transition: transform .12s ease;
+  letter-spacing: 0.3px;
+}
+.sankyu-new-btn:active { transform: scale(0.95); }
+
+/* 社員選択 ピッカー (新規追加モード) */
+.sankyu-picker-wrap {
+  background: #fff;
+  border: 2px solid #f8bbd0;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 8px rgba(216, 27, 96, 0.08);
+}
+.sankyu-picker-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #d81b60;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sankyu-picker-input-wrap {
+  position: relative;
+}
+.sankyu-picker-input {
+  width: 100%;
+  padding: 10px 36px 10px 14px;
+  border: 1.5px solid #f8bbd0;
+  border-radius: 10px;
+  font-size: 14px;
+  outline: none;
+  background: #fff;
+  box-sizing: border-box;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sankyu-picker-input:focus { border-color: #d81b60; box-shadow: 0 0 0 3px rgba(216, 27, 96, 0.1); }
+.sankyu-picker-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #f5f5f5;
+  border: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 14px;
+  color: #888;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.sankyu-picker-clear.visible { display: flex; }
+
+.sankyu-picker-results {
+  margin-top: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #f8bbd0;
+  border-radius: 10px;
+  background: #fff;
+  display: none;
+}
+.sankyu-picker-results.visible { display: block; }
+.sankyu-picker-item {
+  padding: 9px 12px;
+  border-bottom: 1px solid #f5f5f5;
+  cursor: pointer;
+  font-size: 13px;
+}
+.sankyu-picker-item:last-child { border-bottom: none; }
+.sankyu-picker-item:hover, .sankyu-picker-item:active { background: #fce4ec; }
+.sankyu-picker-item-no {
+  font-size: 10px;
+  color: #888;
+  font-weight: 700;
+  background: #f5f5f5;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-right: 6px;
+}
+.sankyu-picker-item-name { font-weight: 700; color: #222; }
+.sankyu-picker-item-haken { font-size: 10.5px; color: #999; margin-top: 2px; }
+
+.sankyu-picker-selected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #fce4ec 0%, #f8bbd0 100%);
+  border-radius: 10px;
+}
+.sankyu-picker-selected-icon {
+  font-size: 22px;
+  background: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sankyu-picker-selected-info { flex: 1; min-width: 0; }
+.sankyu-picker-selected-name { font-size: 14px; font-weight: 800; color: #880e4f; }
+.sankyu-picker-selected-meta { font-size: 11px; color: #ad1457; margin-top: 1px; }
+.sankyu-picker-change-btn {
+  background: rgba(255,255,255,0.7);
+  border: none;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #d81b60;
+  cursor: pointer;
+}
+.sankyu-picker-change-btn:active { background: #fff; }
+
 /* Home Search Card */
 .home-search-card {
   background: #fff;
@@ -3405,7 +3538,8 @@ select.sankyu-edit-input {
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
       <h2 style="font-size:16px;font-weight:800;color:#d81b60;margin:0;">🌸 産休・育休</h2>
       <span id="sankyuCountLabel" style="font-size:11px;color:var(--text-light);"></span>
-      <button onclick="loadSankyuList()" title="更新" style="margin-left:auto;background:none;border:none;font-size:18px;color:#d81b60;cursor:pointer;">⟳</button>
+      <button onclick="openSankyuNew()" class="sankyu-new-btn" title="新規追加">＋ 新規</button>
+      <button onclick="loadSankyuList()" title="更新" style="background:none;border:none;font-size:18px;color:#d81b60;cursor:pointer;">⟳</button>
     </div>
     <div class="sankyu-search-wrap">
       <input type="text" id="sankyuSearchInput" placeholder="氏名・社員番号・派遣先で検索" oninput="renderSankyuList()">
@@ -3691,7 +3825,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'f916a58';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6201,6 +6335,8 @@ var _sankyuItems = null;          // raw items from List52
 var _sankyuCurrentFilter = 'all'; // all | sango | ikuji | kyugyo | owari
 var _sankyuEditMode = false;      // true なら詳細画面が編集モード
 var _sankyuCurrentItem = null;    // 現在表示中の item
+var _sankyuNewMode = false;       // true なら新規追加モード (POST)
+var _sankyuPickedEmp = null;      // 新規モードで選択中の社員 (emp オブジェクト)
 
 // 状況 → カテゴリー判定
 function sankyuStatusCategory(status) {
@@ -6542,8 +6678,213 @@ function openSankyuDetail(itemId) {
   if (!item) { showToast('項目が見つかりません', 'error'); return; }
   _sankyuCurrentItem = item;
   _sankyuEditMode = false;
+  _sankyuNewMode = false;
+  _sankyuPickedEmp = null;
   switchScreen('sankyuDetailScreen');
   renderSankyuDetail(item);
+}
+
+// 新規追加モードで詳細画面を開く
+async function openSankyuNew() {
+  try {
+    // フィールドメタ未取得ならフェッチ
+    if (!_sankyuFieldsMeta) {
+      showToast('読み込み中…', 'info');
+      await fetchSankyuFields();
+      if (!_sankyuFieldsMeta) { showToast('フィールド情報の取得失敗', 'error'); return; }
+    }
+    // 社員データ未取得ならフェッチ (ダッシュボード経由でない場合)
+    if (!_soumuAllEmps || _soumuAllEmps.length === 0) {
+      try {
+        var empRes = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+        _soumuAllEmps = empRes || [];
+      } catch(e) {
+        console.warn('emp fetch failed:', e);
+      }
+    }
+  } catch (e) {
+    console.error('openSankyuNew prep error:', e);
+  }
+  // 空の item オブジェクトを構築 (各 dataKey に null)
+  var emptyItem = { Id: null };
+  if (_sankyuFieldsMeta) {
+    Object.keys(_sankyuFieldsMeta).forEach(function(iname) {
+      var f = _sankyuFieldsMeta[iname];
+      emptyItem[f.dataKey] = null;
+    });
+  }
+  _sankyuCurrentItem = emptyItem;
+  _sankyuNewMode = true;
+  _sankyuEditMode = true;  // 新規は常に編集モード
+  _sankyuPickedEmp = null;
+  switchScreen('sankyuDetailScreen');
+  renderSankyuDetail(emptyItem);
+  window.scrollTo(0, 0);
+}
+
+// 新規モード: 社員ピッカー onInput
+function _sankyuOnPickerInput(q) {
+  var results = document.getElementById('sankyuPickerResults');
+  var clearBtn = document.getElementById('sankyuPickerClear');
+  if (!results) return;
+  var qv = String(q || '').trim();
+  if (clearBtn) clearBtn.classList.toggle('visible', qv.length > 0);
+  if (qv.length === 0) {
+    results.classList.remove('visible');
+    results.innerHTML = '';
+    return;
+  }
+  var list = _soumuAllEmps || [];
+  var qLower = qv.toLowerCase();
+  var matches = [];
+  for (var i = 0; i < list.length && matches.length < 20; i++) {
+    var emp = list[i];
+    if (isResigned(emp)) continue;
+    var name = String(emp.Title || '');
+    var no = String(emp[F.syainNo] || '');
+    var haken = String(getHakensaki(emp) || '');
+    var hay = (name + ' ' + no + ' ' + haken).toLowerCase();
+    if (hay.indexOf(qLower) >= 0) {
+      matches.push(emp);
+    }
+  }
+  if (matches.length === 0) {
+    results.innerHTML = '<div class="sankyu-picker-item" style="color:#999;cursor:default;">該当者なし</div>';
+    results.classList.add('visible');
+    return;
+  }
+  var html = '';
+  matches.forEach(function(emp, idx) {
+    var name = String(emp.Title || '');
+    var no = String(emp[F.syainNo] || '');
+    var haken = String(getHakensaki(emp) || '');
+    html += '<div class="sankyu-picker-item" onclick="_sankyuSelectEmpByIdx(' + idx + ')" data-idx="' + idx + '">';
+    html +=   '<div class="sankyu-picker-item-no">' + escHtml(no) + '</div>';
+    html +=   '<div style="flex:1;min-width:0;">';
+    html +=     '<div class="sankyu-picker-item-name">' + escHtml(name) + '</div>';
+    if (haken) html += '<div class="sankyu-picker-item-haken">📍 ' + escHtml(haken) + '</div>';
+    html +=   '</div>';
+    html += '</div>';
+  });
+  results.innerHTML = html;
+  results.classList.add('visible');
+  // 一時保存 (idx 参照用)
+  _sankyuPickerMatches = matches;
+}
+var _sankyuPickerMatches = [];
+
+function _sankyuSelectEmpByIdx(idx) {
+  var emp = _sankyuPickerMatches[idx];
+  if (!emp) return;
+  _sankyuSelectEmployee(emp);
+}
+
+function _sankyuSelectEmployee(emp) {
+  _sankyuPickedEmp = emp;
+  // 氏名・社員番号・派遣先 を item にセット
+  var it = _sankyuCurrentItem || {};
+  var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+  var kHakensaki = sankyuKeyByTitle('派遣先') || 'Title';
+  var kShimei = sankyuKeyByTitle('氏名') || sankyuKeyByTitle('社員氏名');
+  var no = emp[F.syainNo];
+  var name = emp.Title || '';
+  var haken = getHakensaki(emp) || '';
+  if (kSyainNo) it[kSyainNo] = (no !== undefined && no !== null && no !== '') ? Number(no) : null;
+  if (kShimei) it[kShimei] = name;
+  if (kHakensaki) it[kHakensaki] = haken;
+  _sankyuCurrentItem = it;
+  renderSankyuDetail(it);
+  window.scrollTo(0, 0);
+}
+
+function _sankyuClearEmployeePicker() {
+  var inp = document.getElementById('sankyuPickerInput');
+  var results = document.getElementById('sankyuPickerResults');
+  var clearBtn = document.getElementById('sankyuPickerClear');
+  if (inp) inp.value = '';
+  if (results) { results.classList.remove('visible'); results.innerHTML = ''; }
+  if (clearBtn) clearBtn.classList.remove('visible');
+  if (inp) inp.focus();
+}
+
+function _sankyuChangeEmployee() {
+  _sankyuPickedEmp = null;
+  // クリア (社員番号/氏名/派遣先)
+  var it = _sankyuCurrentItem || {};
+  var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+  var kHakensaki = sankyuKeyByTitle('派遣先') || 'Title';
+  var kShimei = sankyuKeyByTitle('氏名') || sankyuKeyByTitle('社員氏名');
+  if (kSyainNo) it[kSyainNo] = null;
+  if (kShimei) it[kShimei] = null;
+  if (kHakensaki) it[kHakensaki] = null;
+  _sankyuCurrentItem = it;
+  renderSankyuDetail(it);
+  setTimeout(function() {
+    var inp = document.getElementById('sankyuPickerInput');
+    if (inp) inp.focus();
+  }, 50);
+}
+
+// 新規追加 POST
+async function spCreateSankyuItem(body) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var entityType = await getSankyuEntityType();
+  if (!entityType) throw new Error('エンティティ型取得失敗');
+
+  // EntityPropertyName へ変換
+  if (_sankyuFieldsMeta) {
+    Object.keys(body).forEach(function(k) {
+      if (k === '__metadata') return;
+      var iname = k.indexOf('OData_') === 0 ? k.substring(6) : k;
+      var meta = _sankyuFieldsMeta[iname];
+      if (meta && meta.entityPropertyName && meta.entityPropertyName !== iname) {
+        body[meta.entityPropertyName] = body[k];
+        if (meta.entityPropertyName !== k) delete body[k];
+      }
+    });
+  }
+
+  var url = SP_SITE_URL + "/_api/web/GetList('" + SANKYU_LIST_PATH + "')/items";
+
+  async function attempt() {
+    body['__metadata'] = { type: entityType };
+    Object.keys(_sankyuBadFields).forEach(function(k) { delete body[k]; });
+    return await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose'
+      },
+      body: JSON.stringify(body)
+    });
+  }
+
+  for (var i = 0; i < 8; i++) {
+    var resp = await attempt();
+    if (resp.ok) {
+      var data = await resp.json();
+      return data.d || null;
+    }
+    var errText = await resp.text();
+    console.error('Sankyu POST error (attempt ' + (i + 1) + '):', errText);
+    var msgValue = errText;
+    try {
+      var errJson = JSON.parse(errText);
+      msgValue = (errJson && errJson.error && errJson.error.message && errJson.error.message.value) || errText;
+    } catch(_) {}
+    var m = msgValue.match(/プロパティ\s*'([^']+)'/) || msgValue.match(/property\s*'([^']+)'/i);
+    if (!m) m = msgValue.match(/'(_x[0-9a-fA-F_]+)'/);
+    if (m && m[1] && body[m[1]] !== undefined) {
+      console.warn('Removing unwritable sankyu field:', m[1]);
+      _sankyuBadFields[m[1]] = true;
+      delete body[m[1]];
+      continue;
+    }
+    throw new Error('作成失敗: ' + resp.status + ' ' + msgValue);
+  }
+  throw new Error('作成失敗: リトライ上限');
 }
 
 // 編集モード切替
@@ -6557,6 +6898,14 @@ function toggleSankyuEdit() {
 
 // 編集をキャンセル
 function cancelSankyuEdit() {
+  if (_sankyuNewMode) {
+    _sankyuNewMode = false;
+    _sankyuEditMode = false;
+    _sankyuCurrentItem = null;
+    _sankyuPickedEmp = null;
+    switchScreen('sankyuScreen');
+    return;
+  }
   if (!_sankyuCurrentItem) return;
   _sankyuEditMode = false;
   renderSankyuDetail(_sankyuCurrentItem);
@@ -6566,9 +6915,18 @@ function cancelSankyuEdit() {
 // 編集を保存
 async function saveSankyuEdit() {
   if (!_sankyuCurrentItem) return;
+  var isNew = !!_sankyuNewMode;
   var btn = document.getElementById('sankyuSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+  var originalBtnLabel = isNew ? '✨ 作成' : '💾 保存';
+  if (btn) { btn.disabled = true; btn.textContent = isNew ? '作成中…' : '保存中…'; }
   try {
+    // 新規モード: 社員未選択チェック
+    if (isNew && !_sankyuPickedEmp) {
+      showToast('社員を選択してください', 'warn');
+      if (btn) { btn.disabled = false; btn.textContent = originalBtnLabel; }
+      return;
+    }
+
     var meta = _sankyuFieldsMeta || {};
     var body = {};
     var changed = 0;
@@ -6611,6 +6969,14 @@ async function saveSankyuEdit() {
         typed = (newVal === '' || newVal === null) ? null : String(newVal);
       }
 
+      if (isNew) {
+        // 新規モード: null でないものを全て送る
+        if (typed === null || typed === '') return;
+        body[f.dataKey] = typed;
+        changed++;
+        return;
+      }
+
       // 変更検出 (oldRaw との比較)
       var oldComparable = oldRaw;
       if (f.type === 'DateTime' && oldRaw) {
@@ -6629,6 +6995,26 @@ async function saveSankyuEdit() {
       body[f.dataKey] = typed;
       changed++;
     });
+
+    if (isNew) {
+      if (changed === 0) {
+        showToast('入力項目がありません', 'warn');
+        if (btn) { btn.disabled = false; btn.textContent = originalBtnLabel; }
+        return;
+      }
+      var created = await spCreateSankyuItem(body);
+      showToast('追加しました (' + changed + '項目)', 'success');
+      // リスト再読み込み
+      _sankyuNewMode = false;
+      _sankyuEditMode = false;
+      _sankyuCurrentItem = null;
+      _sankyuPickedEmp = null;
+      _soumuSankyuSummary = null;
+      _sankyuItems = null;
+      switchScreen('sankyuScreen');
+      loadSankyuList();
+      return;
+    }
 
     if (changed === 0) {
       showToast('変更はありません', 'info');
@@ -6662,8 +7048,8 @@ async function saveSankyuEdit() {
     window.scrollTo(0, 0);
   } catch (e) {
     console.error('saveSankyuEdit error:', e);
-    showToast('保存失敗: ' + (e.message || String(e)), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+    showToast((isNew ? '作成失敗: ' : '保存失敗: ') + (e.message || String(e)), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = originalBtnLabel; }
   }
 }
 
@@ -7027,6 +7413,7 @@ function renderSankyuDetail(item) {
   if (!body) return;
   var meta = _sankyuFieldsMeta || {};
   var isEdit = !!_sankyuEditMode;
+  var isNew = !!_sankyuNewMode;
 
   // ヘッダー情報
   var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
@@ -7044,21 +7431,61 @@ function renderSankyuDetail(item) {
   // 戻る + 編集ボタン
   html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">';
   html +=   '<button class="back-btn" onclick="switchScreen(\'sankyuScreen\')">←</button>';
-  html +=   '<h2 style="font-size:15px;font-weight:800;color:#d81b60;margin:0;flex:1;">🌸 産休・育休 ' + (isEdit ? '編集' : '詳細') + '</h2>';
-  if (!isEdit) {
+  var headTitle = isNew ? '🌸 産休・育休 新規追加' : ('🌸 産休・育休 ' + (isEdit ? '編集' : '詳細'));
+  html +=   '<h2 style="font-size:15px;font-weight:800;color:#d81b60;margin:0;flex:1;">' + headTitle + '</h2>';
+  if (isNew) {
+    html += '<button class="sankyu-edit-btn sankyu-cancel-btn" onclick="cancelSankyuEdit()">✕ キャンセル</button>';
+  } else if (!isEdit) {
     html += '<button class="sankyu-edit-btn" onclick="toggleSankyuEdit()">✏️ 編集</button>';
   } else {
     html += '<button class="sankyu-edit-btn sankyu-cancel-btn" onclick="cancelSankyuEdit()">✕ キャンセル</button>';
   }
   html += '</div>';
 
-  // ヘッダーカード
-  html += '<div class="sankyu-detail-header">';
-  if (no)     html += '<div class="sankyu-detail-no">No.' + escHtml(no) + '</div>';
-                html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)') + '</div>';
-  if (haken)  html += '<div class="sankyu-detail-sub">📍 ' + escHtml(haken) + '</div>';
-  if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
-  html += '</div>';
+  // 新規モード: 社員ピッカー
+  if (isNew) {
+    if (!_sankyuPickedEmp) {
+      html += '<div class="sankyu-picker-wrap">';
+      html +=   '<div class="sankyu-picker-label">👤 対象の社員を選択</div>';
+      html +=   '<div class="sankyu-picker-input-wrap">';
+      html +=     '<input type="text" id="sankyuPickerInput" class="sankyu-picker-input" placeholder="氏名・社員番号・派遣先で検索" oninput="_sankyuOnPickerInput(this.value)">';
+      html +=     '<button id="sankyuPickerClear" class="sankyu-picker-clear" onclick="_sankyuClearEmployeePicker()">✕</button>';
+      html +=   '</div>';
+      html +=   '<div id="sankyuPickerResults" class="sankyu-picker-results"></div>';
+      html += '</div>';
+    } else {
+      html += '<div class="sankyu-picker-selected">';
+      html +=   '<div class="sankyu-picker-selected-icon">👤</div>';
+      html +=   '<div class="sankyu-picker-selected-info">';
+      html +=     '<div class="sankyu-picker-selected-name">' + escHtml(name || '(氏名なし)') + '</div>';
+      html +=     '<div class="sankyu-picker-selected-meta">No.' + escHtml(no) + (haken ? ' / 📍 ' + escHtml(haken) : '') + '</div>';
+      html +=   '</div>';
+      html +=   '<button class="sankyu-picker-change-btn" onclick="_sankyuChangeEmployee()">変更</button>';
+      html += '</div>';
+    }
+  }
+
+  // ヘッダーカード (新規モードでは社員未選択なら非表示)
+  if (!isNew || _sankyuPickedEmp) {
+    html += '<div class="sankyu-detail-header">';
+    if (no)     html += '<div class="sankyu-detail-no">No.' + escHtml(no) + '</div>';
+                  html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)') + '</div>';
+    if (haken)  html += '<div class="sankyu-detail-sub">📍 ' + escHtml(haken) + '</div>';
+    if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
+    html += '</div>';
+  }
+
+  // 新規モードで社員未選択ならここで描画終了 (下段のフォームは表示しない)
+  if (isNew && !_sankyuPickedEmp) {
+    html += '<div style="text-align:center;padding:24px 14px;color:var(--text-light);font-size:12px;">社員を選択すると入力フォームが表示されます</div>';
+    html += '<div style="height:30px;"></div>';
+    body.innerHTML = html;
+    setTimeout(function() {
+      var inp = document.getElementById('sankyuPickerInput');
+      if (inp) inp.focus();
+    }, 50);
+    return;
+  }
 
   // 編集モード時の自動入力バナー
   if (isEdit) {
@@ -7135,8 +7562,9 @@ function renderSankyuDetail(item) {
 
   // 編集モード: 保存ボタン
   if (isEdit) {
+    var saveLabel = isNew ? '✨ 作成' : '💾 保存';
     html += '<div class="sankyu-save-bar">';
-    html +=   '<button id="sankyuSaveBtn" class="sankyu-save-btn" onclick="saveSankyuEdit()">💾 保存</button>';
+    html +=   '<button id="sankyuSaveBtn" class="sankyu-save-btn" onclick="saveSankyuEdit()">' + saveLabel + '</button>';
     html += '</div>';
   }
 
