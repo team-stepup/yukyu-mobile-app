@@ -1969,6 +1969,112 @@ body {
   flex-shrink: 0;
 }
 .vfolder-back-btn:active { transform: scale(0.96); }
+.vfolder-upload-btn {
+  background: linear-gradient(135deg, #2e7d32, #66bb6a);
+  color: #fff;
+  border: none;
+  border-radius: 18px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(46,125,50,0.25);
+  flex-shrink: 0;
+}
+.vfolder-upload-btn:active { transform: scale(0.96); }
+
+/* アップロードダイアログ */
+.upload-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10000;
+  padding: 16px;
+}
+.upload-panel {
+  background: #fff;
+  border-radius: 18px;
+  width: 100%;
+  max-width: 420px;
+  max-height: 92vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.3);
+  display: flex; flex-direction: column;
+}
+.upload-header {
+  background: linear-gradient(135deg, #2e7d32, #66bb6a);
+  color: #fff;
+  padding: 14px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-radius: 18px 18px 0 0;
+}
+.upload-title { font-size: 15px; font-weight: 800; }
+.upload-close-x {
+  background: rgba(255,255,255,0.25);
+  color: #fff; border: none;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  font-size: 15px; font-weight: 700;
+  cursor: pointer;
+}
+.upload-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.upload-body label { font-size: 12px; font-weight: 700; color: #2e7d32; display: block; margin-bottom: 4px; }
+.upload-body select, .upload-body input[type="text"] {
+  width: 100%; box-sizing: border-box;
+  padding: 12px 14px;
+  font-size: 15px;
+  border: 1.5px solid #a5d6a7;
+  border-radius: 10px;
+  background: #fff;
+}
+.upload-dropzone {
+  border: 2px dashed #81c784;
+  border-radius: 12px;
+  padding: 20px 12px;
+  text-align: center;
+  background: #f1f8e9;
+  color: #2e7d32;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.upload-dropzone.dragover { background: #c8e6c9; border-color: #2e7d32; }
+.upload-dropzone .up-icon { font-size: 32px; display: block; margin-bottom: 6px; }
+.upload-file-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 140px; overflow-y: auto;
+}
+.upload-file-row {
+  background: #f1f8e9;
+  border: 1px solid #c8e6c9;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+}
+.upload-file-row .uf-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1b5e20; }
+.upload-file-row .uf-remove {
+  background: none; border: none; color: #c62828;
+  font-size: 16px; cursor: pointer; padding: 0;
+}
+.upload-btn-row {
+  display: flex; gap: 8px; padding: 12px 16px 16px;
+  border-top: 1px solid #e8f5e9;
+}
+.upload-btn-cancel {
+  flex: 1; padding: 12px; border-radius: 10px;
+  background: #eceff1; color: #455a64;
+  border: none; font-weight: 700; font-size: 14px; cursor: pointer;
+}
+.upload-btn-ok {
+  flex: 2; padding: 12px; border-radius: 10px;
+  background: linear-gradient(135deg, #2e7d32, #66bb6a);
+  color: #fff;
+  border: none; font-weight: 700; font-size: 14px; cursor: pointer;
+}
+.upload-btn-ok:disabled { opacity: 0.5; cursor: default; }
 .vfolder-breadcrumb {
   font-size: 11px;
   color: var(--text-light);
@@ -2409,7 +2515,7 @@ body {
   <button class="home-btn" id="homeBtn" onclick="screenHistory.length=0;resetSearch();switchScreen('searchScreen')" style="display:none;" title="ホーム">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
   </button>
-  <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo">
+  <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo" style="cursor:pointer;" onclick="goToHomeFromLogo()" title="ホームへ戻る">
   <h1 id="headerTitle" style="display:none;">ホーム</h1>
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
@@ -2486,7 +2592,7 @@ body {
       <div class="home-search-wrap">
         <div style="position:relative;flex:1;">
           <input id="searchInput" type="text" placeholder="番号 / 名前 / 生年月日" style="width:100%;padding-right:30px;">
-          <button id="searchClearBtn" onclick="document.getElementById('searchInput').value='';document.getElementById('searchResults').innerHTML='';this.style.display='none';"
+          <button id="searchClearBtn" onclick="resetSearch()"
             style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#bbb;cursor:pointer;padding:0;line-height:1;">&times;</button>
         </div>
         <button class="home-search-btn" onclick="searchEmployee()">🔍</button>
@@ -2826,18 +2932,35 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'f26420b';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
 if (/[?&]v=/.test(location.search)) initialVersion = null;
 let latestVersionData = null;
 
+// ユーザーが「あとで」や「更新」を押したバージョンを覚えておき、
+// 以降そのバージョンでは "更新あり" を出さない（ false positive 対策）
+function getDismissedVersion() {
+  try { return localStorage.getItem('yukyu_dismissed_ver') || null; } catch (e) { return null; }
+}
+function setDismissedVersion(v) {
+  try { if (v) localStorage.setItem('yukyu_dismissed_ver', v); } catch (e) {}
+}
+
+function hasRealUpdate() {
+  if (!latestVersionData || !latestVersionData.version) return false;
+  if (!initialVersion) return false;
+  if (latestVersionData.version === initialVersion) return false;
+  if (latestVersionData.version === getDismissedVersion()) return false;
+  return true;
+}
+
 function updateVersionDisplay() {
   const el = document.getElementById('versionText');
   if (!el) return;
   const cur = initialVersion || '(dev)';
-  if (latestVersionData && latestVersionData.version && latestVersionData.version !== initialVersion) {
+  if (hasRealUpdate()) {
     el.innerHTML = '<span class="ver-update">更新あり</span>';
   } else {
     el.innerHTML = 'v' + escHtml(cur) + ' <span class="ver-latest">最新</span>';
@@ -2845,7 +2968,7 @@ function updateVersionDisplay() {
 }
 
 function onVersionClick() {
-  if (latestVersionData && latestVersionData.version && latestVersionData.version !== initialVersion) {
+  if (hasRealUpdate()) {
     showUpdatePanel();
   } else {
     // Force a fresh check
@@ -2864,9 +2987,13 @@ async function checkForUpdate() {
     if (!initialVersion) {
       // No baked-in version (local dev) → first fetch becomes baseline
       initialVersion = data.version;
-    } else if (initialVersion !== data.version) {
-      // Version changed since this HTML was built → update available
+    } else if (hasRealUpdate()) {
+      // Version changed since this HTML was built and the user hasn't dismissed it → show badge
       document.getElementById('updateBadge').style.display = 'flex';
+    } else {
+      // Same version or dismissed → hide badge
+      var badge = document.getElementById('updateBadge');
+      if (badge) badge.style.display = 'none';
     }
     updateVersionDisplay();
   } catch (e) { /* silently ignore */ }
@@ -2956,6 +3083,14 @@ function showUpdatePanel() {
 function closeUpdatePanel() {
   const el = document.getElementById('updatePanelOverlay');
   if (el) el.remove();
+  // ユーザーが「あとで」を押したらこのバージョンを dismissed として保存
+  // → 次回以降、同じバージョンでは自動で badge を表示しない
+  if (latestVersionData && latestVersionData.version) {
+    setDismissedVersion(latestVersionData.version);
+    var badge = document.getElementById('updateBadge');
+    if (badge) badge.style.display = 'none';
+    updateVersionDisplay();
+  }
   // Restore FAB
   const fab = document.querySelector('.fab-btn');
   if (fab) fab.style.display = '';
@@ -3423,6 +3558,20 @@ function resetSearch() {
   document.getElementById('hakenIncludeRetired').checked = false;
   document.getElementById('hakenSectionCard').style.display = '';
   document.getElementById('addEmpBtn').style.display = '';
+}
+
+// ロゴクリックでホーム画面に戻る
+function goToHomeFromLogo() {
+  try {
+    // ログイン画面の場合は何もしない
+    var login = document.getElementById('loginScreen');
+    if (login && login.classList.contains('active')) return;
+    // 開いているポップアップ/オーバーレイを閉じる
+    document.querySelectorAll('.preview-overlay, .taisha-overlay').forEach(function(el) { el.remove(); });
+    if (typeof screenHistory !== 'undefined') screenHistory.length = 0;
+    resetSearch();
+    switchScreen('searchScreen');
+  } catch (e) { console.warn('goToHomeFromLogo error:', e); }
 }
 
 function goBack() {
@@ -6113,11 +6262,6 @@ async function loadMaebariList() {
     });
     // 未処理（手数料未入力）件数
     var unprocessed = records.filter(function(r) { return !r[MF.fee] || !String(r[MF.fee]).trim(); });
-    if (unprocessed.length > 0) {
-      html += '<div style="text-align:center;margin:12px 0;">' +
-        '<button onclick="deleteUnprocessedMaebari()" style="background:linear-gradient(135deg,#e53935,#c62828);color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;">🗑 未処理分（' + unprocessed.length + '件）を一括削除</button>' +
-        '</div>';
-    }
     html += '</div><div style="height:50px;"></div>';
     body.innerHTML = html;
 
@@ -7862,6 +8006,229 @@ async function uploadFileToSp(folderPath, fileName, file) {
   return await resp.json();
 }
 
+// ============================================================
+// 汎用アップロードダイアログ (車両管理台帳 / 社員フォルダ共通)
+// カメラ撮影 / ファイル選択 / ドラッグ&ドロップ対応
+// ============================================================
+var _uploadFiles = [];  // 選択中のファイル配列
+function openUploadDialog(context) {
+  // context: 'vehicle' | 'syain'
+  _uploadFiles = [];
+
+  // 現在のフォルダを特定
+  var srUrl, folderName, refreshFn, showCategory;
+  if (context === 'vehicle') {
+    if (!_vfNavStack || _vfNavStack.length === 0) { showToast('フォルダが特定できません', 'error'); return; }
+    var cur = _vfNavStack[_vfNavStack.length - 1];
+    srUrl = cur.srUrl;
+    folderName = cur.name;
+    refreshFn = async function() {
+      try {
+        var t = await getToken();
+        var contents = await loadVehicleFolderContents(t, srUrl);
+        renderVehicleFolderContents(contents.folders, contents.files);
+      } catch(e) { console.warn('refresh vehicle folder error:', e); }
+    };
+    showCategory = true;
+  } else {
+    if (typeof _sfNavStack === 'undefined' || !_sfNavStack || _sfNavStack.length === 0) { showToast('フォルダが特定できません', 'error'); return; }
+    var curS = _sfNavStack[_sfNavStack.length - 1];
+    srUrl = curS.srUrl;
+    folderName = curS.name;
+    refreshFn = async function() {
+      try {
+        var t = await getToken();
+        var contents = await loadVehicleFolderContents(t, srUrl);
+        renderSyainFolderContents(contents.folders, contents.files);
+      } catch(e) { console.warn('refresh syain folder error:', e); }
+    };
+    showCategory = false;
+  }
+
+  var existing = document.getElementById('uploadOverlay');
+  if (existing) existing.remove();
+
+  var overlay = document.createElement('div');
+  overlay.className = 'upload-overlay';
+  overlay.id = 'uploadOverlay';
+
+  var categoryHtml = '';
+  if (showCategory) {
+    categoryHtml =
+      '<div>' +
+        '<label>ファイル種類</label>' +
+        '<select id="uploadCategory">' +
+          '<option value="">種類を選択...</option>' +
+          '<option value="車検証">車検証</option>' +
+          '<option value="自賠責">自賠責</option>' +
+          '<option value="任意保険">任意保険</option>' +
+          '<option value="その他">その他(自由入力)</option>' +
+        '</select>' +
+      '</div>' +
+      '<div id="uploadCustomNameWrap" style="display:none;">' +
+        '<label>ファイル名(拡張子なし)</label>' +
+        '<input type="text" id="uploadCustomName" placeholder="例: 車検ステッカー">' +
+      '</div>';
+  } else {
+    categoryHtml =
+      '<div>' +
+        '<label>ファイル名(空欄ならそのまま)</label>' +
+        '<input type="text" id="uploadCustomName" placeholder="例: 免許証_表">' +
+      '</div>';
+  }
+
+  overlay.innerHTML =
+    '<div class="upload-panel">' +
+      '<div class="upload-header">' +
+        '<div class="upload-title">📷 ファイルをアップロード</div>' +
+        '<button class="upload-close-x" onclick="closeUploadDialog()">✕</button>' +
+      '</div>' +
+      '<div class="upload-body">' +
+        '<div style="font-size:11px;color:#666;">保存先: <strong>' + escHtml(folderName || '') + '</strong></div>' +
+        categoryHtml +
+        '<div>' +
+          '<label>ファイル選択</label>' +
+          '<div id="uploadDropzone" class="upload-dropzone">' +
+            '<span class="up-icon">📤</span>' +
+            'タップしてカメラ/ファイルを選択<br>' +
+            '<span style="font-size:11px;color:#66bb6a;">またはここにドラッグ&ドロップ</span>' +
+          '</div>' +
+          '<input type="file" id="uploadFileInput" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.pptx" style="display:none;">' +
+        '</div>' +
+        '<div id="uploadFileList" class="upload-file-list"></div>' +
+      '</div>' +
+      '<div class="upload-btn-row">' +
+        '<button class="upload-btn-cancel" onclick="closeUploadDialog()">キャンセル</button>' +
+        '<button class="upload-btn-ok" id="uploadOkBtn" onclick="submitUpload()" disabled>⬆️ アップロード</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  // Store context in dataset
+  overlay.dataset.context = context;
+  overlay.dataset.srUrl = srUrl;
+  overlay._refreshFn = refreshFn;
+
+  var zone = document.getElementById('uploadDropzone');
+  var input = document.getElementById('uploadFileInput');
+  zone.addEventListener('click', function() { input.click(); });
+  input.addEventListener('change', function(e) {
+    var files = Array.from(e.target.files || []);
+    files.forEach(function(f) { _uploadFiles.push(f); });
+    renderUploadFileList();
+  });
+  zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', function() { zone.classList.remove('dragover'); });
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    var dtFiles = Array.from(e.dataTransfer.files || []);
+    dtFiles.forEach(function(f) { _uploadFiles.push(f); });
+    renderUploadFileList();
+  });
+
+  if (showCategory) {
+    document.getElementById('uploadCategory').addEventListener('change', function(e) {
+      var wrap = document.getElementById('uploadCustomNameWrap');
+      if (e.target.value === 'その他') { wrap.style.display = ''; }
+      else { wrap.style.display = 'none'; }
+    });
+  }
+
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) closeUploadDialog(); });
+}
+
+function renderUploadFileList() {
+  var list = document.getElementById('uploadFileList');
+  if (!list) return;
+  list.innerHTML = _uploadFiles.map(function(f, i) {
+    var sz = f.size ? (f.size < 1024 ? f.size + ' B' : (f.size < 1048576 ? (f.size/1024).toFixed(1) + ' KB' : (f.size/1048576).toFixed(1) + ' MB')) : '';
+    return '<div class="upload-file-row">' +
+      '<span class="uf-name">📎 ' + escHtml(f.name) + '</span>' +
+      '<span style="color:#666;font-size:11px;">' + sz + '</span>' +
+      '<button class="uf-remove" onclick="removeUploadFile(' + i + ')">✕</button>' +
+    '</div>';
+  }).join('');
+  var okBtn = document.getElementById('uploadOkBtn');
+  if (okBtn) okBtn.disabled = (_uploadFiles.length === 0);
+}
+
+function removeUploadFile(idx) {
+  _uploadFiles.splice(idx, 1);
+  renderUploadFileList();
+}
+
+function closeUploadDialog() {
+  var el = document.getElementById('uploadOverlay');
+  if (el) el.remove();
+  _uploadFiles = [];
+}
+
+async function submitUpload() {
+  var overlay = document.getElementById('uploadOverlay');
+  if (!overlay) return;
+  var context = overlay.dataset.context;
+  var srUrl = overlay.dataset.srUrl;
+  if (_uploadFiles.length === 0) { showToast('ファイルを選択してください', 'error'); return; }
+
+  // カテゴリ/ファイル名取得
+  var categoryEl = document.getElementById('uploadCategory');
+  var customEl = document.getElementById('uploadCustomName');
+  var category = categoryEl ? categoryEl.value : '';
+  var customName = customEl ? (customEl.value || '').trim() : '';
+
+  if (context === 'vehicle' && !category) {
+    showToast('ファイル種類を選択してください', 'error');
+    return;
+  }
+  if (context === 'vehicle' && category === 'その他' && !customName) {
+    showToast('ファイル名を入力してください', 'error');
+    return;
+  }
+
+  var okBtn = document.getElementById('uploadOkBtn');
+  if (okBtn) { okBtn.disabled = true; okBtn.textContent = '⏳ アップロード中...'; }
+
+  try {
+    var baseName = '';
+    if (context === 'vehicle') {
+      baseName = (category === 'その他') ? customName : category;
+    } else {
+      baseName = customName; // syain: empty = keep original name
+    }
+
+    var uploaded = 0;
+    for (var i = 0; i < _uploadFiles.length; i++) {
+      var f = _uploadFiles[i];
+      var origName = f.name || 'file';
+      var extMatch = origName.match(/\.([^.]+)$/);
+      var ext = extMatch ? extMatch[1] : '';
+      // iOS camera files sometimes have no extension; fall back to jpg
+      if (!ext && f.type && f.type.indexOf('image/') === 0) ext = 'jpg';
+
+      var finalName;
+      if (baseName) {
+        var suffix = (_uploadFiles.length > 1) ? ('_' + (i + 1)) : '';
+        finalName = baseName + suffix + (ext ? ('.' + ext) : '');
+      } else {
+        finalName = origName;
+      }
+
+      if (okBtn) okBtn.textContent = '⏳ ' + (i + 1) + ' / ' + _uploadFiles.length;
+      await uploadFileToSp(srUrl, finalName, f);
+      uploaded++;
+    }
+    showToast('✅ ' + uploaded + '件 アップロードしました', 'success');
+    closeUploadDialog();
+    // フォルダリストを再読込
+    if (overlay._refreshFn) await overlay._refreshFn();
+  } catch (e) {
+    console.error('upload error:', e);
+    showToast('アップロード失敗: ' + e.message, 'error');
+    if (okBtn) { okBtn.disabled = false; okBtn.textContent = '⬆️ アップロード'; }
+  }
+}
+
 async function uploadCapturedDocs(bukaVal, syainNo, name) {
   const docIds = Object.keys(capturedDocs);
   if (docIds.length === 0) return;
@@ -9199,6 +9566,27 @@ async function openIdouForm() {
   overlay.className = 'taisha-overlay';
   overlay.id = 'idouOverlay';
   overlay.innerHTML =
+    '<style>' +
+      '#idouOverlay .taisha-field { margin-bottom: 14px; }' +
+      '#idouOverlay .taisha-field label { display:block; font-size:13px; font-weight:700; color:#4a148c; margin-bottom:6px; }' +
+      '#idouOverlay .taisha-field input[type="text"],' +
+      '#idouOverlay .taisha-field input[type="number"],' +
+      '#idouOverlay .taisha-field input[type="date"],' +
+      '#idouOverlay .taisha-field select {' +
+        ' width:100%; box-sizing:border-box; padding:13px 14px;' +
+        ' font-size:16px; line-height:1.4; min-height:48px;' +
+        ' border:1.5px solid #ce93d8; border-radius:10px; background:#fff;' +
+        ' -webkit-appearance:none; appearance:none;' +
+      '}' +
+      '#idouOverlay .taisha-field select {' +
+        ' background-image:url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'8\' viewBox=\'0 0 12 8\'><path fill=\'%236a1b9a\' d=\'M6 8L0 0h12z\'/></svg>");' +
+        ' background-repeat:no-repeat; background-position:right 14px center; padding-right:36px;' +
+      '}' +
+      '#idouOverlay .taisha-field input:focus,' +
+      '#idouOverlay .taisha-field select:focus {' +
+        ' outline:none; border-color:#8e24aa; box-shadow:0 0 0 3px rgba(142,36,170,0.15);' +
+      '}' +
+    '</style>' +
     '<div class="taisha-panel">' +
       '<div class="taisha-header" style="background:linear-gradient(135deg,#6a1b9a 0%,#8e24aa 50%,#ab47bc 100%);">' +
         '<div class="taisha-header-bar">' +
@@ -11005,13 +11393,14 @@ function renderVehicleFolderContents(subfolders, files, digits) {
 
   var html = '';
 
-  // ナビゲーションヘッダー（戻るボタン + パンくず）
+  // ナビゲーションヘッダー（戻るボタン + アップロード + パンくず）
   if (_vfNavStack.length > 0) {
     var current = _vfNavStack[_vfNavStack.length - 1];
     html += '<div class="vfolder-nav">';
     if (_vfNavStack.length > 1) {
       html += '<button class="vfolder-back-btn" onclick="navigateBackVehicleFolder()">← 戻る</button>';
     }
+    html += '<button class="vfolder-upload-btn" onclick="openUploadDialog(\'vehicle\')">📷 写真/ファイル追加</button>';
     html += '<div class="vfolder-breadcrumb">';
     var crumbs = _vfNavStack.map(function(s) { return escHtml(s.name); }).join(' <span class="vfolder-crumb-sep">›</span> ');
     html += crumbs;
@@ -11679,40 +12068,54 @@ async function downloadSpSharingFile(token, shareUrl) {
   return await resp.arrayBuffer();
 }
 
-// PDFバッファをcanvasにレンダリング & ピンチズーム有効化
+// PDFバッファをcanvasにレンダリング & ピンチズーム有効化（全ページ縦連結）
 async function renderPdfBufferToBody(pbuf, body) {
   await loadPdfLibs();
   var pdfjsLib = window.pdfjsLib;
   var pdf = await pdfjsLib.getDocument({ data: pbuf.slice(0) }).promise;
-  var page = await pdf.getPage(1);
-  // 解像度を高めにしてズーム時の劣化を抑える
-  var viewport = page.getViewport({ scale: 2.2 });
-  var canvas = document.createElement('canvas');
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
   body.innerHTML = '';
-  body.appendChild(canvas);
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
-  enablePinchZoom(canvas);
+
+  // 全ページを縦に並べるラッパー
+  var wrapper = document.createElement('div');
+  wrapper.className = 'preview-pdf-pages';
+  wrapper.style.cssText = 'display:flex;flex-direction:column;gap:10px;align-items:center;width:100%;';
+  body.appendChild(wrapper);
+
+  // 解像度を高めにしてズーム時の劣化を抑える
+  var scale = 2.2;
+  for (var i = 1; i <= pdf.numPages; i++) {
+    var page = await pdf.getPage(i);
+    var viewport = page.getViewport({ scale: scale });
+    var canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    canvas.style.maxWidth = '100%';
+    canvas.style.height = 'auto';
+    wrapper.appendChild(canvas);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+    enablePinchZoom(canvas);
+
+    if (pdf.numPages > 1) {
+      var pageBadge = document.createElement('div');
+      pageBadge.style.cssText = 'text-align:center;font-size:11px;color:#888;margin-top:-4px;';
+      pageBadge.textContent = i + ' / ' + pdf.numPages + ' ページ';
+      wrapper.appendChild(pageBadge);
+    }
+  }
 
   var hint = document.createElement('div');
   hint.className = 'preview-zoom-hint';
   hint.textContent = '指でピンチズーム / ダブルタップで拡大';
   body.appendChild(hint);
   setTimeout(function() { hint.style.opacity = '0'; }, 3500);
-
-  if (pdf.numPages > 1) {
-    var info = document.createElement('div');
-    info.className = 'preview-page-info';
-    info.textContent = '1 / ' + pdf.numPages + ' ページ';
-    body.appendChild(info);
-  }
 }
 
 // ステップ・アップカレンダー (SharePoint sharing URL のPDF)
 async function openCalendarPopup() {
   var shareUrl = 'https://teamstepupcom774.sharepoint.com/:b:/s/TeamStepup-58/IQBrw6jNMB4TQJrTHAqmcfqDAUt87f33PX0Fib9YRKzbIC0?e=zBvZcS';
   var dlUrl = shareUrl.split('?')[0] + '?download=1';
+  // iframe埋込用URL
+  var embedUrl = shareUrl.split('?')[0] + '?action=embedview';
   var overlay = createPreviewPopup('ステップ・アップカレンダー', 'linear-gradient(135deg,#1565c0 0%,#1976d2 50%,#42a5f5 100%)');
   var body = overlay.querySelector('#previewBody');
   var actions = overlay.querySelector('#previewActions');
@@ -11721,13 +12124,32 @@ async function openCalendarPopup() {
     '<a href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener">⬇️ PDFダウンロード</a>';
   body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">📅</div><div>カレンダー読み込み中...</div></div>';
 
+  // まずSharing API経由で取得 → 失敗ならiframeにフォールバック
   try {
     var token = await getToken();
     if (!token) throw new Error('認証エラー');
     var pbuf = await downloadSpSharingFile(token, shareUrl);
     await renderPdfBufferToBody(pbuf, body);
+    return;
   } catch (e) {
-    console.error('calendar preview error:', e);
+    console.warn('calendar shares API failed, fallback to iframe:', e);
+  }
+
+  // フォールバック: iframe埋込（SharePointのブラウザ認証Cookieを利用）
+  try {
+    body.innerHTML = '';
+    var iframe = document.createElement('iframe');
+    iframe.src = embedUrl;
+    iframe.style.cssText = 'width:100%;height:75vh;border:0;background:#fff;';
+    iframe.setAttribute('allowfullscreen', '');
+    body.appendChild(iframe);
+    var hint = document.createElement('div');
+    hint.className = 'preview-zoom-hint';
+    hint.textContent = '📱 iframe表示中 / 拡大はDL後に';
+    body.appendChild(hint);
+    setTimeout(function() { hint.style.opacity = '0'; }, 3500);
+  } catch (e2) {
+    console.error('calendar preview iframe error:', e2);
     body.innerHTML = '<div class="preview-loading-box">' +
       '<div class="pl-icon">⚠️</div>' +
       '<div style="color:#ef9a9a;">プレビュー読み込み失敗</div>' +
@@ -12278,6 +12700,7 @@ function renderSyainFolderContents(subfolders, files) {
     if (_sfNavStack.length > 1) {
       html += '<button class="vfolder-back-btn" onclick="navigateBackSyainFolder()">← 戻る</button>';
     }
+    html += '<button class="vfolder-upload-btn" onclick="openUploadDialog(\'syain\')">📷 写真/ファイル追加</button>';
     html += '<div class="vfolder-breadcrumb">';
     html += _sfNavStack.map(function(s) { return escHtml(s.name); }).join(' <span class="vfolder-crumb-sep">›</span> ');
     html += '</div>';
