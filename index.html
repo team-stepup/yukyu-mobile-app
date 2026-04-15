@@ -1151,6 +1151,144 @@ select.sankyu-edit-input {
   box-shadow: 0 1px 4px rgba(245, 124, 0, 0.3);
 }
 
+/* ─────────────────────────────────────────
+   申請カード (期間 + 申請日 の1セット)
+   ───────────────────────────────────────── */
+.sankyu-app-card {
+  background: #fff;
+  border: 1.5px solid #f8bbd0;
+  border-radius: 12px;
+  padding: 11px 12px 12px;
+  margin: 10px 12px;
+  box-shadow: 0 2px 5px rgba(216, 27, 96, 0.07);
+  position: relative;
+  transition: background .15s ease, border-color .15s ease;
+}
+.sankyu-app-card.done {
+  background: #f5f5f5;
+  border-color: #ddd;
+  box-shadow: none;
+}
+.sankyu-app-card.done .sankyu-app-card-title {
+  color: #999;
+  text-decoration: line-through;
+  text-decoration-color: #bbb;
+  text-decoration-thickness: 1px;
+}
+.sankyu-app-card.done .sankyu-app-card-main-date,
+.sankyu-app-card.done .sankyu-app-card-period-date {
+  color: #888;
+}
+.sankyu-app-card-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #ad1457;
+  margin-bottom: 7px;
+  line-height: 1.35;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sankyu-app-card-title-text { flex: 1; min-width: 0; }
+.sankyu-app-card-done-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  background: #757575;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
+}
+.sankyu-app-card.done .sankyu-app-card-done-badge { background: #9e9e9e; }
+.sankyu-app-card-active-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, #ec407a, #d81b60);
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
+  animation: sankyuPulse 1.8s ease-in-out infinite;
+}
+@keyframes sankyuPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+.sankyu-app-card-body { display: flex; flex-direction: column; gap: 7px; }
+.sankyu-app-card-period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sankyu-app-card-period .sankyu-app-card-period-date { flex: 1; min-width: 0; }
+.sankyu-app-card-tilde {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 800;
+  color: #999;
+  padding: 0 2px;
+}
+.sankyu-app-card-period-date,
+.sankyu-app-card-main-date {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1976d2;
+}
+.sankyu-app-card-period-date.empty,
+.sankyu-app-card-main-date.empty { color: #ccc; font-weight: 400; }
+
+/* 編集モード時のカード内入力 */
+.sankyu-app-card-period .sankyu-edit-input,
+.sankyu-app-card-main .sankyu-edit-input,
+.sankyu-app-card-submitted .sankyu-edit-input {
+  padding: 7px 9px;
+  font-size: 12.5px;
+  border-width: 1.5px;
+}
+
+/* 申請日バー (下部) */
+.sankyu-app-card-submitted {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: #fafafa;
+  border: 1px dashed #d0d0d0;
+  border-radius: 8px;
+  margin-top: 3px;
+}
+.sankyu-app-card.done .sankyu-app-card-submitted {
+  background: #e0e0e0;
+  border-style: solid;
+  border-color: #bbb;
+}
+.sankyu-app-card-submitted-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #616161;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+.sankyu-app-card-submitted-value {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #424242;
+  text-align: right;
+}
+.sankyu-app-card-submitted-value.empty { color: #bbb; font-weight: 400; }
+.sankyu-app-card-submitted .sankyu-edit-input {
+  flex: 1;
+  background: #fff;
+}
+
+/* セクション内のカード用に section 余白を調整 */
+.sankyu-section.sankyu-section-cards { padding-bottom: 6px; }
+.sankyu-section.sankyu-section-cards .sankyu-app-card:last-child { margin-bottom: 4px; }
+
 /* + 新規追加 ボタン (一覧画面ヘッダー) */
 .sankyu-new-btn {
   margin-left: auto;
@@ -3825,7 +3963,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '8471212';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7114,6 +7252,213 @@ function formatSankyuValue(val, type) {
   return { text: String(val), cls: '' };
 }
 
+// ─────────────────────────────────────────
+// 申請カード 構築 & 描画
+// ─────────────────────────────────────────
+// 正規表現: 申請日 / 実施日 等の「完了マーカー」フィールド
+var _SANKYU_SUBMIT_RE = /(申請日|実施日|提出日|完了日|記入日|実行日|渡した日|もらった日|受取日|受領日)/;
+// 正規表現: 期間の 開始 側
+var _SANKYU_START_RE = /(開始|始め|はじめ|から|From|from|Start|start)/;
+// 正規表現: 期間の 終了 側
+var _SANKYU_END_RE   = /(終了|終わり|おわり|まで|末|To|to|End|end)/;
+
+// Power Apps の「NULL 相当」日付 (2001/12/31 など) を空として扱う
+function _sankyuIsEmptyDateRaw(raw) {
+  if (raw === null || raw === undefined || raw === '') return true;
+  try {
+    var d = new Date(raw);
+    if (isNaN(d)) return true;
+    // 2001/12/31 〜 2002/01/01 は Power Apps の Blank デフォルト扱い
+    var y = d.getFullYear();
+    var mo = d.getMonth();
+    if (y < 2002 && mo === 11) return true;
+    if (y === 1900 || y === 1970) return true;
+  } catch(_) {}
+  return false;
+}
+
+// タイトルから「期間/申請日」のサフィックスを剥がして ベース文字列 を得る
+function _sankyuStripSuffix(title) {
+  if (!title) return '';
+  var t = String(title);
+  // 申請日系の丸ごと除去 (例: "〇〇申請日" → "〇〇")
+  t = t.replace(/[\s　]*[\(（]?(申請日|実施日|提出日|完了日|記入日|実行日|渡した日|もらった日|受取日|受領日)[\)）]?$/, '');
+  // 開始/終了系の除去
+  t = t.replace(/[\s　]*[\(（]?(開始|始め|はじめ|から|From|from|Start|start|終了|終わり|おわり|まで|末|To|to|End|end)[\)）]?$/, '');
+  return t.trim();
+}
+
+// フィールド配列 → 申請カード配列 を構築
+//   fields: [{ title, raw, type, meta }]
+//   returns: [{ type: 'period'|'single', title, start?, end?, main?, submitted?, extras? }]
+function _sankyuBuildCards(fields) {
+  var cards = [];
+  var used = {};
+
+  // インデックス付きコピー
+  var arr = fields.map(function(f, i) { return { f: f, i: i }; });
+
+  function findSibling(baseTitle, predTitleRe, excludeIdx) {
+    for (var j = 0; j < arr.length; j++) {
+      if (used[j]) continue;
+      if (excludeIdx && excludeIdx.indexOf(j) >= 0) continue;
+      var g = arr[j].f;
+      if (g.type !== 'DateTime') continue;
+      if (!g.title) continue;
+      if (g.title.indexOf(baseTitle) < 0) continue;
+      if (!predTitleRe.test(g.title)) continue;
+      // 期間/申請日マーカーを含む必要あり
+      return j;
+    }
+    return -1;
+  }
+
+  // 1st pass: 期間 ( start + end) ペアの検出
+  for (var i = 0; i < arr.length; i++) {
+    if (used[i]) continue;
+    var f = arr[i].f;
+    if (f.type !== 'DateTime') continue;
+    if (!f.title) continue;
+    if (!_SANKYU_START_RE.test(f.title)) continue;
+    if (_SANKYU_SUBMIT_RE.test(f.title)) continue; // 申請日 は除外
+
+    var base = _sankyuStripSuffix(f.title);
+    if (!base || base.length < 2) continue;
+
+    // end を探す
+    var endIdx = findSibling(base, _SANKYU_END_RE, [i]);
+    if (endIdx < 0) continue;
+    // 申請日 を探す
+    var subIdx = findSibling(base, _SANKYU_SUBMIT_RE, [i, endIdx]);
+
+    cards.push({
+      type: 'period',
+      title: base,
+      start: f,
+      end: arr[endIdx].f,
+      submitted: subIdx >= 0 ? arr[subIdx].f : null
+    });
+    used[i] = true;
+    used[endIdx] = true;
+    if (subIdx >= 0) used[subIdx] = true;
+  }
+
+  // 2nd pass: 残りのフィールドを単体カードに
+  for (var k = 0; k < arr.length; k++) {
+    if (used[k]) continue;
+    var g = arr[k].f;
+    // 未消費の 申請日 フィールド → 単体カード (親が見つからなかった孤児)
+    var isSubmitOnly = (g.type === 'DateTime' && g.title && _SANKYU_SUBMIT_RE.test(g.title));
+
+    if (!isSubmitOnly && g.type === 'DateTime' && g.title) {
+      // メイン日付 + 申請日 ペアを探す
+      var base2 = _sankyuStripSuffix(g.title);
+      var subIdx2 = -1;
+      if (base2) subIdx2 = findSibling(base2, _SANKYU_SUBMIT_RE, [k]);
+      cards.push({
+        type: 'single',
+        title: g.title,
+        main: g,
+        submitted: subIdx2 >= 0 ? arr[subIdx2].f : null
+      });
+      used[k] = true;
+      if (subIdx2 >= 0) used[subIdx2] = true;
+      continue;
+    }
+
+    // DateTime 以外 (Text/Number/Note/Choice) または孤児 申請日
+    cards.push({
+      type: 'single',
+      title: g.title,
+      main: g,
+      submitted: null
+    });
+    used[k] = true;
+  }
+
+  return cards;
+}
+
+// 1枚のカードを描画
+function renderSankyuAppCard(card, isEdit) {
+  var html = '';
+
+  // 「申請済み」判定: 申請日 が入っていれば done
+  var isDone = false;
+  if (card.submitted && !_sankyuIsEmptyDateRaw(card.submitted.raw)) isDone = true;
+
+  html += '<div class="sankyu-app-card' + (isDone ? ' done' : '') + '">';
+
+  // タイトル + バッジ
+  html += '<div class="sankyu-app-card-title">';
+  html +=   '<span class="sankyu-app-card-title-text">' + escHtml(card.title || '(無題)') + '</span>';
+  if (card.submitted) {
+    if (isDone) {
+      html += '<span class="sankyu-app-card-done-badge">✓ 申請済</span>';
+    } else {
+      html += '<span class="sankyu-app-card-active-badge">● 未申請</span>';
+    }
+  }
+  html += '</div>';
+
+  html += '<div class="sankyu-app-card-body">';
+
+  if (card.type === 'period') {
+    // 期間 (開始 〜 終了)
+    if (isEdit) {
+      html += '<div class="sankyu-app-card-period">';
+      html +=   renderSankyuFieldInput(card.start.meta, card.start.raw);
+      html +=   '<span class="sankyu-app-card-tilde">〜</span>';
+      html +=   renderSankyuFieldInput(card.end.meta, card.end.raw);
+      html += '</div>';
+    } else {
+      var sv = formatSankyuValue(card.start.raw, 'DateTime');
+      var ev = formatSankyuValue(card.end.raw, 'DateTime');
+      var sEmpty = _sankyuIsEmptyDateRaw(card.start.raw);
+      var eEmpty = _sankyuIsEmptyDateRaw(card.end.raw);
+      html += '<div class="sankyu-app-card-period">';
+      html +=   '<div class="sankyu-app-card-period-date' + (sEmpty ? ' empty' : '') + '">' + (sEmpty ? '—' : escHtml(sv.text)) + '</div>';
+      html +=   '<span class="sankyu-app-card-tilde">〜</span>';
+      html +=   '<div class="sankyu-app-card-period-date' + (eEmpty ? ' empty' : '') + '">' + (eEmpty ? '—' : escHtml(ev.text)) + '</div>';
+      html += '</div>';
+    }
+  } else {
+    // 単体
+    var m = card.main;
+    if (isEdit) {
+      html += '<div class="sankyu-app-card-main">' + renderSankyuFieldInput(m.meta, m.raw) + '</div>';
+    } else {
+      var mEmpty = (m.type === 'DateTime')
+        ? _sankyuIsEmptyDateRaw(m.raw)
+        : (m.raw === null || m.raw === undefined || m.raw === '');
+      var mv = formatSankyuValue(m.raw, m.type);
+      if (m.type === 'DateTime') {
+        html += '<div class="sankyu-app-card-main-date' + (mEmpty ? ' empty' : '') + '">' + (mEmpty ? '—' : escHtml(mv.text)) + '</div>';
+      } else {
+        html += '<div style="font-size:13px;font-weight:700;color:#222;word-break:break-word;white-space:pre-wrap;">' + (mEmpty ? '<span style="color:#ccc;">—</span>' : escHtml(mv.text)) + '</div>';
+      }
+    }
+  }
+
+  // 申請日 バー
+  if (card.submitted) {
+    html += '<div class="sankyu-app-card-submitted">';
+    html +=   '<div class="sankyu-app-card-submitted-label">📝 申請日</div>';
+    if (isEdit) {
+      html += renderSankyuFieldInput(card.submitted.meta, card.submitted.raw);
+    } else {
+      var subEmpty = _sankyuIsEmptyDateRaw(card.submitted.raw);
+      var subv = formatSankyuValue(card.submitted.raw, 'DateTime');
+      html += '<div class="sankyu-app-card-submitted-value' + (subEmpty ? ' empty' : '') + '">' + (subEmpty ? '未申請' : escHtml(subv.text)) + '</div>';
+    }
+    html += '</div>';
+  }
+
+  html += '</div>'; // body
+  html += '</div>'; // card
+  return html;
+}
+
 // ============================================================
 // 産休育休 自動計算 (フェーズ3)
 // ============================================================
@@ -7561,6 +7906,9 @@ function renderSankyuDetail(item) {
   });
 
   // セクションごとに描画
+  //   申請フロー系 (sango/ikukyu/choki/fukki) → カード表示
+  //   それ以外 (basic/child/insurance/bank/memo/misc) → 従来の行表示
+  var cardSectionKeys = { sango: true, ikukyu: true, choki: true, fukki: true };
   var order = ['basic','child','sango','ikukyu','choki','fukki','insurance','bank','memo','misc'];
   order.forEach(function(secKey) {
     var sec = sections[secKey];
@@ -7571,22 +7919,43 @@ function renderSankyuDetail(item) {
       if (!hasValue && secKey !== 'basic' && secKey !== 'memo') return;
     }
 
-    html += '<div class="sankyu-section">';
-    html += '<div class="sankyu-section-head"><span class="sankyu-sec-icon">' + sec.icon + '</span>' + escHtml(sec.title) + '</div>';
-    sec.fields.forEach(function(f) {
-      if (isEdit) {
-        html += '<div class="sankyu-field-row sankyu-field-edit">';
-        html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
-        html +=   '<div class="sankyu-field-value">' + renderSankyuFieldInput(f.meta, f.raw) + '</div>';
-        html += '</div>';
-      } else {
-        var v = formatSankyuValue(f.raw, f.type);
-        html += '<div class="sankyu-field-row">';
-        html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
-        html +=   '<div class="sankyu-field-value' + (v.cls ? ' ' + v.cls : '') + '">' + (v.text ? escHtml(v.text) : '—') + '</div>';
-        html += '</div>';
+    var useCards = !!cardSectionKeys[secKey];
+    html += '<div class="sankyu-section' + (useCards ? ' sankyu-section-cards' : '') + '">';
+    html += '<div class="sankyu-section-head"><span class="sankyu-sec-icon">' + sec.icon + '</span>' + escHtml(sec.title);
+    if (useCards) {
+      // 進捗カウント (申請済 / 申請日あるカードのみ対象)
+      var _cardsPre = _sankyuBuildCards(sec.fields);
+      var totalWithSub = 0, doneCount = 0;
+      _cardsPre.forEach(function(c) {
+        if (!c.submitted) return;
+        totalWithSub++;
+        if (!_sankyuIsEmptyDateRaw(c.submitted.raw)) doneCount++;
+      });
+      if (totalWithSub > 0) {
+        html += '<span style="margin-left:auto;font-size:10.5px;font-weight:700;color:#888;">' + doneCount + ' / ' + totalWithSub + ' 申請済</span>';
       }
-    });
+      html += '</div>';
+      // カード本体
+      _cardsPre.forEach(function(c) {
+        html += renderSankyuAppCard(c, isEdit);
+      });
+    } else {
+      html += '</div>';
+      sec.fields.forEach(function(f) {
+        if (isEdit) {
+          html += '<div class="sankyu-field-row sankyu-field-edit">';
+          html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
+          html +=   '<div class="sankyu-field-value">' + renderSankyuFieldInput(f.meta, f.raw) + '</div>';
+          html += '</div>';
+        } else {
+          var v = formatSankyuValue(f.raw, f.type);
+          html += '<div class="sankyu-field-row">';
+          html +=   '<div class="sankyu-field-label">' + escHtml(f.title) + '</div>';
+          html +=   '<div class="sankyu-field-value' + (v.cls ? ' ' + v.cls : '') + '">' + (v.text ? escHtml(v.text) : '—') + '</div>';
+          html += '</div>';
+        }
+      });
+    }
     html += '</div>';
   });
 
