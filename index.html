@@ -4396,7 +4396,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '40bf37a';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -9111,6 +9111,18 @@ function renderSankyuAppCard(card, isEdit) {
           if (card.synthPeriodLabel) {
             html += '<div class="sankyu-app-card-synth-label">📐 ' + escHtml(card.synthPeriodLabel) + '</div>';
           }
+          // 合成期間カードでも未済ならメイン日付を編集可能にする
+          if (!isDone) {
+            var _spMainIname = m.meta.internalName;
+            var _spMainDateStr = '';
+            if (!_sankyuIsEmptyDateRaw(m.raw)) {
+              try { var _spd = new Date(m.raw); if (!isNaN(_spd)) _spMainDateStr = _spd.getFullYear() + '-' + ('0'+(_spd.getMonth()+1)).slice(-2) + '-' + ('0'+_spd.getDate()).slice(-2); } catch(_) {}
+            }
+            html += '<div class="sankyu-app-card-submitted">';
+            html +=   '<div class="sankyu-app-card-submitted-label">📅 日付</div>';
+            html +=   '<input type="date" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + _spMainDateStr + '" data-prev="' + _spMainDateStr + '" onchange="_sankyuGuardedDateSave(this, \'' + _spMainIname + '\', \'basic\')" style="flex:1;">';
+            html += '</div>';
+          }
         } else if (!isDone) {
           // 未済: メイン日付を編集可能にする
           var _mainIname = m.meta.internalName;
@@ -9657,6 +9669,16 @@ function renderSankyuDetail(item) {
     var kSex = sankyuKeyByTitle('性別', true) || sankyuKeyByTitle('性別');
     var sexVal = kSex ? String(item[kSex] || '') : '';
     var isMale = /男|male|パパ|父/i.test(sexVal);
+    console.log('[PAPA DEBUG] kSex=', kSex, 'sexVal=', sexVal, 'isMale=', isMale, 'item keys sample:', Object.keys(item).slice(0, 15));
+    // フィールドメタから性別フィールドを検索 (デバッグ)
+    if (!kSex && _sankyuFieldsMeta) {
+      var _sexDbg = [];
+      Object.keys(_sankyuFieldsMeta).forEach(function(k) {
+        var f = _sankyuFieldsMeta[k];
+        if (f.title && /性|sex|gender/i.test(f.title)) _sexDbg.push(f.title + ' -> ' + f.dataKey);
+      });
+      console.log('[PAPA DEBUG] 性別候補フィールド:', _sexDbg.length > 0 ? _sexDbg : '見つからない');
+    }
     html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)');
     if (isMale) html += ' <span class="sankyu-papa-badge">👨 パパ</span>';
     html += '</div>';
