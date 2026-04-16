@@ -4119,7 +4119,7 @@ select.sankyu-edit-input {
         <span id="sankyuBadgeCount" class="ql-badge" style="background:#d81b60;display:none;top:4px;right:4px;"></span>
         <span id="sankyuOverdueBadge" class="sankyu-overdue-home-badge" style="display:none;"></span>
       </button>
-      <button class="quick-link-btn" onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')">
+      <button class="quick-link-btn" onclick="openHakensakiListScreen()">
         <span class="ql-icon">🏭</span>
         <span class="ql-text">派遣先</span>
       </button>
@@ -4151,6 +4151,18 @@ select.sankyu-edit-input {
         </label>
       </div>
       <button class="home-search-btn" style="width:100%;margin-top:10px;padding:11px;border-radius:12px;" onclick="openHakenList()">表示</button>
+    </div>
+  </div>
+
+  <!-- Screen: 派遣先一覧 (SharePoint iframe) -->
+  <div class="screen" id="hakensakiListScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🏭 派遣先一覧</h2>
+      <div style="flex:1;"></div>
+      <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SharePointで開く ↗</button>
+    </div>
+    <div id="hakensakiIframeWrap" style="flex:1;border-radius:12px;overflow:hidden;border:1px solid #e0e0e0;background:#fff;">
+      <div style="text-align:center;padding:40px 20px;color:var(--text-light);">読み込み中…</div>
     </div>
   </div>
 
@@ -4502,7 +4514,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '7f9b451';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6666,6 +6678,21 @@ var _soumuSeisanCount = 0;
 var _soumuShahoInCount = 0;
 var _soumuShahoInItems = [];
 var _soumuSankyuSummary = { active: 0, upcoming: 0, overdue: 0 };
+
+// ── 派遣先一覧画面 (SharePoint iframe埋め込み) ──
+function openHakensakiListScreen() {
+  switchScreen('hakensakiListScreen');
+  var wrap = document.getElementById('hakensakiIframeWrap');
+  if (!wrap) return;
+  // 既にiframeがあれば再読込しない
+  if (wrap.querySelector('iframe')) return;
+  var iframe = document.createElement('iframe');
+  iframe.src = 'https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx';
+  iframe.style.cssText = 'width:100%;height:calc(100vh - 120px);border:0;background:#fff;';
+  iframe.setAttribute('allowfullscreen', '');
+  wrap.innerHTML = '';
+  wrap.appendChild(iframe);
+}
 
 function openSoumuScreen() {
   switchScreen('soumuScreen');
