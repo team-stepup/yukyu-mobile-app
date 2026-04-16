@@ -4431,7 +4431,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '97c46a4';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6637,7 +6637,7 @@ async function fetchSankyuSummary() {
     now.setHours(0, 0, 0, 0);
     var todayMs = now.getTime();
     var limit30Ms = todayMs + 30 * 86400000;
-    var threeDaysAgo = new Date(todayMs - 3 * 86400000);
+    var yesterday = new Date(todayMs - 1 * 86400000); // 期間が過ぎたら即検出
 
     var active = 0, upcoming = 0, overdue = 0;
 
@@ -6686,7 +6686,7 @@ async function fetchSankyuSummary() {
           try {
             var dv = new Date(df.raw);
             if (isNaN(dv)) return;
-            if (dv > threeDaysAgo) return; // まだ3日経ってない
+            if (dv > yesterday) return; // まだ期間を過ぎていない
             // プレフィックス抽出: 開始/終了/期間 等を除去
             var base = df.title.replace(/期間|開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
             if (base.length < 2) return;
@@ -7430,7 +7430,7 @@ function _sankyuGetOverdueItems(item) {
   if (!_sankyuFieldsMeta) return [];
   var now = new Date();
   now.setHours(0, 0, 0, 0);
-  var threeDaysAgo = new Date(now.getTime() - 3 * 86400000);
+  var yesterday = new Date(now.getTime() - 1 * 86400000);
   var reStart = /開始日|開始|from/i;
   var reEnd = /終了日|終了|end/i;
   var reSub = /申請日|申請/;
@@ -7459,7 +7459,7 @@ function _sankyuGetOverdueItems(item) {
     try {
       var dv = new Date(df.raw);
       if (isNaN(dv)) return;
-      if (dv > threeDaysAgo) return;
+      if (dv > yesterday) return; // まだ期間を過ぎていない
       // プレフィックス抽出: 期間/開始/終了 等を除去
       var base = df.title.replace(/期間|開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
       if (base.length < 2) return;
