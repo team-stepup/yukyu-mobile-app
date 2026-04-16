@@ -4498,7 +4498,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '7b738ad';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6811,13 +6811,13 @@ async function fetchSoumuSeisanCount() {
 }
 
 // 指定フィールドの値でフィルターした件数をカウント
-function soumuCount(badgeKey, matcher) {
+function soumuCount(badgeKey, matcher, includeResigned) {
   if (!_soumuAllEmps || !_soumuKeyMap) return 0;
   var odKey = _soumuKeyMap[badgeKey];
   if (!odKey) return 0;
   var count = 0;
   _soumuAllEmps.forEach(function(emp) {
-    if (isResigned(emp)) return;
+    if (!includeResigned && isResigned(emp)) return;
     var val = String(emp[odKey] || '');
     if (!val) return;
     if (matcher(val)) count++;
@@ -6840,14 +6840,14 @@ function renderSoumuDashboard() {
   var mRishokuhyou = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
 
   var c = {
-    koyouMochuu: soumuCount('soumuKoyou', mKoyou),
-    rishokuMochuu: soumuCount('soumuRishoku', mRishoku),
-    shahoMochuu: soumuCount('soumuShaho', mShaho),
-    koyouIn: soumuCount('soumuKoyou', mKoyouIn),
-    koyouOut: soumuCount('soumuKoyou', mKoyouOut),
-    shahoIn: soumuCount('soumuShaho', mShahoIn),
-    shahoOut: soumuCount('soumuShaho', mShahoOut),
-    rishokuhyou: soumuCount('soumuRishoku', mRishokuhyou),
+    koyouMochuu: soumuCount('soumuKoyou', mKoyou, true),
+    rishokuMochuu: soumuCount('soumuRishoku', mRishoku, true),
+    shahoMochuu: soumuCount('soumuShaho', mShaho, true),
+    koyouIn: soumuCount('soumuKoyou', mKoyouIn, true),
+    koyouOut: soumuCount('soumuKoyou', mKoyouOut, true),
+    shahoIn: soumuCount('soumuShaho', mShahoIn, true),
+    shahoOut: soumuCount('soumuShaho', mShahoOut, true),
+    rishokuhyou: soumuCount('soumuRishoku', mRishokuhyou, true),
     kyuryoSeisan: _soumuSeisanCount || 0
   };
 
@@ -7036,7 +7036,6 @@ function openSoumuFilterList(filterKey) {
   if (!odKey) { showToast('フィールド「' + badgeKey + '」が見つかりません', 'error'); return; }
 
   var list = _soumuAllEmps.filter(function(emp) {
-    if (isResigned(emp)) return false;
     var val = String(emp[odKey] || '');
     return val && matcher(val);
   });
