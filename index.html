@@ -528,23 +528,41 @@ body {
 .soumu-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 
 /* 派遣先一覧 タブ */
+.haken-tab-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
 .haken-tab {
-  display: inline-block;
-  padding: 7px 14px;
-  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 6px;
+  border-radius: 10px;
   border: 1.5px solid #d0d0e0;
   background: #fff;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-light);
   cursor: pointer;
-  margin-right: 6px;
   transition: all 0.15s;
+  white-space: nowrap;
 }
 .haken-tab-active {
   background: var(--primary);
   color: #fff;
   border-color: var(--primary);
+}
+.haken-tab-warn {
+  border-color: #f9a825;
+  background: #fffde7;
+  color: #f57f17;
+}
+.haken-tab-warn.haken-tab-active {
+  background: #f9a825;
+  color: #fff;
+  border-color: #f9a825;
 }
 
 /* ヒーローカード: 請求書発行シート */
@@ -4181,7 +4199,7 @@ select.sankyu-edit-input {
       <div style="flex:1;"></div>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
-    <div id="hakensakiTabs" style="display:none;margin-bottom:10px;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;"></div>
+    <div id="hakensakiTabs" style="display:none;margin-bottom:10px;"></div>
     <div id="hakensakiBody">
       <div style="text-align:center;padding:40px 20px;color:var(--text-light);">
         <div style="font-size:32px;margin-bottom:10px;">🏭</div>
@@ -4538,7 +4556,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '56f5585';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6829,13 +6847,16 @@ function _hakenItemStatus(item) {
     if (!isNaN(endDate.getTime())) hasEnd = true;
   }
   var today = new Date(); today.setHours(0, 0, 0, 0);
+  var in30 = new Date(today); in30.setDate(in30.getDate() + 30);
   // 派遣契約有効: 期限が今日以降 AND 人数>=1
   var isValid = hasEnd && endDate >= today && ninzu >= 1;
   // 派遣契約期限切れ: 期限が過去 AND 人数>=1
   var isExpiredContract = hasEnd && endDate < today && ninzu >= 1;
   // 派遣契約なし: 人数0
   var isNoContract = ninzu === 0;
-  return { ninzu: ninzu, isValid: isValid, isExpiredContract: isExpiredContract, isNoContract: isNoContract, endDate: endDate, hasEnd: hasEnd };
+  // 契約更新注意: 有効だが1ヶ月以内に切れる (人数>=1)
+  var isSoonExpire = isValid && endDate <= in30;
+  return { ninzu: ninzu, isValid: isValid, isExpiredContract: isExpiredContract, isNoContract: isNoContract, isSoonExpire: isSoonExpire, endDate: endDate, hasEnd: hasEnd };
 }
 
 function buildHakensakiTabs() {
@@ -6843,29 +6864,35 @@ function buildHakensakiTabs() {
   if (!tabs) return;
   var items = _hakensakiItems;
   var cAll = items.length;
-  var cValid = 0, cExpired = 0, cNone = 0;
+  var cValid = 0, cExpired = 0, cNone = 0, cSoon = 0;
   items.forEach(function(item) {
     var s = _hakenItemStatus(item);
     if (s.isValid) cValid++;
-    else if (s.isExpiredContract) cExpired++;
-    else if (s.isNoContract) cNone++;
+    if (s.isExpiredContract) cExpired++;
+    if (s.isNoContract) cNone++;
+    if (s.isSoonExpire) cSoon++;
   });
 
   var tabDefs = [
-    { key: 'all',     label: 'すべて',       count: cAll,     color: '' },
-    { key: 'valid',   label: '派遣契約有効',  count: cValid,   color: '#1565c0' },
-    { key: 'expired', label: '派遣契約期限切れ', count: cExpired, color: '#e65100' },
-    { key: 'none',    label: '派遣契約なし',  count: cNone,    color: '#78909c' }
+    { key: 'all',     label: 'すべて',       count: cAll,     cls: '' },
+    { key: 'valid',   label: '契約有効',      count: cValid,   cls: '' },
+    { key: 'soon',    label: '契約更新注意',   count: cSoon,    cls: ' haken-tab-warn' },
+    { key: 'expired', label: '期限切れ',      count: cExpired, cls: '' },
+    { key: 'none',    label: '契約なし',      count: cNone,    cls: '' }
   ];
 
-  var html = '';
+  // 奇数の場合、最後の行は1列で全幅にするため CSS で対応
+  var html = '<div class="haken-tab-grid">';
   tabDefs.forEach(function(t, idx) {
     var active = idx === 0 ? ' haken-tab-active' : '';
-    html += '<button class="haken-tab' + active + '" data-filter="' + t.key + '" onclick="filterHakensakiList(\'' + t.key + '\',this)">';
+    // 奇数個の最後は全幅
+    var spanStyle = (tabDefs.length % 2 === 1 && idx === tabDefs.length - 1) ? ' style="grid-column:1/-1;"' : '';
+    html += '<button class="haken-tab' + t.cls + active + '"' + spanStyle + ' data-filter="' + t.key + '" onclick="filterHakensakiList(\'' + t.key + '\',this)">';
     html += escHtml(t.label);
-    html += '<span style="margin-left:4px;font-size:11px;font-weight:700;' + (t.color && idx > 0 ? 'color:' + t.color + ';' : '') + '">' + t.count + '</span>';
+    html += ' <span style="font-weight:700;">' + t.count + '</span>';
     html += '</button>';
   });
+  html += '</div>';
   tabs.innerHTML = html;
   tabs.style.display = 'block';
 }
@@ -6897,6 +6924,7 @@ function drawHakensakiCards(filterKey) {
     var s = _hakenItemStatus(item);
     switch (filterKey) {
       case 'valid':   return s.isValid;
+      case 'soon':    return s.isSoonExpire;
       case 'expired': return s.isExpiredContract;
       case 'none':    return s.isNoContract;
       default:        return true; // all
@@ -6939,11 +6967,12 @@ function drawHakensakiCards(filterKey) {
     var isZero = totalNinzu === 0;
 
     // ステータス判定
-    var hasExpired = false, hasValid = false;
+    var hasExpired = false, hasValid = false, hasSoon = false;
     gItems.forEach(function(item) {
       var s = _hakenItemStatus(item);
       if (s.isValid) hasValid = true;
       if (s.isExpiredContract) hasExpired = true;
+      if (s.isSoonExpire) hasSoon = true;
     });
 
     // ヘッダー色
@@ -6955,6 +6984,9 @@ function drawHakensakiCards(filterKey) {
     } else if (hasExpired && !hasValid) {
       headerBg = 'linear-gradient(135deg,#e65100,#f57c00)';
       cardBorder = '1px solid #ffcc80';
+    } else if (hasSoon && !hasExpired) {
+      headerBg = 'linear-gradient(135deg,#f57f17,#f9a825)';
+      cardBorder = '1px solid #ffe082';
     } else if (hasExpired && hasValid) {
       headerBg = 'linear-gradient(135deg,#1a237e,#e65100)';
       cardBorder = '1px solid #e8e8f0';
@@ -6995,6 +7027,9 @@ function drawHakensakiCards(filterKey) {
       } else if (s.isExpiredContract) {
         rowBg = 'background:#fff8e1;'; textColor = '#e65100'; subColor = '#f57c00';
         ninzuBg = '#fff3e0'; ninzuColor = '#e65100';
+      } else if (s.isSoonExpire) {
+        rowBg = 'background:#fffde7;'; textColor = '#f57f17'; subColor = '#f9a825';
+        ninzuBg = '#fff9c4'; ninzuColor = '#f57f17';
       } else if (s.isValid) {
         ninzuBg = '#e3f2fd'; ninzuColor = '#1565c0';
       }
