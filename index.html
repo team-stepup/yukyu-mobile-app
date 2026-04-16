@@ -6641,11 +6641,6 @@ async function fetchSankyuSummary() {
 
     var active = 0, upcoming = 0, overdue = 0;
 
-    // 申請日/開始日/終了日 のロール判定用 regex (classifySankyuField 系から流用)
-    var reStart = /開始日|開始|from/i;
-    var reEnd = /終了日|終了|end/i;
-    var reSub = /申請日|申請/;
-
     items.forEach(function(it) {
       var s = String((statusKey && it[statusKey]) || '');
       var isOwari = s.indexOf('終了') >= 0 || s.indexOf('完了') >= 0;
@@ -6660,51 +6655,40 @@ async function fetchSankyuSummary() {
         } catch(_) {}
       }
 
-      // 遅延判定: 活動中の人の各日付フィールドをチェック
-      //   「期間開始 or 終了 の日付が 3日以上過去 かつ 対応する申請日が未入力」→ 遅延
+      // 遅延判定: _sankyuBuildCards で正確にカードをグルーピングして判定
       if (!isOwari && meta) {
-        var dateFields = [];
+        var allFields = [];
         Object.keys(meta).forEach(function(k) {
           var f = meta[k];
-          if (f.type !== 'DateTime') return;
-          var raw = it[f.dataKey];
-          if (_sankyuIsEmptyDateRaw(raw)) return;
-          dateFields.push({ title: f.title, raw: raw, iname: k, dataKey: f.dataKey });
+          var cat = classifySankyuField(f.title);
+          if (['sango','ikukyu','choki','fukki'].indexOf(cat) < 0) return;
+          allFields.push({
+            title: f.title || f.internalName,
+            raw: it[f.dataKey],
+            type: f.type,
+            meta: f,
+            origCat: cat
+          });
         });
-        // 申請日フィールド一覧を事前に収集
-        var subFields = [];
-        Object.keys(meta).forEach(function(k2) {
-          var f2 = meta[k2];
-          if (f2.type !== 'DateTime') return;
-          if (!reSub.test(f2.title)) return;
-          subFields.push(f2);
-        });
-        // 同じプレフィックス内で 申請日が空 + 他の日付が 3日超え → 遅延
+        var cards = _sankyuBuildCards(allFields);
         var itemOverdue = 0;
-        dateFields.forEach(function(df) {
-          if (reSub.test(df.title)) return; // 申請日自体は対象外
-          try {
-            var dv = new Date(df.raw);
-            if (isNaN(dv)) return;
-            if (dv > yesterday) return; // まだ期間を過ぎていない
-            // プレフィックス抽出: 開始/終了/期間 等を除去
-            var base = df.title.replace(/期間|開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
-            if (base.length < 2) return;
-            // 対応する申請日を検索
-            var found = false;
-            subFields.forEach(function(f2) {
-              if (found) return;
-              var b2 = f2.title.replace(/申請日?/g, '').replace(/[\s　]+/g, '');
-              // 部分一致 (同じプレフィックス)
-              if (b2.length >= 2 && (base.indexOf(b2) >= 0 || b2.indexOf(base) >= 0)) {
-                var subRaw = it[f2.dataKey];
-                if (_sankyuIsEmptyDateRaw(subRaw)) {
-                  itemOverdue++;
-                }
-                found = true;
-              }
-            });
-          } catch(_) {}
+        cards.forEach(function(card) {
+          if (!card.submitted) return;
+          if (!_sankyuIsEmptyDateRaw(card.submitted.raw)) return;
+          var pastDate = false;
+          if (card.type === 'period') {
+            if (card.end && !_sankyuIsEmptyDateRaw(card.end.raw)) {
+              try { var dE = new Date(card.end.raw); if (!isNaN(dE) && dE <= yesterday) pastDate = true; } catch(_) {}
+            }
+            if (!pastDate && card.start && !_sankyuIsEmptyDateRaw(card.start.raw)) {
+              try { var dS = new Date(card.start.raw); if (!isNaN(dS) && dS <= yesterday) pastDate = true; } catch(_) {}
+            }
+          } else {
+            if (card.main && card.main.type === 'DateTime' && !_sankyuIsEmptyDateRaw(card.main.raw)) {
+              try { var dM = new Date(card.main.raw); if (!isNaN(dM) && dM <= yesterday) pastDate = true; } catch(_) {}
+            }
+          }
+          if (pastDate) itemOverdue++;
         });
         if (itemOverdue > 0) overdue += itemOverdue;
       }
@@ -7431,51 +7415,65 @@ function _sankyuGetOverdueItems(item) {
   var now = new Date();
   now.setHours(0, 0, 0, 0);
   var yesterday = new Date(now.getTime() - 1 * 86400000);
-  var reStart = /開始日|開始|from/i;
-  var reEnd = /終了日|終了|end/i;
-  var reSub = /申請日|申請/;
   var overdueList = [];
 
-  var dateFields = [];
-  Object.keys(_sankyuFieldsMeta).forEach(function(k) {
-    var f = _sankyuFieldsMeta[k];
-    if (f.type !== 'DateTime') return;
-    var raw = item[f.dataKey];
-    if (_sankyuIsEmptyDateRaw(raw)) return;
-    dateFields.push({ title: f.title, raw: raw, iname: k });
+  // _sankyuBuildCards と同じ入力形式でフィールド配列を構築
+  var meta = _sankyuFieldsMeta;
+  var allFields = [];
+  Object.keys(meta).forEach(function(k) {
+    var f = meta[k];
+    var cat = classifySankyuField(f.title);
+    // 申請対象カテゴリのみ (産後/育休/延長/復帰)
+    if (['sango','ikukyu','choki','fukki'].indexOf(cat) < 0) return;
+    var rawVal = item[f.dataKey];
+    allFields.push({
+      title: f.title || f.internalName,
+      raw: rawVal,
+      type: f.type,
+      meta: f,
+      origCat: cat
+    });
   });
 
-  // 申請日フィールド一覧を事前に収集
-  var subFieldsList = [];
-  Object.keys(_sankyuFieldsMeta).forEach(function(k2) {
-    var f2 = _sankyuFieldsMeta[k2];
-    if (f2.type !== 'DateTime') return;
-    if (!reSub.test(f2.title)) return;
-    subFieldsList.push(f2);
-  });
+  // カードを構築 (詳細画面と同じアルゴリズム)
+  var cards = _sankyuBuildCards(allFields);
 
-  dateFields.forEach(function(df) {
-    if (reSub.test(df.title)) return;
-    try {
-      var dv = new Date(df.raw);
-      if (isNaN(dv)) return;
-      if (dv > yesterday) return; // まだ期間を過ぎていない
-      // プレフィックス抽出: 期間/開始/終了 等を除去
-      var base = df.title.replace(/期間|開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
-      if (base.length < 2) return;
-      var found = false;
-      subFieldsList.forEach(function(f2) {
-        if (found) return;
-        var b2 = f2.title.replace(/申請日?/g, '').replace(/[\s　]+/g, '');
-        if (b2.length >= 2 && (base.indexOf(b2) >= 0 || b2.indexOf(base) >= 0)) {
-          var subRaw = item[f2.dataKey];
-          if (_sankyuIsEmptyDateRaw(subRaw)) {
-            overdueList.push(df.title);
-          }
-          found = true;
-        }
-      });
-    } catch(_) {}
+  cards.forEach(function(card) {
+    // submitted (申請日) が既に入力済みなら OK
+    if (card.submitted && !_sankyuIsEmptyDateRaw(card.submitted.raw)) return;
+    // submitted フィールドが無いカードはスキップ（対応する申請日が無い）
+    if (!card.submitted) return;
+
+    // カード内の日付が yesterday 以前かチェック
+    var pastDate = null;
+    if (card.type === 'period') {
+      // 終了日が yesterday 以前なら overdue
+      if (card.end && !_sankyuIsEmptyDateRaw(card.end.raw)) {
+        try {
+          var dEnd = new Date(card.end.raw);
+          if (!isNaN(dEnd) && dEnd <= yesterday) pastDate = card.title + '終了';
+        } catch(_) {}
+      }
+      // 終了日が無ければ開始日でチェック
+      if (!pastDate && card.start && !_sankyuIsEmptyDateRaw(card.start.raw)) {
+        try {
+          var dStart = new Date(card.start.raw);
+          if (!isNaN(dStart) && dStart <= yesterday) pastDate = card.title + '開始';
+        } catch(_) {}
+      }
+    } else {
+      // single カード: main の日付が yesterday 以前
+      if (card.main && card.main.type === 'DateTime' && !_sankyuIsEmptyDateRaw(card.main.raw)) {
+        try {
+          var dMain = new Date(card.main.raw);
+          if (!isNaN(dMain) && dMain <= yesterday) pastDate = card.title;
+        } catch(_) {}
+      }
+    }
+
+    if (pastDate) {
+      overdueList.push(pastDate);
+    }
   });
   return overdueList;
 }
