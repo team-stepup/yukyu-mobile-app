@@ -4498,7 +4498,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '9564078';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6650,8 +6650,9 @@ var SOUMU_EXT = {
   sankyuIkukyu: '',
   sankyuIkukyuKanri: ''
 };
-// 給料精算リスト (List6) の path
-var SOUMU_SEISAN_LIST_PATH = '/sites/PowerApps/Lists/List6';
+// 給料精算リスト (List6) — ルートサイトにある
+var SOUMU_SEISAN_LIST_PATH = '/Lists/List6';
+var SP_ROOT_URL = 'https://teamstepupcom774.sharepoint.com';
 // 社会保険加入申請リスト の path
 var SOUMU_SHAHO_IN_LIST_PATH = '/sites/PowerApps/Lists/List4';
 
@@ -6791,14 +6792,15 @@ async function fetchSankyuSummary() {
   }
 }
 
-// 給料精算リスト (List6) の件数を取得
-// Power Apps: 総務部ｿｳﾑ.Value="→計算中ｹｲｻﾝﾁｭｳ" Or IsBlank(総務部ｿｳﾑ)
+// 給料精算リスト (List6) の件数を取得 — ルートサイト
+// Power Apps: 総務部ｿｳﾑ ≠ "✓支払済ｼﾊﾗｲｽﾞﾐ" (= "→計算中ｹｲｻﾝﾁｭｳ" or 空白)
 async function fetchSoumuSeisanCount() {
   try {
     var token = await getToken();
     if (!token) return 0;
+    var baseUrl = SP_ROOT_URL;
     // まずフィールドメタを取得して「総務部ｿｳﾑ」の内部名を解決
-    var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName&$top=200";
+    var fieldsUrl = baseUrl + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName&$top=200";
     var fResp = await fetch(fieldsUrl, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
@@ -6808,7 +6810,7 @@ async function fetchSoumuSeisanCount() {
       var fields = (fData.d && fData.d.results) || [];
       for (var i = 0; i < fields.length; i++) {
         var t = fields[i].Title || '';
-        if (t.indexOf('総務部') >= 0 || t.indexOf('ｿｳﾑ') >= 0 || t.indexOf('soumu') >= 0) {
+        if (t.indexOf('総務部') >= 0 || t.indexOf('ｿｳﾑ') >= 0) {
           var intName = fields[i].EntityPropertyName || fields[i].InternalName;
           soumuFieldKey = intName.startsWith('_') ? 'OData_' + intName : intName;
           break;
@@ -6817,7 +6819,7 @@ async function fetchSoumuSeisanCount() {
     }
     // アイテム取得してフィルター
     var selectFields = 'Id' + (soumuFieldKey ? ',' + soumuFieldKey : '');
-    var url2 = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/items?$top=500&$select=" + selectFields;
+    var url2 = baseUrl + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/items?$top=500&$select=" + selectFields;
     var resp2 = await fetch(url2, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
@@ -6828,6 +6830,7 @@ async function fetchSoumuSeisanCount() {
     var count = 0;
     items.forEach(function(item) {
       var v = String(item[soumuFieldKey] || '');
+      // →計算中ｹｲｻﾝﾁｭｳ or 空白をカウント (✓支払済ｼﾊﾗｲｽﾞﾐ以外)
       if (!v || v === '→計算中ｹｲｻﾝﾁｭｳ') count++;
     });
     return count;
