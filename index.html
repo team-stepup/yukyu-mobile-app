@@ -4396,7 +4396,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '7c16e85';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7344,9 +7344,18 @@ function renderSankyuList() {
     html += '<div class="sankyu-card status-' + cat + '" onclick="openSankyuDetail(' + it.Id + ')">';
     html +=   '<div class="sankyu-card-head">';
     if (no)     html += '<span class="sankyu-card-no">No.' + escHtml(no) + '</span>';
-    // 性別チェック (パパ表示)
-    var kSexL = sankyuKeyByTitle('性別', true) || sankyuKeyByTitle('性別');
-    var sexValL = kSexL ? String(it[kSexL] || '') : '';
+    // 性別チェック (パパ表示) — dataKey, entityPropertyName, internalName の順でフォールバック
+    var sexValL = '';
+    if (_sankyuFieldsMeta) {
+      var _sexMetaL = null;
+      Object.keys(_sankyuFieldsMeta).forEach(function(k) {
+        var f = _sankyuFieldsMeta[k];
+        if (f.title === '性別') _sexMetaL = f;
+      });
+      if (_sexMetaL) {
+        sexValL = String(it[_sexMetaL.dataKey] || it[_sexMetaL.entityPropertyName] || it[_sexMetaL.internalName] || '');
+      }
+    }
     var isMaleL = /男|male|パパ|父/i.test(sexValL);
                 html += '<span class="sankyu-card-name">' + escHtml(name || '(氏名なし)') + (isMaleL ? ' <span class="sankyu-papa-badge-sm">パパ</span>' : '') + '</span>';
     if (status) html += '<span class="sankyu-card-status s-' + cat + '">' + escHtml(status) + '</span>';
@@ -9670,16 +9679,30 @@ function renderSankyuDetail(item) {
     var kSex = sankyuKeyByTitle('性別', true) || sankyuKeyByTitle('性別');
     var sexVal = kSex ? String(item[kSex] || '') : '';
     var isMale = /男|male|パパ|父/i.test(sexVal);
-    console.log('[PAPA DEBUG] kSex=', kSex, 'sexVal=', sexVal, 'isMale=', isMale, 'item keys sample:', Object.keys(item).slice(0, 15));
-    // フィールドメタから性別フィールドを検索 (デバッグ)
-    if (!kSex && _sankyuFieldsMeta) {
-      var _sexDbg = [];
+    // 性別デバッグ: フィールドメタ情報 + item内の実データを出力
+    if (_sankyuFieldsMeta) {
+      var _sexMeta = null;
       Object.keys(_sankyuFieldsMeta).forEach(function(k) {
         var f = _sankyuFieldsMeta[k];
-        if (f.title && /性|sex|gender/i.test(f.title)) _sexDbg.push(f.title + ' -> ' + f.dataKey);
+        if (f.title === '性別') _sexMeta = f;
       });
-      console.log('[PAPA DEBUG] 性別候補フィールド:', _sexDbg.length > 0 ? _sexDbg : '見つからない');
+      if (_sexMeta) {
+        console.log('[PAPA DEBUG] 性別フィールド meta:', JSON.stringify(_sexMeta));
+        console.log('[PAPA DEBUG] item[dataKey]=' + JSON.stringify(item[_sexMeta.dataKey]) + ', item[entityProp]=' + JSON.stringify(item[_sexMeta.entityPropertyName]) + ', item[iname]=' + JSON.stringify(item[_sexMeta.internalName]));
+        // entityPropertyName で取れるか試す
+        if (!sexVal && item[_sexMeta.entityPropertyName]) {
+          sexVal = String(item[_sexMeta.entityPropertyName]);
+          isMale = /男|male|パパ|父/i.test(sexVal);
+        }
+        if (!sexVal && item[_sexMeta.internalName]) {
+          sexVal = String(item[_sexMeta.internalName]);
+          isMale = /男|male|パパ|父/i.test(sexVal);
+        }
+      } else {
+        console.log('[PAPA DEBUG] 性別フィールドがメタに見つかりません');
+      }
     }
+    console.log('[PAPA DEBUG] kSex=', kSex, 'sexVal=', sexVal, 'isMale=', isMale);
     html += '<div class="sankyu-detail-name">' + escHtml(name || '(氏名なし)');
     if (isMale) html += ' <span class="sankyu-papa-badge">👨 パパ</span>';
     html += '</div>';
