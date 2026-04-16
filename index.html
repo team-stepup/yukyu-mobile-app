@@ -527,6 +527,26 @@ body {
 .soumu-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .soumu-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 
+/* 派遣先一覧 タブ */
+.haken-tab {
+  display: inline-block;
+  padding: 7px 14px;
+  border-radius: 20px;
+  border: 1.5px solid #d0d0e0;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-light);
+  cursor: pointer;
+  margin-right: 6px;
+  transition: all 0.15s;
+}
+.haken-tab-active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
 /* ヒーローカード: 請求書発行シート */
 .soumu-hero {
   display: flex;
@@ -4161,6 +4181,13 @@ select.sankyu-edit-input {
       <div style="flex:1;"></div>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
+    <div id="hakensakiTabs" style="display:none;margin-bottom:10px;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
+      <button class="haken-tab haken-tab-active" data-filter="all" onclick="filterHakensakiList('all',this)">すべて</button>
+      <button class="haken-tab" data-filter="active" onclick="filterHakensakiList('active',this)">契約あり</button>
+      <button class="haken-tab" data-filter="inactive" onclick="filterHakensakiList('inactive',this)">契約なし</button>
+      <button class="haken-tab" data-filter="valid" onclick="filterHakensakiList('valid',this)">派遣有効</button>
+      <button class="haken-tab" data-filter="expired" onclick="filterHakensakiList('expired',this)">派遣なし</button>
+    </div>
     <div id="hakensakiBody">
       <div style="text-align:center;padding:40px 20px;color:var(--text-light);">
         <div style="font-size:32px;margin-bottom:10px;">🏭</div>
@@ -6725,7 +6752,17 @@ async function loadHakensakiList() {
   }
 }
 
+// 派遣先データ保持 (フィルター切替用)
+var _hakensakiItems = [];
+var _hakensakiFieldMap = {};
+var _hakensakiFieldTypes = {};
+var _hakensakiFields = {}; // resolved field keys
+
 function renderHakensakiList(items, fieldMap, fieldTypes) {
+  _hakensakiItems = items;
+  _hakensakiFieldMap = fieldMap;
+  _hakensakiFieldTypes = fieldTypes;
+
   var body = document.getElementById('hakensakiBody');
   if (!body) return;
   if (items.length === 0) {
@@ -6737,15 +6774,13 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
   console.log('[派遣先] fieldMap:', JSON.stringify(fieldMap, null, 2));
   if (items[0]) console.log('[派遣先] sample item keys:', Object.keys(items[0]).filter(function(k) { return items[0][k] !== null && !k.startsWith('__'); }));
 
-  // フィールドキー解決 — 部分一致で検索するヘルパー
+  // フィールドキー解決
   var allTitles = Object.keys(fieldMap);
-  function findField(/* keywords */) {
+  function findField() {
     var keywords = Array.prototype.slice.call(arguments);
-    // まず完全一致
     for (var i = 0; i < keywords.length; i++) {
       if (fieldMap[keywords[i]]) return fieldMap[keywords[i]];
     }
-    // 部分一致
     for (var i = 0; i < keywords.length; i++) {
       for (var j = 0; j < allTitles.length; j++) {
         if (allTitles[j].indexOf(keywords[i]) >= 0) return fieldMap[allTitles[j]];
@@ -6754,31 +6789,58 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
     return null;
   }
 
-  var fCompany = findField('派遣先会社名', '派遣先会社', '派遣先名', '派遣先') || 'Title';
-  var fSoshiki = findField('組織単位', '組織', '部署', '配属先', '部課');
-  var fStart   = findField('派遣期間　始まり', '派遣期間 始まり', '派遣期間始まり', '派遣開始', '開始日', '契約開始');
-  var fEnd     = findField('派遣期間　終わり', '派遣期間 終わり', '派遣期間終わり', '派遣終了', '終了日', '契約終了');
-  var fNinzu   = findField('派遣人数', '人数');
+  _hakensakiFields = {
+    company: findField('派遣先会社名', '派遣先会社', '派遣先名', '派遣先') || 'Title',
+    soshiki: findField('組織単位', '組織', '部署', '配属先', '部課'),
+    start:   findField('派遣期間　始まり', '派遣期間 始まり', '派遣期間始まり', '派遣開始', '開始日', '契約開始'),
+    end:     findField('派遣期間　終わり', '派遣期間 終わり', '派遣期間終わり', '派遣終了', '終了日', '契約終了'),
+    ninzu:   findField('派遣人数', '人数')
+  };
 
   // 日付型自動検出フォールバック
-  if (!fStart || !fEnd) {
+  if (!_hakensakiFields.start || !_hakensakiFields.end) {
     allTitles.forEach(function(title) {
       var k = fieldMap[title];
       if (fieldTypes[k] === 'DateTime') {
-        if (!fStart && (title.indexOf('始') >= 0 || title.indexOf('開始') >= 0)) fStart = k;
-        if (!fEnd && (title.indexOf('終') >= 0 || title.indexOf('了') >= 0)) fEnd = k;
+        if (!_hakensakiFields.start && (title.indexOf('始') >= 0 || title.indexOf('開始') >= 0)) _hakensakiFields.start = k;
+        if (!_hakensakiFields.end && (title.indexOf('終') >= 0 || title.indexOf('了') >= 0)) _hakensakiFields.end = k;
       }
     });
   }
-  // 数値型自動検出フォールバック
-  if (!fNinzu) {
+  if (!_hakensakiFields.ninzu) {
     allTitles.forEach(function(title) {
       var k = fieldMap[title];
-      if (fieldTypes[k] === 'Number' && (title.indexOf('人数') >= 0 || title.indexOf('人') >= 0)) fNinzu = k;
+      if (fieldTypes[k] === 'Number' && (title.indexOf('人数') >= 0 || title.indexOf('人') >= 0)) _hakensakiFields.ninzu = k;
     });
   }
 
-  console.log('[派遣先] resolved fields:', { company: fCompany, soshiki: fSoshiki, start: fStart, end: fEnd, ninzu: fNinzu });
+  console.log('[派遣先] resolved fields:', _hakensakiFields);
+
+  // タブ表示
+  var tabs = document.getElementById('hakensakiTabs');
+  if (tabs) tabs.style.display = 'block';
+
+  // 初期表示: すべて
+  drawHakensakiCards('all');
+}
+
+function filterHakensakiList(filterKey, btn) {
+  // タブ切替
+  var tabs = document.getElementById('hakensakiTabs');
+  if (tabs) {
+    var btns = tabs.querySelectorAll('.haken-tab');
+    btns.forEach(function(b) { b.classList.remove('haken-tab-active'); });
+  }
+  if (btn) btn.classList.add('haken-tab-active');
+  drawHakensakiCards(filterKey);
+}
+
+function drawHakensakiCards(filterKey) {
+  var body = document.getElementById('hakensakiBody');
+  if (!body) return;
+  var F = _hakensakiFields;
+  var items = _hakensakiItems;
+  var today = new Date(); today.setHours(0, 0, 0, 0);
 
   function fmtDate(v) {
     if (!v) return '';
@@ -6787,44 +6849,117 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
   }
 
+  // 各アイテムにステータスを付与
+  function itemStatus(item) {
+    var ninzu = F.ninzu ? (Number(item[F.ninzu]) || 0) : 0;
+    var endVal = F.end ? item[F.end] : null;
+    var hasEnd = false;
+    var endDate = null;
+    if (endVal) {
+      endDate = new Date(endVal); endDate.setHours(0, 0, 0, 0);
+      if (!isNaN(endDate.getTime())) hasEnd = true;
+    }
+    var startVal = F.start ? item[F.start] : null;
+    var hasStart = false;
+    if (startVal) {
+      var sd = new Date(startVal);
+      if (!isNaN(sd.getTime())) hasStart = true;
+    }
+    // 契約あり = 開始日or終了日がある
+    var hasContract = hasStart || hasEnd;
+    // 派遣有効 = 終了日が今日以降 AND 人数>0
+    var isValid = hasEnd && endDate >= today && ninzu > 0;
+    // 派遣なし = 人数0 or 終了日が過去
+    var isExpired = ninzu === 0 || (hasEnd && endDate < today);
+    return { ninzu: ninzu, hasContract: hasContract, isValid: isValid, isExpired: isExpired, endDate: endDate, hasEnd: hasEnd };
+  }
+
+  // フィルター適用
+  var filtered = items.filter(function(item) {
+    var s = itemStatus(item);
+    switch (filterKey) {
+      case 'active':  return s.hasContract;
+      case 'inactive': return !s.hasContract;
+      case 'valid':   return s.isValid;
+      case 'expired': return s.isExpired;
+      default:        return true;
+    }
+  });
+
   // 派遣先会社名でグルーピング
   var groups = {};
   var groupOrder = [];
-  items.forEach(function(item) {
-    var name = String(item[fCompany] || item.Title || '(不明)').trim();
-    if (!name) name = '(不明)';
+  filtered.forEach(function(item) {
+    var name = String(item[F.company] || item.Title || '(不明)').trim() || '(不明)';
     if (!groups[name]) { groups[name] = []; groupOrder.push(name); }
     groups[name].push(item);
   });
 
-  var html = '<div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">全 ' + items.length + ' 件</div>';
+  // グループをソート: 人数>0のグループが上、0人は下
+  groupOrder.sort(function(a, b) {
+    var aNinzu = 0, bNinzu = 0;
+    if (F.ninzu) {
+      groups[a].forEach(function(i) { aNinzu += Number(i[F.ninzu]) || 0; });
+      groups[b].forEach(function(i) { bNinzu += Number(i[F.ninzu]) || 0; });
+    }
+    if (aNinzu > 0 && bNinzu === 0) return -1;
+    if (aNinzu === 0 && bNinzu > 0) return 1;
+    return 0;
+  });
+
+  var html = '<div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">' + filtered.length + ' 件表示</div>';
+
+  if (filtered.length === 0) {
+    html += '<div style="text-align:center;padding:40px;color:var(--text-light);">該当なし</div>';
+    body.innerHTML = html;
+    return;
+  }
+
   groupOrder.forEach(function(gName) {
     var gItems = groups[gName];
-    // グループ内の合計人数
     var totalNinzu = 0;
-    if (fNinzu) gItems.forEach(function(item) { totalNinzu += Number(item[fNinzu]) || 0; });
+    if (F.ninzu) gItems.forEach(function(item) { totalNinzu += Number(item[F.ninzu]) || 0; });
+    var isZero = totalNinzu === 0;
 
-    html += '<div style="background:#fff;border-radius:12px;margin-bottom:12px;border:1px solid #e8e8f0;overflow:hidden;">';
-    html += '<div style="background:linear-gradient(135deg,#1a237e,#283593);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;">';
+    // ヘッダー色: 人数>0=紺色, 0人=グレー
+    var headerBg = isZero ? 'linear-gradient(135deg,#78909c,#90a4ae)' : 'linear-gradient(135deg,#1a237e,#283593)';
+    var cardBorder = isZero ? '1px solid #cfd8dc' : '1px solid #e8e8f0';
+    var cardOpacity = isZero ? 'opacity:0.75;' : '';
+
+    html += '<div style="background:#fff;border-radius:12px;margin-bottom:12px;border:' + cardBorder + ';overflow:hidden;' + cardOpacity + '">';
+    html += '<div style="background:' + headerBg + ';color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;">';
     html += '<div style="flex:1;font-weight:700;font-size:14px;">' + escHtml(gName) + '</div>';
-    if (fNinzu && totalNinzu > 0) html += '<div style="background:rgba(255,255,255,0.2);padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
+    if (F.ninzu) {
+      var pillBg = isZero ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.2)';
+      html += '<div style="background:' + pillBg + ';padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
+    }
     html += '</div>';
 
-    gItems.forEach(function(item, idx) {
-      var soshiki = fSoshiki ? String(item[fSoshiki] || '').trim() : '';
-      var start = fStart ? fmtDate(item[fStart]) : '';
-      var end = fEnd ? fmtDate(item[fEnd]) : '';
-      var ninzu = fNinzu ? item[fNinzu] : '';
-      var dateStr = '';
-      if (start || end) dateStr = start + '～' + end;
+    gItems.forEach(function(item) {
+      var soshiki = F.soshiki ? String(item[F.soshiki] || '').trim() : '';
+      var start = F.start ? fmtDate(item[F.start]) : '';
+      var end = F.end ? fmtDate(item[F.end]) : '';
+      var ninzu = F.ninzu ? (Number(item[F.ninzu]) || 0) : '';
+      var dateStr = (start || end) ? start + '～' + end : '';
 
-      html += '<div style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;">';
+      // 行の状態判定
+      var s = itemStatus(item);
+      var rowBg = '';
+      var ninzuBg = '#e8eaf6'; var ninzuColor = '#283593';
+      if (s.isExpired || ninzu === 0) {
+        rowBg = 'background:#f5f5f5;';
+        ninzuBg = '#efebe9'; ninzuColor = '#8d6e63';
+      } else if (s.isValid) {
+        ninzuBg = '#e3f2fd'; ninzuColor = '#1565c0';
+      }
+
+      html += '<div style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;' + rowBg + '">';
       html += '<div style="flex:1;min-width:0;">';
-      if (soshiki) html += '<div style="font-size:13px;color:var(--text-dark);overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
-      if (dateStr) html += '<div style="font-size:11px;color:var(--text-light);margin-top:2px;">' + escHtml(dateStr) + '</div>';
+      if (soshiki) html += '<div style="font-size:13px;color:' + (s.isExpired ? '#999' : 'var(--text-dark)') + ';overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
+      if (dateStr) html += '<div style="font-size:11px;color:' + (s.isExpired ? '#bbb' : 'var(--text-light)') + ';margin-top:2px;">' + escHtml(dateStr) + '</div>';
       html += '</div>';
-      if (ninzu !== '' && ninzu !== null && ninzu !== undefined) {
-        html += '<div style="background:#e8eaf6;color:#283593;font-weight:700;font-size:15px;min-width:36px;text-align:center;padding:4px 10px;border-radius:8px;">' + escHtml(String(ninzu)) + '</div>';
+      if (F.ninzu) {
+        html += '<div style="background:' + ninzuBg + ';color:' + ninzuColor + ';font-weight:700;font-size:15px;min-width:36px;text-align:center;padding:4px 10px;border-radius:8px;">' + ninzu + '</div>';
       }
       html += '</div>';
     });
