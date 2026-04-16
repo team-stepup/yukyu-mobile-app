@@ -4498,7 +4498,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'bd6b96f';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6263,6 +6263,7 @@ function buildFieldKeyMap(fieldsMeta) {
     yuukiMuki: '有期',
     koyouKaisi: '雇用契約開始',
     koyouSyuryo: '雇用契約終了',
+    zaisyoku: '在職zaisyoku',
   };
 
   Object.keys(titleMap).forEach(key => {
@@ -6832,17 +6833,43 @@ function renderSoumuDashboard() {
   // 各種カウント (badgeフィールドの値で集計)
   // Power Apps: soumukoyou="→取得申請中" Or soumukoyou="→喪失申請中"
   var mKoyou = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
-  var mRishoku = function(v) { return v.indexOf('申請中') >= 0; };
-  var mShaho = function(v) { return v.indexOf('申請中') >= 0; };
+  // Power Apps: soumusyaho="→取得申請中" Or soumusyaho="→喪失申請中"
+  var mShaho = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
   var mKoyouIn = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
   var mKoyouOut = function(v) { return v.indexOf('喪失') >= 0; };
   var mShahoIn = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
   var mShahoOut = function(v) { return v.indexOf('喪失') >= 0; };
   var mRishokuhyou = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
 
+  // 離職票申請中: Power Apps: zaisyoku="退社" && 離職票risyokuhyou.Value="必要" && '総務-離職票'.Value="→申請中"
+  var rishokuMochuuCount = (function() {
+    if (!_soumuAllEmps || !_soumuKeyMap) return 0;
+    var odRishoku = _soumuKeyMap['soumuRishoku'];
+    var odRishokuhyou = _soumuKeyMap['rishokuhyou'];
+    var odZaisyoku = _soumuKeyMap['zaisyoku'];
+    if (!odRishoku) return 0;
+    var count = 0;
+    _soumuAllEmps.forEach(function(emp) {
+      // zaisyoku="退社" — check direct field or fallback to isResigned
+      var zVal = odZaisyoku ? String(emp[odZaisyoku] || '') : '';
+      var isTaisha = zVal === '退社' || (!odZaisyoku && isResigned(emp));
+      if (!isTaisha) return;
+      // 離職票risyokuhyou="必要"
+      if (odRishokuhyou) {
+        var rhVal = String(emp[odRishokuhyou] || '');
+        if (rhVal !== '必要') return;
+      }
+      // 総務-離職票="→申請中"
+      var srVal = String(emp[odRishoku] || '');
+      if (srVal !== '→申請中') return;
+      count++;
+    });
+    return count;
+  })();
+
   var c = {
     koyouMochuu: soumuCount('soumuKoyou', mKoyou, true),
-    rishokuMochuu: soumuCount('soumuRishoku', mRishoku, true),
+    rishokuMochuu: rishokuMochuuCount,
     shahoMochuu: soumuCount('soumuShaho', mShaho, true),
     koyouIn: soumuCount('soumuKoyou', mKoyouIn, true),
     koyouOut: soumuCount('soumuKoyou', mKoyouOut, true),
@@ -7002,12 +7029,32 @@ function openSoumuFilterList(filterKey) {
       matcher = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
       break;
     case 'rishoku-mochuu':
-      badgeKey = 'soumuRishoku'; title = '離票 申請中';
-      matcher = function(v) { return v.indexOf('申請中') >= 0; };
-      break;
+      // 離職票申請中: zaisyoku="退社" && 離職票risyokuhyou="必要" && 総務-離職票="→申請中"
+      // Custom multi-field filter
+      (function() {
+        badgeKey = 'soumuRishoku'; title = '離票 申請中';
+        var odRishokuhyou = _soumuKeyMap['rishokuhyou'];
+        var odZaisyoku = _soumuKeyMap['zaisyoku'];
+        var odRishoku = _soumuKeyMap['soumuRishoku'];
+        if (!odRishoku) { showToast('フィールド「soumuRishoku」が見つかりません', 'error'); return; }
+        var filteredList = _soumuAllEmps.filter(function(emp) {
+          var zVal = odZaisyoku ? String(emp[odZaisyoku] || '') : '';
+          var isTaisha = zVal === '退社' || (!odZaisyoku && isResigned(emp));
+          if (!isTaisha) return false;
+          if (odRishokuhyou) {
+            var rhVal = String(emp[odRishokuhyou] || '');
+            if (rhVal !== '必要') return false;
+          }
+          var srVal = String(emp[odRishoku] || '');
+          return srVal === '→申請中';
+        });
+        openSoumuListOverlay(title, filteredList, odRishoku);
+      })();
+      return;
     case 'shaho-mochuu':
       badgeKey = 'soumuShaho'; title = '社保 申請中';
-      matcher = function(v) { return v.indexOf('申請中') >= 0; };
+      // Power Apps: soumusyaho="→取得申請中" Or soumusyaho="→喪失申請中"
+      matcher = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
       break;
     case 'koyou-kanyuu':
       badgeKey = 'soumuKoyou'; title = '雇用 加入';
