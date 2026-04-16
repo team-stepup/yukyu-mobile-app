@@ -483,6 +483,21 @@ body {
 .ql-icon { font-size: 28px; line-height: 1; }
 .ql-text { font-size: 11px; font-weight: 700; color: var(--text); letter-spacing: 0.5px; }
 .ql-badge { position:absolute;top:4px;right:4px;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 4px;line-height:16px;text-align:center; }
+.maebari-total-badge {
+  position: absolute;
+  bottom: 2px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(135deg, #e65100, #bf360c);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 7px;
+  border-radius: 8px;
+  white-space: nowrap;
+  line-height: 16px;
+  height: 16px;
+  box-shadow: 0 1px 4px rgba(191,54,12,0.4);
+  letter-spacing: -0.3px;
+}
 
 /* ============================================================
    総務部 ダッシュボード - 洗練されたカードレイアウト
@@ -4066,7 +4081,7 @@ select.sankyu-edit-input {
         <span class="ql-icon">💰</span>
         <span class="ql-text">前払い一覧</span>
         <span id="maebariBadgeCount" class="ql-badge" style="background:#f57c00;display:none;top:4px;right:4px;"></span>
-        <span id="maebariBadgeTotal" class="ql-badge" style="background:#e65100;display:none;bottom:4px;right:4px;top:auto;font-size:9px;min-width:auto;padding:1px 5px;height:16px;line-height:16px;border-radius:8px;"></span>
+        <span id="maebariBadgeTotal" class="maebari-total-badge" style="display:none;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
@@ -4484,7 +4499,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '08e3f47';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6389,7 +6404,7 @@ async function loadHomeBadges() {
     if (mRecs.length > 0) { mBadge.textContent = mRecs.length; mBadge.style.display = 'inline-block'; }
     else { mBadge.style.display = 'none'; }
   }
-  // 前払いバッジ（合計金額）
+  // 前払いバッジ（合計金額 正確表示）
   var mTotalBadge = document.getElementById('maebariBadgeTotal');
   if (mTotalBadge) {
     if (mRecs.length > 0) {
@@ -6398,8 +6413,7 @@ async function loadHomeBadges() {
         totalAmt += (parseFloat(r[MF.amount]) || 0) + (parseFloat(r[MF.fee]) || 0);
       });
       if (totalAmt > 0) {
-        var dispAmt = totalAmt >= 10000 ? Math.round(totalAmt / 10000) + '万' : totalAmt.toLocaleString();
-        mTotalBadge.textContent = '¥' + dispAmt;
+        mTotalBadge.textContent = '¥' + Math.round(totalAmt).toLocaleString();
         mTotalBadge.style.display = 'inline-block';
       } else { mTotalBadge.style.display = 'none'; }
     } else { mTotalBadge.style.display = 'none'; }
