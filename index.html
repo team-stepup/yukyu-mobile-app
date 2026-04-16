@@ -4431,7 +4431,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '6d278e9';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7438,6 +7438,24 @@ function _sankyuGetOverdueItems(item) {
   // カードを構築 (詳細画面と同じアルゴリズム)
   var cards = _sankyuBuildCards(allFields);
 
+  // DEBUG: 名前を取得
+  var _dbgName = '';
+  var _nameKey = sankyuKeyByTitle('氏名', true) || sankyuKeyByTitle('氏名');
+  if (_nameKey) _dbgName = item[_nameKey] || '';
+
+  console.log('[OVERDUE DEBUG] ' + _dbgName + ' allFields=' + allFields.length + ' cards=' + cards.length);
+  cards.forEach(function(card, ci) {
+    var hasSubmitted = !!card.submitted;
+    var submittedEmpty = hasSubmitted ? _sankyuIsEmptyDateRaw(card.submitted.raw) : 'N/A';
+    var dateInfo = '';
+    if (card.type === 'period') {
+      dateInfo = 'start=' + (card.start ? card.start.raw : 'null') + ' end=' + (card.end ? card.end.raw : 'null');
+    } else {
+      dateInfo = 'main=' + (card.main ? card.main.raw : 'null');
+    }
+    console.log('[OVERDUE DEBUG]   card[' + ci + '] type=' + card.type + ' title=' + card.title + ' ' + dateInfo + ' submitted=' + hasSubmitted + ' submittedEmpty=' + submittedEmpty + ' submittedRaw=' + (hasSubmitted ? card.submitted.raw : 'N/A'));
+  });
+
   cards.forEach(function(card) {
     // submitted (申請日) が既に入力済みなら OK
     if (card.submitted && !_sankyuIsEmptyDateRaw(card.submitted.raw)) return;
@@ -7473,6 +7491,7 @@ function _sankyuGetOverdueItems(item) {
 
     if (pastDate) {
       overdueList.push(pastDate);
+      console.log('[OVERDUE DEBUG]   → OVERDUE: ' + pastDate);
     }
   });
   return overdueList;
