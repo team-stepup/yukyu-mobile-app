@@ -6847,6 +6847,7 @@ var _hakensakiItems = [];
 var _hakensakiFieldMap = {};
 var _hakensakiFieldTypes = {};
 var _hakensakiFields = {}; // resolved field keys
+var _hakensakiAllFields = []; // 全フィールド [{title, odKey, type}]
 
 function renderHakensakiList(items, fieldMap, fieldTypes) {
   _hakensakiItems = items;
@@ -6903,6 +6904,13 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
       if (fieldTypes[k] === 'Number' && (title.indexOf('人数') >= 0 || title.indexOf('人') >= 0)) _hakensakiFields.ninzu = k;
     });
   }
+
+  // 全フィールド情報を保存（詳細表示用）
+  _hakensakiAllFields = [];
+  allTitles.forEach(function(title) {
+    var odKey = fieldMap[title];
+    _hakensakiAllFields.push({ title: title, odKey: odKey, type: fieldTypes[odKey] || '' });
+  });
 
   console.log('[派遣先] resolved fields:', _hakensakiFields);
 
@@ -7109,7 +7117,9 @@ function drawHakensakiCards(filterKey) {
         ninzuBg = '#e3f2fd'; ninzuColor = '#1565c0';
       }
 
-      html += '<div style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;' + rowBg + '">';
+      var rowId = 'hkRow_' + gIdx + '_' + gItems.indexOf(item);
+      html += '<div id="' + rowId + '">';
+      html += '<div onclick="toggleHakenDetail(\'' + rowId + '\')" style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;cursor:pointer;' + rowBg + '">';
       html += '<div style="flex:1;min-width:0;">';
       if (soshiki) html += '<div style="font-size:13px;color:' + textColor + ';overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
       if (dateStr) html += '<div style="font-size:11px;color:' + subColor + ';margin-top:2px;">' + escHtml(dateStr) + '</div>';
@@ -7117,6 +7127,12 @@ function drawHakensakiCards(filterKey) {
       if (F.ninzu) {
         html += '<div style="background:' + ninzuBg + ';color:' + ninzuColor + ';font-weight:700;font-size:15px;min-width:36px;text-align:center;padding:4px 10px;border-radius:8px;">' + ninzu + '</div>';
       }
+      html += '<span class="hk-row-arrow" style="font-size:9px;color:#aaa;transition:transform 0.2s;">▶</span>';
+      html += '</div>';
+      // 詳細パネル（初期非表示）
+      html += '<div class="hk-row-detail" style="display:none;padding:0 14px 12px;border-top:1px dashed #e8e8f0;background:#fafaff;">';
+      html += buildHakenDetailHtml(item);
+      html += '</div>';
       html += '</div>';
     });
     html += '</div>'; // hk-acc-body
@@ -7124,6 +7140,62 @@ function drawHakensakiCards(filterKey) {
   });
 
   body.innerHTML = html;
+}
+
+function buildHakenDetailHtml(item) {
+  var html = '<div style="padding-top:10px;">';
+  var skipKeys = { '__metadata': 1, 'Id': 1, 'ID': 1, 'ContentTypeId': 1, 'AuthorId': 1, 'EditorId': 1,
+    'FileSystemObjectType': 1, 'ServerRedirectedEmbedUri': 1, 'ServerRedirectedEmbedUrl': 1,
+    'Attachments': 1, 'GUID': 1, 'ComplianceAssetId': 1, 'OData__UIVersionString': 1 };
+  var fields = _hakensakiAllFields;
+  if (!fields || fields.length === 0) {
+    // フォールバック: itemのキーを直接表示
+    Object.keys(item).forEach(function(k) {
+      if (skipKeys[k] || k.startsWith('__') || k.startsWith('odata')) return;
+      var v = item[k];
+      if (v === null || v === undefined || v === '') return;
+      html += '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f5;font-size:12px;">';
+      html += '<div style="color:var(--text-light);min-width:90px;flex-shrink:0;">' + escHtml(k) + '</div>';
+      html += '<div style="color:var(--text);word-break:break-all;">' + escHtml(String(v)) + '</div>';
+      html += '</div>';
+    });
+  } else {
+    fields.forEach(function(f) {
+      var v = item[f.odKey];
+      if (v === null || v === undefined || v === '') return;
+      var display = String(v);
+      // 日付型はフォーマット
+      if (f.type === 'DateTime' && v) {
+        var d = new Date(v);
+        if (!isNaN(d.getTime())) display = d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+      }
+      // 数値型
+      if (f.type === 'Number' && !isNaN(Number(v))) {
+        display = Number(v).toLocaleString();
+      }
+      // 通貨型
+      if (f.type === 'Currency' && !isNaN(Number(v))) {
+        display = '¥' + Number(v).toLocaleString();
+      }
+      html += '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f5;font-size:12px;">';
+      html += '<div style="color:var(--text-light);min-width:100px;flex-shrink:0;font-weight:600;">' + escHtml(f.title) + '</div>';
+      html += '<div style="color:var(--text);word-break:break-all;">' + escHtml(display) + '</div>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+  return html;
+}
+
+function toggleHakenDetail(rowId) {
+  var row = document.getElementById(rowId);
+  if (!row) return;
+  var detail = row.querySelector('.hk-row-detail');
+  var arrow = row.querySelector('.hk-row-arrow');
+  if (!detail) return;
+  var isOpen = detail.style.display !== 'none';
+  detail.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
 }
 
 function toggleHakenAcc(sectionId) {
