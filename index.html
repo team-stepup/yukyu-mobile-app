@@ -6652,10 +6652,14 @@ var SOUMU_EXT = {
 };
 // 給料精算リスト (List6) の path
 var SOUMU_SEISAN_LIST_PATH = '/sites/PowerApps/Lists/List6';
+// 社会保険加入申請リスト の path
+var SOUMU_SHAHO_IN_LIST_PATH = '/sites/PowerApps/Lists/List4';
 
 var _soumuAllEmps = null;
 var _soumuKeyMap = null;
 var _soumuSeisanCount = 0;
+var _soumuShahoInCount = 0;
+var _soumuShahoInItems = [];
 var _soumuSankyuSummary = { active: 0, upcoming: 0, overdue: 0 };
 
 function openSoumuScreen() {
@@ -6677,13 +6681,17 @@ async function loadSoumuDashboard() {
       spGetAll(LIST_EMPLOYEES_GUID, '$top=500').catch(function() { return []; }),
       fetchEmployeeFields().catch(function() { return {}; }),
       fetchSoumuSeisanCount().catch(function() { return 0; }),
-      fetchSankyuSummary().catch(function() { return { active: 0, upcoming: 0, overdue: 0 }; })
+      fetchSankyuSummary().catch(function() { return { active: 0, upcoming: 0, overdue: 0 }; }),
+      fetchSoumuShahoInCount().catch(function() { return { count: 0, items: [] }; })
     ]);
     _soumuAllEmps = results[0] || [];
     var meta = results[1] || {};
     _soumuKeyMap = (meta && Object.keys(meta).length > 0) ? buildFieldKeyMap(meta) : {};
     _soumuSeisanCount = results[2] || 0;
     _soumuSankyuSummary = results[3] || { active: 0, upcoming: 0, overdue: 0 };
+    var shahoInResult = results[4] || { count: 0, items: [] };
+    _soumuShahoInCount = shahoInResult.count;
+    _soumuShahoInItems = shahoInResult.items;
     renderSoumuDashboard();
   } catch (e) {
     console.error('loadSoumuDashboard error:', e);
@@ -6784,31 +6792,131 @@ async function fetchSankyuSummary() {
 }
 
 // 給料精算リスト (List6) の件数を取得
+// Power Apps: 総務部ｿｳﾑ.Value="→計算中ｹｲｻﾝﾁｭｳ" Or IsBlank(総務部ｿｳﾑ)
 async function fetchSoumuSeisanCount() {
   try {
     var token = await getToken();
     if (!token) return 0;
-    var url = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/ItemCount";
-    var resp = await fetch(url, {
+    // まずフィールドメタを取得して「総務部ｿｳﾑ」の内部名を解決
+    var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName&$top=200";
+    var fResp = await fetch(fieldsUrl, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
-    if (resp.ok) {
-      var data = await resp.json();
-      if (typeof data.d === 'number') return data.d;
-      if (data.d && typeof data.d.ItemCount === 'number') return data.d.ItemCount;
+    var soumuFieldKey = null;
+    if (fResp.ok) {
+      var fData = await fResp.json();
+      var fields = (fData.d && fData.d.results) || [];
+      for (var i = 0; i < fields.length; i++) {
+        var t = fields[i].Title || '';
+        if (t.indexOf('総務部') >= 0 || t.indexOf('ｿｳﾑ') >= 0 || t.indexOf('soumu') >= 0) {
+          var intName = fields[i].EntityPropertyName || fields[i].InternalName;
+          soumuFieldKey = intName.startsWith('_') ? 'OData_' + intName : intName;
+          break;
+        }
+      }
     }
-    // Fallback: count items directly
-    var url2 = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/items?$top=500&$select=Id";
+    // アイテム取得してフィルター
+    var selectFields = 'Id' + (soumuFieldKey ? ',' + soumuFieldKey : '');
+    var url2 = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SEISAN_LIST_PATH + "')/items?$top=500&$select=" + selectFields;
     var resp2 = await fetch(url2, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
     if (!resp2.ok) return 0;
     var data2 = await resp2.json();
-    return (data2.d.results || []).length;
+    var items = (data2.d && data2.d.results) || [];
+    if (!soumuFieldKey) return items.length; // フィールド不明時は全件
+    var count = 0;
+    items.forEach(function(item) {
+      var v = String(item[soumuFieldKey] || '');
+      if (!v || v === '→計算中ｹｲｻﾝﾁｭｳ') count++;
+    });
+    return count;
   } catch (e) {
     console.warn('fetchSoumuSeisanCount error:', e);
     return 0;
   }
+}
+
+// 社会保険加入申請リスト: 加入日<=Today() AND 加入日>2022/01/01 AND IsBlank(本人加入)
+async function fetchSoumuShahoInCount() {
+  try {
+    var token = await getToken();
+    if (!token) return { count: 0, items: [] };
+    // フィールドメタ取得
+    var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName&$top=200";
+    var fResp = await fetch(fieldsUrl, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    var kanyuuKey = null, honninKey = null, nameKey = null;
+    if (fResp.ok) {
+      var fData = await fResp.json();
+      var fields = (fData.d && fData.d.results) || [];
+      fields.forEach(function(f) {
+        var t = f.Title || '';
+        var intName = f.EntityPropertyName || f.InternalName;
+        var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
+        if (t === '加入日' || t.indexOf('加入日') >= 0) kanyuuKey = odKey;
+        if (t === '本人加入' || t.indexOf('本人加入') >= 0) honninKey = odKey;
+        if (t === '氏名' || t === '社員名') nameKey = odKey;
+      });
+    }
+    // アイテム取得
+    var url = SP_SITE_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=500";
+    var resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) return { count: 0, items: [] };
+    var data = await resp.json();
+    var allItems = (data.d && data.d.results) || [];
+    var today = new Date(); today.setHours(0,0,0,0);
+    var minDate = new Date(2022, 0, 1); // 2022/01/01
+    var filtered = allItems.filter(function(item) {
+      // 加入日チェック
+      var kVal = kanyuuKey ? item[kanyuuKey] : null;
+      if (!kVal) return false;
+      var kDate = new Date(kVal); kDate.setHours(0,0,0,0);
+      if (isNaN(kDate.getTime())) return false;
+      if (kDate > today) return false;     // 加入日<=Today()
+      if (kDate <= minDate) return false;   // 加入日>2022/01/01
+      // IsBlank(本人加入)
+      if (honninKey) {
+        var hVal = item[honninKey];
+        if (hVal !== null && hVal !== undefined && String(hVal).trim() !== '') return false;
+      }
+      return true;
+    });
+    return { count: filtered.length, items: filtered };
+  } catch (e) {
+    console.warn('fetchSoumuShahoInCount error:', e);
+    return { count: 0, items: [] };
+  }
+}
+
+// 社保加入リストを overlay で表示
+function openSoumuShahoInList() {
+  if (!_soumuShahoInItems || _soumuShahoInItems.length === 0) {
+    showToast('該当者なし', 'info');
+    return;
+  }
+  var existing = document.getElementById('soumuListOverlay');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'soumuListOverlay';
+  ov.className = 'confirm-overlay';
+  var itemsHtml = '';
+  _soumuShahoInItems.forEach(function(item) {
+    var name = item.Title || '';
+    itemsHtml += '<div class="soumu-list-item">';
+    itemsHtml += '<div class="soumu-list-name">' + escHtml(name) + '</div>';
+    itemsHtml += '</div>';
+  });
+  ov.innerHTML =
+    '<div class="confirm-box" style="max-height:80vh;overflow-y:auto;">' +
+      '<div style="font-weight:700;font-size:16px;margin-bottom:12px;">社保 加入 (' + _soumuShahoInItems.length + '名)</div>' +
+      '<div>' + itemsHtml + '</div>' +
+      '<button class="confirm-btn confirm-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">閉じる</button>' +
+    '</div>';
+  document.body.appendChild(ov);
 }
 
 // 指定フィールドの値でフィルターした件数をカウント
@@ -6835,34 +6943,74 @@ function renderSoumuDashboard() {
   var mKoyou = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
   // Power Apps: soumusyaho="→取得申請中" Or soumusyaho="→喪失申請中"
   var mShaho = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
-  var mKoyouIn = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
-  var mKoyouOut = function(v) { return v.indexOf('喪失') >= 0; };
-  var mShahoIn = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
-  var mShahoOut = function(v) { return v.indexOf('喪失') >= 0; };
   var mRishokuhyou = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
+
+  // ── zaisyoku フィールドの OData キー取得 ──
+  var odZaisyoku = _soumuKeyMap['zaisyoku'];
+  function empZaisyoku(emp) {
+    if (odZaisyoku) return String(emp[odZaisyoku] || '');
+    // fallback: hakenTaisha/yukyuTaisha があれば退社
+    return isResigned(emp) ? '退社' : '在職';
+  }
 
   // 離職票申請中: Power Apps: zaisyoku="退社" && 離職票risyokuhyou.Value="必要" && '総務-離職票'.Value="→申請中"
   var rishokuMochuuCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odRishoku = _soumuKeyMap['soumuRishoku'];
     var odRishokuhyou = _soumuKeyMap['rishokuhyou'];
-    var odZaisyoku = _soumuKeyMap['zaisyoku'];
     if (!odRishoku) return 0;
     var count = 0;
     _soumuAllEmps.forEach(function(emp) {
-      // zaisyoku="退社" — check direct field or fallback to isResigned
-      var zVal = odZaisyoku ? String(emp[odZaisyoku] || '') : '';
-      var isTaisha = zVal === '退社' || (!odZaisyoku && isResigned(emp));
-      if (!isTaisha) return;
-      // 離職票risyokuhyou="必要"
+      if (empZaisyoku(emp) !== '退社') return;
       if (odRishokuhyou) {
         var rhVal = String(emp[odRishokuhyou] || '');
         if (rhVal !== '必要') return;
       }
-      // 総務-離職票="→申請中"
       var srVal = String(emp[odRishoku] || '');
       if (srVal !== '→申請中') return;
       count++;
+    });
+    return count;
+  })();
+
+  // 雇用加入: Power Apps: soumukoyou="未加入" AND zaisyoku="在職"
+  var koyouInCount = (function() {
+    if (!_soumuAllEmps || !_soumuKeyMap) return 0;
+    var odKoyou = _soumuKeyMap['soumuKoyou'];
+    if (!odKoyou) return 0;
+    var count = 0;
+    _soumuAllEmps.forEach(function(emp) {
+      if (empZaisyoku(emp) !== '在職') return;
+      var v = String(emp[odKoyou] || '');
+      if (v === '未加入') count++;
+    });
+    return count;
+  })();
+
+  // 雇用喪失: Power Apps: soumukoyou="✓取得完了" AND zaisyoku="退社"
+  var koyouOutCount = (function() {
+    if (!_soumuAllEmps || !_soumuKeyMap) return 0;
+    var odKoyou = _soumuKeyMap['soumuKoyou'];
+    if (!odKoyou) return 0;
+    var count = 0;
+    _soumuAllEmps.forEach(function(emp) {
+      if (empZaisyoku(emp) !== '退社') return;
+      var v = String(emp[odKoyou] || '');
+      if (v === '✓取得完了') count++;
+    });
+    return count;
+  })();
+
+  // 社保喪失: Power Apps: soumusyaho="✓取得完了" AND zaisyoku="退社"
+  var shahoOutCount = (function() {
+    if (!_soumuAllEmps || !_soumuKeyMap) return 0;
+    var odShaho = _soumuKeyMap['soumuShaho'];
+    if (!odShaho) return 0;
+    var count = 0;
+    _soumuAllEmps.forEach(function(emp) {
+      if (empZaisyoku(emp) !== '退社') return;
+      var v = String(emp[odShaho] || '');
+      if (v === '✓取得完了') count++;
     });
     return count;
   })();
@@ -6871,10 +7019,10 @@ function renderSoumuDashboard() {
     koyouMochuu: soumuCount('soumuKoyou', mKoyou, true),
     rishokuMochuu: rishokuMochuuCount,
     shahoMochuu: soumuCount('soumuShaho', mShaho, true),
-    koyouIn: soumuCount('soumuKoyou', mKoyouIn, true),
-    koyouOut: soumuCount('soumuKoyou', mKoyouOut, true),
-    shahoIn: soumuCount('soumuShaho', mShahoIn, true),
-    shahoOut: soumuCount('soumuShaho', mShahoOut, true),
+    koyouIn: koyouInCount,
+    koyouOut: koyouOutCount,
+    shahoIn: _soumuShahoInCount || 0,
+    shahoOut: shahoOutCount,
     rishokuhyou: soumuCount('soumuRishoku', mRishokuhyou, true),
     kyuryoSeisan: _soumuSeisanCount || 0
   };
@@ -7057,27 +7205,58 @@ function openSoumuFilterList(filterKey) {
       matcher = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
       break;
     case 'koyou-kanyuu':
-      badgeKey = 'soumuKoyou'; title = '雇用 加入';
-      matcher = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
-      break;
+      // Power Apps: soumukoyou="未加入" AND zaisyoku="在職"
+      (function() {
+        var odKoyou = _soumuKeyMap['soumuKoyou'];
+        var odZ = _soumuKeyMap['zaisyoku'];
+        if (!odKoyou) { showToast('フィールド「soumuKoyou」が見つかりません', 'error'); return; }
+        var filteredList = _soumuAllEmps.filter(function(emp) {
+          var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
+          if (zVal !== '在職') return false;
+          return String(emp[odKoyou] || '') === '未加入';
+        });
+        openSoumuListOverlay('雇用 加入', filteredList, odKoyou);
+      })();
+      return;
     case 'koyou-soushitsu':
-      badgeKey = 'soumuKoyou'; title = '雇用 喪失';
-      matcher = function(v) { return v.indexOf('喪失') >= 0; };
-      break;
+      // Power Apps: soumukoyou="✓取得完了" AND zaisyoku="退社"
+      (function() {
+        var odKoyou = _soumuKeyMap['soumuKoyou'];
+        var odZ = _soumuKeyMap['zaisyoku'];
+        if (!odKoyou) { showToast('フィールド「soumuKoyou」が見つかりません', 'error'); return; }
+        var filteredList = _soumuAllEmps.filter(function(emp) {
+          var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
+          if (zVal !== '退社') return false;
+          return String(emp[odKoyou] || '') === '✓取得完了';
+        });
+        openSoumuListOverlay('雇用 喪失', filteredList, odKoyou);
+      })();
+      return;
     case 'shaho-kanyuu':
-      badgeKey = 'soumuShaho'; title = '社保 加入';
-      matcher = function(v) { return v.indexOf('加入') >= 0 && v.indexOf('未') < 0 && v.indexOf('申請') < 0; };
-      break;
+      // 社会保険加入: 別リスト(社会保険加入申請)から取得
+      showToast('社保加入データを表示します', 'info');
+      openSoumuShahoInList();
+      return;
     case 'shaho-soushitsu':
-      badgeKey = 'soumuShaho'; title = '社保 喪失';
-      matcher = function(v) { return v.indexOf('喪失') >= 0; };
-      break;
+      // Power Apps: soumusyaho="✓取得完了" AND zaisyoku="退社"
+      (function() {
+        var odShaho = _soumuKeyMap['soumuShaho'];
+        var odZ = _soumuKeyMap['zaisyoku'];
+        if (!odShaho) { showToast('フィールド「soumuShaho」が見つかりません', 'error'); return; }
+        var filteredList = _soumuAllEmps.filter(function(emp) {
+          var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
+          if (zVal !== '退社') return false;
+          return String(emp[odShaho] || '') === '✓取得完了';
+        });
+        openSoumuListOverlay('社保 喪失', filteredList, odShaho);
+      })();
+      return;
     case 'rishokuhyou':
       badgeKey = 'soumuRishoku'; title = '離職票';
       matcher = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
       break;
     case 'kyuryo-seisan':
-      showToast('給料精算のデータ元が未指定です', 'warn');
+      soumuOpenSeisanList();
       return;
   }
   var odKey = _soumuKeyMap[badgeKey];
