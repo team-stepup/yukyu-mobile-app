@@ -4498,7 +4498,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '9df7e32';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6929,6 +6929,7 @@ function soumuCount(badgeKey, matcher, includeResigned) {
   if (!odKey) return 0;
   var count = 0;
   _soumuAllEmps.forEach(function(emp) {
+    if (!emp.Title) return; // 氏名なしスキップ
     if (!includeResigned && isResigned(emp)) return;
     var val = String(emp[odKey] || '');
     if (!val) return;
@@ -6964,6 +6965,7 @@ function renderSoumuDashboard() {
     if (!odRishoku) return 0;
     var count = 0;
     _soumuAllEmps.forEach(function(emp) {
+      if (!emp.Title) return;
       if (empZaisyoku(emp) !== '退社') return;
       if (odRishokuhyou) {
         var rhVal = String(emp[odRishokuhyou] || '');
@@ -6983,6 +6985,7 @@ function renderSoumuDashboard() {
     if (!odKoyou) return 0;
     var count = 0;
     _soumuAllEmps.forEach(function(emp) {
+      if (!emp.Title) return; // 氏名なしスキップ
       if (empZaisyoku(emp) !== '在職') return;
       var v = String(emp[odKoyou] || '');
       if (v === '未加入') count++;
@@ -6997,6 +7000,7 @@ function renderSoumuDashboard() {
     if (!odKoyou) return 0;
     var count = 0;
     _soumuAllEmps.forEach(function(emp) {
+      if (!emp.Title) return;
       if (empZaisyoku(emp) !== '退社') return;
       var v = String(emp[odKoyou] || '');
       if (v === '✓取得完了') count++;
@@ -7011,6 +7015,7 @@ function renderSoumuDashboard() {
     if (!odShaho) return 0;
     var count = 0;
     _soumuAllEmps.forEach(function(emp) {
+      if (!emp.Title) return;
       if (empZaisyoku(emp) !== '退社') return;
       var v = String(emp[odShaho] || '');
       if (v === '✓取得完了') count++;
@@ -7214,6 +7219,7 @@ function openSoumuFilterList(filterKey) {
         var odZ = _soumuKeyMap['zaisyoku'];
         if (!odKoyou) { showToast('フィールド「soumuKoyou」が見つかりません', 'error'); return; }
         var filteredList = _soumuAllEmps.filter(function(emp) {
+          if (!emp.Title) return false;
           var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
           if (zVal !== '在職') return false;
           return String(emp[odKoyou] || '') === '未加入';
@@ -7228,6 +7234,7 @@ function openSoumuFilterList(filterKey) {
         var odZ = _soumuKeyMap['zaisyoku'];
         if (!odKoyou) { showToast('フィールド「soumuKoyou」が見つかりません', 'error'); return; }
         var filteredList = _soumuAllEmps.filter(function(emp) {
+          if (!emp.Title) return false;
           var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
           if (zVal !== '退社') return false;
           return String(emp[odKoyou] || '') === '✓取得完了';
@@ -7247,6 +7254,7 @@ function openSoumuFilterList(filterKey) {
         var odZ = _soumuKeyMap['zaisyoku'];
         if (!odShaho) { showToast('フィールド「soumuShaho」が見つかりません', 'error'); return; }
         var filteredList = _soumuAllEmps.filter(function(emp) {
+          if (!emp.Title) return false;
           var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
           if (zVal !== '退社') return false;
           return String(emp[odShaho] || '') === '✓取得完了';
