@@ -13572,26 +13572,39 @@ function _readEntryRecursive(entry, basePath) {
 }
 
 // ドロップされたアイテムからファイル（フォルダ含む）を収集
-async function _collectDroppedItems(dataTransfer) {
+// 重要: dataTransfer.items はドロップイベント直後にしかアクセスできないため
+//        エントリの取得は同期的に行い、読み取りだけを非同期にする
+function _collectDroppedItems(dataTransfer) {
   var items = dataTransfer.items;
-  if (!items) {
+  if (!items || items.length === 0) {
     // フォールバック: items API非対応
-    return Array.from(dataTransfer.files || []).map(function(f) { return { file: f, relPath: '' }; });
+    var fallback = Array.from(dataTransfer.files || []).map(function(f) { return { file: f, relPath: '' }; });
+    return Promise.resolve(fallback);
   }
-  var promises = [];
+  // 同期的にエントリを全て取得（非同期にすると items がクリアされる）
+  var entries = [];
+  var plainFiles = [];
   for (var i = 0; i < items.length; i++) {
-    var entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+    var entry = null;
+    try { entry = items[i].webkitGetAsEntry(); } catch(_) {}
     if (entry) {
-      promises.push(_readEntryRecursive(entry, ''));
+      entries.push(entry);
     } else {
       var f = items[i].getAsFile();
-      if (f) promises.push(Promise.resolve([{ file: f, relPath: '' }]));
+      if (f) plainFiles.push({ file: f, relPath: '' });
     }
   }
-  var results = await Promise.all(promises);
-  var flat = [];
-  results.forEach(function(r) { flat = flat.concat(r); });
-  return flat;
+  // エントリが無ければプレーンファイルだけ返す
+  if (entries.length === 0) {
+    return Promise.resolve(plainFiles);
+  }
+  // エントリを非同期で再帰読み取り
+  var promises = entries.map(function(ent) { return _readEntryRecursive(ent, ''); });
+  return Promise.all(promises).then(function(results) {
+    var flat = plainFiles.slice();
+    results.forEach(function(r) { flat = flat.concat(r); });
+    return flat;
+  });
 }
 function openUploadDialog(context) {
   // context: 'vehicle' | 'syain'
@@ -13704,18 +13717,18 @@ function openUploadDialog(context) {
     });
     renderUploadFileList();
   });
-  zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragover', function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('dragover'); });
   zone.addEventListener('dragleave', function() { zone.classList.remove('dragover'); });
   zone.addEventListener('drop', async function(e) {
     e.preventDefault();
     zone.classList.remove('dragover');
-    zone.innerHTML = '<span class="up-icon">⏳</span>フォルダを読み込み中...';
+    zone.innerHTML = '<span class="up-icon">⏳</span>読み込み中...';
     try {
       var items = await _collectDroppedItems(e.dataTransfer);
+      console.log('[UPLOAD DROP] collected items:', items.length, items.map(function(it) { return (it.relPath || '') + it.file.name; }));
       items.forEach(function(item) { _uploadFiles.push(item); });
     } catch(err) {
       console.error('drop read error:', err);
-      // フォールバック
       var dtFiles = Array.from(e.dataTransfer.files || []);
       dtFiles.forEach(function(f) { _uploadFiles.push({ file: f, relPath: '' }); });
     }
