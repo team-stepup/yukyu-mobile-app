@@ -4065,7 +4065,8 @@ select.sankyu-edit-input {
       <button class="quick-link-btn" onclick="switchScreen('maebariListScreen')" style="position:relative;">
         <span class="ql-icon">💰</span>
         <span class="ql-text">前払い一覧</span>
-        <span id="maebariBadgeCount" class="ql-badge" style="background:#f57c00;display:none;"></span>
+        <span id="maebariBadgeCount" class="ql-badge" style="background:#f57c00;display:none;top:4px;right:4px;"></span>
+        <span id="maebariBadgeTotal" class="ql-badge" style="background:#e65100;display:none;bottom:4px;right:4px;top:auto;font-size:9px;min-width:auto;padding:1px 5px;height:16px;line-height:16px;border-radius:8px;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
@@ -4483,7 +4484,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'b31f975';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6382,11 +6383,26 @@ async function loadHomeBadges() {
   var vehicleResult = results[4].value;
   var sankyuResult = results[5].value;
 
-  // 前払いバッジ
+  // 前払いバッジ（件数）
   var mBadge = document.getElementById('maebariBadgeCount');
   if (mBadge) {
     if (mRecs.length > 0) { mBadge.textContent = mRecs.length; mBadge.style.display = 'inline-block'; }
     else { mBadge.style.display = 'none'; }
+  }
+  // 前払いバッジ（合計金額）
+  var mTotalBadge = document.getElementById('maebariBadgeTotal');
+  if (mTotalBadge) {
+    if (mRecs.length > 0) {
+      var totalAmt = 0;
+      mRecs.forEach(function(r) {
+        totalAmt += (parseFloat(r[MF.amount]) || 0) + (parseFloat(r[MF.fee]) || 0);
+      });
+      if (totalAmt > 0) {
+        var dispAmt = totalAmt >= 10000 ? Math.round(totalAmt / 10000) + '万' : totalAmt.toLocaleString();
+        mTotalBadge.textContent = '¥' + dispAmt;
+        mTotalBadge.style.display = 'inline-block';
+      } else { mTotalBadge.style.display = 'none'; }
+    } else { mTotalBadge.style.display = 'none'; }
   }
 
   // 入退バッジ
