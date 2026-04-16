@@ -4420,7 +4420,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '18f5908';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -9147,22 +9147,25 @@ function renderSankyuAppCard(card, isEdit) {
           html += '</div>';
         }
         // 合成期間があれば 「開始 〜 終了」 の表記で表示
+        //   synthPeriodStart = 計算値 (前カード +1日)
+        //   synthPeriodEnd   = card.main と同じ日付 (実フィールド)
+        //   → 左: synthPeriodStart (計算表示), 右: card.main (編集可能)
         else if (card.synthPeriodStart && card.synthPeriodEnd) {
           var _spMainIname = m.meta.internalName;
-          var eStr = _sankyuFormatSynthDate(card.synthPeriodEnd);
+          var sStr = _sankyuFormatSynthDate(card.synthPeriodStart);
           if (!isDone) {
-            // 未済: 開始日をdate inputで直接編集 (mainフィールド保存), 終了日は計算値表示
+            // 未済: 開始日は計算値表示、終了日(=main)をdate inputで編集可能に
             var _spMainDateStr = '';
             if (!_sankyuIsEmptyDateRaw(m.raw)) {
               try { var _spd = new Date(m.raw); if (!isNaN(_spd)) _spMainDateStr = _spd.getFullYear() + '-' + ('0'+(_spd.getMonth()+1)).slice(-2) + '-' + ('0'+_spd.getDate()).slice(-2); } catch(_) {}
             }
             html += '<div class="sankyu-app-card-period">';
-            html +=   '<input type="date" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + _spMainDateStr + '" data-prev="' + _spMainDateStr + '" onchange="_sankyuGuardedDateSave(this, \'' + _spMainIname + '\', \'basic\')" style="flex:1;max-width:130px;">';
+            html +=   '<div class="sankyu-app-card-period-date">' + escHtml(sStr) + '</div>';
             html +=   '<span class="sankyu-app-card-tilde">〜</span>';
-            html +=   '<div class="sankyu-app-card-period-date">' + escHtml(eStr) + '</div>';
+            html +=   '<input type="date" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + _spMainDateStr + '" data-prev="' + _spMainDateStr + '" onchange="_sankyuGuardedDateSave(this, \'' + _spMainIname + '\', \'basic\')" style="flex:1;max-width:130px;">';
             html += '</div>';
           } else {
-            var sStr = _sankyuFormatSynthDate(card.synthPeriodStart);
+            var eStr = _sankyuFormatSynthDate(card.synthPeriodEnd);
             html += '<div class="sankyu-app-card-period">';
             html +=   '<div class="sankyu-app-card-period-date">' + escHtml(sStr) + '</div>';
             html +=   '<span class="sankyu-app-card-tilde">〜</span>';
