@@ -6932,13 +6932,13 @@ function drawHakensakiCards(filterKey) {
     return;
   }
 
-  groupOrder.forEach(function(gName) {
+  groupOrder.forEach(function(gName, gIdx) {
     var gItems = groups[gName];
     var totalNinzu = 0;
     if (F.ninzu) gItems.forEach(function(item) { totalNinzu += Number(item[F.ninzu]) || 0; });
     var isZero = totalNinzu === 0;
 
-    // ヘッダー色: 有効=紺, 0人=グレー, 期限切れ混在=オレンジ系
+    // ステータス判定
     var hasExpired = false, hasValid = false;
     gItems.forEach(function(item) {
       var s = _hakenItemStatus(item);
@@ -6946,6 +6946,7 @@ function drawHakensakiCards(filterKey) {
       if (s.isExpiredContract) hasExpired = true;
     });
 
+    // ヘッダー色
     var headerBg, cardBorder, cardStyle = '';
     if (isZero) {
       headerBg = 'linear-gradient(135deg,#78909c,#90a4ae)';
@@ -6962,14 +6963,22 @@ function drawHakensakiCards(filterKey) {
       cardBorder = '1px solid #e8e8f0';
     }
 
-    html += '<div style="background:#fff;border-radius:12px;margin-bottom:12px;border:' + cardBorder + ';overflow:hidden;' + cardStyle + '">';
-    html += '<div style="background:' + headerBg + ';color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;">';
+    var sectionId = 'hkAcc_' + gIdx;
+    html += '<div id="' + sectionId + '" style="background:#fff;border-radius:12px;margin-bottom:8px;border:' + cardBorder + ';overflow:hidden;' + cardStyle + '">';
+
+    // ヘッダー (クリックで展開)
+    html += '<div onclick="toggleHakenAcc(\'' + sectionId + '\')" style="background:' + headerBg + ';color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">';
+    html += '<span class="hk-acc-arrow" style="font-size:10px;transition:transform 0.2s;flex-shrink:0;">▶</span>';
     html += '<div style="flex:1;font-weight:700;font-size:14px;">' + escHtml(gName) + '</div>';
+    // サマリー: 件数 + 合計人数
+    html += '<div style="font-size:11px;opacity:0.8;">' + gItems.length + '件</div>';
     if (F.ninzu) {
       html += '<div style="background:rgba(255,255,255,0.2);padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
     }
     html += '</div>';
 
+    // ボディ (初期は非表示)
+    html += '<div class="hk-acc-body" style="display:none;">';
     gItems.forEach(function(item) {
       var soshiki = F.soshiki ? String(item[F.soshiki] || '').trim() : '';
       var start = F.start ? fmtDate(item[F.start]) : '';
@@ -6978,7 +6987,6 @@ function drawHakensakiCards(filterKey) {
       var dateStr = (start || end) ? start + '～' + end : '';
       var s = _hakenItemStatus(item);
 
-      // 行スタイル
       var rowBg = '', textColor = 'var(--text-dark)', subColor = 'var(--text-light)';
       var ninzuBg = '#e8eaf6', ninzuColor = '#283593';
       if (s.isNoContract) {
@@ -7001,10 +7009,22 @@ function drawHakensakiCards(filterKey) {
       }
       html += '</div>';
     });
-    html += '</div>';
+    html += '</div>'; // hk-acc-body
+    html += '</div>'; // section
   });
 
   body.innerHTML = html;
+}
+
+function toggleHakenAcc(sectionId) {
+  var sec = document.getElementById(sectionId);
+  if (!sec) return;
+  var bodyEl = sec.querySelector('.hk-acc-body');
+  var arrow = sec.querySelector('.hk-acc-arrow');
+  if (!bodyEl) return;
+  var isOpen = bodyEl.style.display !== 'none';
+  bodyEl.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
 }
 
 function openSoumuScreen() {
