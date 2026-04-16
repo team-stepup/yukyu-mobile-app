@@ -6623,7 +6623,15 @@ async function fetchSankyuSummary() {
           if (f.type !== 'DateTime') return;
           var raw = it[f.dataKey];
           if (_sankyuIsEmptyDateRaw(raw)) return;
-          dateFields.push({ title: f.title, raw: raw, iname: k });
+          dateFields.push({ title: f.title, raw: raw, iname: k, dataKey: f.dataKey });
+        });
+        // 申請日フィールド一覧を事前に収集
+        var subFields = [];
+        Object.keys(meta).forEach(function(k2) {
+          var f2 = meta[k2];
+          if (f2.type !== 'DateTime') return;
+          if (!reSub.test(f2.title)) return;
+          subFields.push(f2);
         });
         // 同じプレフィックス内で 申請日が空 + 他の日付が 3日超え → 遅延
         var itemOverdue = 0;
@@ -6633,16 +6641,13 @@ async function fetchSankyuSummary() {
             var dv = new Date(df.raw);
             if (isNaN(dv)) return;
             if (dv > threeDaysAgo) return; // まだ3日経ってない
-            // この日付の近くに 申請日 があるか探す (同じ番号プレフィックスで)
-            var base = df.title.replace(/開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
+            // プレフィックス抽出: 開始/終了/期間 等を除去
+            var base = df.title.replace(/期間|開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
             if (base.length < 2) return;
             // 対応する申請日を検索
             var found = false;
-            Object.keys(meta).forEach(function(k2) {
+            subFields.forEach(function(f2) {
               if (found) return;
-              var f2 = meta[k2];
-              if (f2.type !== 'DateTime') return;
-              if (!reSub.test(f2.title)) return;
               var b2 = f2.title.replace(/申請日?/g, '').replace(/[\s　]+/g, '');
               // 部分一致 (同じプレフィックス)
               if (b2.length >= 2 && (base.indexOf(b2) >= 0 || b2.indexOf(base) >= 0)) {
@@ -7394,20 +7399,27 @@ function _sankyuGetOverdueItems(item) {
     dateFields.push({ title: f.title, raw: raw, iname: k });
   });
 
+  // 申請日フィールド一覧を事前に収集
+  var subFieldsList = [];
+  Object.keys(_sankyuFieldsMeta).forEach(function(k2) {
+    var f2 = _sankyuFieldsMeta[k2];
+    if (f2.type !== 'DateTime') return;
+    if (!reSub.test(f2.title)) return;
+    subFieldsList.push(f2);
+  });
+
   dateFields.forEach(function(df) {
     if (reSub.test(df.title)) return;
     try {
       var dv = new Date(df.raw);
       if (isNaN(dv)) return;
       if (dv > threeDaysAgo) return;
-      var base = df.title.replace(/開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
+      // プレフィックス抽出: 期間/開始/終了 等を除去
+      var base = df.title.replace(/期間|開始日?|終了日?|from|end|to/gi, '').replace(/[\s　]+/g, '');
       if (base.length < 2) return;
       var found = false;
-      Object.keys(_sankyuFieldsMeta).forEach(function(k2) {
+      subFieldsList.forEach(function(f2) {
         if (found) return;
-        var f2 = _sankyuFieldsMeta[k2];
-        if (f2.type !== 'DateTime') return;
-        if (!reSub.test(f2.title)) return;
         var b2 = f2.title.replace(/申請日?/g, '').replace(/[\s　]+/g, '');
         if (b2.length >= 2 && (base.indexOf(b2) >= 0 || b2.indexOf(base) >= 0)) {
           var subRaw = item[f2.dataKey];
