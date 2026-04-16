@@ -13520,7 +13520,65 @@ async function uploadFileToSp(folderPath, fileName, file) {
 // 汎用アップロードダイアログ (車両管理台帳 / 社員フォルダ共通)
 // カメラ撮影 / ファイル選択 / ドラッグ&ドロップ対応
 // ============================================================
-var _uploadFiles = [];  // 選択中のファイル配列
+var _uploadFiles = [];  // 選択中のファイル配列 [{file: File, relPath: ''}]
+
+// DataTransferItem からフォルダを再帰的に読み取り、ファイル＋相対パスを返す
+function _readEntryRecursive(entry, basePath) {
+  return new Promise(function(resolve) {
+    if (entry.isFile) {
+      entry.file(function(f) {
+        resolve([{ file: f, relPath: basePath }]);
+      }, function() { resolve([]); });
+    } else if (entry.isDirectory) {
+      var reader = entry.createReader();
+      var allEntries = [];
+      // readEntries は最大100件ずつ返すので繰り返し呼ぶ
+      (function readAll() {
+        reader.readEntries(function(entries) {
+          if (entries.length === 0) {
+            // 全エントリ読み終わり → 再帰処理
+            var promises = allEntries.map(function(e) {
+              return _readEntryRecursive(e, basePath + entry.name + '/');
+            });
+            Promise.all(promises).then(function(results) {
+              var flat = [];
+              results.forEach(function(r) { flat = flat.concat(r); });
+              resolve(flat);
+            });
+          } else {
+            allEntries = allEntries.concat(Array.from(entries));
+            readAll();
+          }
+        }, function() { resolve([]); });
+      })();
+    } else {
+      resolve([]);
+    }
+  });
+}
+
+// ドロップされたアイテムからファイル（フォルダ含む）を収集
+async function _collectDroppedItems(dataTransfer) {
+  var items = dataTransfer.items;
+  if (!items) {
+    // フォールバック: items API非対応
+    return Array.from(dataTransfer.files || []).map(function(f) { return { file: f, relPath: '' }; });
+  }
+  var promises = [];
+  for (var i = 0; i < items.length; i++) {
+    var entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+    if (entry) {
+      promises.push(_readEntryRecursive(entry, ''));
+    } else {
+      var f = items[i].getAsFile();
+      if (f) promises.push(Promise.resolve([{ file: f, relPath: '' }]));
+    }
+  }
+  var results = await Promise.all(promises);
+  var flat = [];
+  results.forEach(function(r) { flat = flat.concat(r); });
+  return flat;
+}
 function openUploadDialog(context) {
   // context: 'vehicle' | 'syain'
   _uploadFiles = [];
@@ -13601,7 +13659,7 @@ function openUploadDialog(context) {
           '<div id="uploadDropzone" class="upload-dropzone">' +
             '<span class="up-icon">📤</span>' +
             'タップしてカメラ/ファイルを選択<br>' +
-            '<span style="font-size:11px;color:#66bb6a;">またはここにドラッグ&ドロップ</span>' +
+            '<span style="font-size:11px;color:#66bb6a;">またはここにフォルダもドラッグ&ドロップ</span>' +
           '</div>' +
           '<input type="file" id="uploadFileInput" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.pptx" style="display:none;">' +
         '</div>' +
@@ -13624,16 +13682,30 @@ function openUploadDialog(context) {
   zone.addEventListener('click', function() { input.click(); });
   input.addEventListener('change', function(e) {
     var files = Array.from(e.target.files || []);
-    files.forEach(function(f) { _uploadFiles.push(f); });
+    files.forEach(function(f) {
+      // webkitRelativePath はフォルダ選択時にパスを含む
+      var rel = f.webkitRelativePath || '';
+      var relPath = rel ? rel.substring(0, rel.lastIndexOf('/') + 1) : '';
+      _uploadFiles.push({ file: f, relPath: relPath });
+    });
     renderUploadFileList();
   });
   zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('dragover'); });
   zone.addEventListener('dragleave', function() { zone.classList.remove('dragover'); });
-  zone.addEventListener('drop', function(e) {
+  zone.addEventListener('drop', async function(e) {
     e.preventDefault();
     zone.classList.remove('dragover');
-    var dtFiles = Array.from(e.dataTransfer.files || []);
-    dtFiles.forEach(function(f) { _uploadFiles.push(f); });
+    zone.innerHTML = '<span class="up-icon">⏳</span>フォルダを読み込み中...';
+    try {
+      var items = await _collectDroppedItems(e.dataTransfer);
+      items.forEach(function(item) { _uploadFiles.push(item); });
+    } catch(err) {
+      console.error('drop read error:', err);
+      // フォールバック
+      var dtFiles = Array.from(e.dataTransfer.files || []);
+      dtFiles.forEach(function(f) { _uploadFiles.push({ file: f, relPath: '' }); });
+    }
+    zone.innerHTML = '<span class="up-icon">📤</span>タップしてカメラ/ファイルを選択<br><span style="font-size:11px;color:#66bb6a;">またはここにフォルダもドラッグ&ドロップ</span>';
     renderUploadFileList();
   });
 
@@ -13651,10 +13723,25 @@ function openUploadDialog(context) {
 function renderUploadFileList() {
   var list = document.getElementById('uploadFileList');
   if (!list) return;
-  list.innerHTML = _uploadFiles.map(function(f, i) {
+  // フォルダ数を集計
+  var folderSet = {};
+  _uploadFiles.forEach(function(item) {
+    if (item.relPath) {
+      var top = item.relPath.split('/')[0];
+      if (top) folderSet[top] = true;
+    }
+  });
+  var folderCount = Object.keys(folderSet).length;
+  var headerHtml = '';
+  if (folderCount > 0) {
+    headerHtml = '<div style="padding:4px 8px;font-size:11px;color:#1565c0;background:#e3f2fd;border-radius:6px;margin-bottom:4px;">📁 ' + folderCount + 'フォルダ / ' + _uploadFiles.length + 'ファイル</div>';
+  }
+  list.innerHTML = headerHtml + _uploadFiles.map(function(item, i) {
+    var f = item.file;
     var sz = f.size ? (f.size < 1024 ? f.size + ' B' : (f.size < 1048576 ? (f.size/1024).toFixed(1) + ' KB' : (f.size/1048576).toFixed(1) + ' MB')) : '';
+    var pathLabel = item.relPath ? '<span style="color:#1565c0;font-size:10px;">📁' + escHtml(item.relPath) + '</span>' : '';
     return '<div class="upload-file-row">' +
-      '<span class="uf-name">📎 ' + escHtml(f.name) + '</span>' +
+      '<span class="uf-name">' + pathLabel + '📎 ' + escHtml(f.name) + '</span>' +
       '<span style="color:#666;font-size:11px;">' + sz + '</span>' +
       '<button class="uf-remove" onclick="removeUploadFile(' + i + ')">✕</button>' +
     '</div>';
@@ -13707,9 +13794,31 @@ async function submitUpload() {
       baseName = customName; // syain: empty = keep original name
     }
 
+    // フォルダ構造がある場合、事前にサブフォルダを作成
+    var createdFolders = {};
+    for (var p = 0; p < _uploadFiles.length; p++) {
+      var rp = _uploadFiles[p].relPath || '';
+      if (rp && !createdFolders[rp]) {
+        // relPath = "folder/subfolder/" → 階層ごとに作成
+        var parts = rp.replace(/\/$/, '').split('/');
+        var cumPath = srUrl;
+        for (var pi = 0; pi < parts.length; pi++) {
+          cumPath += '/' + parts[pi];
+          if (!createdFolders[cumPath]) {
+            if (okBtn) okBtn.textContent = '📁 フォルダ作成中...';
+            await ensureSpFolder(cumPath);
+            createdFolders[cumPath] = true;
+          }
+        }
+        createdFolders[rp] = true;
+      }
+    }
+
     var uploaded = 0;
     for (var i = 0; i < _uploadFiles.length; i++) {
-      var f = _uploadFiles[i];
+      var item = _uploadFiles[i];
+      var f = item.file;
+      var relPath = item.relPath || '';
       var origName = f.name || 'file';
       var extMatch = origName.match(/\.([^.]+)$/);
       var ext = extMatch ? extMatch[1] : '';
@@ -13717,15 +13826,24 @@ async function submitUpload() {
       if (!ext && f.type && f.type.indexOf('image/') === 0) ext = 'jpg';
 
       var finalName;
-      if (baseName) {
+      // フォルダからドロップされたファイルはリネームせずオリジナル名を維持
+      if (relPath) {
+        finalName = origName;
+      } else if (baseName) {
         var suffix = (_uploadFiles.length > 1) ? ('_' + (i + 1)) : '';
         finalName = baseName + suffix + (ext ? ('.' + ext) : '');
       } else {
         finalName = origName;
       }
 
+      // アップロード先フォルダ（サブフォルダがある場合はそちらへ）
+      var targetFolder = srUrl;
+      if (relPath) {
+        targetFolder = srUrl + '/' + relPath.replace(/\/$/, '');
+      }
+
       if (okBtn) okBtn.textContent = '⏳ ' + (i + 1) + ' / ' + _uploadFiles.length;
-      await uploadFileToSp(srUrl, finalName, f);
+      await uploadFileToSp(targetFolder, finalName, f);
       uploaded++;
     }
     showToast('✅ ' + uploaded + '件 アップロードしました', 'success');
