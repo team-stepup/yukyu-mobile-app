@@ -4015,8 +4015,8 @@ select.sankyu-edit-input {
       <button class="quick-link-btn" onclick="openSankyuScreen()" style="position:relative;">
         <span class="ql-icon">🌸</span>
         <span class="ql-text">産休育休</span>
-        <span id="sankyuBadgeCount" class="ql-badge" style="background:#d81b60;display:none;"></span>
-        <span id="sankyuOverdueBadge" class="ql-badge" style="background:#f44336;display:none;position:absolute;top:-2px;right:-2px;animation:sankyuWarnPulse 1.8s ease-in-out infinite;"></span>
+        <span id="sankyuBadgeCount" class="ql-badge" style="background:#d81b60;display:none;top:4px;right:26px;"></span>
+        <span id="sankyuOverdueBadge" class="ql-badge" style="background:#f44336;display:none;top:4px;right:4px;animation:sankyuWarnPulse 1.8s ease-in-out infinite;"></span>
       </button>
     </div>
 
@@ -6370,23 +6370,19 @@ async function loadHomeBadges() {
   // 産休育休バッジ (休業中の人数 + 遅延)
   var sBadge = document.getElementById('sankyuBadgeCount');
   var sOverdueBadge = document.getElementById('sankyuOverdueBadge');
-  var sr = sankyuResult;
-  console.log('[HOME BADGE DEBUG] sr=', sr, 'sBadge=', sBadge, 'sOverdueBadge=', sOverdueBadge);
-  if (sr) {
+  if (sankyuResult) {
     if (sBadge) {
-      if (sr.active > 0) {
-        sBadge.textContent = sr.active;
+      if (sankyuResult.active > 0) {
+        sBadge.textContent = sankyuResult.active;
         sBadge.style.display = 'inline-block';
-        console.log('[HOME BADGE DEBUG] active badge SET:', sr.active, 'display=', sBadge.style.display, 'offsetParent=', sBadge.offsetParent);
       } else {
         sBadge.style.display = 'none';
       }
     }
     if (sOverdueBadge) {
-      if (sr.overdue > 0) {
-        sOverdueBadge.textContent = '⚠' + sr.overdue;
+      if (sankyuResult.overdue > 0) {
+        sOverdueBadge.textContent = '⚠' + sankyuResult.overdue;
         sOverdueBadge.style.display = 'inline-block';
-        console.log('[HOME BADGE DEBUG] overdue badge SET:', sr.overdue, 'display=', sOverdueBadge.style.display, 'offsetParent=', sOverdueBadge.offsetParent);
       } else {
         sOverdueBadge.style.display = 'none';
       }
@@ -6679,7 +6675,6 @@ async function fetchSankyuSummary() {
         if (itemOverdue > 0) overdue += itemOverdue;
       }
     });
-    console.log('[OVERDUE DEBUG] summary:', { active: active, upcoming: upcoming, overdue: overdue });
     return { active: active, upcoming: upcoming, overdue: overdue };
   } catch (e) {
     console.warn('fetchSankyuSummary error:', e);
