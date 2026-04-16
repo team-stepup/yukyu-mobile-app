@@ -4569,7 +4569,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '984085e';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7153,33 +7153,35 @@ function buildHakenDetailHtml(item) {
     Object.keys(item).forEach(function(k) {
       if (skipKeys[k] || k.startsWith('__') || k.startsWith('odata')) return;
       var v = item[k];
-      if (v === null || v === undefined || v === '') return;
+      var display = (v === null || v === undefined || v === '') ? '—' : String(v);
+      var valColor = (v === null || v === undefined || v === '') ? '#ccc' : 'var(--text)';
       html += '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f5;font-size:12px;">';
       html += '<div style="color:var(--text-light);min-width:90px;flex-shrink:0;">' + escHtml(k) + '</div>';
-      html += '<div style="color:var(--text);word-break:break-all;">' + escHtml(String(v)) + '</div>';
+      html += '<div style="color:' + valColor + ';word-break:break-all;">' + escHtml(display) + '</div>';
       html += '</div>';
     });
   } else {
     fields.forEach(function(f) {
       var v = item[f.odKey];
-      if (v === null || v === undefined || v === '') return;
-      var display = String(v);
+      var isEmpty = (v === null || v === undefined || v === '');
+      var display = isEmpty ? '—' : String(v);
+      var valColor = isEmpty ? '#ccc' : 'var(--text)';
       // 日付型はフォーマット
-      if (f.type === 'DateTime' && v) {
+      if (!isEmpty && f.type === 'DateTime') {
         var d = new Date(v);
         if (!isNaN(d.getTime())) display = d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
       }
       // 数値型
-      if (f.type === 'Number' && !isNaN(Number(v))) {
+      if (!isEmpty && f.type === 'Number' && !isNaN(Number(v))) {
         display = Number(v).toLocaleString();
       }
       // 通貨型
-      if (f.type === 'Currency' && !isNaN(Number(v))) {
+      if (!isEmpty && f.type === 'Currency' && !isNaN(Number(v))) {
         display = '¥' + Number(v).toLocaleString();
       }
       html += '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f5;font-size:12px;">';
       html += '<div style="color:var(--text-light);min-width:100px;flex-shrink:0;font-weight:600;">' + escHtml(f.title) + '</div>';
-      html += '<div style="color:var(--text);word-break:break-all;">' + escHtml(display) + '</div>';
+      html += '<div style="color:' + valColor + ';word-break:break-all;">' + escHtml(display) + '</div>';
       html += '</div>';
     });
   }
