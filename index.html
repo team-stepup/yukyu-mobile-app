@@ -13437,11 +13437,38 @@ async function deleteSpFile(serverRelativeUrl) {
   console.log('[DELETE FILE] success:', serverRelativeUrl);
 }
 
-// SharePoint REST API でフォルダを削除（ごみ箱へ移動）
+// SharePoint REST API でフォルダを削除（中身を先に削除→フォルダ削除）
 async function deleteSpFolder(serverRelativeUrl) {
   var token = await getToken();
   if (!token) throw new Error('認証エラー');
   var encoded = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
+
+  // まず中のファイルとサブフォルダを取得して再帰的に削除
+  try {
+    var contents = await loadVehicleFolderContents(token, serverRelativeUrl);
+    // サブフォルダを先に再帰削除
+    if (contents.folders && contents.folders.length > 0) {
+      for (var i = 0; i < contents.folders.length; i++) {
+        var sub = contents.folders[i];
+        if (sub.ServerRelativeUrl) {
+          await deleteSpFolder(sub.ServerRelativeUrl);
+        }
+      }
+    }
+    // ファイルを削除
+    if (contents.files && contents.files.length > 0) {
+      for (var j = 0; j < contents.files.length; j++) {
+        var f = contents.files[j];
+        if (f.ServerRelativeUrl) {
+          await deleteSpFile(f.ServerRelativeUrl);
+        }
+      }
+    }
+  } catch(e) {
+    console.warn('[DELETE FOLDER] contents cleanup error (continuing):', e);
+  }
+
+  // フォルダ自体を削除
   var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')/recycle()";
   console.log('[DELETE FOLDER] url:', url);
   var resp = await fetch(url, {
@@ -13452,10 +13479,23 @@ async function deleteSpFolder(serverRelativeUrl) {
     }
   });
   if (!resp.ok) {
-    var errText = '';
-    try { errText = await resp.text(); } catch(_) {}
-    console.error('deleteSpFolder error:', resp.status, errText);
-    throw new Error('フォルダ削除失敗 (' + resp.status + ')');
+    // recycle失敗 → DELETE方式にフォールバック
+    var url2 = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')";
+    var resp2 = await fetch(url2, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'X-HTTP-Method': 'DELETE',
+        'IF-MATCH': '*'
+      }
+    });
+    if (!resp2.ok) {
+      var errText = '';
+      try { errText = await resp2.text(); } catch(_) {}
+      console.error('deleteSpFolder error:', resp2.status, errText);
+      throw new Error('フォルダ削除失敗 (' + resp2.status + ')');
+    }
   }
   console.log('[DELETE FOLDER] success:', serverRelativeUrl);
 }
