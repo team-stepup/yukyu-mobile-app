@@ -9679,27 +9679,27 @@ function renderSankyuDetail(item) {
     var kSex = sankyuKeyByTitle('性別', true) || sankyuKeyByTitle('性別');
     var sexVal = kSex ? String(item[kSex] || '') : '';
     var isMale = /男|male|パパ|父/i.test(sexVal);
-    // 性別デバッグ: フィールドメタ情報 + item内の実データを出力
+    // 性別デバッグ: 全フィールドタイトル + 性別に関連するフィールド探索
     if (_sankyuFieldsMeta) {
-      var _sexMeta = null;
+      var _allTitles = [];
+      var _sexCandidates = [];
       Object.keys(_sankyuFieldsMeta).forEach(function(k) {
         var f = _sankyuFieldsMeta[k];
-        if (f.title === '性別') _sexMeta = f;
+        _allTitles.push(f.title);
+        if (f.title && /性別|性|sex|gender/i.test(f.title)) {
+          _sexCandidates.push({ title: f.title, dataKey: f.dataKey, entityProp: f.entityPropertyName, iname: f.internalName, val_dk: item[f.dataKey], val_ep: item[f.entityPropertyName], val_in: item[f.internalName] });
+        }
       });
-      if (_sexMeta) {
-        console.log('[PAPA DEBUG] 性別フィールド meta:', JSON.stringify(_sexMeta));
-        console.log('[PAPA DEBUG] item[dataKey]=' + JSON.stringify(item[_sexMeta.dataKey]) + ', item[entityProp]=' + JSON.stringify(item[_sexMeta.entityPropertyName]) + ', item[iname]=' + JSON.stringify(item[_sexMeta.internalName]));
-        // entityPropertyName で取れるか試す
-        if (!sexVal && item[_sexMeta.entityPropertyName]) {
-          sexVal = String(item[_sexMeta.entityPropertyName]);
-          isMale = /男|male|パパ|父/i.test(sexVal);
+      console.log('[PAPA DEBUG] 全フィールドタイトル:', _allTitles);
+      console.log('[PAPA DEBUG] 性別候補:', JSON.stringify(_sexCandidates));
+      // 候補からデータが取れるものを使用
+      if (!sexVal) {
+        for (var _si = 0; _si < _sexCandidates.length; _si++) {
+          var _sc = _sexCandidates[_si];
+          var _sv = _sc.val_dk || _sc.val_ep || _sc.val_in || '';
+          if (_sv) { sexVal = String(_sv); break; }
         }
-        if (!sexVal && item[_sexMeta.internalName]) {
-          sexVal = String(item[_sexMeta.internalName]);
-          isMale = /男|male|パパ|父/i.test(sexVal);
-        }
-      } else {
-        console.log('[PAPA DEBUG] 性別フィールドがメタに見つかりません');
+        isMale = /男|male|パパ|父/i.test(sexVal);
       }
     }
     console.log('[PAPA DEBUG] kSex=', kSex, 'sexVal=', sexVal, 'isMale=', isMale);
