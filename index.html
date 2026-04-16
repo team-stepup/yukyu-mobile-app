@@ -4154,15 +4154,18 @@ select.sankyu-edit-input {
     </div>
   </div>
 
-  <!-- Screen: 派遣先一覧 (SharePoint iframe) -->
+  <!-- Screen: 派遣先一覧 (REST API) -->
   <div class="screen" id="hakensakiListScreen">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🏭 派遣先一覧</h2>
       <div style="flex:1;"></div>
-      <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SharePointで開く ↗</button>
+      <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
-    <div id="hakensakiIframeWrap" style="flex:1;border-radius:12px;overflow:hidden;border:1px solid #e0e0e0;background:#fff;">
-      <div style="text-align:center;padding:40px 20px;color:var(--text-light);">読み込み中…</div>
+    <div id="hakensakiBody">
+      <div style="text-align:center;padding:40px 20px;color:var(--text-light);">
+        <div style="font-size:32px;margin-bottom:10px;">🏭</div>
+        <div style="font-size:14px;">読み込み中…</div>
+      </div>
     </div>
   </div>
 
@@ -6679,19 +6682,138 @@ var _soumuShahoInCount = 0;
 var _soumuShahoInItems = [];
 var _soumuSankyuSummary = { active: 0, upcoming: 0, overdue: 0 };
 
-// ── 派遣先一覧画面 (SharePoint iframe埋め込み) ──
+// ── 派遣先一覧画面 (REST API) ──
+var HAKENSAKI_LIST_PATH = '/sites/PowerApps/Lists/040623';
+var _hakensakiLoaded = false;
+
 function openHakensakiListScreen() {
   switchScreen('hakensakiListScreen');
-  var wrap = document.getElementById('hakensakiIframeWrap');
-  if (!wrap) return;
-  // 既にiframeがあれば再読込しない
-  if (wrap.querySelector('iframe')) return;
-  var iframe = document.createElement('iframe');
-  iframe.src = 'https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx';
-  iframe.style.cssText = 'width:100%;height:calc(100vh - 120px);border:0;background:#fff;';
-  iframe.setAttribute('allowfullscreen', '');
-  wrap.innerHTML = '';
-  wrap.appendChild(iframe);
+  if (!_hakensakiLoaded) loadHakensakiList();
+}
+
+async function loadHakensakiList() {
+  var body = document.getElementById('hakensakiBody');
+  if (!body) return;
+  try {
+    var token = await getToken();
+    if (!token) { body.innerHTML = '<div style="padding:20px;color:#c62828;">認証エラー</div>'; return; }
+    // フィールドメタ取得
+    var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName,TypeAsString&$top=200";
+    var fResp = await fetch(fieldsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    var fieldMap = {}; // title → odataKey
+    var fieldTypes = {};
+    if (fResp.ok) {
+      var fData = await fResp.json();
+      ((fData.d && fData.d.results) || []).forEach(function(f) {
+        var intName = f.EntityPropertyName || f.InternalName;
+        var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
+        fieldMap[f.Title] = odKey;
+        fieldTypes[odKey] = f.TypeAsString;
+      });
+    }
+    // アイテム取得
+    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500";
+    var resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    _hakensakiLoaded = true;
+    renderHakensakiList(items, fieldMap, fieldTypes);
+  } catch (e) {
+    console.error('loadHakensakiList error:', e);
+    body.innerHTML = '<div style="padding:20px;color:#c62828;">読み込みエラー: ' + escHtml(e.message || String(e)) + '</div>';
+  }
+}
+
+function renderHakensakiList(items, fieldMap, fieldTypes) {
+  var body = document.getElementById('hakensakiBody');
+  if (!body) return;
+  if (items.length === 0) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-light);">データなし</div>';
+    return;
+  }
+  // フィールドキーの推測 (スクリーンショットの列に合わせて)
+  var fHakensaki = fieldMap['派遣先'] || fieldMap['派遣先名'] || 'Title';
+  var fBusho = fieldMap['部署'] || fieldMap['配属先'] || fieldMap['部課'] || null;
+  var fStart = fieldMap['開始日'] || fieldMap['契約開始日'] || fieldMap['契約開始'] || fieldMap['派遣開始日'] || null;
+  var fEnd = fieldMap['終了日'] || fieldMap['契約終了日'] || fieldMap['契約終了'] || fieldMap['派遣終了日'] || null;
+  var fNinzu = fieldMap['人数'] || fieldMap['派遣人数'] || null;
+
+  // 全フィールドキーのリスト（表示用に使うかもしれない）
+  var allKeys = Object.keys(fieldMap);
+  // 日付型フィールドを自動検出
+  if (!fStart || !fEnd) {
+    allKeys.forEach(function(title) {
+      var k = fieldMap[title];
+      if (fieldTypes[k] === 'DateTime') {
+        if (!fStart && (title.indexOf('開始') >= 0 || title.indexOf('始') >= 0)) fStart = k;
+        if (!fEnd && (title.indexOf('終了') >= 0 || title.indexOf('了') >= 0 || title.indexOf('満了') >= 0)) fEnd = k;
+      }
+    });
+  }
+  // 数値型フィールドで人数を自動検出
+  if (!fNinzu) {
+    allKeys.forEach(function(title) {
+      var k = fieldMap[title];
+      if (fieldTypes[k] === 'Number' && (title.indexOf('人数') >= 0 || title.indexOf('人') >= 0 || title.indexOf('名') >= 0)) fNinzu = k;
+    });
+  }
+
+  function fmtDate(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  }
+
+  // 派遣先でグルーピング
+  var groups = {};
+  var groupOrder = [];
+  items.forEach(function(item) {
+    var name = item[fHakensaki] || item.Title || '(不明)';
+    if (!groups[name]) { groups[name] = []; groupOrder.push(name); }
+    groups[name].push(item);
+  });
+
+  var html = '<div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">全 ' + items.length + ' 件</div>';
+  groupOrder.forEach(function(gName) {
+    var gItems = groups[gName];
+    html += '<div style="background:#fff;border-radius:12px;margin-bottom:12px;border:1px solid #e8e8f0;overflow:hidden;">';
+    html += '<div style="background:linear-gradient(135deg,#1a237e,#283593);color:#fff;padding:12px 14px;font-weight:700;font-size:14px;">' + escHtml(gName) + '</div>';
+    gItems.forEach(function(item, idx) {
+      var busho = fBusho ? (item[fBusho] || '') : '';
+      var start = fStart ? fmtDate(item[fStart]) : '';
+      var end = fEnd ? fmtDate(item[fEnd]) : '';
+      var ninzu = fNinzu ? item[fNinzu] : '';
+      var dateStr = '';
+      if (start || end) dateStr = start + '～' + end;
+      html += '<div style="padding:10px 14px;border-top:' + (idx > 0 ? '1px solid #f0f0f5' : '0') + ';display:flex;align-items:center;gap:8px;">';
+      html += '<div style="flex:1;min-width:0;">';
+      if (busho) html += '<div style="font-size:13px;color:var(--text-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(busho) + '</div>';
+      if (dateStr) html += '<div style="font-size:11px;color:var(--text-light);margin-top:2px;">' + escHtml(dateStr) + '</div>';
+      if (!busho && !dateStr) {
+        // フォールバック: Title以外の表示できるフィールドを探す
+        var shown = false;
+        allKeys.forEach(function(title) {
+          if (shown) return;
+          var k = fieldMap[title];
+          if (k === fHakensaki || k === 'Title' || k === 'Id') return;
+          var v = item[k];
+          if (v !== null && v !== undefined && String(v).trim()) {
+            html += '<div style="font-size:12px;color:var(--text-light);">' + escHtml(title) + ': ' + escHtml(String(v).substring(0, 50)) + '</div>';
+            shown = true;
+          }
+        });
+      }
+      html += '</div>';
+      if (ninzu !== '' && ninzu !== null && ninzu !== undefined) {
+        html += '<div style="background:#e8eaf6;color:#283593;font-weight:700;font-size:14px;padding:4px 10px;border-radius:8px;white-space:nowrap;">' + escHtml(String(ninzu)) + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  body.innerHTML = html;
 }
 
 function openSoumuScreen() {
