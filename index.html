@@ -4181,13 +4181,7 @@ select.sankyu-edit-input {
       <div style="flex:1;"></div>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
-    <div id="hakensakiTabs" style="display:none;margin-bottom:10px;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;">
-      <button class="haken-tab haken-tab-active" data-filter="all" onclick="filterHakensakiList('all',this)">すべて</button>
-      <button class="haken-tab" data-filter="active" onclick="filterHakensakiList('active',this)">契約あり</button>
-      <button class="haken-tab" data-filter="inactive" onclick="filterHakensakiList('inactive',this)">契約なし</button>
-      <button class="haken-tab" data-filter="valid" onclick="filterHakensakiList('valid',this)">派遣有効</button>
-      <button class="haken-tab" data-filter="expired" onclick="filterHakensakiList('expired',this)">派遣なし</button>
-    </div>
+    <div id="hakensakiTabs" style="display:none;margin-bottom:10px;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;"></div>
     <div id="hakensakiBody">
       <div style="text-align:center;padding:40px 20px;color:var(--text-light);">
         <div style="font-size:32px;margin-bottom:10px;">🏭</div>
@@ -4544,7 +4538,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '3e3282e';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6816,20 +6810,70 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
 
   console.log('[派遣先] resolved fields:', _hakensakiFields);
 
-  // タブ表示
-  var tabs = document.getElementById('hakensakiTabs');
-  if (tabs) tabs.style.display = 'block';
+  // 件数を計算してタブを生成
+  buildHakensakiTabs();
 
   // 初期表示: すべて
   drawHakensakiCards('all');
 }
 
+// アイテムのステータス判定
+function _hakenItemStatus(item) {
+  var F = _hakensakiFields;
+  var ninzu = F.ninzu ? (Number(item[F.ninzu]) || 0) : 0;
+  var endVal = F.end ? item[F.end] : null;
+  var endDate = null;
+  var hasEnd = false;
+  if (endVal) {
+    endDate = new Date(endVal); endDate.setHours(0, 0, 0, 0);
+    if (!isNaN(endDate.getTime())) hasEnd = true;
+  }
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  // 派遣契約有効: 期限が今日以降 AND 人数>=1
+  var isValid = hasEnd && endDate >= today && ninzu >= 1;
+  // 派遣契約期限切れ: 期限が過去 AND 人数>=1
+  var isExpiredContract = hasEnd && endDate < today && ninzu >= 1;
+  // 派遣契約なし: 人数0
+  var isNoContract = ninzu === 0;
+  return { ninzu: ninzu, isValid: isValid, isExpiredContract: isExpiredContract, isNoContract: isNoContract, endDate: endDate, hasEnd: hasEnd };
+}
+
+function buildHakensakiTabs() {
+  var tabs = document.getElementById('hakensakiTabs');
+  if (!tabs) return;
+  var items = _hakensakiItems;
+  var cAll = items.length;
+  var cValid = 0, cExpired = 0, cNone = 0;
+  items.forEach(function(item) {
+    var s = _hakenItemStatus(item);
+    if (s.isValid) cValid++;
+    else if (s.isExpiredContract) cExpired++;
+    else if (s.isNoContract) cNone++;
+  });
+
+  var tabDefs = [
+    { key: 'all',     label: 'すべて',       count: cAll,     color: '' },
+    { key: 'valid',   label: '派遣契約有効',  count: cValid,   color: '#1565c0' },
+    { key: 'expired', label: '派遣契約期限切れ', count: cExpired, color: '#e65100' },
+    { key: 'none',    label: '派遣契約なし',  count: cNone,    color: '#78909c' }
+  ];
+
+  var html = '';
+  tabDefs.forEach(function(t, idx) {
+    var active = idx === 0 ? ' haken-tab-active' : '';
+    html += '<button class="haken-tab' + active + '" data-filter="' + t.key + '" onclick="filterHakensakiList(\'' + t.key + '\',this)">';
+    html += escHtml(t.label);
+    html += '<span style="margin-left:4px;font-size:11px;font-weight:700;' + (t.color && idx > 0 ? 'color:' + t.color + ';' : '') + '">' + t.count + '</span>';
+    html += '</button>';
+  });
+  tabs.innerHTML = html;
+  tabs.style.display = 'block';
+}
+
 function filterHakensakiList(filterKey, btn) {
-  // タブ切替
   var tabs = document.getElementById('hakensakiTabs');
   if (tabs) {
-    var btns = tabs.querySelectorAll('.haken-tab');
-    btns.forEach(function(b) { b.classList.remove('haken-tab-active'); });
+    tabs.querySelectorAll('.haken-tab').forEach(function(b) { b.classList.remove('haken-tab-active'); });
   }
   if (btn) btn.classList.add('haken-tab-active');
   drawHakensakiCards(filterKey);
@@ -6840,7 +6884,6 @@ function drawHakensakiCards(filterKey) {
   if (!body) return;
   var F = _hakensakiFields;
   var items = _hakensakiItems;
-  var today = new Date(); today.setHours(0, 0, 0, 0);
 
   function fmtDate(v) {
     if (!v) return '';
@@ -6849,40 +6892,14 @@ function drawHakensakiCards(filterKey) {
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
   }
 
-  // 各アイテムにステータスを付与
-  function itemStatus(item) {
-    var ninzu = F.ninzu ? (Number(item[F.ninzu]) || 0) : 0;
-    var endVal = F.end ? item[F.end] : null;
-    var hasEnd = false;
-    var endDate = null;
-    if (endVal) {
-      endDate = new Date(endVal); endDate.setHours(0, 0, 0, 0);
-      if (!isNaN(endDate.getTime())) hasEnd = true;
-    }
-    var startVal = F.start ? item[F.start] : null;
-    var hasStart = false;
-    if (startVal) {
-      var sd = new Date(startVal);
-      if (!isNaN(sd.getTime())) hasStart = true;
-    }
-    // 契約あり = 開始日or終了日がある
-    var hasContract = hasStart || hasEnd;
-    // 派遣有効 = 終了日が今日以降 AND 人数>0
-    var isValid = hasEnd && endDate >= today && ninzu > 0;
-    // 派遣なし = 人数0 or 終了日が過去
-    var isExpired = ninzu === 0 || (hasEnd && endDate < today);
-    return { ninzu: ninzu, hasContract: hasContract, isValid: isValid, isExpired: isExpired, endDate: endDate, hasEnd: hasEnd };
-  }
-
   // フィルター適用
   var filtered = items.filter(function(item) {
-    var s = itemStatus(item);
+    var s = _hakenItemStatus(item);
     switch (filterKey) {
-      case 'active':  return s.hasContract;
-      case 'inactive': return !s.hasContract;
       case 'valid':   return s.isValid;
-      case 'expired': return s.isExpired;
-      default:        return true;
+      case 'expired': return s.isExpiredContract;
+      case 'none':    return s.isNoContract;
+      default:        return true; // all
     }
   });
 
@@ -6895,19 +6912,19 @@ function drawHakensakiCards(filterKey) {
     groups[name].push(item);
   });
 
-  // グループをソート: 人数>0のグループが上、0人は下
+  // ソート: 人数>0上、0下
   groupOrder.sort(function(a, b) {
-    var aNinzu = 0, bNinzu = 0;
+    var aN = 0, bN = 0;
     if (F.ninzu) {
-      groups[a].forEach(function(i) { aNinzu += Number(i[F.ninzu]) || 0; });
-      groups[b].forEach(function(i) { bNinzu += Number(i[F.ninzu]) || 0; });
+      groups[a].forEach(function(i) { aN += Number(i[F.ninzu]) || 0; });
+      groups[b].forEach(function(i) { bN += Number(i[F.ninzu]) || 0; });
     }
-    if (aNinzu > 0 && bNinzu === 0) return -1;
-    if (aNinzu === 0 && bNinzu > 0) return 1;
+    if (aN > 0 && bN === 0) return -1;
+    if (aN === 0 && bN > 0) return 1;
     return 0;
   });
 
-  var html = '<div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">' + filtered.length + ' 件表示</div>';
+  var html = '<div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">' + filtered.length + ' 件</div>';
 
   if (filtered.length === 0) {
     html += '<div style="text-align:center;padding:40px;color:var(--text-light);">該当なし</div>';
@@ -6921,17 +6938,35 @@ function drawHakensakiCards(filterKey) {
     if (F.ninzu) gItems.forEach(function(item) { totalNinzu += Number(item[F.ninzu]) || 0; });
     var isZero = totalNinzu === 0;
 
-    // ヘッダー色: 人数>0=紺色, 0人=グレー
-    var headerBg = isZero ? 'linear-gradient(135deg,#78909c,#90a4ae)' : 'linear-gradient(135deg,#1a237e,#283593)';
-    var cardBorder = isZero ? '1px solid #cfd8dc' : '1px solid #e8e8f0';
-    var cardOpacity = isZero ? 'opacity:0.75;' : '';
+    // ヘッダー色: 有効=紺, 0人=グレー, 期限切れ混在=オレンジ系
+    var hasExpired = false, hasValid = false;
+    gItems.forEach(function(item) {
+      var s = _hakenItemStatus(item);
+      if (s.isValid) hasValid = true;
+      if (s.isExpiredContract) hasExpired = true;
+    });
 
-    html += '<div style="background:#fff;border-radius:12px;margin-bottom:12px;border:' + cardBorder + ';overflow:hidden;' + cardOpacity + '">';
+    var headerBg, cardBorder, cardStyle = '';
+    if (isZero) {
+      headerBg = 'linear-gradient(135deg,#78909c,#90a4ae)';
+      cardBorder = '1px solid #cfd8dc';
+      cardStyle = 'opacity:0.7;';
+    } else if (hasExpired && !hasValid) {
+      headerBg = 'linear-gradient(135deg,#e65100,#f57c00)';
+      cardBorder = '1px solid #ffcc80';
+    } else if (hasExpired && hasValid) {
+      headerBg = 'linear-gradient(135deg,#1a237e,#e65100)';
+      cardBorder = '1px solid #e8e8f0';
+    } else {
+      headerBg = 'linear-gradient(135deg,#1a237e,#283593)';
+      cardBorder = '1px solid #e8e8f0';
+    }
+
+    html += '<div style="background:#fff;border-radius:12px;margin-bottom:12px;border:' + cardBorder + ';overflow:hidden;' + cardStyle + '">';
     html += '<div style="background:' + headerBg + ';color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;">';
     html += '<div style="flex:1;font-weight:700;font-size:14px;">' + escHtml(gName) + '</div>';
     if (F.ninzu) {
-      var pillBg = isZero ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.2)';
-      html += '<div style="background:' + pillBg + ';padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
+      html += '<div style="background:rgba(255,255,255,0.2);padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
     }
     html += '</div>';
 
@@ -6941,22 +6976,25 @@ function drawHakensakiCards(filterKey) {
       var end = F.end ? fmtDate(item[F.end]) : '';
       var ninzu = F.ninzu ? (Number(item[F.ninzu]) || 0) : '';
       var dateStr = (start || end) ? start + '～' + end : '';
+      var s = _hakenItemStatus(item);
 
-      // 行の状態判定
-      var s = itemStatus(item);
-      var rowBg = '';
-      var ninzuBg = '#e8eaf6'; var ninzuColor = '#283593';
-      if (s.isExpired || ninzu === 0) {
-        rowBg = 'background:#f5f5f5;';
-        ninzuBg = '#efebe9'; ninzuColor = '#8d6e63';
+      // 行スタイル
+      var rowBg = '', textColor = 'var(--text-dark)', subColor = 'var(--text-light)';
+      var ninzuBg = '#e8eaf6', ninzuColor = '#283593';
+      if (s.isNoContract) {
+        rowBg = 'background:#fafafa;'; textColor = '#999'; subColor = '#bbb';
+        ninzuBg = '#f0f0f0'; ninzuColor = '#999';
+      } else if (s.isExpiredContract) {
+        rowBg = 'background:#fff8e1;'; textColor = '#e65100'; subColor = '#f57c00';
+        ninzuBg = '#fff3e0'; ninzuColor = '#e65100';
       } else if (s.isValid) {
         ninzuBg = '#e3f2fd'; ninzuColor = '#1565c0';
       }
 
       html += '<div style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;' + rowBg + '">';
       html += '<div style="flex:1;min-width:0;">';
-      if (soshiki) html += '<div style="font-size:13px;color:' + (s.isExpired ? '#999' : 'var(--text-dark)') + ';overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
-      if (dateStr) html += '<div style="font-size:11px;color:' + (s.isExpired ? '#bbb' : 'var(--text-light)') + ';margin-top:2px;">' + escHtml(dateStr) + '</div>';
+      if (soshiki) html += '<div style="font-size:13px;color:' + textColor + ';overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
+      if (dateStr) html += '<div style="font-size:11px;color:' + subColor + ';margin-top:2px;">' + escHtml(dateStr) + '</div>';
       html += '</div>';
       if (F.ninzu) {
         html += '<div style="background:' + ninzuBg + ';color:' + ninzuColor + ';font-weight:700;font-size:15px;min-width:36px;text-align:center;padding:4px 10px;border-radius:8px;">' + ninzu + '</div>';
