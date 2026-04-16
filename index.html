@@ -4517,7 +4517,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'd22fa54';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6732,32 +6732,53 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
     body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-light);">データなし</div>';
     return;
   }
-  // フィールドキーの推測 (スクリーンショットの列に合わせて)
-  var fHakensaki = fieldMap['派遣先'] || fieldMap['派遣先名'] || 'Title';
-  var fBusho = fieldMap['部署'] || fieldMap['配属先'] || fieldMap['部課'] || null;
-  var fStart = fieldMap['開始日'] || fieldMap['契約開始日'] || fieldMap['契約開始'] || fieldMap['派遣開始日'] || null;
-  var fEnd = fieldMap['終了日'] || fieldMap['契約終了日'] || fieldMap['契約終了'] || fieldMap['派遣終了日'] || null;
-  var fNinzu = fieldMap['人数'] || fieldMap['派遣人数'] || null;
 
-  // 全フィールドキーのリスト（表示用に使うかもしれない）
-  var allKeys = Object.keys(fieldMap);
-  // 日付型フィールドを自動検出
+  // デバッグ: フィールド一覧をログ出力
+  console.log('[派遣先] fieldMap:', JSON.stringify(fieldMap, null, 2));
+  if (items[0]) console.log('[派遣先] sample item keys:', Object.keys(items[0]).filter(function(k) { return items[0][k] !== null && !k.startsWith('__'); }));
+
+  // フィールドキー解決 — 部分一致で検索するヘルパー
+  var allTitles = Object.keys(fieldMap);
+  function findField(/* keywords */) {
+    var keywords = Array.prototype.slice.call(arguments);
+    // まず完全一致
+    for (var i = 0; i < keywords.length; i++) {
+      if (fieldMap[keywords[i]]) return fieldMap[keywords[i]];
+    }
+    // 部分一致
+    for (var i = 0; i < keywords.length; i++) {
+      for (var j = 0; j < allTitles.length; j++) {
+        if (allTitles[j].indexOf(keywords[i]) >= 0) return fieldMap[allTitles[j]];
+      }
+    }
+    return null;
+  }
+
+  var fCompany = findField('派遣先会社名', '派遣先会社', '派遣先名', '派遣先') || 'Title';
+  var fSoshiki = findField('組織単位', '組織', '部署', '配属先', '部課');
+  var fStart   = findField('派遣期間　始まり', '派遣期間 始まり', '派遣期間始まり', '派遣開始', '開始日', '契約開始');
+  var fEnd     = findField('派遣期間　終わり', '派遣期間 終わり', '派遣期間終わり', '派遣終了', '終了日', '契約終了');
+  var fNinzu   = findField('派遣人数', '人数');
+
+  // 日付型自動検出フォールバック
   if (!fStart || !fEnd) {
-    allKeys.forEach(function(title) {
+    allTitles.forEach(function(title) {
       var k = fieldMap[title];
       if (fieldTypes[k] === 'DateTime') {
-        if (!fStart && (title.indexOf('開始') >= 0 || title.indexOf('始') >= 0)) fStart = k;
-        if (!fEnd && (title.indexOf('終了') >= 0 || title.indexOf('了') >= 0 || title.indexOf('満了') >= 0)) fEnd = k;
+        if (!fStart && (title.indexOf('始') >= 0 || title.indexOf('開始') >= 0)) fStart = k;
+        if (!fEnd && (title.indexOf('終') >= 0 || title.indexOf('了') >= 0)) fEnd = k;
       }
     });
   }
-  // 数値型フィールドで人数を自動検出
+  // 数値型自動検出フォールバック
   if (!fNinzu) {
-    allKeys.forEach(function(title) {
+    allTitles.forEach(function(title) {
       var k = fieldMap[title];
-      if (fieldTypes[k] === 'Number' && (title.indexOf('人数') >= 0 || title.indexOf('人') >= 0 || title.indexOf('名') >= 0)) fNinzu = k;
+      if (fieldTypes[k] === 'Number' && (title.indexOf('人数') >= 0 || title.indexOf('人') >= 0)) fNinzu = k;
     });
   }
+
+  console.log('[派遣先] resolved fields:', { company: fCompany, soshiki: fSoshiki, start: fStart, end: fEnd, ninzu: fNinzu });
 
   function fmtDate(v) {
     if (!v) return '';
@@ -6766,11 +6787,12 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
   }
 
-  // 派遣先でグルーピング
+  // 派遣先会社名でグルーピング
   var groups = {};
   var groupOrder = [];
   items.forEach(function(item) {
-    var name = item[fHakensaki] || item.Title || '(不明)';
+    var name = String(item[fCompany] || item.Title || '(不明)').trim();
+    if (!name) name = '(不明)';
     if (!groups[name]) { groups[name] = []; groupOrder.push(name); }
     groups[name].push(item);
   });
@@ -6778,41 +6800,37 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
   var html = '<div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">全 ' + items.length + ' 件</div>';
   groupOrder.forEach(function(gName) {
     var gItems = groups[gName];
+    // グループ内の合計人数
+    var totalNinzu = 0;
+    if (fNinzu) gItems.forEach(function(item) { totalNinzu += Number(item[fNinzu]) || 0; });
+
     html += '<div style="background:#fff;border-radius:12px;margin-bottom:12px;border:1px solid #e8e8f0;overflow:hidden;">';
-    html += '<div style="background:linear-gradient(135deg,#1a237e,#283593);color:#fff;padding:12px 14px;font-weight:700;font-size:14px;">' + escHtml(gName) + '</div>';
+    html += '<div style="background:linear-gradient(135deg,#1a237e,#283593);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;">';
+    html += '<div style="flex:1;font-weight:700;font-size:14px;">' + escHtml(gName) + '</div>';
+    if (fNinzu && totalNinzu > 0) html += '<div style="background:rgba(255,255,255,0.2);padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
+    html += '</div>';
+
     gItems.forEach(function(item, idx) {
-      var busho = fBusho ? (item[fBusho] || '') : '';
+      var soshiki = fSoshiki ? String(item[fSoshiki] || '').trim() : '';
       var start = fStart ? fmtDate(item[fStart]) : '';
       var end = fEnd ? fmtDate(item[fEnd]) : '';
       var ninzu = fNinzu ? item[fNinzu] : '';
       var dateStr = '';
       if (start || end) dateStr = start + '～' + end;
-      html += '<div style="padding:10px 14px;border-top:' + (idx > 0 ? '1px solid #f0f0f5' : '0') + ';display:flex;align-items:center;gap:8px;">';
+
+      html += '<div style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;">';
       html += '<div style="flex:1;min-width:0;">';
-      if (busho) html += '<div style="font-size:13px;color:var(--text-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(busho) + '</div>';
+      if (soshiki) html += '<div style="font-size:13px;color:var(--text-dark);overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
       if (dateStr) html += '<div style="font-size:11px;color:var(--text-light);margin-top:2px;">' + escHtml(dateStr) + '</div>';
-      if (!busho && !dateStr) {
-        // フォールバック: Title以外の表示できるフィールドを探す
-        var shown = false;
-        allKeys.forEach(function(title) {
-          if (shown) return;
-          var k = fieldMap[title];
-          if (k === fHakensaki || k === 'Title' || k === 'Id') return;
-          var v = item[k];
-          if (v !== null && v !== undefined && String(v).trim()) {
-            html += '<div style="font-size:12px;color:var(--text-light);">' + escHtml(title) + ': ' + escHtml(String(v).substring(0, 50)) + '</div>';
-            shown = true;
-          }
-        });
-      }
       html += '</div>';
       if (ninzu !== '' && ninzu !== null && ninzu !== undefined) {
-        html += '<div style="background:#e8eaf6;color:#283593;font-weight:700;font-size:14px;padding:4px 10px;border-radius:8px;white-space:nowrap;">' + escHtml(String(ninzu)) + '</div>';
+        html += '<div style="background:#e8eaf6;color:#283593;font-weight:700;font-size:15px;min-width:36px;text-align:center;padding:4px 10px;border-radius:8px;">' + escHtml(String(ninzu)) + '</div>';
       }
       html += '</div>';
     });
     html += '</div>';
   });
+
   body.innerHTML = html;
 }
 
