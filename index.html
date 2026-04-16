@@ -4016,6 +4016,7 @@ select.sankyu-edit-input {
         <span class="ql-icon">🌸</span>
         <span class="ql-text">産休育休</span>
         <span id="sankyuBadgeCount" class="ql-badge" style="background:#d81b60;display:none;"></span>
+        <span id="sankyuOverdueBadge" class="ql-badge" style="background:#f44336;display:none;position:absolute;top:-2px;right:-2px;animation:sankyuWarnPulse 1.8s ease-in-out infinite;"></span>
       </button>
     </div>
 
@@ -4396,7 +4397,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '1bbadd8';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6376,6 +6377,16 @@ async function loadHomeBadges() {
       sBadge.style.display = 'none';
     }
   }
+  // 遅延バッジ (赤パルス)
+  var sOverdueBadge = document.getElementById('sankyuOverdueBadge');
+  if (sOverdueBadge && sankyuResult) {
+    if (sankyuResult.overdue > 0) {
+      sOverdueBadge.textContent = '⚠' + sankyuResult.overdue;
+      sOverdueBadge.style.display = 'inline-block';
+    } else {
+      sOverdueBadge.style.display = 'none';
+    }
+  }
 }
 
 // 車両バッジ用データ取得（並列呼び出し用に分離）
@@ -6663,6 +6674,7 @@ async function fetchSankyuSummary() {
         if (itemOverdue > 0) overdue += itemOverdue;
       }
     });
+    console.log('[OVERDUE DEBUG] summary:', { active: active, upcoming: upcoming, overdue: overdue });
     return { active: active, upcoming: upcoming, overdue: overdue };
   } catch (e) {
     console.warn('fetchSankyuSummary error:', e);
