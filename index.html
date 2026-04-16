@@ -9101,38 +9101,39 @@ function renderSankyuAppCard(card, isEdit) {
         }
         // 合成期間があれば 「開始 〜 終了」 の表記で表示
         else if (card.synthPeriodStart && card.synthPeriodEnd) {
-          var sStr = _sankyuFormatSynthDate(card.synthPeriodStart);
+          var _spMainIname = m.meta.internalName;
           var eStr = _sankyuFormatSynthDate(card.synthPeriodEnd);
-          html += '<div class="sankyu-app-card-period">';
-          html +=   '<div class="sankyu-app-card-period-date">' + escHtml(sStr) + '</div>';
-          html +=   '<span class="sankyu-app-card-tilde">〜</span>';
-          html +=   '<div class="sankyu-app-card-period-date">' + escHtml(eStr) + '</div>';
-          html += '</div>';
-          if (card.synthPeriodLabel) {
-            html += '<div class="sankyu-app-card-synth-label">📐 ' + escHtml(card.synthPeriodLabel) + '</div>';
-          }
-          // 合成期間カードでも未済ならメイン日付を編集可能にする
           if (!isDone) {
-            var _spMainIname = m.meta.internalName;
+            // 未済: 開始日をdate inputで直接編集 (mainフィールド保存), 終了日は計算値表示
             var _spMainDateStr = '';
             if (!_sankyuIsEmptyDateRaw(m.raw)) {
               try { var _spd = new Date(m.raw); if (!isNaN(_spd)) _spMainDateStr = _spd.getFullYear() + '-' + ('0'+(_spd.getMonth()+1)).slice(-2) + '-' + ('0'+_spd.getDate()).slice(-2); } catch(_) {}
             }
-            html += '<div class="sankyu-app-card-submitted">';
-            html +=   '<div class="sankyu-app-card-submitted-label">📅 日付</div>';
-            html +=   '<input type="date" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + _spMainDateStr + '" data-prev="' + _spMainDateStr + '" onchange="_sankyuGuardedDateSave(this, \'' + _spMainIname + '\', \'basic\')" style="flex:1;">';
+            html += '<div class="sankyu-app-card-period">';
+            html +=   '<input type="date" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + _spMainDateStr + '" data-prev="' + _spMainDateStr + '" onchange="_sankyuGuardedDateSave(this, \'' + _spMainIname + '\', \'basic\')" style="flex:1;max-width:130px;">';
+            html +=   '<span class="sankyu-app-card-tilde">〜</span>';
+            html +=   '<div class="sankyu-app-card-period-date">' + escHtml(eStr) + '</div>';
+            html += '</div>';
+          } else {
+            var sStr = _sankyuFormatSynthDate(card.synthPeriodStart);
+            html += '<div class="sankyu-app-card-period">';
+            html +=   '<div class="sankyu-app-card-period-date">' + escHtml(sStr) + '</div>';
+            html +=   '<span class="sankyu-app-card-tilde">〜</span>';
+            html +=   '<div class="sankyu-app-card-period-date">' + escHtml(eStr) + '</div>';
             html += '</div>';
           }
-        } else if (!isDone) {
-          // 未済: メイン日付を編集可能にする
+          if (card.synthPeriodLabel) {
+            html += '<div class="sankyu-app-card-synth-label">📐 ' + escHtml(card.synthPeriodLabel) + '</div>';
+          }
+        } else if (!isDone && m.type === 'DateTime') {
+          // 未済 + 合成期間なし: メイン日付をdate inputで直接表示
           var _mainIname = m.meta.internalName;
           var _mainDateStr = '';
           if (!_sankyuIsEmptyDateRaw(m.raw)) {
             try { var _md = new Date(m.raw); if (!isNaN(_md)) _mainDateStr = _md.getFullYear() + '-' + ('0'+(_md.getMonth()+1)).slice(-2) + '-' + ('0'+_md.getDate()).slice(-2); } catch(_) {}
           }
-          html += '<div class="sankyu-app-card-submitted">';
-          html +=   '<div class="sankyu-app-card-submitted-label">📅 日付</div>';
-          html +=   '<input type="date" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + _mainDateStr + '" data-prev="' + _mainDateStr + '" onchange="_sankyuGuardedDateSave(this, \'' + _mainIname + '\', \'basic\')" style="flex:1;">';
+          html += '<div class="sankyu-app-card-period" style="justify-content:flex-start;">';
+          html +=   '<input type="date" class="sankyu-edit-input sankyu-edit-date sankyu-quick-submit" value="' + _mainDateStr + '" data-prev="' + _mainDateStr + '" onchange="_sankyuGuardedDateSave(this, \'' + _mainIname + '\', \'basic\')" style="flex:1;max-width:160px;">';
           html += '</div>';
         } else {
           html += '<div class="sankyu-app-card-main-date' + (mEmpty ? ' empty' : '') + '">' + (mEmpty ? '—' : escHtml(mv.text)) + '</div>';
