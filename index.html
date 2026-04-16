@@ -4397,7 +4397,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '025757f';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6368,25 +6368,28 @@ async function loadHomeBadges() {
   }
 
   // 産休育休バッジ (休業中の人数 + 遅延)
-  console.log('[HOME BADGE DEBUG] sankyuResult=', sankyuResult, 'results[5]=', results[5]);
   var sBadge = document.getElementById('sankyuBadgeCount');
   var sOverdueBadge = document.getElementById('sankyuOverdueBadge');
-  // sankyuResult が null の場合でもフォールバック
-  var sr = sankyuResult || (results[5] && results[5].status === 'fulfilled' ? results[5].value : null);
-  if (sBadge && sr) {
-    if (sr.active > 0) {
-      sBadge.textContent = sr.active;
-      sBadge.style.display = 'inline-block';
-    } else {
-      sBadge.style.display = 'none';
+  var sr = sankyuResult;
+  console.log('[HOME BADGE DEBUG] sr=', sr, 'sBadge=', sBadge, 'sOverdueBadge=', sOverdueBadge);
+  if (sr) {
+    if (sBadge) {
+      if (sr.active > 0) {
+        sBadge.textContent = sr.active;
+        sBadge.style.display = 'inline-block';
+        console.log('[HOME BADGE DEBUG] active badge SET:', sr.active, 'display=', sBadge.style.display, 'offsetParent=', sBadge.offsetParent);
+      } else {
+        sBadge.style.display = 'none';
+      }
     }
-  }
-  if (sOverdueBadge && sr) {
-    if (sr.overdue > 0) {
-      sOverdueBadge.textContent = '⚠' + sr.overdue;
-      sOverdueBadge.style.display = 'inline-block';
-    } else {
-      sOverdueBadge.style.display = 'none';
+    if (sOverdueBadge) {
+      if (sr.overdue > 0) {
+        sOverdueBadge.textContent = '⚠' + sr.overdue;
+        sOverdueBadge.style.display = 'inline-block';
+        console.log('[HOME BADGE DEBUG] overdue badge SET:', sr.overdue, 'display=', sOverdueBadge.style.display, 'offsetParent=', sOverdueBadge.offsetParent);
+      } else {
+        sOverdueBadge.style.display = 'none';
+      }
     }
   }
 }
