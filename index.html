@@ -565,6 +565,16 @@ body {
   color: #fff;
   border-color: #f9a825;
 }
+.haken-tab-danger {
+  border-color: #e53935;
+  background: #ffebee;
+  color: #c62828;
+}
+.haken-tab-danger.haken-tab-active {
+  background: #e53935;
+  color: #fff;
+  border-color: #e53935;
+}
 
 /* ヒーローカード: 請求書発行シート */
 .soumu-hero {
@@ -4158,9 +4168,11 @@ select.sankyu-edit-input {
         <span id="sankyuBadgeCount" class="ql-badge" style="background:#d81b60;display:none;top:4px;right:4px;"></span>
         <span id="sankyuOverdueBadge" class="sankyu-overdue-home-badge" style="display:none;"></span>
       </button>
-      <button class="quick-link-btn" onclick="openHakensakiListScreen()">
+      <button class="quick-link-btn" onclick="openHakensakiListScreen()" style="position:relative;">
         <span class="ql-icon">🏭</span>
         <span class="ql-text">派遣先</span>
+        <span id="hakenExpiredBadge" class="ql-badge" style="background:#e53935;display:none;top:4px;right:4px;"></span>
+        <span id="hakenSoonBadge" class="ql-badge" style="background:#f9a825;display:none;top:4px;right:28px;"></span>
       </button>
     </div>
 
@@ -4557,7 +4569,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '0dd6132';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6447,7 +6459,8 @@ async function loadHomeBadges() {
     spGet(LIST_LEAVE_GUID, yFilter).catch(function(e) { console.log('Yukyu badge error:', e); return []; }),
     fetchEmployeeFields().catch(function(e) { console.log('Fields fetch error:', e); return []; }),
     loadVehicleBadgeData().catch(function(e) { console.log('Vehicle badge error:', e); return null; }),
-    fetchSankyuSummary().catch(function(e) { console.log('Sankyu badge error:', e); return null; })
+    fetchSankyuSummary().catch(function(e) { console.log('Sankyu badge error:', e); return null; }),
+    fetchHakensakiBadgeData().catch(function(e) { console.log('Hakensaki badge error:', e); return null; })
   ]);
 
   var mRecs = results[0].value || [];
@@ -6456,6 +6469,7 @@ async function loadHomeBadges() {
   var meta = results[3].value || [];
   var vehicleResult = results[4].value;
   var sankyuResult = results[5].value;
+  var hakenBadgeResult = results[6].value;
 
   // 前払いバッジ（件数）
   var mBadge = document.getElementById('maebariBadgeCount');
@@ -6561,6 +6575,20 @@ async function loadHomeBadges() {
       } else {
         sOverdueBadge.style.display = 'none';
       }
+    }
+  }
+
+  // 派遣先バッジ（期限切れ赤・更新注意黄）
+  var hExpBadge = document.getElementById('hakenExpiredBadge');
+  var hSoonBadge = document.getElementById('hakenSoonBadge');
+  if (hakenBadgeResult) {
+    if (hExpBadge) {
+      if (hakenBadgeResult.expired > 0) { hExpBadge.textContent = hakenBadgeResult.expired; hExpBadge.style.display = 'inline-block'; }
+      else { hExpBadge.style.display = 'none'; }
+    }
+    if (hSoonBadge) {
+      if (hakenBadgeResult.soon > 0) { hSoonBadge.textContent = hakenBadgeResult.soon; hSoonBadge.style.display = 'inline-block'; }
+      else { hSoonBadge.style.display = 'none'; }
     }
   }
 }
@@ -6722,6 +6750,55 @@ var _soumuShahoInCount = 0;
 var _soumuShahoInItems = [];
 var _soumuSankyuSummary = { active: 0, upcoming: 0, overdue: 0 };
 
+// ── 派遣先バッジ用データ取得 ──
+async function fetchHakensakiBadgeData() {
+  var token = await getToken();
+  if (!token) return null;
+  var hdrs = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
+  var listPath = '/sites/PowerApps/Lists/040623';
+  // フィールドメタ取得
+  var fUrl = SP_SITE_URL + "/_api/web/GetList('" + listPath + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName,TypeAsString&$top=200";
+  var fResp = await fetch(fUrl, { headers: hdrs });
+  if (!fResp.ok) return null;
+  var fData = await fResp.json();
+  var fMap = {};
+  ((fData.d && fData.d.results) || []).forEach(function(f) {
+    var intName = f.EntityPropertyName || f.InternalName;
+    var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
+    fMap[f.Title] = odKey;
+  });
+  // フィールド解決
+  var allTitles = Object.keys(fMap);
+  function findF() {
+    var kws = Array.prototype.slice.call(arguments);
+    for (var i = 0; i < kws.length; i++) { if (fMap[kws[i]]) return fMap[kws[i]]; }
+    for (var i = 0; i < kws.length; i++) { for (var j = 0; j < allTitles.length; j++) { if (allTitles[j].indexOf(kws[i]) >= 0) return fMap[allTitles[j]]; } }
+    return null;
+  }
+  var fNinzu = findF('派遣人数', '人数') || 'Title';
+  var fEnd = findF('派遣期間 終わり', '派遣期間終わり', '期間終', '終わり');
+  // アイテム取得
+  var iUrl = SP_SITE_URL + "/_api/web/GetList('" + listPath + "')/items?$top=500";
+  var iResp = await fetch(iUrl, { headers: hdrs });
+  if (!iResp.ok) return null;
+  var iData = await iResp.json();
+  var items = (iData.d && iData.d.results) || [];
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var in30 = new Date(today); in30.setDate(in30.getDate() + 30);
+  var expired = 0, soon = 0;
+  items.forEach(function(item) {
+    var ninzu = Number(item[fNinzu]) || 0;
+    if (ninzu < 1) return;
+    var endVal = fEnd ? item[fEnd] : null;
+    if (!endVal) return;
+    var endDate = new Date(endVal); endDate.setHours(0, 0, 0, 0);
+    if (isNaN(endDate.getTime())) return;
+    if (endDate < today) { expired++; }
+    else if (endDate <= in30) { soon++; }
+  });
+  return { expired: expired, soon: soon };
+}
+
 // ── 派遣先一覧画面 (REST API) ──
 var HAKENSAKI_LIST_PATH = '/sites/PowerApps/Lists/040623';
 var _hakensakiLoaded = false;
@@ -6878,7 +6955,7 @@ function buildHakensakiTabs() {
     { key: 'all',     label: 'すべて',       count: cAll,     cls: '' },
     { key: 'valid',   label: '契約有効',      count: cValid,   cls: '' },
     { key: 'soon',    label: '契約更新注意',   count: cSoon,    cls: ' haken-tab-warn' },
-    { key: 'expired', label: '期限切れ',      count: cExpired, cls: '' },
+    { key: 'expired', label: '契約期限切れ',    count: cExpired, cls: ' haken-tab-danger' },
     { key: 'none',    label: '契約なし',      count: cNone,    cls: '' }
   ];
 
