@@ -4498,7 +4498,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '60d9a59';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -13413,19 +13413,19 @@ async function ensureSpFolder(folderPath) {
   console.log('Folder created (legacy):', folderPath);
 }
 
-// SharePoint REST API でファイルを削除
+// SharePoint REST API でファイルを削除（ごみ箱へ移動）
 async function deleteSpFile(serverRelativeUrl) {
   var token = await getToken();
   if (!token) throw new Error('認証エラー');
   var encoded = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
-  var url = SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + encoded + "')";
+  // recycle() でごみ箱へ移動（復元可能・権限エラーが少ない）
+  var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + encoded + "')/recycle()";
+  console.log('[DELETE FILE] url:', url);
   var resp = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json;odata=verbose',
-      'X-HTTP-Method': 'DELETE',
-      'IF-MATCH': '*'
+      'Accept': 'application/json;odata=verbose'
     }
   });
   if (!resp.ok) {
@@ -13434,21 +13434,21 @@ async function deleteSpFile(serverRelativeUrl) {
     console.error('deleteSpFile error:', resp.status, errText);
     throw new Error('ファイル削除失敗 (' + resp.status + ')');
   }
+  console.log('[DELETE FILE] success:', serverRelativeUrl);
 }
 
-// SharePoint REST API でフォルダを削除（中身ごと削除）
+// SharePoint REST API でフォルダを削除（ごみ箱へ移動）
 async function deleteSpFolder(serverRelativeUrl) {
   var token = await getToken();
   if (!token) throw new Error('認証エラー');
   var encoded = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
-  var url = SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')";
+  var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')/recycle()";
+  console.log('[DELETE FOLDER] url:', url);
   var resp = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json;odata=verbose',
-      'X-HTTP-Method': 'DELETE',
-      'IF-MATCH': '*'
+      'Accept': 'application/json;odata=verbose'
     }
   });
   if (!resp.ok) {
@@ -13457,6 +13457,7 @@ async function deleteSpFolder(serverRelativeUrl) {
     console.error('deleteSpFolder error:', resp.status, errText);
     throw new Error('フォルダ削除失敗 (' + resp.status + ')');
   }
+  console.log('[DELETE FOLDER] success:', serverRelativeUrl);
 }
 
 // 新しいサブフォルダを作成（ファイルブラウザから）
