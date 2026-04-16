@@ -3371,6 +3371,58 @@ select.sankyu-edit-input {
   transform: scale(0.94);
   box-shadow: 0 2px 8px rgba(46,125,50,0.25);
 }
+.vfolder-del-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  border-radius: 12px;
+  border: 1px solid #ffcdd2;
+  background: linear-gradient(180deg, #ffebee, #ffcdd2);
+  color: #c62828;
+  font-size: 15px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+  margin-left: 4px;
+}
+.vfolder-del-btn:active {
+  transform: scale(0.94);
+  box-shadow: 0 2px 8px rgba(198,40,40,0.25);
+}
+.vfolder-folder-del-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  border: 1px solid #ffcdd2;
+  background: #ffebee;
+  color: #c62828;
+  font-size: 14px;
+  cursor: pointer;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.vfolder-newfolder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #bbdefb;
+  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+  color: #1565c0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: 6px;
+}
+.vfolder-newfolder-btn:active {
+  transform: scale(0.95);
+}
 .gensen-sp-link {
   flex-shrink: 0;
   margin-right: 6px;
@@ -13265,23 +13317,163 @@ const SP_DOC_LIB_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル';
 async function ensureSpFolder(folderPath) {
   const token = await getToken();
   if (!token) throw new Error('認証エラー');
-  // Try to create folder (will silently succeed if exists)
-  const url = SP_DOC_SITE_URL + "/_api/web/folders";
+  // まずフォルダが存在するかチェック
+  var encodedPath = encodeURIComponent(folderPath).replace(/%2F/g, '/');
+  var checkUrl = SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')?$select=Exists";
   try {
-    await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Accept': 'application/json;odata=verbose',
-        'Content-Type': 'application/json;odata=verbose',
-      },
-      body: JSON.stringify({
-        '__metadata': { type: 'SP.Folder' },
-        'ServerRelativeUrl': folderPath
-      }),
+    var checkResp = await fetch(checkUrl, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
-  } catch (e) {
-    console.log('Folder may already exist:', folderPath);
+    if (checkResp.ok) {
+      console.log('Folder already exists:', folderPath);
+      return; // フォルダ既存 → 作成不要
+    }
+  } catch(_) {}
+  // フォルダ作成
+  const url = SP_DOC_SITE_URL + "/_api/web/folders";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+    },
+    body: JSON.stringify({
+      '__metadata': { type: 'SP.Folder' },
+      'ServerRelativeUrl': folderPath
+    }),
+  });
+  if (!resp.ok) {
+    var errText = '';
+    try { errText = await resp.text(); } catch(_) {}
+    console.error('ensureSpFolder error:', resp.status, errText);
+    throw new Error('フォルダ作成失敗 (' + resp.status + '): ' + folderPath);
+  }
+}
+
+// SharePoint REST API でファイルを削除
+async function deleteSpFile(serverRelativeUrl) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var encoded = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
+  var url = SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + encoded + "')";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'X-HTTP-Method': 'DELETE',
+      'IF-MATCH': '*'
+    }
+  });
+  if (!resp.ok) {
+    var errText = '';
+    try { errText = await resp.text(); } catch(_) {}
+    console.error('deleteSpFile error:', resp.status, errText);
+    throw new Error('ファイル削除失敗 (' + resp.status + ')');
+  }
+}
+
+// SharePoint REST API でフォルダを削除（中身ごと削除）
+async function deleteSpFolder(serverRelativeUrl) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var encoded = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
+  var url = SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'X-HTTP-Method': 'DELETE',
+      'IF-MATCH': '*'
+    }
+  });
+  if (!resp.ok) {
+    var errText = '';
+    try { errText = await resp.text(); } catch(_) {}
+    console.error('deleteSpFolder error:', resp.status, errText);
+    throw new Error('フォルダ削除失敗 (' + resp.status + ')');
+  }
+}
+
+// 新しいサブフォルダを作成（ファイルブラウザから）
+async function createNewSubfolder(context) {
+  var name = prompt('新しいフォルダ名を入力:');
+  if (!name || !name.trim()) return;
+  name = name.trim();
+  // 禁止文字チェック
+  if (/[\\/:*?"<>|#%]/.test(name)) {
+    showToast('フォルダ名に使えない文字が含まれています', 'error');
+    return;
+  }
+  var navStack = (context === 'vehicle') ? _vfNavStack : _sfNavStack;
+  if (!navStack || navStack.length === 0) { showToast('現在のフォルダが不明です', 'error'); return; }
+  var cur = navStack[navStack.length - 1];
+  var newPath = cur.srUrl + '/' + name;
+  try {
+    showToast('フォルダ作成中...', 'info');
+    await ensureSpFolder(newPath);
+    showToast('フォルダ「' + name + '」を作成しました', 'success');
+    // リロード
+    var token = await getToken();
+    var contents = await loadVehicleFolderContents(token, cur.srUrl);
+    if (context === 'vehicle') {
+      renderVehicleFolderContents(contents.folders, contents.files);
+    } else {
+      renderSyainFolderContents(contents.folders, contents.files);
+    }
+  } catch(e) {
+    console.error('createNewSubfolder error:', e);
+    showToast('フォルダ作成失敗: ' + e.message, 'error');
+  }
+}
+
+// ファイル削除の確認ダイアログ＋実行
+async function confirmDeleteFile(srUrl, fileName, context) {
+  if (!confirm('「' + fileName + '」を削除しますか？\nこの操作は元に戻せません。')) return;
+  try {
+    showToast('削除中...', 'info');
+    await deleteSpFile(srUrl);
+    showToast('「' + fileName + '」を削除しました', 'success');
+    // リロード
+    var navStack = (context === 'vehicle') ? _vfNavStack : _sfNavStack;
+    if (!navStack || navStack.length === 0) return;
+    var cur = navStack[navStack.length - 1];
+    var token = await getToken();
+    var contents = await loadVehicleFolderContents(token, cur.srUrl);
+    if (context === 'vehicle') {
+      renderVehicleFolderContents(contents.folders, contents.files);
+    } else {
+      renderSyainFolderContents(contents.folders, contents.files);
+    }
+  } catch(e) {
+    console.error('confirmDeleteFile error:', e);
+    showToast('削除失敗: ' + e.message, 'error');
+  }
+}
+
+// フォルダ削除の確認ダイアログ＋実行
+async function confirmDeleteFolder(srUrl, folderName, context) {
+  if (!confirm('フォルダ「' + folderName + '」を削除しますか？\n中のファイルもすべて削除されます。')) return;
+  try {
+    showToast('削除中...', 'info');
+    await deleteSpFolder(srUrl);
+    showToast('フォルダ「' + folderName + '」を削除しました', 'success');
+    // リロード
+    var navStack = (context === 'vehicle') ? _vfNavStack : _sfNavStack;
+    if (!navStack || navStack.length === 0) return;
+    var cur = navStack[navStack.length - 1];
+    var token = await getToken();
+    var contents = await loadVehicleFolderContents(token, cur.srUrl);
+    if (context === 'vehicle') {
+      renderVehicleFolderContents(contents.folders, contents.files);
+    } else {
+      renderSyainFolderContents(contents.folders, contents.files);
+    }
+  } catch(e) {
+    console.error('confirmDeleteFolder error:', e);
+    showToast('削除失敗: ' + e.message, 'error');
   }
 }
 
@@ -16703,6 +16895,7 @@ function renderVehicleFolderContents(subfolders, files, digits) {
       html += '<button class="vfolder-back-btn" onclick="navigateBackVehicleFolder()">← 戻る</button>';
     }
     html += '<button class="vfolder-upload-btn" onclick="openUploadDialog(\'vehicle\')">📷 写真/ファイル追加</button>';
+    html += '<button class="vfolder-newfolder-btn" onclick="createNewSubfolder(\'vehicle\')">📁+ 新規フォルダ</button>';
     html += '<div class="vfolder-breadcrumb">';
     var crumbs = _vfNavStack.map(function(s) { return escHtml(s.name); }).join(' <span class="vfolder-crumb-sep">›</span> ');
     html += crumbs;
@@ -16743,16 +16936,21 @@ function renderVehicleFolderContents(subfolders, files, digits) {
   // サブフォルダを先に表示
   _vfCurrentSubfolders.forEach(function(sub, i) {
     var count = (typeof sub.ItemCount === 'number') ? sub.ItemCount : null;
-    html += '<div class="vfolder-file vfolder-subfolder" onclick="openVehicleSubfolderByIdx(' + i + ')">' +
-      '<div class="vfolder-file-icon" style="background:#fff3e0;color:#ef6c00;">📁</div>' +
-      '<div class="vfolder-file-info">' +
-        '<div class="vfolder-file-name">' + escHtml(sub.Name) + '</div>' +
-        '<div class="vfolder-file-meta">' +
-          '<span class="vfolder-file-badge" style="background:#ef6c00;">フォルダ</span>' +
-          (count !== null ? '<span>' + count + ' 件</span>' : '') +
+    var subSrUrl = sub.ServerRelativeUrl || '';
+    var delPayload = subSrUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: subSrUrl, name: sub.Name, ctx: 'vehicle' })))) : '';
+    html += '<div class="vfolder-row">' +
+      '<div class="vfolder-file vfolder-subfolder" onclick="openVehicleSubfolderByIdx(' + i + ')">' +
+        '<div class="vfolder-file-icon" style="background:#fff3e0;color:#ef6c00;">📁</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(sub.Name) + '</div>' +
+          '<div class="vfolder-file-meta">' +
+            '<span class="vfolder-file-badge" style="background:#ef6c00;">フォルダ</span>' +
+            (count !== null ? '<span>' + count + ' 件</span>' : '') +
+          '</div>' +
         '</div>' +
+        '<span class="vfolder-file-arrow">›</span>' +
       '</div>' +
-      '<span class="vfolder-file-arrow">›</span>' +
+      (delPayload ? '<button class="vfolder-del-btn" onclick="event.stopPropagation();deleteFolderFromPayload(\'' + delPayload + '\')" title="削除">🗑</button>' : '') +
     '</div>';
   });
 
@@ -16767,6 +16965,7 @@ function renderVehicleFolderContents(subfolders, files, digits) {
     var srUrl = f.ServerRelativeUrl || '';
     var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
     var prevB64 = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ext: ext })))) : '';
+    var delPayload = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ctx: 'vehicle', type: 'file' })))) : '';
 
     html += '<div class="vfolder-row">' +
       (prevB64
@@ -16784,11 +16983,27 @@ function renderVehicleFolderContents(subfolders, files, digits) {
         '<span class="vfolder-file-arrow">›</span>' +
       (prevB64 ? '</div>' : '</a>') +
       '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
+      (delPayload ? '<button class="vfolder-del-btn" onclick="event.stopPropagation();deleteFileFromPayload(\'' + delPayload + '\')" title="削除">🗑</button>' : '') +
     '</div>';
   });
   html += '</div>';
 
   content.innerHTML = html;
+}
+
+// ペイロードからファイル削除
+function deleteFileFromPayload(b64) {
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(b64))));
+    confirmDeleteFile(p.srUrl, p.name, p.ctx);
+  } catch(e) { showToast('削除情報の解析に失敗', 'error'); }
+}
+// ペイロードからフォルダ削除
+function deleteFolderFromPayload(b64) {
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(b64))));
+    confirmDeleteFolder(p.srUrl, p.name, p.ctx);
+  } catch(e) { showToast('削除情報の解析に失敗', 'error'); }
 }
 
 function formatFileSize(bytes) {
@@ -18003,6 +18218,7 @@ function renderSyainFolderContents(subfolders, files) {
       html += '<button class="vfolder-back-btn" onclick="navigateBackSyainFolder()">← 戻る</button>';
     }
     html += '<button class="vfolder-upload-btn" onclick="openUploadDialog(\'syain\')">📷 写真/ファイル追加</button>';
+    html += '<button class="vfolder-newfolder-btn" onclick="createNewSubfolder(\'syain\')">📁+ 新規フォルダ</button>';
     html += '<div class="vfolder-breadcrumb">';
     html += _sfNavStack.map(function(s) { return escHtml(s.name); }).join(' <span class="vfolder-crumb-sep">›</span> ');
     html += '</div>';
@@ -18039,16 +18255,21 @@ function renderSyainFolderContents(subfolders, files) {
 
   _sfCurrentSubfolders.forEach(function(sub, i) {
     var count = (typeof sub.ItemCount === 'number') ? sub.ItemCount : null;
-    html += '<div class="vfolder-file vfolder-subfolder" onclick="openSyainSubfolderByIdx(' + i + ')">' +
-      '<div class="vfolder-file-icon" style="background:#fff3e0;color:#ef6c00;">📁</div>' +
-      '<div class="vfolder-file-info">' +
-        '<div class="vfolder-file-name">' + escHtml(sub.Name) + '</div>' +
-        '<div class="vfolder-file-meta">' +
-          '<span class="vfolder-file-badge" style="background:#ef6c00;">フォルダ</span>' +
-          (count !== null ? '<span>' + count + ' 件</span>' : '') +
+    var subSrUrl = sub.ServerRelativeUrl || '';
+    var delPayload = subSrUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: subSrUrl, name: sub.Name, ctx: 'syain' })))) : '';
+    html += '<div class="vfolder-row">' +
+      '<div class="vfolder-file vfolder-subfolder" onclick="openSyainSubfolderByIdx(' + i + ')">' +
+        '<div class="vfolder-file-icon" style="background:#fff3e0;color:#ef6c00;">📁</div>' +
+        '<div class="vfolder-file-info">' +
+          '<div class="vfolder-file-name">' + escHtml(sub.Name) + '</div>' +
+          '<div class="vfolder-file-meta">' +
+            '<span class="vfolder-file-badge" style="background:#ef6c00;">フォルダ</span>' +
+            (count !== null ? '<span>' + count + ' 件</span>' : '') +
+          '</div>' +
         '</div>' +
+        '<span class="vfolder-file-arrow">›</span>' +
       '</div>' +
-      '<span class="vfolder-file-arrow">›</span>' +
+      (delPayload ? '<button class="vfolder-del-btn" onclick="event.stopPropagation();deleteFolderFromPayload(\'' + delPayload + '\')" title="削除">🗑</button>' : '') +
     '</div>';
   });
 
@@ -18062,6 +18283,7 @@ function renderSyainFolderContents(subfolders, files) {
     var srUrl = f.ServerRelativeUrl || '';
     var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
     var prevB64 = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ext: ext })))) : '';
+    var delPayload = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ctx: 'syain', type: 'file' })))) : '';
 
     html += '<div class="vfolder-row">' +
       (prevB64
@@ -18079,6 +18301,7 @@ function renderSyainFolderContents(subfolders, files) {
         '<span class="vfolder-file-arrow">›</span>' +
       (prevB64 ? '</div>' : '</a>') +
       '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
+      (delPayload ? '<button class="vfolder-del-btn" onclick="event.stopPropagation();deleteFileFromPayload(\'' + delPayload + '\')" title="削除">🗑</button>' : '') +
     '</div>';
   });
   html += '</div>';
