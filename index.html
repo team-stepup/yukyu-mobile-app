@@ -4598,7 +4598,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '37f9a88';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -8167,13 +8167,14 @@ function renderShahoKanyuuYoteiList() {
   }
   console.log('[社保加入予定] empMap size:', Object.keys(empMap).length);
 
-  var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 6px;">' + filtered.length + '件</div>';
+  var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 6px;">' + filtered.length + '件 <span style="color:#888;">(タップで社員情報を開く)</span></div>';
   html += '<table class="list-table" style="width:100%;font-size:11px;table-layout:fixed;">';
   html += '<thead><tr style="background:#2e7d32;color:#fff;">';
-  html += '<th style="padding:8px 4px;text-align:left;width:30%;">派遣先</th>';
-  html += '<th style="padding:8px 4px;text-align:left;width:18%;">番号</th>';
-  html += '<th style="padding:8px 4px;text-align:left;width:27%;">氏名</th>';
-  html += '<th style="padding:8px 4px;text-align:left;width:25%;">加入日</th>';
+  html += '<th style="padding:8px 4px;text-align:left;width:28%;">派遣先</th>';
+  html += '<th style="padding:8px 4px;text-align:left;width:16%;">番号</th>';
+  html += '<th style="padding:8px 4px;text-align:left;width:24%;">氏名</th>';
+  html += '<th style="padding:8px 4px;text-align:left;width:22%;">加入日</th>';
+  html += '<th style="padding:8px 4px;text-align:center;width:10%;"></th>';
   html += '</tr></thead><tbody>';
   filtered.forEach(function(item, i) {
     var haken = hakenKey ? truncHaken(item[hakenKey] || '') : '';
@@ -8196,6 +8197,12 @@ function renderShahoKanyuuYoteiList() {
     html += '<td style="' + tdStyle + 'color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</td>';
     html += '<td style="' + tdStyle + 'font-weight:600;">' + escHtml(name) + '</td>';
     html += '<td style="' + tdStyle + 'color:#1b5e20;">' + escHtml(kStr) + '</td>';
+    // 詳細ボタン (確実にクリックできる)
+    if (bangoStr) {
+      html += '<td style="' + tdStyle + 'text-align:center;"><button type="button" onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\')" style="background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">詳細</button></td>';
+    } else {
+      html += '<td style="' + tdStyle + '"></td>';
+    }
     html += '</tr>';
   });
   html += '</tbody></table>';
