@@ -16468,15 +16468,30 @@ async function loadNyutaiScreen() {
       empsBySyainNo[key].push(e);
     });
 
+    // 採用在籍種別 syubetu の値から分類カテゴリを推定
+    // 例: "移動在職中idou zaisyokutyuu" → 'transfer-in', "再入社..." → 'rejoin'
+    function syubetuKind(subVal) {
+      const s = String(subVal || '');
+      if (!s) return null;
+      if (s.indexOf('移動') >= 0) return 'transfer-in';
+      if (s.indexOf('再入') >= 0 || s.indexOf('再採') >= 0 || s.indexOf('出戻') >= 0) return 'rejoin';
+      return 'new'; // 一般派遣 等は新規扱い
+    }
+
     // 入社タイプ判定: new（新規）/ rejoin（再入社）/ transfer-in（移動入社）
+    // 優先: 採用在籍種別(zaiyokuSyubetu) → フォールバック: 同一社員番号の履歴
     function classifyEntry(emp) {
+      // ① 採用種別フィールドで判定
+      const kind = syubetuKind(emp[F.zaiyokuSyubetu]);
+      if (kind === 'transfer-in' || kind === 'rejoin') return kind;
+
+      // ② フォールバック: 同一社員番号のレコード履歴から判定
       const sn = emp[F.syainNo];
       if (!sn) return 'new';
       const group = empsBySyainNo[String(sn)] || [];
       if (group.length <= 1) return 'new';
       const myNd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
       if (!myNd) return 'new';
-      // このレコードより前に入社日があるレコード
       const older = group.filter(e => e.Id !== emp.Id && e[F.nyushaDate] && new Date(e[F.nyushaDate]) < myNd);
       if (older.length === 0) return 'new';
       // 完全退社歴（有給退社日 セット）があれば → 再入社
@@ -16489,6 +16504,7 @@ async function loadNyutaiScreen() {
     }
 
     // 退社タイプ判定: retire（完全退社）/ transfer-out（移動退社）
+    // 移動退社 = 同一社員番号で、この 派遣先退社日 より後に「移動在職中」種別の新レコードが存在
     function classifyExit(emp) {
       const yd = emp[F.yukyuTaisha];
       if (yd) return 'retire'; // 有給退社日あり = 完全退社
@@ -16498,7 +16514,15 @@ async function loadNyutaiScreen() {
       if (!sn) return 'retire';
       const group = empsBySyainNo[String(sn)] || [];
       const hdDate = new Date(hd);
-      // この 派遣先退社 より後の入社日レコードがあれば → 移動退社
+      // ① 採用種別=移動在職中 の後続レコードが存在 → 確実に移動退社
+      const hasTransferKind = group.some(e => {
+        if (e.Id === emp.Id) return false;
+        if (!e[F.nyushaDate]) return false;
+        if (new Date(e[F.nyushaDate]) <= hdDate) return false;
+        return syubetuKind(e[F.zaiyokuSyubetu]) === 'transfer-in';
+      });
+      if (hasTransferKind) return 'transfer-out';
+      // ② フォールバック: 単に後続レコードがあれば移動退社扱い
       const hasNewerEntry = group.some(e => e.Id !== emp.Id && e[F.nyushaDate] && new Date(e[F.nyushaDate]) > hdDate);
       if (hasNewerEntry) return 'transfer-out';
       return 'retire';
