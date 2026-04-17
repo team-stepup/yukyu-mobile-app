@@ -3027,6 +3027,80 @@ select.sankyu-edit-input {
 .profile-badge.active { background: #e8f5e9; color: #2e7d32; }
 .profile-badge.retiring { background: #fff3e0; color: #e65100; }
 .profile-badge.retired { background: #ffebee; color: #c62828; }
+
+/* Profile classification badges (入退分類) */
+.profile-class-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 2px 0 8px;
+}
+.profile-badge-v2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1.2;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.profile-badge-v2 .pb-ic { font-size: 12px; line-height: 1; }
+.profile-badge-v2.new { background: linear-gradient(135deg,#e8f5e9,#a5d6a7); color:#1b5e20; }
+.profile-badge-v2.rejoin { background: linear-gradient(135deg,#e0f7fa,#80deea); color:#006064; }
+.profile-badge-v2.transfer-in { background: linear-gradient(135deg,#ede7f6,#b39ddb); color:#4527a0; }
+.profile-badge-v2.retire { background: linear-gradient(135deg,#fce4ec,#f48fb1); color:#880e4f; }
+.profile-badge-v2.transfer-out { background: linear-gradient(135deg,#fff3e0,#ffcc80); color:#bf360c; }
+.profile-badge-v2.active { background: linear-gradient(135deg,#e3f2fd,#90caf9); color:#0d47a1; }
+.profile-badge-v2.plan { background: linear-gradient(135deg,#fffde7,#fff59d); color:#f57f17; border:1px dashed #fbc02d; box-shadow:none; }
+.profile-badge-v2.plan-retire { background: linear-gradient(135deg,#fce4ec,#f8bbd0); color:#ad1457; border:1px dashed #ec407a; box-shadow:none; }
+
+/* Profile dates row (入社日/起算日/退社日を chip で表示) */
+.profile-dates-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.profile-date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: linear-gradient(135deg,#f7f9fc,#e8eef5);
+  border: 1px solid #d7e0ea;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.profile-date-chip .pdc-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  color: #78909c;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.profile-date-chip .pdc-val {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.profile-date-chip.chip-retire {
+  background: linear-gradient(135deg,#ffebee,#ffcdd2);
+  border-color: #ef9a9a;
+}
+.profile-date-chip.chip-retire .pdc-lbl { color: #c62828; }
+.profile-date-chip.chip-retire .pdc-val { color: #880e4f; }
+.profile-date-chip.chip-plan {
+  background: linear-gradient(135deg,#fff8e1,#ffe082);
+  border-color: #ffca28;
+  border-style: dashed;
+}
+.profile-date-chip.chip-plan .pdc-lbl { color: #e65100; }
+.profile-date-chip.chip-plan .pdc-val { color: #bf360c; }
 .profile-header .profile-meta {
   display: flex;
   flex-wrap: wrap;
@@ -5590,6 +5664,89 @@ function isResigned(emp) {
   return new Date(retireDate) < new Date();
 }
 
+// ============================================================
+// 入退分類グローバルヘルパー
+//   採用在籍種別(zaiyokuSyubetu) を主シグナルとし、
+//   同一社員番号のレコード履歴をフォールバックとして使用。
+// ============================================================
+function syubetuKindGlobal(subVal) {
+  const s = String(subVal || '');
+  if (!s) return null;
+  if (s.indexOf('移動') >= 0) return 'transfer-in';
+  if (s.indexOf('再入') >= 0 || s.indexOf('再採') >= 0 || s.indexOf('出戻') >= 0) return 'rejoin';
+  return 'new';
+}
+
+function classifyEntryEmp(emp, sameBangoRecs) {
+  // ① 採用種別フィールドで判定
+  const kind = syubetuKindGlobal(emp[F.zaiyokuSyubetu]);
+  if (kind === 'transfer-in' || kind === 'rejoin') return kind;
+  // ② フォールバック: 同一社員番号の履歴
+  if (!sameBangoRecs || sameBangoRecs.length <= 1) return 'new';
+  const myNd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
+  if (!myNd) return 'new';
+  const older = sameBangoRecs.filter(e => e.Id !== emp.Id && e[F.nyushaDate] && new Date(e[F.nyushaDate]) < myNd);
+  if (older.length === 0) return 'new';
+  if (older.some(e => e[F.yukyuTaisha])) return 'rejoin';
+  if (older.some(e => e[F.hakenTaisha] && !e[F.yukyuTaisha])) return 'transfer-in';
+  return 'new';
+}
+
+function classifyExitEmp(emp, sameBangoRecs) {
+  const yd = emp[F.yukyuTaisha];
+  const hd = emp[F.hakenTaisha];
+  if (!yd && !hd) return null; // 退社情報なし
+  if (yd) return 'retire';
+  // yd なし、hd あり → 移動退社の可能性
+  if (hd && sameBangoRecs && sameBangoRecs.length > 0) {
+    const hdDate = new Date(hd);
+    const hasTransferKind = sameBangoRecs.some(e => {
+      if (e.Id === emp.Id) return false;
+      if (!e[F.nyushaDate]) return false;
+      if (new Date(e[F.nyushaDate]) <= hdDate) return false;
+      return syubetuKindGlobal(e[F.zaiyokuSyubetu]) === 'transfer-in';
+    });
+    if (hasTransferKind) return 'transfer-out';
+    const hasNewerEntry = sameBangoRecs.some(e => e.Id !== emp.Id && e[F.nyushaDate] && new Date(e[F.nyushaDate]) > hdDate);
+    if (hasNewerEntry) return 'transfer-out';
+  }
+  return 'retire';
+}
+
+// 同一社員番号の全レコード取得（ローカルキャッシュ優先 → API フィルタ）
+async function getSameBangoRecords(syainNo) {
+  if (!syainNo) return [];
+  try {
+    if (typeof _soumuAllEmps !== 'undefined' && _soumuAllEmps && Array.isArray(_soumuAllEmps) && _soumuAllEmps.length > 0) {
+      return _soumuAllEmps.filter(e => String(e[F.syainNo]) === String(syainNo));
+    }
+  } catch (_) { /* _soumuAllEmps 未定義 */ }
+  try {
+    const filter = "$filter=" + F.syainNo + " eq " + Number(syainNo) + "&$top=30";
+    return (await spGet(LIST_EMPLOYEES_GUID, filter)) || [];
+  } catch (e) {
+    console.warn('getSameBangoRecords failed:', e);
+    return [];
+  }
+}
+
+// 入退分類 → バッジ情報 (class, icon, label)
+function entryBadgeInfo(type, isFuture) {
+  if (isFuture) return { cls: 'plan', ic: '⏳', label: '入社予定' };
+  if (type === 'rejoin') return { cls: 'rejoin', ic: '🔄', label: '再入社' };
+  if (type === 'transfer-in') return { cls: 'transfer-in', ic: '↪️', label: '移動入社' };
+  return { cls: 'new', ic: '🌱', label: '新規入社' };
+}
+function exitBadgeInfo(type, isPlan) {
+  if (type == null) return null;
+  if (isPlan) {
+    if (type === 'transfer-out') return { cls: 'plan-retire', ic: '⏳', label: '移動退社予定' };
+    return { cls: 'plan-retire', ic: '⏳', label: '退社予定' };
+  }
+  if (type === 'transfer-out') return { cls: 'transfer-out', ic: '↗️', label: '移動退社' };
+  return { cls: 'retire', ic: '🏁', label: '退社' };
+}
+
 async function selectEmployee(emp) {
   currentEmployee = emp;
   _shahoYoteiOpenedItemId = null; // 他画面からの検索で開いた場合は社保加入予定フラグをクリア
@@ -5822,24 +5979,32 @@ async function loadLeaveDetails() {
   const resigned = isResigned(emp);
   const hakensaki = getHakensaki(emp);
 
-  // Status badge
-  let statusLabel = '在職';
-  let statusClass = 'active';
-  if (resigned) {
-    statusLabel = '退職済';
-    statusClass = 'retired';
-  } else {
-    const retRaw = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
-    if (retRaw && new Date(retRaw) > new Date()) {
-      statusLabel = '退職予定';
-      statusClass = 'retiring';
-    }
-  }
+  // 入退分類 (zaiyokuSyubetu + 履歴フォールバック)
+  // 初期は種別のみで判定 → 直後に履歴フェッチして更新
+  let _entryType = classifyEntryEmp(emp, null);
+  let _exitType = classifyExitEmp(emp, null);
+  const _retRaw = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+  const _isFuture = _retRaw ? (new Date(_retRaw) > new Date()) : false;
+  const _nyushaDate = emp[F.nyushaDate] || '';
+  const _retireStr = _retRaw ? formatDate(_retRaw) : '';
 
   // 通勤方法 for header badge
   const tsukinKeyH = Object.keys(emp).find(k => k.indexOf('x901a__x52e4__x65b9__x6cd5') >= 0);
   const tsukinValH = tsukinKeyH ? (emp[tsukinKeyH] || '') : '';
   const tsukinIcon = tsukinValH.indexOf('車') >= 0 ? '🚗' : tsukinValH.indexOf('電車') >= 0 ? '🚃' : tsukinValH.indexOf('バス') >= 0 ? '🚌' : tsukinValH.indexOf('自転車') >= 0 ? '🚲' : tsukinValH.indexOf('徒歩') >= 0 ? '🚶' : '🚶';
+
+  // バッジHTML生成（エントリー + 退社状態）
+  function _buildProfBadges(entryType, exitType, isFuture) {
+    const eb = entryBadgeInfo(entryType, false);
+    const xb = exitBadgeInfo(exitType, isFuture);
+    let hb = '<span class="profile-badge-v2 ' + eb.cls + '"><span class="pb-ic">' + eb.ic + '</span>' + eb.label + '</span>';
+    if (xb) {
+      hb += '<span class="profile-badge-v2 ' + xb.cls + '"><span class="pb-ic">' + xb.ic + '</span>' + xb.label + '</span>';
+    } else {
+      hb += '<span class="profile-badge-v2 active"><span class="pb-ic">✓</span>在職中</span>';
+    }
+    return hb;
+  }
 
   // 社員ファイルURLを取得（emp内のspUrl型フィールドを検索）
   var syainFileUrl = '';
@@ -5857,14 +6022,19 @@ async function loadLeaveDetails() {
     <div class="profile-header">
       <div class="profile-name-row">
         <span class="profile-name">${escHtml(emp.Title || '')}</span>
-        <span class="profile-badge ${statusClass}">${statusLabel}</span>
         ${tsukinValH ? '<span class="profile-badge" style="background:#f0f0ff;color:var(--primary);">' + tsukinIcon + ' ' + escHtml(tsukinValH) + '</span>' : '<span class="profile-badge" style="background:#ffebee;color:var(--danger);">通勤方法未登録</span>'}
+      </div>
+      <div class="profile-class-row" id="profileClassRow">
+        ${_buildProfBadges(_entryType, _exitType, _isFuture)}
+      </div>
+      <div class="profile-dates-row">
+        <div class="profile-date-chip"><span class="pdc-lbl">入社日</span><span class="pdc-val">${_nyushaDate ? escHtml(formatDate(_nyushaDate)) : '未設定'}</span></div>
+        <div class="profile-date-chip"><span class="pdc-lbl">起算日</span><span class="pdc-val">${formatDate(kisanDate) || '未設定'}</span></div>
+        ${_retRaw ? '<div class="profile-date-chip ' + (_isFuture ? 'chip-plan' : 'chip-retire') + '"><span class="pdc-lbl">' + (_isFuture ? '退社予定' : '退社日') + '</span><span class="pdc-val">' + escHtml(_retireStr) + '</span></div>' : ''}
       </div>
       <div class="profile-meta">
         <span>社番: ${emp[F.syainNo] || ''}</span>
         ${hakensaki ? '<span>派遣先: ' + escHtml(hakensaki) + '</span>' : ''}
-        <span>起算日: ${formatDate(kisanDate)}</span>
-        ${resigned ? '<span style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</span>' : ''}
       </div>
       <div id="detailRetireReason" style="display:none;"></div>
       <div class="profile-quick-actions">
@@ -5875,6 +6045,19 @@ async function loadLeaveDetails() {
       </div>
     </div>
   `;
+
+  // 履歴ベース判定を非同期で適用（採用種別が空のケースで分類を精緻化）
+  (async function() {
+    try {
+      const sameRecs = await getSameBangoRecords(emp[F.syainNo]);
+      if (!sameRecs || sameRecs.length <= 1) return;
+      const newEntry = classifyEntryEmp(emp, sameRecs);
+      const newExit = classifyExitEmp(emp, sameRecs);
+      if (newEntry === _entryType && newExit === _exitType) return;
+      const row = document.getElementById('profileClassRow');
+      if (row) row.innerHTML = _buildProfBadges(newEntry, newExit, _isFuture);
+    } catch (e) { console.warn('profile classify history fetch failed:', e); }
+  })();
   // 退社者の退社理由表示（非同期でメタ取得して反映）
   if (resigned) {
     (async function() {
