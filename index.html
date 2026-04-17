@@ -8413,6 +8413,7 @@ async function saveShahoDetailOverlay() {
         if (newVal === '') newVal = null;
       }
       // 旧値比較: 型を揃えて比較
+      // SharePoint REST: InternalName が "_" 始まりのフィールドは読み書きとも "OData_" プレフィックス必須
       var odKey = iname.startsWith('_') ? 'OData_' + iname : iname;
       var oldVal = item[odKey];
       var isSame = false;
@@ -8429,10 +8430,12 @@ async function saveShahoDetailOverlay() {
         isSame = (oldVal || '') === (newVal || '');
       }
       if (!isSame) {
-        body[iname] = newVal;
+        // 書き込み用キーは OData_ プレフィックスが必要 (InternalName が "_" 始まりの場合)
+        body[odKey] = newVal;
         changed = true;
       }
     });
+    try { console.log('[saveShahoDetail] PATCH body keys:', Object.keys(body)); } catch(_){}
 
     if (!changed) {
       showToast('変更がありません', 'error');
@@ -8472,7 +8475,8 @@ async function saveShahoDetailOverlay() {
     });
     if (!saveResp.ok) {
       var errText = await saveResp.text();
-      throw new Error('HTTP ' + saveResp.status + ': ' + errText.substring(0,200));
+      try { console.error('[saveShahoDetail] SP error full:', errText); } catch(_){}
+      throw new Error('HTTP ' + saveResp.status + ': ' + errText.substring(0,500));
     }
     showToast('社保加入申請を保存しました', 'success');
     // キャッシュも再読込 (次回は最新データ)
