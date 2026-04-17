@@ -4311,6 +4311,22 @@ select.sankyu-edit-input {
     <div id="sankyuDetailBody"></div>
   </div>
 
+  <!-- Screen: 社会保険 加入予定 -->
+  <div class="screen" id="shahoKanyuuYoteiScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="loadShahoKanyuuYoteiList()" title="更新" style="background:none;border:none;font-size:18px;color:#2e7d32;cursor:pointer;">⟳</button>
+      <h2 style="font-size:16px;font-weight:700;color:#1b5e20;margin:0;flex:1;text-align:center;">社会保険加入予定</h2>
+      <button onclick="window.open('https://teamstepupcom774.sharepoint.com/Lists/List9/team.aspx','_blank','noopener')" title="SharePoint" style="background:none;border:none;font-size:18px;color:#2e7d32;cursor:pointer;">📋</button>
+      <button onclick="switchScreen('soumuScreen')" title="ホーム" style="background:none;border:none;font-size:18px;color:#2e7d32;cursor:pointer;">🏠</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+      <span class="date-display-text" id="shahoYoteiDateDisplay" onclick="document.getElementById('shahoYoteiDate').showPicker()" style="flex:0 0 auto;padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;"></span>
+      <input type="date" id="shahoYoteiDate" class="date-hidden-input" onchange="onShahoYoteiDateChange()">
+      <span style="font-size:12px;color:var(--text-light);">〜 (以降 加入者)</span>
+    </div>
+    <div id="shahoKanyuuYoteiBody"></div>
+  </div>
+
   <!-- Screen: 期限注意リスト -->
   <div class="screen" id="expiryListScreen">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
@@ -4583,7 +4599,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '28e9357';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7851,6 +7867,174 @@ async function fetchSoumuShahoInCount() {
   }
 }
 
+// ============================================================
+// 社会保険加入予定 画面
+// ============================================================
+var _shahoYoteiLoaded = false;
+var _shahoYoteiItems = [];
+var _shahoYoteiFields = {};
+
+function openShahoKanyuuYoteiScreen() {
+  switchScreen('shahoKanyuuYoteiScreen');
+  // デフォルトは当月1日
+  var inp = document.getElementById('shahoYoteiDate');
+  if (inp && !inp.value) {
+    var now = new Date();
+    var firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    inp.value = firstDay.getFullYear() + '-' + String(firstDay.getMonth() + 1).padStart(2, '0') + '-' + String(firstDay.getDate()).padStart(2, '0');
+    updateShahoYoteiDateDisplay();
+  }
+  if (!_shahoYoteiLoaded) {
+    loadShahoKanyuuYoteiList();
+  } else {
+    renderShahoKanyuuYoteiList();
+  }
+}
+
+function updateShahoYoteiDateDisplay() {
+  var inp = document.getElementById('shahoYoteiDate');
+  var disp = document.getElementById('shahoYoteiDateDisplay');
+  if (!inp || !disp) return;
+  if (!inp.value) { disp.textContent = '選択'; return; }
+  var d = new Date(inp.value);
+  if (isNaN(d.getTime())) { disp.textContent = inp.value; return; }
+  disp.textContent = d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+}
+
+function onShahoYoteiDateChange() {
+  updateShahoYoteiDateDisplay();
+  renderShahoKanyuuYoteiList();
+}
+
+async function loadShahoKanyuuYoteiList() {
+  var body = document.getElementById('shahoKanyuuYoteiBody');
+  if (!body) return;
+  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">読み込み中...</div>';
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    // フィールドメタ取得
+    var fUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName,TypeAsString&$top=200";
+    var fResp = await fetch(fUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    var fMap = {};
+    if (fResp.ok) {
+      var fData = await fResp.json();
+      ((fData.d && fData.d.results) || []).forEach(function(f) {
+        var intName = f.EntityPropertyName || f.InternalName;
+        var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
+        fMap[f.Title] = odKey;
+      });
+    }
+    var titles = Object.keys(fMap);
+    function findF() {
+      var kws = Array.prototype.slice.call(arguments);
+      for (var i = 0; i < kws.length; i++) { if (fMap[kws[i]]) return fMap[kws[i]]; }
+      for (var i = 0; i < kws.length; i++) {
+        for (var j = 0; j < titles.length; j++) {
+          if (titles[j].indexOf(kws[i]) >= 0) return fMap[titles[j]];
+        }
+      }
+      return null;
+    }
+    _shahoYoteiFields = {
+      kanyuubi: findF('加入日'),
+      hakensaki: findF('派遣先会社名', '派遣先'),
+      bango: findF('社員番号', '社番', '番号'),
+      name: findF('氏名', '社員名')
+    };
+    // アイテム取得
+    var url = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=500";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    _shahoYoteiItems = (data.d && data.d.results) || [];
+    _shahoYoteiLoaded = true;
+    renderShahoKanyuuYoteiList();
+  } catch (e) {
+    console.error('loadShahoKanyuuYoteiList error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--danger);">読み込みエラー: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function renderShahoKanyuuYoteiList() {
+  var body = document.getElementById('shahoKanyuuYoteiBody');
+  if (!body) return;
+  var F = _shahoYoteiFields;
+  var items = _shahoYoteiItems || [];
+  var inp = document.getElementById('shahoYoteiDate');
+  var selDate = null;
+  if (inp && inp.value) {
+    selDate = new Date(inp.value);
+    selDate.setHours(0, 0, 0, 0);
+  }
+
+  // Filter: 加入日>=selDate
+  var filtered = items.filter(function(item) {
+    if (!F.kanyuubi) return false;
+    var v = item[F.kanyuubi];
+    if (!v) return false;
+    var d = new Date(v); d.setHours(0, 0, 0, 0);
+    if (isNaN(d.getTime())) return false;
+    if (selDate && d < selDate) return false;
+    return true;
+  });
+
+  // Sort: 加入日 ASC
+  filtered.sort(function(a, b) {
+    var da = new Date(a[F.kanyuubi]);
+    var db = new Date(b[F.kanyuubi]);
+    return da - db;
+  });
+
+  if (filtered.length === 0) {
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">指定日以降の加入予定者はありません</div>';
+    return;
+  }
+
+  function fmtD(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function truncHaken(h) {
+    if (!h) return '';
+    var s = String(h);
+    // "数値:名前数値" を "名前" にクリーンアップ
+    var m = s.match(/(\d+:[^\d].*)/);
+    if (m) s = m[1].replace(/\d+$/, '');
+    var ci = s.indexOf(':');
+    if (ci >= 0) s = s.substring(ci + 1);
+    return s;
+  }
+
+  var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 6px;">' + filtered.length + '件</div>';
+  html += '<table class="list-table" style="width:100%;font-size:11px;table-layout:fixed;">';
+  html += '<thead><tr style="background:#2e7d32;color:#fff;">';
+  html += '<th style="padding:8px 4px;text-align:left;width:30%;">派遣先</th>';
+  html += '<th style="padding:8px 4px;text-align:left;width:18%;">番号</th>';
+  html += '<th style="padding:8px 4px;text-align:left;width:27%;">氏名</th>';
+  html += '<th style="padding:8px 4px;text-align:left;width:25%;">加入日</th>';
+  html += '</tr></thead><tbody>';
+  filtered.forEach(function(item, i) {
+    var haken = F.hakensaki ? truncHaken(item[F.hakensaki] || '') : '';
+    var bango = F.bango ? (item[F.bango] || '') : '';
+    var name = F.name ? (item[F.name] || item.Title || '') : (item.Title || '');
+    var kStr = F.kanyuubi ? fmtD(item[F.kanyuubi]) : '';
+    var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
+    html += '<tr style="background:' + bg + ';">';
+    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</td>';
+    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#2e7d32;font-weight:600;">' + escHtml(String(bango)) + '</td>';
+    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;font-weight:600;">' + escHtml(name) + '</td>';
+    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#1b5e20;">' + escHtml(kStr) + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  html += '<div style="height:30px;"></div>';
+  body.innerHTML = html;
+}
+
 // 社保加入リストを overlay で表示
 function openSoumuShahoInList() {
   if (!_soumuShahoInItems || _soumuShahoInItems.length === 0) {
@@ -8084,29 +8268,15 @@ function renderSoumuDashboard() {
   html += '</div>';
   html += '</div>';
 
-  // 🌸 産休育休 (1枚 / アプリ内画面)
-  var sankyuActive = (_soumuSankyuSummary && _soumuSankyuSummary.active) || 0;
-  var sankyuUpcoming = (_soumuSankyuSummary && _soumuSankyuSummary.upcoming) || 0;
-  var sankyuOverdue = (_soumuSankyuSummary && _soumuSankyuSummary.overdue) || 0;
-  html += '<div class="soumu-section-label">産休・育休</div>';
-  html += '<div class="soumu-pink-card sankyu-pink-row" onclick="openSankyuScreen()">';
-  html +=   '<div class="sankyu-pink-icon-big">🌸</div>';
+  // 🏥 社保加入申請状況 (産休育休と入れ替え)
+  html += '<div class="soumu-section-label">社会保険 加入予定</div>';
+  html += '<div class="soumu-pink-card sankyu-pink-row" onclick="openShahoKanyuuYoteiScreen()" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:1px solid #81c784;">';
+  html +=   '<div class="sankyu-pink-icon-big" style="background:linear-gradient(135deg,#43a047,#2e7d32);">🏥</div>';
   html +=   '<div class="sankyu-pink-text">';
   html +=     '<div class="sankyu-pink-title-row">';
-  html +=       '<span class="sankyu-pink-title-main">産休・育休 一覧</span>';
-  if (sankyuActive > 0) {
-    html +=     '<span class="sankyu-pink-count-pill">' + sankyuActive + '<span class="sankyu-pink-count-unit">名</span></span>';
-  }
+  html +=       '<span class="sankyu-pink-title-main" style="color:#1b5e20;">社保加入申請状況</span>';
   html +=     '</div>';
-  if (sankyuOverdue > 0) {
-    html +=   '<div class="sankyu-pink-overdue">🚨 申請遅れ <b>' + sankyuOverdue + '件</b></div>';
-  }
-  if (sankyuUpcoming > 0) {
-    html +=   '<div class="sankyu-pink-alert">⚠️ 30日以内に出産予定 <b>' + sankyuUpcoming + '名</b></div>';
-  }
-  if (sankyuOverdue === 0 && sankyuUpcoming === 0) {
-    html +=   '<div class="sankyu-pink-sub">対象者の状況・申請日を確認 ▸</div>';
-  }
+  html +=     '<div class="sankyu-pink-sub" style="color:#2e7d32;">加入予定者を日付で絞り込み ▸</div>';
   html +=   '</div>';
   html += '</div>';
 
