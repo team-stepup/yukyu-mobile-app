@@ -6376,6 +6376,11 @@ function buildFieldKeyMap(fieldsMeta) {
     shahoZairyuCard: '扶養者在留カード',
     shahoMyNumber: '扶養者マイナンバー',
     shahoFurigana: '扶養者フリガナ',
+    shahoHuyouKanyuubi: '扶養加入日',
+    shahoTsuzukigara: '加入続柄',
+    shahoKanyuuRiyuu: '加入理由',
+    shahoShugyo: '就業状況',
+    shahoNenshou: '年間収入',
     tokki1: '特記事項１',
     syainFile: '社員ファイル',
     sagyouFuku: '作業服',
@@ -16363,6 +16368,48 @@ async function openShahoForm() {
           '<label>扶養者 フリガナ</label>' +
           '<input type="text" id="shaho_furigana" placeholder="フリガナを入力" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
         '</div>' +
+        '<div style="margin:16px 0 8px;padding:10px 12px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:10px;border-left:4px solid #43a047;">' +
+          '<div style="font-size:13px;font-weight:700;color:#2e7d32;">👪 扶養加入情報</div>' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>扶養の加入日</label>' +
+          '<input type="date" id="shaho_huyouKanyuubi">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>加入する続柄</label>' +
+          '<select id="shaho_tsuzukigara" onchange="onShahoTsuzukigaraChange()">' +
+            '<option value="">選択してください</option>' +
+            '<option value="配偶者">配偶者</option>' +
+            '<option value="子">子</option>' +
+            '<option value="親（同居）">親（同居）</option>' +
+            '<option value="親（別居）">親（別居）</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field" id="shaho_riyuu_wrap" style="display:none;">' +
+          '<label>加入する理由</label>' +
+          '<select id="shaho_riyuu" onchange="onShahoRiyuuChange()">' +
+            '<option value="">選択してください</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field" id="shaho_taishokubi_wrap" style="display:none;">' +
+          '<label>退職年月日</label>' +
+          '<input type="date" id="shaho_taishokubi">' +
+          '<div style="font-size:11px;color:var(--text-light);margin-top:4px;">理由文に「令和○年○月○日退職により…」として記載されます</div>' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>就業状況</label>' +
+          '<select id="shaho_shugyo" onchange="onShahoShugyoChange()">' +
+            '<option value="">選択してください</option>' +
+            '<option value="学生">学生</option>' +
+            '<option value="無職">無職</option>' +
+            '<option value="アルバイト">アルバイト</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field" id="shaho_nenshou_wrap" style="display:none;">' +
+          '<label>年間収入</label>' +
+          '<input type="number" id="shaho_nenshou" placeholder="例: 1200000" min="0" step="1000" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+          '<div style="font-size:11px;color:var(--text-light);margin-top:4px;">円（年間）</div>' +
+        '</div>' +
       '</div>' +
       '<div class="taisha-footer">' +
         '<button class="taisha-submit-btn" id="shahoSubmitBtn" onclick="submitShahoForm()" style="background:linear-gradient(135deg,#43a047,#2e7d32);">🏥 社保加入申請を送信</button>' +
@@ -16379,6 +16426,93 @@ function closeShahoForm() {
   if (el) el.remove();
 }
 
+// 続柄別の加入理由オプション
+var SHAHO_RIYUU_MAP = {
+  '配偶者': [
+    { key: 'taishoku', text: '令和○年○月○日退職により収入がなくなったため', hasDate: true },
+    { key: 'pato', text: 'パート収入減少により今後の年収見込が扶養認定基準未満となったため' },
+    { key: 'kekkon', text: '結婚により同一生計となったため' }
+  ],
+  '子': [
+    { key: 'gakusei', text: '学校在学中で無収入のため、被保険者が主として生計維持するため' },
+    { key: 'shussho', text: '出生により扶養追加するため' },
+    { key: 'arubaito', text: 'アルバイト収入が扶養認定基準未満のため' },
+    { key: 'rishoku', text: '離職により無収入となり、被保険者が生計維持するため' }
+  ],
+  '親（同居）': [
+    { key: 'dokyo', text: '被保険者が主として生計維持するため' }
+  ],
+  '親（別居）': [
+    { key: 'bekkyo', text: '別居中であるが、被保険者からの仕送りにより生計を維持しているため' }
+  ]
+};
+
+function onShahoTsuzukigaraChange() {
+  var selEl = document.getElementById('shaho_tsuzukigara');
+  var wrap = document.getElementById('shaho_riyuu_wrap');
+  var riyuuSel = document.getElementById('shaho_riyuu');
+  var taishokuWrap = document.getElementById('shaho_taishokubi_wrap');
+  if (!selEl || !wrap || !riyuuSel) return;
+  var val = selEl.value;
+  if (!val) {
+    wrap.style.display = 'none';
+    if (taishokuWrap) taishokuWrap.style.display = 'none';
+    riyuuSel.innerHTML = '<option value="">選択してください</option>';
+    return;
+  }
+  var opts = SHAHO_RIYUU_MAP[val] || [];
+  var html = '<option value="">選択してください</option>';
+  opts.forEach(function(o) {
+    html += '<option value="' + escHtml(o.key) + '" data-text="' + escHtml(o.text) + '" data-hasdate="' + (o.hasDate ? '1' : '0') + '">' + escHtml(o.text) + '</option>';
+  });
+  riyuuSel.innerHTML = html;
+  wrap.style.display = 'block';
+  if (taishokuWrap) taishokuWrap.style.display = 'none';
+}
+
+function onShahoRiyuuChange() {
+  var sel = document.getElementById('shaho_riyuu');
+  var taishokuWrap = document.getElementById('shaho_taishokubi_wrap');
+  if (!sel || !taishokuWrap) return;
+  var opt = sel.options[sel.selectedIndex];
+  var hasDate = opt && opt.getAttribute('data-hasdate') === '1';
+  taishokuWrap.style.display = hasDate ? 'block' : 'none';
+}
+
+function onShahoShugyoChange() {
+  var sel = document.getElementById('shaho_shugyo');
+  var wrap = document.getElementById('shaho_nenshou_wrap');
+  if (!sel || !wrap) return;
+  wrap.style.display = sel.value === 'アルバイト' ? 'block' : 'none';
+}
+
+// 日付を和暦(令和)フォーマットに変換
+function toJapaneseReiwa(dateStr) {
+  if (!dateStr) return '';
+  var d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  // 令和: 2019/5/1 以降
+  var reiwaStart = new Date(2019, 4, 1);
+  if (d < reiwaStart) {
+    // fallback: return as is
+    return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  }
+  var rYear = d.getFullYear() - 2018;
+  return '令和' + rYear + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+}
+
+// 選択された加入理由を完全な文章に変換
+function buildShahoRiyuuText(riyuuKey, taishokubi) {
+  var tsuzukigara = (document.getElementById('shaho_tsuzukigara') || {}).value || '';
+  var opts = SHAHO_RIYUU_MAP[tsuzukigara] || [];
+  var found = opts.find(function(o) { return o.key === riyuuKey; });
+  if (!found) return '';
+  if (found.hasDate && taishokubi) {
+    return toJapaneseReiwa(taishokubi) + '退職により収入がなくなったため';
+  }
+  return found.text;
+}
+
 async function submitShahoForm() {
   const emp = currentEmployee;
   if (!emp) return;
@@ -16389,6 +16523,14 @@ async function submitShahoForm() {
   const zairyuCard = document.getElementById('shaho_zairyuCard').value;
   const myNumber = document.getElementById('shaho_myNumber').value;
   const furigana = document.getElementById('shaho_furigana').value;
+  // 新規追加フィールド
+  const huyouKanyuubi = document.getElementById('shaho_huyouKanyuubi').value;
+  const tsuzukigara = document.getElementById('shaho_tsuzukigara').value;
+  const riyuuKey = document.getElementById('shaho_riyuu').value;
+  const taishokubi = document.getElementById('shaho_taishokubi').value;
+  const shugyo = document.getElementById('shaho_shugyo').value;
+  const nenshou = document.getElementById('shaho_nenshou').value;
+  const riyuuText = buildShahoRiyuuText(riyuuKey, taishokubi);
 
   if (!kanyuubi) { showToast('加入日を入力してください', 'error'); return; }
   if (!huyou) { showToast('扶養を選択してください', 'error'); return; }
@@ -16408,7 +16550,11 @@ async function submitShahoForm() {
     (huyouBaai ? '扶養がある場合: ' + escHtml(huyouBaai) + '<br>' : '') +
     (zairyuCard ? '在留カード: ' + escHtml(zairyuCard) + '<br>' : '') +
     (myNumber ? 'マイナンバー: ' + escHtml(myNumber) + '<br>' : '') +
-    (furigana ? 'フリガナ: ' + escHtml(furigana) : '') +
+    (furigana ? 'フリガナ: ' + escHtml(furigana) + '<br>' : '') +
+    (huyouKanyuubi ? '扶養加入日: ' + escHtml(huyouKanyuubi) + '<br>' : '') +
+    (tsuzukigara ? '続柄: ' + escHtml(tsuzukigara) + '<br>' : '') +
+    (riyuuText ? '加入理由: ' + escHtml(riyuuText) + '<br>' : '') +
+    (shugyo ? '就業状況: ' + escHtml(shugyo) + (shugyo === 'アルバイト' && nenshou ? ' (年収 ¥' + Number(nenshou).toLocaleString() + ')' : '') : '') +
     '</div>' +
     '<div class="confirm-btns">' +
     '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
@@ -16419,11 +16565,13 @@ async function submitShahoForm() {
 
   document.getElementById('shahoConfirmOk').onclick = async function() {
     overlay.remove();
-    await executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana);
+    await executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana,
+      huyouKanyuubi, tsuzukigara, riyuuText, shugyo, nenshou);
   };
 }
 
-async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana) {
+async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana,
+    huyouKanyuubi, tsuzukigara, riyuuText, shugyo, nenshou) {
   const emp = currentEmployee;
   if (!emp) return;
   const btn = document.getElementById('shahoSubmitBtn');
@@ -16452,6 +16600,12 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
     if (zairyuCard) setField('shahoZairyuCard', zairyuCard);
     if (myNumber) setField('shahoMyNumber', myNumber);
     if (furigana) setField('shahoFurigana', furigana);
+    // 新規追加フィールド
+    if (huyouKanyuubi) setField('shahoHuyouKanyuubi', huyouKanyuubi + 'T00:00:00Z');
+    if (tsuzukigara) setField('shahoTsuzukigara', tsuzukigara);
+    if (riyuuText) setField('shahoKanyuuRiyuu', riyuuText);
+    if (shugyo) setField('shahoShugyo', shugyo);
+    if (shugyo === 'アルバイト' && nenshou) setField('shahoNenshou', Number(nenshou));
 
     body['__metadata'] = { type: LIST_ITEM_ENTITY };
     await spPatchEmployee(emp.Id, body);
