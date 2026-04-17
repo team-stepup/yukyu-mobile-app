@@ -4242,7 +4242,6 @@ select.sankyu-edit-input {
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
         <span class="ql-text">車両管理</span>
-        <span id="vehicleBadgeUse" class="ql-badge" style="background:#1565c0;display:none;top:4px;right:26px;"></span>
         <span id="vehicleBadgeSyaken" class="ql-badge" style="background:#c62828;display:none;top:4px;right:4px;"></span>
       </button>
       <button class="quick-link-btn" onclick="openShiryouScreen()">
@@ -6820,13 +6819,8 @@ async function loadHomeBadges() {
     else { eBadge.style.display = 'none'; }
   }
 
-  // 車両バッジ
+  // 車両バッジ（車検が1ヵ月以内 or 期限切れの車両数のみ表示）
   if (vehicleResult) {
-    var vBU = document.getElementById('vehicleBadgeUse');
-    if (vBU) {
-      if (vehicleResult.use > 0) { vBU.textContent = vehicleResult.use; vBU.style.display = 'inline-block'; }
-      else { vBU.style.display = 'none'; }
-    }
     var vBS = document.getElementById('vehicleBadgeSyaken');
     if (vBS) {
       if (vehicleResult.syaken > 0) { vBS.textContent = vehicleResult.syaken; vBS.style.display = 'inline-block'; }
@@ -6871,7 +6865,7 @@ async function loadHomeBadges() {
   }
 }
 
-// 車両バッジ用データ取得（並列呼び出し用に分離）
+// 車両バッジ用データ取得 (車検満了日が1ヵ月以内 or 期限切れの車両数)
 var _vehicleBadgeFieldsCache = null;
 async function loadVehicleBadgeData() {
   var token = await getToken();
@@ -6883,35 +6877,40 @@ async function loadVehicleBadgeData() {
     if (!vfResp.ok) return null;
     var vfData = await vfResp.json();
     var vfList = vfData.d.results || [];
-    var vfUsage = null, vfSyaken = null;
+    // 車検満了日フィールドの特定（「車検満了」優先 → 「車検」+「満了」 → その他の車検DateTime）
+    var vfSyaken = null, vfSyakenFallback = null;
     vfList.forEach(function(f) {
-      if (f.Title && (f.Title.indexOf('Usage') >= 0 || f.Title.indexOf('使用') >= 0)) vfUsage = f.EntityPropertyName;
-      if (f.Title && f.Title.indexOf('車検') >= 0 && f.TypeAsString === 'DateTime') vfSyaken = f.EntityPropertyName;
+      if (!f.Title || f.TypeAsString !== 'DateTime') return;
+      if (f.Title.indexOf('車検') < 0) return;
+      if (f.Title.indexOf('車検満了') >= 0 || (f.Title.indexOf('車検') >= 0 && f.Title.indexOf('満了') >= 0)) {
+        vfSyaken = f.EntityPropertyName;
+      } else if (!vfSyakenFallback) {
+        vfSyakenFallback = f.EntityPropertyName;
+      }
     });
-    _vehicleBadgeFieldsCache = { usage: vfUsage, syaken: vfSyaken };
+    _vehicleBadgeFieldsCache = { syaken: vfSyaken || vfSyakenFallback };
   }
 
-  var uf = _vehicleBadgeFieldsCache.usage;
   var sf = _vehicleBadgeFieldsCache.syaken;
-  if (!uf) return null;
+  if (!sf) return { syaken: 0 };
 
-  var selectFields = uf + (sf ? ',' + sf : '');
-  var viResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=" + selectFields + "&$top=500", { headers: hdrs });
+  var viResp = await fetch(SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=" + sf + "&$top=500", { headers: hdrs });
   if (!viResp.ok) return null;
   var viData = await viResp.json();
   var viItems = viData.d.results || [];
 
-  var useCount = 0, syakenCount = 0;
+  var syakenCount = 0;
   var now = new Date();
-  var in30 = new Date(now.getTime() + 30 * 86400000);
+  var nowTs = now.getTime();
   viItems.forEach(function(v) {
-    if ((v[uf] || '') === '使用') useCount++;
-    if (sf && v[sf]) {
-      var sd = new Date(v[sf]);
-      if (!isNaN(sd) && sd <= in30 && sd >= now) syakenCount++;
-    }
+    if (!v[sf]) return;
+    var sd = new Date(v[sf]);
+    if (isNaN(sd)) return;
+    var diffDays = Math.ceil((sd.getTime() - nowTs) / 86400000);
+    // 期限切れ (< 0) または 1ヵ月以内 (<= 30)
+    if (diffDays <= 30) syakenCount++;
   });
-  return { use: useCount, syaken: syakenCount };
+  return { syaken: syakenCount };
 }
 
 // ============================================================
