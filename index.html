@@ -4316,7 +4316,7 @@ select.sankyu-edit-input {
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <button onclick="loadShahoKanyuuYoteiList()" title="更新" style="background:none;border:none;font-size:18px;color:#2e7d32;cursor:pointer;">⟳</button>
       <h2 style="font-size:16px;font-weight:700;color:#1b5e20;margin:0;flex:1;text-align:center;">社会保険加入予定</h2>
-      <a href="https://teamstepupcom774.sharepoint.com/Lists/List9/team.aspx?viewid=79cdf88a-a87a-48ba-8b45-5071541eecc0" target="_blank" rel="noopener noreferrer" title="SharePointで開く" style="text-decoration:none;font-size:18px;color:#2e7d32;padding:4px 8px;">📋</a>
+      <button onclick="openShahoListSharepoint()" title="SharePointで開く" style="background:none;border:none;font-size:20px;color:#2e7d32;cursor:pointer;padding:4px 10px;">📋</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
       <span class="date-display-text" id="shahoYoteiDateDisplay" onclick="document.getElementById('shahoYoteiDate').showPicker()" style="flex:0 0 auto;padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;"></span>
@@ -4598,7 +4598,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'afdde33';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7873,6 +7873,47 @@ var _shahoYoteiLoaded = false;
 var _shahoYoteiItems = [];
 var _shahoYoteiFields = {};
 
+// SharePoint リストを新タブで開く
+function openShahoListSharepoint() {
+  var url = 'https://teamstepupcom774.sharepoint.com/Lists/List9/team.aspx?viewid=79cdf88a-a87a-48ba-8b45-5071541eecc0';
+  var w = window.open(url, '_blank');
+  if (!w) {
+    // ポップアップブロックされた場合はlocationで遷移
+    if (confirm('新タブで開けませんでした。現在のタブで開きますか？')) {
+      window.location.href = url;
+    }
+  } else {
+    try { w.opener = null; } catch(_) {}
+  }
+}
+
+// 加入予定者から社員情報詳細へ (番号 → 社員ID → openNyutaiEmployee)
+async function openShahoYoteiEmp(syainNo) {
+  if (!syainNo) { showToast('社員番号がありません', 'error'); return; }
+  try {
+    // まずローカルの _soumuAllEmps から探す
+    if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
+      var found = _soumuAllEmps.find(function(e) { return String(e[F.syainNo]) === String(syainNo); });
+      if (found && found.Id) {
+        await openNyutaiEmployee(found.Id);
+        return;
+      }
+    }
+    // 見つからない場合 fetchFullEmployee にフォールバック
+    if (typeof fetchFullEmployee === 'function') {
+      var full = await fetchFullEmployee(syainNo);
+      if (full && full.Id) {
+        await openNyutaiEmployee(full.Id);
+        return;
+      }
+    }
+    showToast('社員データが見つかりません: ' + syainNo, 'error');
+  } catch (e) {
+    console.error('openShahoYoteiEmp error:', e);
+    showToast('社員情報の取得に失敗しました: ' + e.message, 'error');
+  }
+}
+
 function openShahoKanyuuYoteiScreen() {
   switchScreen('shahoKanyuuYoteiScreen');
   // デフォルトは当月1日
@@ -8139,9 +8180,12 @@ function renderShahoKanyuuYoteiList() {
       }
     }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
-    html += '<tr style="background:' + bg + ';">';
+    var bangoStr = String(bango);
+    var onclickAttr = bangoStr ? ' ontouchstart="tapGuardStart(event)" ontouchmove="tapGuardMove(event)" onclick="tapGuardClick(event, function(){openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\')})"' : '';
+    var cursor = bangoStr ? 'cursor:pointer;' : '';
+    html += '<tr style="background:' + bg + ';' + cursor + '"' + onclickAttr + '>';
     html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</td>';
-    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#2e7d32;font-weight:600;">' + escHtml(String(bango)) + '</td>';
+    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</td>';
     html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;font-weight:600;">' + escHtml(name) + '</td>';
     html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#1b5e20;">' + escHtml(kStr) + '</td>';
     html += '</tr>';
