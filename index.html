@@ -7824,7 +7824,7 @@ async function fetchSoumuShahoInCount() {
     var fResp = await fetch(fieldsUrl, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
-    var kanyuuKey = null, honninKey = null, nameKey = null;
+    var kanyuuKey = null, honninKey = null, nameKey = null, kubunKey = null;
     if (fResp.ok) {
       var fData = await fResp.json();
       var fields = (fData.d && fData.d.results) || [];
@@ -7835,6 +7835,7 @@ async function fetchSoumuShahoInCount() {
         if (t === '加入日' || t.indexOf('加入日') >= 0) kanyuuKey = odKey;
         if (t === '本人加入' || t.indexOf('本人加入') >= 0) honninKey = odKey;
         if (t === '氏名' || t === '社員名') nameKey = odKey;
+        if (t === '申請区分' || t.indexOf('申請区分') >= 0) kubunKey = odKey;
       });
     }
     // アイテム取得
@@ -7859,6 +7860,11 @@ async function fetchSoumuShahoInCount() {
       if (honninKey) {
         var hVal = item[honninKey];
         if (hVal !== null && hVal !== undefined && String(hVal).trim() !== '') return false;
+      }
+      // 扶養追加/喪失 は加入予定から除外
+      if (kubunKey) {
+        var kubun = String(item[kubunKey] || '').trim();
+        if (kubun === '扶養追加' || kubun === '扶養喪失') return false;
       }
       return true;
     });
@@ -8023,7 +8029,8 @@ async function loadShahoKanyuuYoteiList() {
       kanyuubi: findF('加入日', 'kanyuubi', 'kanyu'),
       hakensaki: findF('派遣先会社名', '派遣先', 'Hakensaki', '会社名'),
       bango: findF('社員番号', '社番', '番号', 'SyainNo', '社員No'),
-      name: findF('氏名', '社員名', '名前')
+      name: findF('氏名', '社員名', '名前'),
+      shinseiKubun: findF('申請区分', 'shinseiKubun')
     };
     console.log('[社保加入予定] resolved fields:', _shahoYoteiFields);
 
@@ -8108,7 +8115,8 @@ function renderShahoKanyuuYoteiList() {
     return;
   }
 
-  // Filter: 加入日>=selDate
+  // Filter: 加入日>=selDate, かつ 申請区分が「扶養追加」「扶養喪失」以外 (新規加入のみ・または空)
+  var kubunKey = SF.shinseiKubun || null;
   var withValue = 0, withValidDate = 0, futureCount = 0;
   var filtered = items.filter(function(item) {
     var v = item[kanyuuKey];
@@ -8118,6 +8126,11 @@ function renderShahoKanyuuYoteiList() {
     if (isNaN(d.getTime())) return false;
     withValidDate++;
     if (selDate && d < selDate) return false;
+    // 扶養追加/喪失 は加入予定リストから除外
+    if (kubunKey) {
+      var kubun = String(item[kubunKey] || '').trim();
+      if (kubun === '扶養追加' || kubun === '扶養喪失') return false;
+    }
     futureCount++;
     return true;
   });
@@ -8303,6 +8316,14 @@ async function openShahoKanyuuDetailOverlay(itemId) {
       return ia - ib;
     });
 
+    // 「申請区分」が未設定なら "新規加入" をデフォルト表示 (新規加入フロー用)
+    try {
+      var kubunField = editable.filter(function(f) { return f.Title === '申請区分' || (f.Title || '').indexOf('申請区分') >= 0; })[0];
+      if (kubunField && (!item[kubunField.OdKey] || String(item[kubunField.OdKey]).trim() === '')) {
+        item[kubunField.OdKey] = '新規加入';
+      }
+    } catch (e) { /* ignore */ }
+
     // 既存の overlay を除去
     var old = document.getElementById('shahoDetailOverlay');
     if (old) old.remove();
@@ -8487,6 +8508,153 @@ async function saveShahoDetailOverlay() {
     showToast('保存エラー: ' + e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = '💾 変更を保存'; }
   }
+}
+
+// ============================================================
+// List9 (社保加入申請) 書き込み系ヘルパー
+// 案Y: 新規加入 / 扶養追加 / 扶養喪失 をすべて List9 のレコードとして扱う
+// ============================================================
+
+// List9 のフィールドメタから論理名 → OData キーのマップを組み立てる
+// タイトル文字列で判定 (部分一致)
+function buildShahoList9FieldMap(meta) {
+  var map = {};
+  if (!meta) return map;
+  // Title -> meta 逆引き
+  function match(keywords, excludes) {
+    for (var i = 0; i < meta.length; i++) {
+      var f = meta[i];
+      if (!f.Title) continue;
+      var t = String(f.Title).replace(/[\r\n\s]/g, '');
+      var ok = false;
+      for (var j = 0; j < keywords.length; j++) {
+        if (t.indexOf(keywords[j]) >= 0) { ok = true; break; }
+      }
+      if (!ok) continue;
+      if (excludes) {
+        var ex = false;
+        for (var k = 0; k < excludes.length; k++) {
+          if (t.indexOf(excludes[k]) >= 0) { ex = true; break; }
+        }
+        if (ex) continue;
+      }
+      return f; // 先頭一致を優先
+    }
+    return null;
+  }
+  function take(key, keywords, excludes) {
+    var f = match(keywords, excludes);
+    if (f) map[key] = f;
+  }
+  take('kanyuubi',       ['加入日']);
+  take('honninKanyuu',   ['本人加入']);
+  take('shinseiKubun',   ['申請区分']);
+  take('bango',          ['社員番号', '社番']);
+  take('name',           ['氏名'], ['扶養']);
+  take('hakensaki',      ['派遣先', '会社名']);
+  take('huyou',          ['扶養'], ['扶養者', 'ある場合', 'フリガナ', 'マイナンバー', '在留', '続柄', '氏名', '生年', '喪失']);
+  take('huyouBaai',      ['扶養がある場合', 'ある場合']);
+  take('huyouFurigana',  ['フリガナ']);
+  take('huyouMyNumber',  ['マイナンバー']);
+  take('huyouZairyu',    ['在留']);
+  take('huyouTsuzukigara',['続柄']);
+  take('huyouName',      ['扶養者氏名', '扶養氏名', '被扶養者氏名']);
+  take('huyouBirthday',  ['扶養者生年月日', '扶養生年月日', '被扶養者生年月日', '生年月日']);
+  take('huyouSoushitsu', ['喪失日', '扶養喪失日']);
+  take('huyouSoushitsuRiyuu',['喪失事由', '喪失理由']);
+  take('kanyuuRiyuu',    ['加入理由', '加入事由']);
+  take('shugyo',         ['就業状況']);
+  return map;
+}
+
+// List9 の指定社員番号のレコードを取得 (履歴)
+async function fetchShahoList9ForEmp(bangoStr) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var meta = await fetchShahoDetailFieldsMeta();
+  var fmap = buildShahoList9FieldMap(meta);
+  var bangoMeta = fmap.bango;
+  if (!bangoMeta) return { map: fmap, items: [] };
+  // OData filter: 社員番号は Number 型が想定されるが Text の可能性もあるので両対応
+  var filterUrl;
+  var intName = bangoMeta.InternalName;
+  if (bangoMeta.Type === 'Number' || bangoMeta.Type === 'Integer' || bangoMeta.Type === 'Counter') {
+    filterUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$filter=" + encodeURIComponent(intName + " eq " + Number(bangoStr)) + "&$top=500";
+  } else {
+    filterUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$filter=" + encodeURIComponent(intName + " eq '" + String(bangoStr).replace(/'/g, "''") + "'") + "&$top=500";
+  }
+  var resp = await fetch(filterUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!resp.ok) {
+    // フィルタ失敗時は全件取得で絞り込み
+    var url2 = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=2000";
+    var r2 = await fetch(url2, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!r2.ok) throw new Error('List9 取得失敗 HTTP ' + r2.status);
+    var d2 = await r2.json();
+    var all = (d2.d && d2.d.results) || [];
+    var bangoKey = bangoMeta.InternalName.startsWith('_') ? 'OData_' + bangoMeta.InternalName : bangoMeta.InternalName;
+    var items = all.filter(function(it) { return String(it[bangoKey]) === String(bangoStr); });
+    return { map: fmap, items: items };
+  }
+  var data = await resp.json();
+  var items = (data.d && data.d.results) || [];
+  return { map: fmap, items: items };
+}
+
+// List9 に新規レコードを作成
+async function createShahoList9Record(body) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  // エンティティ型取得
+  var listUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')";
+  var listResp = await fetch(listUrl + "?$select=ListItemEntityTypeFullName", {
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+  });
+  if (!listResp.ok) throw new Error('ListInfo HTTP ' + listResp.status);
+  var listData = await listResp.json();
+  var entityType = listData.d && listData.d.ListItemEntityTypeFullName;
+  if (!entityType) throw new Error('エンティティ型取得失敗');
+  var payload = {};
+  Object.keys(body).forEach(function(k) { payload[k] = body[k]; });
+  payload['__metadata'] = { type: entityType };
+  // CSRF digest
+  var digestResp = await fetch(SP_ROOT_URL + "/_api/contextinfo", {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+  });
+  var digestData = await digestResp.json();
+  var digest = digestData.d && digestData.d.GetContextWebInformation && digestData.d.GetContextWebInformation.FormDigestValue;
+  // POST items
+  var saveResp = await fetch(listUrl + "/items", {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'X-RequestDigest': digest || ''
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!saveResp.ok) {
+    var errText = await saveResp.text();
+    try { console.error('[createShahoList9] SP error full:', errText); } catch(_){}
+    throw new Error('HTTP ' + saveResp.status + ': ' + errText.substring(0, 500));
+  }
+  var created = await saveResp.json();
+  return created.d;
+}
+
+// 書き込み用: 論理キー→OData書き込みキー変換し body に値をセット
+// InternalName が "_" 始まりなら "OData_" プレフィックス必須
+function putShahoField(body, fmap, logicalKey, value) {
+  var f = fmap[logicalKey];
+  if (!f) {
+    console.warn('[putShahoField] field not found in List9:', logicalKey);
+    return false;
+  }
+  var iname = f.InternalName || '';
+  var odKey = iname.indexOf('_') === 0 ? 'OData_' + iname : iname;
+  body[odKey] = value;
+  return true;
 }
 
 // 社保加入リストを overlay で表示
@@ -16912,8 +17080,12 @@ async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, risho
 }
 
 // ============================================================
-// 社保加入申請 Form
+// 社保加入申請 Form (案Y: 新規加入 / 扶養追加 / 扶養喪失 の 3モード)
 // ============================================================
+// 現在モードと、扶養喪失の対象候補 (List9履歴から取得)
+var _shahoCurrentMode = 'new';        // 'new' | 'add' | 'remove'
+var _shahoFormList9Items = [];        // List9 既存レコード (扶養喪失選択用)
+
 async function openShahoForm() {
   const emp = currentEmployee;
   if (!emp) return;
@@ -16925,52 +17097,78 @@ async function openShahoForm() {
   const no = emp[F.syainNo] || '';
   const today = toLocalDateStr(new Date());
 
-  const fieldsMeta = await fetchEmployeeFields();
-  const keyMap = buildFieldKeyMap(fieldsMeta);
+  showSpinner();
+  try {
+    const fieldsMeta = await fetchEmployeeFields();
+    const keyMap = buildFieldKeyMap(fieldsMeta);
 
-  // Employee info
-  const buka = emp[keyMap['buka']] || '';
-  const nyushaDate = emp[F.nyushaDate] ? emp[F.nyushaDate].substring(0, 10) : '';
+    // Employee info
+    const buka = emp[keyMap['buka']] || '';
+    const nyushaDate = emp[F.nyushaDate] ? emp[F.nyushaDate].substring(0, 10) : '';
+    const kenpoShutokuVal = emp[keyMap['kenpoShutoku']] || '';
 
-  // 健保資格取得日チェック（既に取得済みの場合エラー）
-  const kenpoShutokuVal = emp[keyMap['kenpoShutoku']] || '';
-  if (kenpoShutokuVal) {
-    var kenpoDate = new Date(kenpoShutokuVal);
-    if (!isNaN(kenpoDate)) {
-      showToast('⚠️ この社員は既に健保資格を取得済みです（' + kenpoDate.toISOString().substring(0,10) + '）', 'error');
-      return;
+    // List9 から該当社員の履歴を取得 (加入済み判定 + 扶養喪失対象ドロップダウン)
+    var list9History = { map: {}, items: [] };
+    if (no) {
+      try { list9History = await fetchShahoList9ForEmp(no); }
+      catch (e) { console.warn('[openShahoForm] List9履歴取得失敗:', e); }
     }
-  }
+    _shahoFormList9Items = list9History.items || [];
+    var fmap = list9History.map || {};
 
-  // 加入予定日: next month 1st
-  const now = new Date();
-  const kanyuYotei = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const kanyuYoteiStr = toLocalDateStr(kanyuYotei);
+    // 「加入済み」判定: kenpoShutoku or List9に「本人加入」済み or 申請区分=新規加入 のレコード有
+    var isEnrolled = false;
+    if (kenpoShutokuVal) isEnrolled = true;
+    var honninOdKey = fmap.honninKanyuu ? (fmap.honninKanyuu.InternalName.indexOf('_')===0 ? 'OData_' + fmap.honninKanyuu.InternalName : fmap.honninKanyuu.InternalName) : null;
+    var kubunOdKey  = fmap.shinseiKubun  ? (fmap.shinseiKubun.InternalName.indexOf('_')===0 ? 'OData_' + fmap.shinseiKubun.InternalName : fmap.shinseiKubun.InternalName) : null;
+    _shahoFormList9Items.forEach(function(it) {
+      if (honninOdKey && it[honninOdKey]) isEnrolled = true;
+      if (kubunOdKey && String(it[kubunOdKey] || '') === '新規加入') isEnrolled = true;
+    });
 
-  function buildOpts(choices) {
-    return choices.map(function(c) {
-      return '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>';
-    }).join('');
-  }
+    // 扶養追加履歴 (喪失候補)
+    var fuyouHistory = _shahoFormList9Items.filter(function(it) {
+      if (!kubunOdKey) return false;
+      var v = String(it[kubunOdKey] || '');
+      return v === '新規加入' || v === '扶養追加'; // 喪失対象 = 過去の加入(本人は除外したいが、扶養者情報が入っている前提)
+    });
 
-  const overlay = document.createElement('div');
-  overlay.className = 'taisha-overlay';
-  overlay.id = 'shahoOverlay';
-  overlay.innerHTML =
-    '<div class="taisha-panel">' +
-      '<div class="taisha-header">' +
-        '<div class="taisha-header-bar">' +
-          '<span class="taisha-title">🏥 社保加入申請</span>' +
-          '<button class="taisha-close" onclick="closeShahoForm()">✕</button>' +
-        '</div>' +
-        '<div class="taisha-emp-info">' +
-          '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
-          '<span>部課: ' + escHtml(buka) + '</span>' +
-          '<span>入社日: ' + escHtml(nyushaDate) + '</span>' +
-          '<span>加入予定日: ' + escHtml(kanyuYoteiStr) + '</span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="taisha-body">' +
+    // 加入予定日: next month 1st
+    const now = new Date();
+    const kanyuYotei = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const kanyuYoteiStr = toLocalDateStr(kanyuYotei);
+
+    function buildOpts(choices) {
+      return choices.map(function(c) {
+        return '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>';
+      }).join('');
+    }
+
+    // デフォルトモード: 未加入なら 'new'、加入済なら 'add'
+    _shahoCurrentMode = isEnrolled ? 'add' : 'new';
+
+    // モードセレクタ (加入済の場合のみ 扶養追加/扶養喪失 を表示)
+    var modeSelectorHtml = '';
+    if (isEnrolled) {
+      modeSelectorHtml =
+        '<div style="margin:8px 0 14px;padding:10px;background:#fff3e0;border:1.5px solid #ffb74d;border-radius:10px;">' +
+          '<div style="font-size:12px;color:#e65100;font-weight:700;margin-bottom:6px;">📌 既に社保加入済みです。申請種別を選択:</div>' +
+          '<div style="display:flex;gap:8px;">' +
+            '<label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:#fff;border:2px solid #43a047;border-radius:8px;cursor:pointer;">' +
+              '<input type="radio" name="shahoMode" value="add" checked onchange="switchShahoMode(\'add\')">' +
+              '<span style="font-size:14px;font-weight:700;color:#2e7d32;">👪 扶養追加</span>' +
+            '</label>' +
+            '<label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:#fff;border:2px solid #ddd;border-radius:8px;cursor:pointer;">' +
+              '<input type="radio" name="shahoMode" value="remove" onchange="switchShahoMode(\'remove\')">' +
+              '<span style="font-size:14px;font-weight:700;color:#c62828;">❌ 扶養喪失</span>' +
+            '</label>' +
+          '</div>' +
+        '</div>';
+    }
+
+    // 新規加入モード用 本体 (既存フォーム)
+    var newModeHtml =
+      '<div id="shahoModeNewBody" style="' + (isEnrolled ? 'display:none;' : '') + '">' +
         '<div class="taisha-field">' +
           '<label>加入日（加入予定日）</label>' +
           '<input type="date" id="shaho_kanyuubi" value="' + kanyuYoteiStr + '">' +
@@ -17046,15 +17244,187 @@ async function openShahoForm() {
           '<input type="number" id="shaho_nenshou" placeholder="例: 1200000" min="0" step="1000" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
           '<div style="font-size:11px;color:var(--text-light);margin-top:4px;">円（年間）</div>' +
         '</div>' +
-      '</div>' +
-      '<div class="taisha-footer">' +
-        '<button class="taisha-submit-btn" id="shahoSubmitBtn" onclick="submitShahoForm()" style="background:linear-gradient(135deg,#43a047,#2e7d32);">🏥 社保加入申請を送信</button>' +
-      '</div>' +
-    '</div>';
+      '</div>';
 
-  document.body.appendChild(overlay);
-  var panel = overlay.querySelector('.taisha-panel');
-  if (panel) panel.scrollTop = 0;
+    // 扶養追加モード用 本体
+    var addModeHtml =
+      '<div id="shahoModeAddBody" style="' + (_shahoCurrentMode === 'add' ? '' : 'display:none;') + '">' +
+        '<div style="margin:0 0 12px;padding:10px 12px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:10px;border-left:4px solid #43a047;">' +
+          '<div style="font-size:13px;font-weight:700;color:#2e7d32;">👪 扶養者を追加申請</div>' +
+          '<div style="font-size:11px;color:#555;margin-top:3px;">扶養者1人につき 1申請レコードを作成します。複数追加したい場合は「＋扶養者を追加」で入力行を増やせます。</div>' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>加入日</label>' +
+          '<input type="date" id="shahoAdd_kanyuubi" value="' + escHtml(today) + '">' +
+        '</div>' +
+        '<div id="shahoAdd_fuyouList"></div>' +
+        '<button type="button" class="dattai-add-fuyou-btn" onclick="addShahoAddFuyouRow()">＋ 扶養者を追加</button>' +
+      '</div>';
+
+    // 扶養喪失モード用 本体
+    var removeCandidatesHtml = '';
+    if (fuyouHistory.length === 0) {
+      removeCandidatesHtml = '<div style="padding:14px;background:#fff8e1;border:1px solid #ffca28;border-radius:10px;color:#6d4c41;font-size:13px;text-align:center;">喪失対象となる過去の加入履歴がありません。</div>';
+    } else {
+      var fnameOdKey = fmap.huyouFurigana ? (fmap.huyouFurigana.InternalName.indexOf('_')===0 ? 'OData_' + fmap.huyouFurigana.InternalName : fmap.huyouFurigana.InternalName) : null;
+      var tsuzOdKey  = fmap.huyouTsuzukigara ? (fmap.huyouTsuzukigara.InternalName.indexOf('_')===0 ? 'OData_' + fmap.huyouTsuzukigara.InternalName : fmap.huyouTsuzukigara.InternalName) : null;
+      var kanyOdKey  = fmap.kanyuubi ? (fmap.kanyuubi.InternalName.indexOf('_')===0 ? 'OData_' + fmap.kanyuubi.InternalName : fmap.kanyuubi.InternalName) : null;
+      var optHtml = '<option value="">選択してください</option>';
+      fuyouHistory.forEach(function(it) {
+        var id = it.Id || it.ID;
+        var furi = fnameOdKey ? (it[fnameOdKey] || '') : '';
+        var tsuz = tsuzOdKey ? (it[tsuzOdKey] || '') : '';
+        var kdate = kanyOdKey ? (it[kanyOdKey] ? String(it[kanyOdKey]).substring(0,10) : '') : '';
+        var kubun = kubunOdKey ? (it[kubunOdKey] || '') : '';
+        var label = '[#' + id + '] ' + (kdate || '-') + ' ' + (kubun || '') + ' ' + (tsuz || '') + ' ' + (furi || '');
+        optHtml += '<option value="' + escHtml(String(id)) + '">' + escHtml(label) + '</option>';
+      });
+      removeCandidatesHtml =
+        '<div class="taisha-field">' +
+          '<label>喪失対象の扶養者</label>' +
+          '<select id="shahoRemove_targetId" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;">' +
+            optHtml +
+          '</select>' +
+          '<div style="font-size:11px;color:#888;margin-top:4px;">過去の加入/扶養追加申請から選択</div>' +
+        '</div>';
+    }
+    var removeModeHtml =
+      '<div id="shahoModeRemoveBody" style="' + (_shahoCurrentMode === 'remove' ? '' : 'display:none;') + '">' +
+        '<div style="margin:0 0 12px;padding:10px 12px;background:linear-gradient(135deg,#ffebee,#ffcdd2);border-radius:10px;border-left:4px solid #c62828;">' +
+          '<div style="font-size:13px;font-weight:700;color:#b71c1c;">❌ 扶養喪失申請</div>' +
+          '<div style="font-size:11px;color:#555;margin-top:3px;">過去の加入履歴から喪失対象1名を選択して申請します。</div>' +
+        '</div>' +
+        removeCandidatesHtml +
+        '<div class="taisha-field">' +
+          '<label>喪失日</label>' +
+          '<input type="date" id="shahoRemove_date" value="' + escHtml(today) + '">' +
+        '</div>' +
+        '<div class="taisha-field">' +
+          '<label>喪失事由</label>' +
+          '<select id="shahoRemove_riyuu" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;">' +
+            '<option value="">選択してください</option>' +
+            '<option value="収入超過">収入超過により扶養認定基準超過</option>' +
+            '<option value="就職">就職により扶養から外れるため</option>' +
+            '<option value="別居">別居により生計維持関係解消</option>' +
+            '<option value="離婚">離婚により扶養から外れるため</option>' +
+            '<option value="死亡">死亡のため</option>' +
+            '<option value="その他">その他</option>' +
+          '</select>' +
+        '</div>';
+      removeModeHtml += '</div>';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'taisha-overlay';
+    overlay.id = 'shahoOverlay';
+    overlay.innerHTML =
+      '<div class="taisha-panel">' +
+        '<div class="taisha-header">' +
+          '<div class="taisha-header-bar">' +
+            '<span class="taisha-title">🏥 社保加入申請</span>' +
+            '<button class="taisha-close" onclick="closeShahoForm()">✕</button>' +
+          '</div>' +
+          '<div class="taisha-emp-info">' +
+            '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
+            '<span>部課: ' + escHtml(buka) + '</span>' +
+            '<span>入社日: ' + escHtml(nyushaDate) + '</span>' +
+            (isEnrolled ? '<span style="color:#2e7d32;font-weight:700;">✓ 加入済</span>' : '<span>加入予定日: ' + escHtml(kanyuYoteiStr) + '</span>') +
+          '</div>' +
+        '</div>' +
+        '<div class="taisha-body">' +
+          modeSelectorHtml +
+          newModeHtml +
+          addModeHtml +
+          removeModeHtml +
+        '</div>' +
+        '<div class="taisha-footer">' +
+          '<button class="taisha-submit-btn" id="shahoSubmitBtn" onclick="submitShahoForm()" style="background:linear-gradient(135deg,#43a047,#2e7d32);">' + getShahoSubmitLabel(_shahoCurrentMode) + '</button>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+    var panel = overlay.querySelector('.taisha-panel');
+    if (panel) panel.scrollTop = 0;
+
+    // 扶養追加モードなら最初の行を挿入
+    if (_shahoCurrentMode === 'add') {
+      addShahoAddFuyouRow();
+    }
+  } catch (e) {
+    console.error('openShahoForm error:', e);
+    showToast('フォーム初期化エラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function getShahoSubmitLabel(mode) {
+  if (mode === 'add') return '👪 扶養追加申請を送信';
+  if (mode === 'remove') return '❌ 扶養喪失申請を送信';
+  return '🏥 社保加入申請を送信';
+}
+
+// モード切替 (radioの onchange から)
+function switchShahoMode(mode) {
+  _shahoCurrentMode = mode;
+  var newBody = document.getElementById('shahoModeNewBody');
+  var addBody = document.getElementById('shahoModeAddBody');
+  var remBody = document.getElementById('shahoModeRemoveBody');
+  if (newBody) newBody.style.display = (mode === 'new') ? '' : 'none';
+  if (addBody) addBody.style.display = (mode === 'add') ? '' : 'none';
+  if (remBody) remBody.style.display = (mode === 'remove') ? '' : 'none';
+  var btn = document.getElementById('shahoSubmitBtn');
+  if (btn) btn.textContent = getShahoSubmitLabel(mode);
+  // ラジオのビジュアル枠線更新
+  var radios = document.querySelectorAll('input[name="shahoMode"]');
+  radios.forEach(function(r) {
+    var lbl = r.closest('label');
+    if (!lbl) return;
+    var chk = (r.value === mode);
+    lbl.style.border = chk ? ('2px solid ' + (mode === 'remove' ? '#c62828' : '#43a047')) : '2px solid #ddd';
+    lbl.style.background = chk ? (mode === 'remove' ? '#ffebee' : '#e8f5e9') : '#fff';
+  });
+  // 扶養追加モードで行が無ければ追加
+  if (mode === 'add') {
+    var list = document.getElementById('shahoAdd_fuyouList');
+    if (list && list.children.length === 0) addShahoAddFuyouRow();
+  }
+}
+
+// 扶養者入力行を追加 (扶養追加モード用)
+function addShahoAddFuyouRow() {
+  var list = document.getElementById('shahoAdd_fuyouList');
+  if (!list) return;
+  var idx = list.children.length;
+  var row = document.createElement('div');
+  row.className = 'dattai-fuyou-row';
+  row.innerHTML =
+    '<div class="dattai-fuyou-header">' +
+      '<span>扶養者 ' + (idx + 1) + '</span>' +
+      '<button type="button" class="dattai-fuyou-remove" onclick="this.closest(\'.dattai-fuyou-row\').remove()">✕</button>' +
+    '</div>' +
+    '<div class="dattai-fuyou-fields">' +
+      '<input type="text" class="shahoAddFu-name" placeholder="氏名" style="grid-column:1/3;">' +
+      '<input type="text" class="shahoAddFu-furigana" placeholder="フリガナ" style="grid-column:1/3;">' +
+      '<select class="shahoAddFu-tsuzuki" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '<option value="">続柄</option>' +
+        '<option value="配偶者">配偶者</option>' +
+        '<option value="子">子</option>' +
+        '<option value="親（同居）">親(同居)</option>' +
+        '<option value="親（別居）">親(別居)</option>' +
+      '</select>' +
+      '<input type="date" class="shahoAddFu-birthday" title="生年月日">' +
+      '<select class="shahoAddFu-zairyu" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '<option value="">在留カード</option>' +
+        '<option value="あり">あり</option>' +
+        '<option value="なし">なし</option>' +
+      '</select>' +
+      '<select class="shahoAddFu-mynumber" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '<option value="">マイナンバー</option>' +
+        '<option value="あり">あり</option>' +
+        '<option value="なし">なし</option>' +
+      '</select>' +
+    '</div>';
+  list.appendChild(row);
 }
 
 function closeShahoForm() {
@@ -17153,6 +17523,15 @@ async function submitShahoForm() {
   const emp = currentEmployee;
   if (!emp) return;
 
+  // モード分岐
+  if (_shahoCurrentMode === 'add') {
+    return await submitShahoAddFuyou();
+  }
+  if (_shahoCurrentMode === 'remove') {
+    return await submitShahoRemoveFuyou();
+  }
+
+  // 新規加入モード (既存ロジック)
   const kanyuubi = document.getElementById('shaho_kanyuubi').value;
   const huyou = document.getElementById('shaho_huyou').value;
   const huyouBaai = document.getElementById('shaho_huyouBaai').value;
@@ -17256,6 +17635,219 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🏥 社保加入申請を送信'; }
   }
+}
+
+// ============================================================
+// 扶養追加申請 (加入済社員用・複数扶養者対応)
+// ============================================================
+async function submitShahoAddFuyou() {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const btn = document.getElementById('shahoSubmitBtn');
+
+  var kanyuubi = (document.getElementById('shahoAdd_kanyuubi') || {}).value || '';
+  if (!kanyuubi) { showToast('加入日を入力してください', 'error'); return; }
+
+  var rows = document.querySelectorAll('#shahoAdd_fuyouList .dattai-fuyou-row');
+  if (!rows || rows.length === 0) { showToast('扶養者を1名以上追加してください', 'error'); return; }
+
+  var fuyouList = [];
+  rows.forEach(function(r) {
+    var nm   = (r.querySelector('.shahoAddFu-name')    || {}).value || '';
+    var fu   = (r.querySelector('.shahoAddFu-furigana')|| {}).value || '';
+    var tz   = (r.querySelector('.shahoAddFu-tsuzuki') || {}).value || '';
+    var bd   = (r.querySelector('.shahoAddFu-birthday')|| {}).value || '';
+    var zr   = (r.querySelector('.shahoAddFu-zairyu')  || {}).value || '';
+    var my   = (r.querySelector('.shahoAddFu-mynumber')|| {}).value || '';
+    if (nm || fu || tz) fuyouList.push({ name: nm, furigana: fu, tsuzuki: tz, birthday: bd, zairyu: zr, mynumber: my });
+  });
+  if (fuyouList.length === 0) { showToast('扶養者情報を入力してください', 'error'); return; }
+
+  // 確認ダイアログ
+  var nameEmp = emp.Title || '';
+  var noEmp = emp[F.syainNo] || '';
+  var listHtml = '';
+  fuyouList.forEach(function(f, i) {
+    listHtml += '<div style="padding:6px 0;border-bottom:1px dashed #ddd;"><strong>' + (i+1) + '. ' + escHtml(f.name || '(氏名未入力)') + '</strong>' +
+      (f.tsuzuki ? ' [' + escHtml(f.tsuzuki) + ']' : '') +
+      (f.birthday ? ' ' + escHtml(f.birthday) : '') +
+      '</div>';
+  });
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '99999';
+  ov.innerHTML = '<div class="confirm-box" style="max-width:420px;">' +
+    '<div class="confirm-title">👪 扶養追加申請 確認</div>' +
+    '<div class="confirm-msg" style="text-align:left;">' +
+    '<strong>' + escHtml(noEmp + ' ' + nameEmp) + '</strong><br>' +
+    '加入日: ' + escHtml(kanyuubi) + '<br>' +
+    '扶養者 ' + fuyouList.length + '名:<br>' + listHtml +
+    '<div style="font-size:12px;color:#555;margin-top:8px;">※ 扶養者ごとに 1レコード、計 ' + fuyouList.length + ' 件を作成します</div>' +
+    '</div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
+    '<button class="btn-ok" id="shahoAddConfirmOk" style="background:linear-gradient(135deg,#43a047,#2e7d32);">送信する</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+
+  document.getElementById('shahoAddConfirmOk').onclick = async function() {
+    ov.remove();
+    if (btn) { btn.disabled = true; btn.textContent = '送信中...'; }
+    try {
+      var meta = await fetchShahoDetailFieldsMeta();
+      var fmap = buildShahoList9FieldMap(meta);
+      // 派遣先 (派遣先リストから解決される名前)
+      var empHakensaki = '';
+      try { empHakensaki = getHakensaki(emp) || ''; } catch(_) {}
+      var successCount = 0;
+      for (var i = 0; i < fuyouList.length; i++) {
+        var f = fuyouList[i];
+        var body = {};
+        putShahoField(body, fmap, 'shinseiKubun', '扶養追加');
+        putShahoField(body, fmap, 'kanyuubi', kanyuubi + 'T00:00:00Z');
+        if (noEmp) putShahoField(body, fmap, 'bango', isNaN(Number(noEmp)) ? noEmp : Number(noEmp));
+        if (nameEmp) putShahoField(body, fmap, 'name', nameEmp);
+        if (empHakensaki) putShahoField(body, fmap, 'hakensaki', empHakensaki);
+        if (f.name) putShahoField(body, fmap, 'huyouName', f.name);
+        if (f.furigana) putShahoField(body, fmap, 'huyouFurigana', f.furigana);
+        if (f.tsuzuki) putShahoField(body, fmap, 'huyouTsuzukigara', f.tsuzuki);
+        if (f.birthday) putShahoField(body, fmap, 'huyouBirthday', f.birthday + 'T00:00:00Z');
+        if (f.zairyu) putShahoField(body, fmap, 'huyouZairyu', f.zairyu);
+        if (f.mynumber) putShahoField(body, fmap, 'huyouMyNumber', f.mynumber);
+        try {
+          await createShahoList9Record(body);
+          successCount++;
+        } catch (e) {
+          console.error('扶養追加レコード作成失敗 (idx=' + i + '):', e);
+          showToast('扶養者' + (i+1) + '「' + (f.name || '') + '」の作成失敗: ' + e.message, 'error');
+        }
+      }
+      if (successCount > 0) {
+        showToast('👪 扶養追加申請を ' + successCount + ' 件送信しました', 'success');
+        _shahoYoteiLoaded = false;
+        closeShahoForm();
+      }
+    } catch (e) {
+      console.error('扶養追加エラー:', e);
+      showToast('送信に失敗しました: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = getShahoSubmitLabel(_shahoCurrentMode); }
+    }
+  };
+}
+
+// ============================================================
+// 扶養喪失申請
+// ============================================================
+async function submitShahoRemoveFuyou() {
+  const emp = currentEmployee;
+  if (!emp) return;
+  const btn = document.getElementById('shahoSubmitBtn');
+
+  var targetSel = document.getElementById('shahoRemove_targetId');
+  if (!targetSel) { showToast('喪失対象が表示されていません', 'error'); return; }
+  var targetIdStr = targetSel.value;
+  if (!targetIdStr) { showToast('喪失対象の扶養者を選択してください', 'error'); return; }
+  var soushitsuDate = (document.getElementById('shahoRemove_date') || {}).value || '';
+  if (!soushitsuDate) { showToast('喪失日を入力してください', 'error'); return; }
+  var riyuu = (document.getElementById('shahoRemove_riyuu') || {}).value || '';
+  if (!riyuu) { showToast('喪失事由を選択してください', 'error'); return; }
+
+  // 対象レコードの扶養者情報を取得
+  var target = null;
+  for (var i = 0; i < _shahoFormList9Items.length; i++) {
+    if (String(_shahoFormList9Items[i].Id) === String(targetIdStr)) { target = _shahoFormList9Items[i]; break; }
+  }
+  if (!target) { showToast('対象レコードが見つかりません', 'error'); return; }
+
+  var meta = await fetchShahoDetailFieldsMeta();
+  var fmap = buildShahoList9FieldMap(meta);
+
+  function getOd(key) {
+    var f = fmap[key];
+    if (!f) return null;
+    return f.InternalName.indexOf('_') === 0 ? 'OData_' + f.InternalName : f.InternalName;
+  }
+  var tgtFuriganaKey = getOd('huyouFurigana');
+  var tgtNameKey     = getOd('huyouName');
+  var tgtTsuzKey     = getOd('huyouTsuzukigara');
+  var tgtBirthdayKey = getOd('huyouBirthday');
+  var tgtZairyuKey   = getOd('huyouZairyu');
+  var tgtMyNumberKey = getOd('huyouMyNumber');
+
+  var copyFuyou = {
+    name:     tgtNameKey     ? (target[tgtNameKey]     || '') : '',
+    furigana: tgtFuriganaKey ? (target[tgtFuriganaKey] || '') : '',
+    tsuzuki:  tgtTsuzKey     ? (target[tgtTsuzKey]     || '') : '',
+    birthday: tgtBirthdayKey ? (target[tgtBirthdayKey] || '') : '',
+    zairyu:   tgtZairyuKey   ? (target[tgtZairyuKey]   || '') : '',
+    mynumber: tgtMyNumberKey ? (target[tgtMyNumberKey] || '') : ''
+  };
+
+  // 確認ダイアログ
+  var nameEmp = emp.Title || '';
+  var noEmp = emp[F.syainNo] || '';
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '99999';
+  ov.innerHTML = '<div class="confirm-box">' +
+    '<div class="confirm-title">❌ 扶養喪失申請 確認</div>' +
+    '<div class="confirm-msg" style="text-align:left;">' +
+    '<strong>' + escHtml(noEmp + ' ' + nameEmp) + '</strong><br>' +
+    '対象: ' + escHtml(copyFuyou.name || copyFuyou.furigana || '(不明)') + (copyFuyou.tsuzuki ? ' [' + escHtml(copyFuyou.tsuzuki) + ']' : '') + '<br>' +
+    '喪失日: ' + escHtml(soushitsuDate) + '<br>' +
+    '喪失事由: ' + escHtml(riyuu) +
+    '</div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
+    '<button class="btn-ok" id="shahoRemoveConfirmOk" style="background:linear-gradient(135deg,#c62828,#8e0000);">送信する</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+
+  document.getElementById('shahoRemoveConfirmOk').onclick = async function() {
+    ov.remove();
+    if (btn) { btn.disabled = true; btn.textContent = '送信中...'; }
+    try {
+      var empHakensaki = '';
+      try { empHakensaki = getHakensaki(emp) || ''; } catch(_) {}
+      var body = {};
+      putShahoField(body, fmap, 'shinseiKubun', '扶養喪失');
+      if (noEmp)    putShahoField(body, fmap, 'bango', isNaN(Number(noEmp)) ? noEmp : Number(noEmp));
+      if (nameEmp)  putShahoField(body, fmap, 'name', nameEmp);
+      if (empHakensaki) putShahoField(body, fmap, 'hakensaki', empHakensaki);
+      // 喪失日 (kanyuubi に喪失日を入れる、または 専用列があれば優先)
+      if (fmap.huyouSoushitsu) {
+        putShahoField(body, fmap, 'huyouSoushitsu', soushitsuDate + 'T00:00:00Z');
+      } else {
+        putShahoField(body, fmap, 'kanyuubi', soushitsuDate + 'T00:00:00Z');
+      }
+      // 喪失事由
+      if (fmap.huyouSoushitsuRiyuu) {
+        putShahoField(body, fmap, 'huyouSoushitsuRiyuu', riyuu);
+      } else if (fmap.kanyuuRiyuu) {
+        putShahoField(body, fmap, 'kanyuuRiyuu', '喪失事由: ' + riyuu);
+      }
+      // 扶養者情報コピー
+      if (copyFuyou.name)     putShahoField(body, fmap, 'huyouName', copyFuyou.name);
+      if (copyFuyou.furigana) putShahoField(body, fmap, 'huyouFurigana', copyFuyou.furigana);
+      if (copyFuyou.tsuzuki)  putShahoField(body, fmap, 'huyouTsuzukigara', copyFuyou.tsuzuki);
+      if (copyFuyou.birthday) putShahoField(body, fmap, 'huyouBirthday', copyFuyou.birthday);
+      if (copyFuyou.zairyu)   putShahoField(body, fmap, 'huyouZairyu', copyFuyou.zairyu);
+      if (copyFuyou.mynumber) putShahoField(body, fmap, 'huyouMyNumber', copyFuyou.mynumber);
+
+      await createShahoList9Record(body);
+      showToast('❌ 扶養喪失申請を送信しました', 'success');
+      _shahoYoteiLoaded = false;
+      closeShahoForm();
+    } catch (e) {
+      console.error('扶養喪失エラー:', e);
+      showToast('送信に失敗しました: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = getShahoSubmitLabel(_shahoCurrentMode); }
+    }
+  };
 }
 
 
