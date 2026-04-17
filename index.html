@@ -4583,7 +4583,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '5083edd';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -6376,7 +6376,6 @@ function buildFieldKeyMap(fieldsMeta) {
     shahoZairyuCard: '扶養者在留カード',
     shahoMyNumber: '扶養者マイナンバー',
     shahoFurigana: '扶養者フリガナ',
-    shahoHuyouKanyuubi: '扶養加入日',
     shahoTsuzukigara: '加入続柄',
     shahoKanyuuRiyuu: '加入理由',
     shahoShugyo: '就業状況',
@@ -16370,10 +16369,7 @@ async function openShahoForm() {
         '</div>' +
         '<div style="margin:16px 0 8px;padding:10px 12px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:10px;border-left:4px solid #43a047;">' +
           '<div style="font-size:13px;font-weight:700;color:#2e7d32;">👪 扶養加入情報</div>' +
-        '</div>' +
-        '<div class="taisha-field">' +
-          '<label>扶養の加入日</label>' +
-          '<input type="date" id="shaho_huyouKanyuubi">' +
+          '<div style="font-size:11px;color:#555;margin-top:3px;">※ 扶養加入日は上の「加入日」を使用します</div>' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>加入する続柄</label>' +
@@ -16524,7 +16520,6 @@ async function submitShahoForm() {
   const myNumber = document.getElementById('shaho_myNumber').value;
   const furigana = document.getElementById('shaho_furigana').value;
   // 新規追加フィールド
-  const huyouKanyuubi = document.getElementById('shaho_huyouKanyuubi').value;
   const tsuzukigara = document.getElementById('shaho_tsuzukigara').value;
   const riyuuKey = document.getElementById('shaho_riyuu').value;
   const taishokubi = document.getElementById('shaho_taishokubi').value;
@@ -16551,7 +16546,6 @@ async function submitShahoForm() {
     (zairyuCard ? '在留カード: ' + escHtml(zairyuCard) + '<br>' : '') +
     (myNumber ? 'マイナンバー: ' + escHtml(myNumber) + '<br>' : '') +
     (furigana ? 'フリガナ: ' + escHtml(furigana) + '<br>' : '') +
-    (huyouKanyuubi ? '扶養加入日: ' + escHtml(huyouKanyuubi) + '<br>' : '') +
     (tsuzukigara ? '続柄: ' + escHtml(tsuzukigara) + '<br>' : '') +
     (riyuuText ? '加入理由: ' + escHtml(riyuuText) + '<br>' : '') +
     (shugyo ? '就業状況: ' + escHtml(shugyo) + (shugyo === 'アルバイト' && nenshou ? ' (年収 ¥' + Number(nenshou).toLocaleString() + ')' : '') : '') +
@@ -16566,12 +16560,12 @@ async function submitShahoForm() {
   document.getElementById('shahoConfirmOk').onclick = async function() {
     overlay.remove();
     await executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana,
-      huyouKanyuubi, tsuzukigara, riyuuText, shugyo, nenshou);
+      tsuzukigara, riyuuText, shugyo, nenshou);
   };
 }
 
 async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumber, furigana,
-    huyouKanyuubi, tsuzukigara, riyuuText, shugyo, nenshou) {
+    tsuzukigara, riyuuText, shugyo, nenshou) {
   const emp = currentEmployee;
   if (!emp) return;
   const btn = document.getElementById('shahoSubmitBtn');
@@ -16601,7 +16595,6 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
     if (myNumber) setField('shahoMyNumber', myNumber);
     if (furigana) setField('shahoFurigana', furigana);
     // 新規追加フィールド
-    if (huyouKanyuubi) setField('shahoHuyouKanyuubi', huyouKanyuubi + 'T00:00:00Z');
     if (tsuzukigara) setField('shahoTsuzukigara', tsuzukigara);
     if (riyuuText) setField('shahoKanyuuRiyuu', riyuuText);
     if (shugyo) setField('shahoShugyo', shugyo);
