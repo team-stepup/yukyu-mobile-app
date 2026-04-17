@@ -4598,7 +4598,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'd615d6d';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -8167,15 +8167,12 @@ function renderShahoKanyuuYoteiList() {
   }
   console.log('[社保加入予定] empMap size:', Object.keys(empMap).length);
 
-  var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 6px;">' + filtered.length + '件 <span style="color:#888;">(タップで社員情報を開く)</span></div>';
-  html += '<table class="list-table" style="width:100%;font-size:11px;table-layout:fixed;">';
-  html += '<thead><tr style="background:#2e7d32;color:#fff;">';
-  html += '<th style="padding:8px 4px;text-align:left;width:28%;">派遣先</th>';
-  html += '<th style="padding:8px 4px;text-align:left;width:16%;">番号</th>';
-  html += '<th style="padding:8px 4px;text-align:left;width:24%;">氏名</th>';
-  html += '<th style="padding:8px 4px;text-align:left;width:22%;">加入日</th>';
-  html += '<th style="padding:8px 4px;text-align:center;width:10%;"></th>';
-  html += '</tr></thead><tbody>';
+  var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 8px;">' + filtered.length + '件 <span style="color:#888;">(タップで社員情報を開く)</span></div>';
+  // ヘッダー (グリッド)
+  html += '<div style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;background:#2e7d32;color:#fff;padding:8px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700;">';
+  html += '<div>派遣先</div><div>番号</div><div>氏名</div><div>加入日</div>';
+  html += '</div>';
+  html += '<div>';
   filtered.forEach(function(item, i) {
     var haken = hakenKey ? truncHaken(item[hakenKey] || '') : '';
     var bango = bangoKey ? (item[bangoKey] || '') : '';
@@ -8191,57 +8188,40 @@ function renderShahoKanyuuYoteiList() {
     }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
     var bangoStr = String(bango);
-    var tdStyle = 'padding:7px 4px;border-bottom:1px solid #e8f5e9;';
-    html += '<tr class="shaho-yotei-row" data-shaho-bango="' + escHtml(bangoStr) + '" style="background:' + bg + ';' + (bangoStr ? 'cursor:pointer;' : '') + '">';
-    html += '<td style="' + tdStyle + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</td>';
-    html += '<td style="' + tdStyle + 'color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</td>';
-    html += '<td style="' + tdStyle + 'font-weight:600;">' + escHtml(name) + '</td>';
-    html += '<td style="' + tdStyle + 'color:#1b5e20;">' + escHtml(kStr) + '</td>';
-    // 詳細ボタン (確実にクリックできる)
+    // 行全体を<button>要素にする (確実にクリック可能)
     if (bangoStr) {
-      html += '<td style="' + tdStyle + 'text-align:center;"><button type="button" onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\')" style="background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">詳細</button></td>';
+      html += '<button type="button" class="shaho-yotei-btn" data-shaho-bango="' + escHtml(bangoStr) + '" onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\')" style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;width:100%;padding:10px;background:' + bg + ';border:none;border-bottom:1px solid #e8f5e9;font-size:12px;text-align:left;cursor:pointer;font-family:inherit;">';
     } else {
-      html += '<td style="' + tdStyle + '"></td>';
+      html += '<div style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;padding:10px;background:' + bg + ';border-bottom:1px solid #e8f5e9;font-size:12px;">';
     }
-    html += '</tr>';
+    html += '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</div>';
+    html += '<div style="color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</div>';
+    html += '<div style="font-weight:600;">' + escHtml(name) + '</div>';
+    html += '<div style="color:#1b5e20;">' + escHtml(kStr) + '</div>';
+    html += bangoStr ? '</button>' : '</div>';
   });
-  html += '</tbody></table>';
+  html += '</div>'; // row container
   html += '<div style="height:30px;"></div>';
   body.innerHTML = html;
 
-  // 行のボタン/行自体に直接addEventListenerをバインド(3重化)
-  var rows = body.querySelectorAll('tr.shaho-yotei-row');
-  console.log('[社保加入予定] binding direct listeners to', rows.length, 'rows');
-  rows.forEach(function(row) {
-    var bango = row.getAttribute('data-shaho-bango');
-    if (!bango) return;
-    // 行自体のクリック
-    row.addEventListener('click', function(ev) {
-      // ボタンクリックは別ハンドラで処理されるためスキップ
-      if (ev.target && ev.target.tagName === 'BUTTON') return;
-      console.log('[社保加入予定] DIRECT row click, bango=', bango);
-      openShahoYoteiEmp(bango);
+  // ボタン要素に直接addEventListenerで保険
+  var btns = body.querySelectorAll('button.shaho-yotei-btn');
+  console.log('[社保加入予定] binding direct listeners to', btns.length, 'rows');
+  btns.forEach(function(b) {
+    var bango = b.getAttribute('data-shaho-bango');
+    b.addEventListener('click', function(ev) {
+      console.log('[社保加入予定] DIRECT btn click, bango=', bango);
     });
-    // 詳細ボタンのクリック
-    var btn = row.querySelector('button');
-    if (btn) {
-      btn.addEventListener('click', function(ev) {
-        ev.stopPropagation();
-        console.log('[社保加入予定] DIRECT button click, bango=', bango);
-        openShahoYoteiEmp(bango);
-      });
-    }
   });
 }
 
 // グローバル1回だけクリックリスナーを設置 (document level delegation)
 if (!window._shahoYoteiClickAttached) {
   document.addEventListener('click', function(ev) {
-    var row = ev.target && ev.target.closest ? ev.target.closest('tr.shaho-yotei-row') : null;
-    if (!row) return;
-    var bango = row.getAttribute('data-shaho-bango');
+    var btn = ev.target && ev.target.closest ? ev.target.closest('button.shaho-yotei-btn') : null;
+    if (!btn) return;
+    var bango = btn.getAttribute('data-shaho-bango');
     console.log('[社保加入予定] DOC click captured, bango=', bango);
-    if (bango) openShahoYoteiEmp(bango);
   }, true); // capture phase で確実に捕捉
   window._shahoYoteiClickAttached = true;
   console.log('[社保加入予定] document click listener attached');
