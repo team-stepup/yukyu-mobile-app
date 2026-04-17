@@ -2914,7 +2914,7 @@ select.sankyu-edit-input {
 }
 .maebari-fit {
   table-layout: fixed;
-  width: 420px;  /* 4列(~330px) + 登録者(44px) + 登録日時(46px) */
+  width: 434px;  /* 4列(~330px) + 登録者(44px) + 登録日時(60px) */
 }
 .maebari-fit thead th,
 .maebari-fit tbody td {
@@ -2935,7 +2935,7 @@ select.sankyu-edit-input {
 .maebari-fit thead th:nth-child(5),
 .maebari-fit tbody td:nth-child(5) { width: 44px; }  /* 登録者 */
 .maebari-fit thead th:nth-child(6),
-.maebari-fit tbody td:nth-child(6) { width: 46px; font-size: 9px; }  /* 登録日時 */
+.maebari-fit tbody td:nth-child(6) { width: 60px; font-size: 9px; }  /* 登録日時 */
 .maebari-fit tbody td .fee-sub {
   display: block;
   font-size: 8px;
@@ -4583,7 +4583,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = 'c931a6e';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -12576,7 +12576,7 @@ async function loadMaebariList() {
     }
 
     let totalAmount = 0;
-    let html = '<div class="maebari-scroll-wrap"><table class="list-table maebari-fit"><thead><tr><th>No.</th><th>派遣先</th><th>氏名</th><th>金額</th><th>登録者</th><th>📅</th></tr></thead><tbody>';
+    let html = '<div class="maebari-scroll-wrap"><table class="list-table maebari-fit"><thead><tr><th>No.</th><th>派遣先</th><th>氏名</th><th>金額</th><th>登録者</th><th>登録日時</th></tr></thead><tbody>';
     records.forEach(r => {
       const amt = parseInt(String(r[MF.amount] || '0').replace(/,/g, '')) || 0;
       const fee = parseInt(String(r[MF.fee] || '0').replace(/,/g, '')) || 0;
@@ -12588,18 +12588,14 @@ async function loadMaebariList() {
       if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
       const author = r.Author ? r.Author.Title : '';
       const feeHtml = fee ? '<span class="fee-sub">+' + fee.toLocaleString() + '</span>' : '';
-      const hasFeeForRow = !!(r[MF.fee] && String(r[MF.fee]).trim());
-      const payDateRaw = r[MF.payDate] ? new Date(r[MF.payDate]).toISOString().substring(0,10) : '';
-      const dateBtn = hasFeeForRow
-        ? '<span style="color:#bbb;font-size:18px;">🔒</span>'
-        : '<button type="button" class="row-date-btn" onclick="event.stopPropagation();changeRowPayDate(' + r.Id + ',this)" data-current="' + payDateRaw + '">📅</button>';
+      const createdStr = r.Created ? formatTimeShort(r.Created) : '';
       html += '<tr style="cursor:pointer;" ontouchstart="tapGuardStart(event)" ontouchmove="tapGuardMove(event)" onclick="tapGuardClick(event, function(){openMaebariEdit(' + r.Id + ')})">'
         + '<td>' + escHtml(String(r[MF.syainNo] || '')) + '</td>'
         + '<td>' + escHtml(haken) + '</td>'
         + '<td>' + escHtml(r[MF.name] || '') + '</td>'
         + '<td style="text-align:right;white-space:normal;line-height:1.3;">' + amt.toLocaleString() + feeHtml + '</td>'
         + '<td>' + escHtml(author) + '</td>'
-        + '<td style="text-align:center;">' + dateBtn + '</td>'
+        + '<td style="text-align:center;white-space:normal;line-height:1.2;">' + escHtml(createdStr) + '</td>'
         + '</tr>';
     });
     // 未処理（手数料未入力）件数
