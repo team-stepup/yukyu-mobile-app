@@ -4316,7 +4316,7 @@ select.sankyu-edit-input {
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <button onclick="loadShahoKanyuuYoteiList()" title="更新" style="background:none;border:none;font-size:18px;color:#2e7d32;cursor:pointer;">⟳</button>
       <h2 style="font-size:16px;font-weight:700;color:#1b5e20;margin:0;flex:1;text-align:center;">社会保険加入予定</h2>
-      <button onclick="openShahoListSharepoint()" title="SharePointで開く" style="background:none;border:none;font-size:20px;color:#2e7d32;cursor:pointer;padding:4px 10px;">📋</button>
+      <button type="button" onclick="openShahoListSharepoint();return false;" title="SharePointで開く" style="background:#e8f5e9;border:1px solid #81c784;border-radius:8px;font-size:16px;color:#2e7d32;cursor:pointer;padding:6px 12px;font-weight:700;">📋 SP</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
       <span class="date-display-text" id="shahoYoteiDateDisplay" onclick="document.getElementById('shahoYoteiDate').showPicker()" style="flex:0 0 auto;padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;"></span>
@@ -4598,7 +4598,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '3ed3738';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -8190,30 +8190,20 @@ function renderShahoKanyuuYoteiList() {
     }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
     var bangoStr = String(bango);
-    var cursor = bangoStr ? 'cursor:pointer;' : '';
-    html += '<tr data-bango="' + escHtml(bangoStr) + '" style="background:' + bg + ';' + cursor + '">';
-    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</td>';
-    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</td>';
-    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;font-weight:600;">' + escHtml(name) + '</td>';
-    html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#1b5e20;">' + escHtml(kStr) + '</td>';
+    var hoverStyle = bangoStr ? 'cursor:pointer;' : '';
+    // 行自体はクリック不可。各tdにonclickをつける。
+    var cellOnclick = bangoStr ? ' onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'").replace(/"/g, '&quot;') + '\')"' : '';
+    var tdStyle = 'padding:7px 4px;border-bottom:1px solid #e8f5e9;' + hoverStyle;
+    html += '<tr style="background:' + bg + ';">';
+    html += '<td style="' + tdStyle + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"' + cellOnclick + '>' + escHtml(haken) + '</td>';
+    html += '<td style="' + tdStyle + 'color:#2e7d32;font-weight:600;"' + cellOnclick + '>' + escHtml(bangoStr) + '</td>';
+    html += '<td style="' + tdStyle + 'font-weight:600;"' + cellOnclick + '>' + escHtml(name) + '</td>';
+    html += '<td style="' + tdStyle + 'color:#1b5e20;"' + cellOnclick + '>' + escHtml(kStr) + '</td>';
     html += '</tr>';
   });
   html += '</tbody></table>';
   html += '<div style="height:30px;"></div>';
   body.innerHTML = html;
-
-  // 行クリックでopenShahoYoteiEmpを呼ぶ (イベント委任)
-  var tbl = body.querySelector('table.list-table');
-  if (tbl) {
-    tbl.addEventListener('click', function(ev) {
-      var tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-bango]') : null;
-      if (!tr) return;
-      var bango = tr.getAttribute('data-bango');
-      console.log('[社保加入予定] row clicked, bango=', bango);
-      if (!bango) return;
-      openShahoYoteiEmp(bango);
-    });
-  }
 }
 
 // 社保加入リストを overlay で表示
