@@ -4599,7 +4599,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '283e88d';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7921,12 +7921,9 @@ async function loadShahoKanyuuYoteiList() {
     if (fResp.ok) {
       var fData = await fResp.json();
       ((fData.d && fData.d.results) || []).forEach(function(f) {
+        // 既存のfetchSoumuShahoInCountと同じパターン
         var intName = f.EntityPropertyName || f.InternalName;
-        // OData_プレフィックス判定は EntityPropertyName 優先
-        var odKey = intName;
-        if (f.InternalName && f.InternalName.startsWith('_')) {
-          odKey = f.EntityPropertyName ? f.EntityPropertyName : ('OData_' + f.InternalName);
-        }
+        var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
         fMap[f.Title] = odKey;
         var norm = String(f.Title || '').replace(/\s+/g, '').replace(/[\r\n]/g, '').toLowerCase();
         if (norm) fMapLower[norm] = odKey;
@@ -8028,14 +8025,22 @@ function renderShahoKanyuuYoteiList() {
   }
 
   // Filter: 加入日>=selDate
+  var withValue = 0, withValidDate = 0, futureCount = 0;
   var filtered = items.filter(function(item) {
     var v = item[kanyuuKey];
     if (!v) return false;
+    withValue++;
     var d = new Date(v); d.setHours(0, 0, 0, 0);
     if (isNaN(d.getTime())) return false;
+    withValidDate++;
     if (selDate && d < selDate) return false;
+    futureCount++;
     return true;
   });
+  console.log('[社保加入予定] using key:', kanyuuKey, 'withValue:', withValue, 'withValidDate:', withValidDate, 'future:', futureCount);
+  if (items.length > 0 && withValue === 0) {
+    console.log('[社保加入予定] sample values in key:', items.slice(0, 5).map(function(it) { return it[kanyuuKey]; }));
+  }
 
   // Sort: 加入日 ASC
   filtered.sort(function(a, b) {
@@ -8045,7 +8050,7 @@ function renderShahoKanyuuYoteiList() {
   });
 
   if (filtered.length === 0) {
-    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">指定日以降の加入予定者はありません<br><span style="font-size:11px;">(全' + items.length + '件中)</span></div>';
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">指定日以降の加入予定者はありません<br><span style="font-size:11px;">(全' + items.length + '件中 / 加入日あり: ' + withValue + '件 / 有効日付: ' + withValidDate + '件)</span><br><span style="font-size:10px;color:#aaa;">検出キー: ' + escHtml(kanyuuKey) + '</span></div>';
     return;
   }
 
