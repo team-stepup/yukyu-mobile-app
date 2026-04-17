@@ -2219,16 +2219,28 @@ select.sankyu-edit-input {
 .nyutai-stat-card .stat-label { font-size:10px; font-weight:600; color:var(--text-light); margin-top:2px; }
 .nyutai-section { margin-bottom:12px; }
 .nyutai-section-title { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:700; padding:8px 4px; }
-.nyutai-emp-card { display:flex; align-items:center; gap:10px; padding:10px 12px; background:#fff; border-radius:10px; margin-bottom:6px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer; transition: transform 0.1s; }
+.nyutai-emp-card { display:flex; align-items:center; gap:10px; padding:10px 12px; background:#fff; border-radius:10px; margin-bottom:6px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer; transition: transform 0.1s; border-left:4px solid transparent; }
 .nyutai-emp-card:active { transform:scale(0.98); }
+.nyutai-emp-card.type-new { border-left-color:#43a047; }
+.nyutai-emp-card.type-rejoin { border-left-color:#00838f; }
+.nyutai-emp-card.type-transfer-in { border-left-color:#5e35b1; }
+.nyutai-emp-card.type-retire { border-left-color:#c62828; }
+.nyutai-emp-card.type-transfer-out { border-left-color:#ef6c00; }
+.nyutai-emp-card.type-plan-in { border-left-color:#7cb342; border-left-style:dashed; }
+.nyutai-emp-card.type-plan-out { border-left-color:#d81b60; border-left-style:dashed; }
 .nyutai-emp-date { font-size:15px; font-weight:800; color:var(--primary); min-width:48px; text-align:center; flex-shrink:0; }
 .nyutai-emp-info { flex:1; min-width:0; }
 .nyutai-emp-name { font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .nyutai-emp-buka { font-size:11px; color:var(--text-light); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.nyutai-badge { padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; white-space:nowrap; }
-.nyutai-badge.new { background:#e8f5e9; color:#2e7d32; }
-.nyutai-badge.retire { background:#fce4ec; color:#c62828; }
-.nyutai-badge.plan { background:#fff3e0; color:#e65100; }
+.nyutai-badge { display:inline-flex; align-items:center; gap:3px; padding:4px 9px; border-radius:12px; font-size:10px; font-weight:700; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,0.08); line-height:1.2; letter-spacing:0.2px; }
+.nyutai-badge .badge-ic { font-size:11px; line-height:1; }
+.nyutai-badge.new { background:linear-gradient(135deg,#e8f5e9,#c8e6c9); color:#1b5e20; }
+.nyutai-badge.rejoin { background:linear-gradient(135deg,#e0f7fa,#b2ebf2); color:#006064; }
+.nyutai-badge.transfer-in { background:linear-gradient(135deg,#ede7f6,#d1c4e9); color:#4527a0; }
+.nyutai-badge.retire { background:linear-gradient(135deg,#fce4ec,#f8bbd0); color:#880e4f; }
+.nyutai-badge.transfer-out { background:linear-gradient(135deg,#fff3e0,#ffe0b2); color:#bf360c; }
+.nyutai-badge.plan { background:linear-gradient(135deg,#fffde7,#fff9c4); color:#f57f17; border:1px dashed #f9a825; box-shadow:none; }
+.nyutai-badge.plan-retire { background:linear-gradient(135deg,#fce4ec,#f8bbd0); color:#ad1457; border:1px dashed #ec407a; box-shadow:none; }
 .nyutai-empty { text-align:center; padding:20px; color:var(--text-light); font-size:13px; }
 .nyutai-range-btn { background:#f0f0f0; border:1px solid var(--border); border-radius:16px; padding:4px 14px; font-size:12px; font-weight:600; color:var(--text-light); cursor:pointer; transition:all 0.15s; }
 .nyutai-range-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
@@ -16439,6 +16451,79 @@ async function loadNyutaiScreen() {
     const rangeStartM = startY * 12 + startM;
     const rangeEndM = nyutaiYear * 12 + nyutaiMonth;
 
+    // ─── 同一社員番号のレコード群をMAP化（再入社/移動入社/移動退社の判定に使用） ───
+    const empsBySyainNo = {};
+    allEmps.forEach(e => {
+      const sn = e[F.syainNo];
+      if (sn === undefined || sn === null || sn === '') return;
+      const key = String(sn);
+      if (!empsBySyainNo[key]) empsBySyainNo[key] = [];
+      empsBySyainNo[key].push(e);
+    });
+
+    // 入社タイプ判定: new（新規）/ rejoin（再入社）/ transfer-in（移動入社）
+    function classifyEntry(emp) {
+      const sn = emp[F.syainNo];
+      if (!sn) return 'new';
+      const group = empsBySyainNo[String(sn)] || [];
+      if (group.length <= 1) return 'new';
+      const myNd = emp[F.nyushaDate] ? new Date(emp[F.nyushaDate]) : null;
+      if (!myNd) return 'new';
+      // このレコードより前に入社日があるレコード
+      const older = group.filter(e => e.Id !== emp.Id && e[F.nyushaDate] && new Date(e[F.nyushaDate]) < myNd);
+      if (older.length === 0) return 'new';
+      // 完全退社歴（有給退社日 セット）があれば → 再入社
+      const hasFullRetire = older.some(e => e[F.yukyuTaisha]);
+      if (hasFullRetire) return 'rejoin';
+      // 派遣先退社のみ（完全退社なし）→ 移動入社
+      const hasHakenOnly = older.some(e => e[F.hakenTaisha] && !e[F.yukyuTaisha]);
+      if (hasHakenOnly) return 'transfer-in';
+      return 'new';
+    }
+
+    // 退社タイプ判定: retire（完全退社）/ transfer-out（移動退社）
+    function classifyExit(emp) {
+      const yd = emp[F.yukyuTaisha];
+      if (yd) return 'retire'; // 有給退社日あり = 完全退社
+      const hd = emp[F.hakenTaisha];
+      if (!hd) return 'retire';
+      const sn = emp[F.syainNo];
+      if (!sn) return 'retire';
+      const group = empsBySyainNo[String(sn)] || [];
+      const hdDate = new Date(hd);
+      // この 派遣先退社 より後の入社日レコードがあれば → 移動退社
+      const hasNewerEntry = group.some(e => e.Id !== emp.Id && e[F.nyushaDate] && new Date(e[F.nyushaDate]) > hdDate);
+      if (hasNewerEntry) return 'transfer-out';
+      return 'retire';
+    }
+
+    // バッジ情報（クラス名＋アイコン＋ラベル）
+    function entryBadge(type, isFuture) {
+      if (isFuture) return { cls: 'plan', ic: '⏳', label: '入社予定' };
+      if (type === 'rejoin') return { cls: 'rejoin', ic: '🔄', label: '再入社' };
+      if (type === 'transfer-in') return { cls: 'transfer-in', ic: '↪️', label: '移動入社' };
+      return { cls: 'new', ic: '🌱', label: '入社' };
+    }
+    function exitBadge(type, isPlan) {
+      if (isPlan) {
+        if (type === 'transfer-out') return { cls: 'plan-retire', ic: '⏳', label: '移動退社予定' };
+        return { cls: 'plan-retire', ic: '⏳', label: '退社予定' };
+      }
+      if (type === 'transfer-out') return { cls: 'transfer-out', ic: '↗️', label: '移動退社' };
+      return { cls: 'retire', ic: '🏁', label: '退社' };
+    }
+    function entryCardClass(type, isFuture) {
+      if (isFuture) return 'type-plan-in';
+      if (type === 'rejoin') return 'type-rejoin';
+      if (type === 'transfer-in') return 'type-transfer-in';
+      return 'type-new';
+    }
+    function exitCardClass(type, isPlan) {
+      if (isPlan) return 'type-plan-out';
+      if (type === 'transfer-out') return 'type-transfer-out';
+      return 'type-retire';
+    }
+
     // Classify
     const nyusha = []; // 入社
     const taishaList = []; // 退社 (deduplicated, counted per rules)
@@ -16563,7 +16648,19 @@ async function loadNyutaiScreen() {
 
       // 入社 section
       html += '<div class="nyutai-section">';
-      html += '<div class="nyutai-section-title"><span style="color:#2e7d32;">🟢</span> 入社 (' + nyusha.length + '件)</div>';
+      // 入社タイプ別件数カウント（サブラベル表示用）
+      const nyushaStats = { new: 0, rejoin: 0, 'transfer-in': 0, plan: 0 };
+      nyusha.forEach(e => {
+        const isFut = new Date(e[F.nyushaDate]) > new Date();
+        if (isFut) nyushaStats.plan++;
+        else nyushaStats[classifyEntry(e)]++;
+      });
+      let nyushaSubHtml = '';
+      if (nyushaStats.new) nyushaSubHtml += '<span class="nyutai-badge new" style="font-size:9px;padding:2px 6px;">🌱 新規 ' + nyushaStats.new + '</span>';
+      if (nyushaStats.rejoin) nyushaSubHtml += '<span class="nyutai-badge rejoin" style="font-size:9px;padding:2px 6px;">🔄 再入社 ' + nyushaStats.rejoin + '</span>';
+      if (nyushaStats['transfer-in']) nyushaSubHtml += '<span class="nyutai-badge transfer-in" style="font-size:9px;padding:2px 6px;">↪️ 移動 ' + nyushaStats['transfer-in'] + '</span>';
+      if (nyushaStats.plan) nyushaSubHtml += '<span class="nyutai-badge plan" style="font-size:9px;padding:2px 6px;">⏳ 予定 ' + nyushaStats.plan + '</span>';
+      html += '<div class="nyutai-section-title"><span style="color:#2e7d32;">🟢</span> 入社 (' + nyusha.length + '件)' + (nyushaSubHtml ? '<span style="display:inline-flex;gap:4px;margin-left:auto;flex-wrap:wrap;">' + nyushaSubHtml + '</span>' : '') + '</div>';
       if (nyusha.length === 0) {
         html += '<div class="nyutai-empty">この期間の入社はありません</div>';
       } else {
@@ -16573,18 +16670,21 @@ async function loadNyutaiScreen() {
           const name = emp.Title || '';
           const buka = getBukaValue(emp) || '';
           const isFuture = new Date(emp[F.nyushaDate]) > new Date();
+          const eType = classifyEntry(emp);
+          const bd = entryBadge(eType, isFuture);
+          const cardCls = entryCardClass(eType, isFuture);
           // 入社カード: 総務・雇用 + 総務-社保
           const sKoyou = getSoumuVal(emp, 'soumuKoyou');
           const sShaho = getSoumuVal(emp, 'soumuShaho');
           let soumuHtml = '';
           soumuHtml += soumuBadge('雇用', sKoyou);
           soumuHtml += soumuBadge('社保', sShaho);
-          html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
+          html += '<div class="nyutai-emp-card ' + cardCls + '" onclick="openNyutaiEmployee(' + emp.Id + ')">';
           html += '<div class="nyutai-emp-date">' + dt.replace(/^\d{4}\//, '') + '</div>';
           html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div>';
           html += '<div style="margin-top:3px;line-height:1.5;">' + soumuHtml + '</div>';
           html += '</div>';
-          html += '<span class="nyutai-badge ' + (isFuture ? 'plan' : 'new') + '">' + (isFuture ? '入社予定' : '入社') + '</span>';
+          html += '<span class="nyutai-badge ' + bd.cls + '"><span class="badge-ic">' + bd.ic + '</span>' + bd.label + '</span>';
           html += '</div>';
         });
       }
@@ -16592,7 +16692,19 @@ async function loadNyutaiScreen() {
 
       // 退社 section
       html += '<div class="nyutai-section">';
-      html += '<div class="nyutai-section-title"><span style="color:#c62828;">🔴</span> 退社 (' + taishaList.length + '件)</div>';
+      // 退社タイプ別件数カウント
+      const taishaStats = { retire: 0, 'transfer-out': 0, plan: 0 };
+      taishaList.forEach(e => {
+        const _hd = e[F.hakenTaisha], _yd = e[F.yukyuTaisha];
+        const _retDate = new Date(_yd || _hd);
+        if (_retDate > new Date()) taishaStats.plan++;
+        else taishaStats[classifyExit(e)]++;
+      });
+      let taishaSubHtml = '';
+      if (taishaStats.retire) taishaSubHtml += '<span class="nyutai-badge retire" style="font-size:9px;padding:2px 6px;">🏁 退社 ' + taishaStats.retire + '</span>';
+      if (taishaStats['transfer-out']) taishaSubHtml += '<span class="nyutai-badge transfer-out" style="font-size:9px;padding:2px 6px;">↗️ 移動 ' + taishaStats['transfer-out'] + '</span>';
+      if (taishaStats.plan) taishaSubHtml += '<span class="nyutai-badge plan-retire" style="font-size:9px;padding:2px 6px;">⏳ 予定 ' + taishaStats.plan + '</span>';
+      html += '<div class="nyutai-section-title"><span style="color:#c62828;">🔴</span> 退社 (' + taishaList.length + '件)' + (taishaSubHtml ? '<span style="display:inline-flex;gap:4px;margin-left:auto;flex-wrap:wrap;">' + taishaSubHtml + '</span>' : '') + '</div>';
       if (taishaList.length === 0) {
         html += '<div class="nyutai-empty">この期間の退社はありません</div>';
       } else {
@@ -16614,6 +16726,9 @@ async function loadNyutaiScreen() {
           const now = new Date();
           const retDate = new Date(yd || hd);
           const isPlan = retDate > now;
+          const xType = classifyExit(emp);
+          const xBd = exitBadge(xType, isPlan);
+          const xCardCls = exitCardClass(xType, isPlan);
           // 退社カード: 総務・雇用 + 総務-社保 + 離職票 + 離職票渡し方
           const sKoyouT = getSoumuVal(emp, 'soumuKoyou');
           const sShahoT = getSoumuVal(emp, 'soumuShaho');
@@ -16634,7 +16749,7 @@ async function loadNyutaiScreen() {
           } else {
             shahoSoushitsuHtml = '<span style="display:inline-flex;align-items:center;gap:3px;background:#f5f5f5;color:#aaa;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;margin-right:4px;border:1px dashed #ddd;"><span style="font-size:9px;">🩺 社保喪失</span> <span>未登録</span></span>';
           }
-          html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
+          html += '<div class="nyutai-emp-card ' + xCardCls + '" onclick="openNyutaiEmployee(' + emp.Id + ')">';
           html += '<div class="nyutai-emp-date">' + displayDate + '</div>';
           html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div>';
           html += '<div class="nyutai-emp-buka">' + escHtml(buka) + (tenure ? ' <span style="color:var(--primary);font-weight:600;">(' + tenure + ')</span>' : '') + '</div>';
@@ -16642,7 +16757,7 @@ async function loadNyutaiScreen() {
           html += '<div style="margin-top:4px;">' + shahoSoushitsuHtml + '</div>';
           html += '<div style="margin-top:3px;line-height:1.7;">' + soumuHtmlT + '</div>';
           html += '</div>';
-          html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '退社予定' : '退社') + '</span>';
+          html += '<span class="nyutai-badge ' + xBd.cls + '"><span class="badge-ic">' + xBd.ic + '</span>' + xBd.label + '</span>';
           html += '</div>';
         });
       }
