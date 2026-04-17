@@ -4212,6 +4212,10 @@ select.sankyu-edit-input {
       <div style="flex:1;"></div>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
+    <div style="position:relative;margin-bottom:8px;">
+      <input type="text" id="hakensakiSearch" placeholder="🔍 派遣先名で検索..." oninput="onHakensakiSearch()" style="width:100%;padding:10px 36px 10px 12px;border:1.5px solid #e0e0e8;border-radius:10px;font-size:14px;background:#fafaff;outline:none;">
+      <button id="hakensakiSearchClear" onclick="clearHakensakiSearch()" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#bbb;cursor:pointer;padding:0;line-height:1;">&times;</button>
+    </div>
     <div id="hakensakiTabs" style="display:none;margin-bottom:10px;"></div>
     <div id="hakensakiBody">
       <div style="text-align:center;padding:40px 20px;color:var(--text-light);">
@@ -4219,6 +4223,16 @@ select.sankyu-edit-input {
         <div style="font-size:14px;">読み込み中…</div>
       </div>
     </div>
+  </div>
+
+  <!-- Screen: 派遣先 詳細 -->
+  <div class="screen" id="hakensakiDetailScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('hakensakiListScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <div style="flex:1;"></div>
+      <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
+    </div>
+    <div id="hakensakiDetailBody"></div>
   </div>
 
   <!-- Screen: 車両一覧 -->
@@ -4359,16 +4373,16 @@ select.sankyu-edit-input {
 
   <!-- Screen: 前払い一覧 -->
   <div class="screen" id="maebariListScreen">
-    <div class="list-screen-header">
-      <div class="list-date-row">
+    <div class="list-screen-header" style="padding:6px 10px;margin-bottom:4px;">
+      <div class="list-date-row" style="margin-bottom:0;">
         <label>前払日</label>
         <div class="date-display-wrap">
-          <span class="date-display-text" id="maebariListDateDisplay" onclick="document.getElementById('maebariListDate').showPicker()" style="font-weight:700;color:var(--primary);"></span>
+          <span class="date-display-text" id="maebariListDateDisplay" onclick="document.getElementById('maebariListDate').showPicker()" style="font-weight:700;color:var(--primary);padding:6px 10px;font-size:14px;"></span>
           <input type="date" id="maebariListDate" class="date-hidden-input" onchange="onMaebariListDateChange()">
         </div>
       </div>
     </div>
-    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:4px 8px;"><span id="maebariListCount" style="font-size:13px;color:var(--text-light);"></span></div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:2px 8px;"><span id="maebariListCount" style="font-size:13px;color:var(--text-light);"></span></div>
     <div id="maebariListBody"></div>
     <div id="maebariListFooter" class="list-footer" style="display:none;"></div>
   </div>
@@ -5819,6 +5833,7 @@ async function loadLeaveDetails() {
         <span>起算日: ${formatDate(kisanDate)}</span>
         ${resigned ? '<span style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</span>' : ''}
       </div>
+      <div id="detailRetireReason" style="display:none;"></div>
       <div class="profile-quick-actions">
         ${syainFileUrl ? `<button class="profile-quick-btn pq-folder" onclick="openSyainFolderFromPayload('${sfBtnB64}')"><span class="pq-icon">📂</span><span class="pq-label">社員ファイル</span></button>` : ''}
         <button class="profile-quick-btn pq-gensen" onclick="openEmpViewer('gensen','${empBtnB64}')"><span class="pq-icon">📄</span><span class="pq-label">源泉</span></button>
@@ -5827,6 +5842,32 @@ async function loadLeaveDetails() {
       </div>
     </div>
   `;
+  // 退社者の退社理由表示（非同期でメタ取得して反映）
+  if (resigned) {
+    (async function() {
+      try {
+        var _meta = await fetchEmployeeFields();
+        var _km = buildFieldKeyMap(_meta);
+        var _riyuuKey = _km['taisyokuRiyuu'];
+        var _jikaiKey = _km['jikaiSaiyou'];
+        var _riyuu = _riyuuKey ? emp[_riyuuKey] : '';
+        var _jikai = _jikaiKey ? emp[_jikaiKey] : '';
+        var _rEl = document.getElementById('detailRetireReason');
+        if (!_rEl) return;
+        var _html = '';
+        _html += '<div style="margin-top:8px;padding:10px 12px;background:linear-gradient(135deg,#ffebee,#fce4ec);border-left:4px solid #c62828;border-radius:8px;">';
+        _html += '<div style="font-size:11px;font-weight:700;color:#c62828;margin-bottom:3px;">📝 退社情報</div>';
+        _html += '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;">';
+        _html += '<div><span style="color:#888;font-size:11px;">退職理由:</span> <span style="font-weight:700;color:#c62828;">' + (_riyuu ? escHtml(String(_riyuu)) : '未登録') + '</span></div>';
+        if (_jikai) {
+          _html += '<div><span style="color:#888;font-size:11px;">次回の採用:</span> <span style="font-weight:700;color:#555;">' + escHtml(String(_jikai)) + '</span></div>';
+        }
+        _html += '</div></div>';
+        _rEl.innerHTML = _html;
+        _rEl.style.display = 'block';
+      } catch (_e) { console.log('retire reason render error:', _e); }
+    })();
+  }
 
   // Set tab stats
   const yukyuStatEl = document.getElementById('tabStatYukyu');
@@ -6120,6 +6161,8 @@ const PROFILE_CATEGORIES = [
       { key: 'yukyuTaisha', label: '有給使用後退社日', format: 'date' },
       { key: 'kisanDate', label: '有休付与起算日', format: 'date' },
       { key: '_calcTenure', label: '在職期間', format: 'calcTenure' },
+      { key: 'taisyokuRiyuu', label: '退職理由', showOnlyResigned: true },
+      { key: 'jikaiSaiyou', label: '次回の採用', showOnlyResigned: true },
     ]
   },
   {
@@ -6221,6 +6264,7 @@ const PROFILE_CATEGORIES = [
       { key: 'koyouShutoku', label: '雇用：資格取得日', format: 'date' },
       { key: 'koyouName', label: 'Koyou Name' },
       { key: 'shahoSoushitsu', label: '社保喪失日', format: 'date' },
+      { key: 'koyouSoushitsu', label: '雇用保険喪失日', format: 'date' },
       { key: 'soumuKoyou', label: '総務・雇用', format: 'badge' },
       { key: 'soumuShaho', label: '総務-社保', format: 'badge' },
       { key: 'soumuRishoku', label: '総務-離職票', format: 'badge' },
@@ -6229,6 +6273,9 @@ const PROFILE_CATEGORIES = [
     ]
   },
 ];
+
+// insurance セクションで値が空でも常に表示するフィールド
+const INSURANCE_ALWAYS_SHOW_KEYS = ['shahoSoushitsu', 'koyouSoushitsu', 'soumuKoyou', 'soumuShaho', 'soumuRishoku', 'rishokuhyou', 'rishokuWatashi'];
 
 // Map profile category field keys to actual OData field names found in employee data
 // This mapping is built dynamically from field metadata
@@ -6315,6 +6362,7 @@ function buildFieldKeyMap(fieldsMeta) {
     koyouShutoku: '雇用：資格取得日',
     koyouName: 'Koyou Name',
     shahoSoushitsu: '社保喪失日',
+    koyouSoushitsu: '雇用保険喪失日',
     soumuKoyou: '総務・雇用',
     soumuShaho: '総務-社保',
     soumuRishoku: '総務-離職票',
@@ -6980,13 +7028,114 @@ function buildHakensakiTabs() {
   tabs.style.display = 'block';
 }
 
+var _hakensakiCurrentFilter = 'all';
 function filterHakensakiList(filterKey, btn) {
   var tabs = document.getElementById('hakensakiTabs');
   if (tabs) {
     tabs.querySelectorAll('.haken-tab').forEach(function(b) { b.classList.remove('haken-tab-active'); });
   }
   if (btn) btn.classList.add('haken-tab-active');
+  _hakensakiCurrentFilter = filterKey;
   drawHakensakiCards(filterKey);
+}
+
+function onHakensakiSearch() {
+  var inp = document.getElementById('hakensakiSearch');
+  var clr = document.getElementById('hakensakiSearchClear');
+  if (clr) clr.style.display = (inp && inp.value) ? 'block' : 'none';
+  drawHakensakiCards(_hakensakiCurrentFilter || 'all');
+}
+function clearHakensakiSearch() {
+  var inp = document.getElementById('hakensakiSearch');
+  if (inp) inp.value = '';
+  var clr = document.getElementById('hakensakiSearchClear');
+  if (clr) clr.style.display = 'none';
+  drawHakensakiCards(_hakensakiCurrentFilter || 'all');
+}
+
+function openHakensakiDetail(itemIdx) {
+  var item = _hakensakiItems[itemIdx];
+  if (!item) return;
+  var body = document.getElementById('hakensakiDetailBody');
+  if (!body) return;
+  var F = _hakensakiFields;
+  var s = _hakenItemStatus(item);
+
+  var company = String(item[F.company] || item.Title || '(不明)').trim() || '(不明)';
+  var soshiki = F.soshiki ? String(item[F.soshiki] || '').trim() : '';
+  var ninzu = F.ninzu ? (Number(item[F.ninzu]) || 0) : 0;
+
+  function fmtDate(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  }
+
+  // ステータス判定 → ヘッダー色
+  var headerBg, statusLabel, statusColor, statusBg;
+  if (s.isNoContract) {
+    headerBg = 'linear-gradient(135deg,#78909c,#90a4ae)';
+    statusLabel = '契約なし'; statusColor = '#546e7a'; statusBg = '#eceff1';
+  } else if (s.isExpiredContract) {
+    headerBg = 'linear-gradient(135deg,#c62828,#e53935)';
+    statusLabel = '契約期限切れ'; statusColor = '#c62828'; statusBg = '#ffebee';
+  } else if (s.isSoonExpire) {
+    headerBg = 'linear-gradient(135deg,#f57f17,#f9a825)';
+    statusLabel = '契約更新注意'; statusColor = '#f57f17'; statusBg = '#fffde7';
+  } else if (s.isValid) {
+    headerBg = 'linear-gradient(135deg,#1565c0,#1976d2)';
+    statusLabel = '契約有効'; statusColor = '#1565c0'; statusBg = '#e3f2fd';
+  } else {
+    headerBg = 'linear-gradient(135deg,#5e35b2,#7e57c2)';
+    statusLabel = ''; statusColor = '#5e35b2'; statusBg = '#ede7f6';
+  }
+
+  var html = '';
+  // ヘッダーカード
+  html += '<div style="background:' + headerBg + ';color:#fff;padding:18px 16px;border-radius:14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,0.12);">';
+  html += '<div style="font-size:12px;opacity:0.85;margin-bottom:4px;">🏭 派遣先会社</div>';
+  html += '<div style="font-size:18px;font-weight:700;line-height:1.3;">' + escHtml(company) + '</div>';
+  if (soshiki) {
+    html += '<div style="font-size:13px;opacity:0.92;margin-top:6px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.25);">' + escHtml(soshiki) + '</div>';
+  }
+  html += '</div>';
+
+  // サマリーカード (ステータス・人数・期間)
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+  if (statusLabel) {
+    html += '<div style="background:' + statusBg + ';color:' + statusColor + ';padding:12px;border-radius:12px;text-align:center;">';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">ステータス</div>';
+    html += '<div style="font-size:14px;font-weight:700;">' + statusLabel + '</div>';
+    html += '</div>';
+  }
+  html += '<div style="background:#e8eaf6;color:#283593;padding:12px;border-radius:12px;text-align:center;">';
+  html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">派遣人数</div>';
+  html += '<div style="font-size:20px;font-weight:700;">' + ninzu + '<span style="font-size:12px;">名</span></div>';
+  html += '</div>';
+  html += '</div>';
+
+  // 派遣期間カード
+  if (F.start || F.end) {
+    html += '<div style="background:#fff;border:1px solid #e8e8f0;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">';
+    html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:6px;">📅 派遣期間</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;">';
+    html += '<span>' + escHtml(fmtDate(item[F.start])) + '</span>';
+    html += '<span style="color:#ccc;">〜</span>';
+    html += '<span>' + escHtml(fmtDate(item[F.end])) + '</span>';
+    html += '</div>';
+    html += '</div>';
+  }
+
+  // 全フィールド詳細テーブル
+  html += '<div style="background:#fff;border:1px solid #e8e8f0;border-radius:12px;padding:6px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">';
+  html += '<div style="font-size:12px;color:var(--text-light);font-weight:600;padding:10px 0 6px;border-bottom:1px solid #f0f0f5;margin-bottom:4px;">📋 全項目</div>';
+  html += buildHakenDetailHtml(item);
+  html += '</div>';
+
+  html += '<div style="height:40px;"></div>';
+  body.innerHTML = html;
+  switchScreen('hakensakiDetailScreen');
 }
 
 function drawHakensakiCards(filterKey) {
@@ -7002,8 +7151,18 @@ function drawHakensakiCards(filterKey) {
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
   }
 
+  // 検索キーワード取得
+  var searchInput = document.getElementById('hakensakiSearch');
+  var searchQ = searchInput ? String(searchInput.value || '').trim().toLowerCase() : '';
+
   // フィルター適用
   var filtered = items.filter(function(item) {
+    // 検索キーワード
+    if (searchQ) {
+      var cName = String(item[F.company] || item.Title || '').toLowerCase();
+      var sName = F.soshiki ? String(item[F.soshiki] || '').toLowerCase() : '';
+      if (cName.indexOf(searchQ) < 0 && sName.indexOf(searchQ) < 0) return false;
+    }
     var s = _hakenItemStatus(item);
     switch (filterKey) {
       case 'valid':   return s.isValid;
@@ -7117,9 +7276,8 @@ function drawHakensakiCards(filterKey) {
         ninzuBg = '#e3f2fd'; ninzuColor = '#1565c0';
       }
 
-      var rowId = 'hkRow_' + gIdx + '_' + gItems.indexOf(item);
-      html += '<div id="' + rowId + '">';
-      html += '<div onclick="toggleHakenDetail(\'' + rowId + '\')" style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;cursor:pointer;' + rowBg + '">';
+      var itemIdx = _hakensakiItems.indexOf(item);
+      html += '<div onclick="openHakensakiDetail(' + itemIdx + ')" style="padding:10px 14px;border-top:1px solid #f0f0f5;display:flex;align-items:center;gap:8px;cursor:pointer;' + rowBg + '">';
       html += '<div style="flex:1;min-width:0;">';
       if (soshiki) html += '<div style="font-size:13px;color:' + textColor + ';overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
       if (dateStr) html += '<div style="font-size:11px;color:' + subColor + ';margin-top:2px;">' + escHtml(dateStr) + '</div>';
@@ -7127,12 +7285,7 @@ function drawHakensakiCards(filterKey) {
       if (F.ninzu) {
         html += '<div style="background:' + ninzuBg + ';color:' + ninzuColor + ';font-weight:700;font-size:15px;min-width:36px;text-align:center;padding:4px 10px;border-radius:8px;">' + ninzu + '</div>';
       }
-      html += '<span class="hk-row-arrow" style="font-size:9px;color:#aaa;transition:transform 0.2s;">▶</span>';
-      html += '</div>';
-      // 詳細パネル（初期非表示）
-      html += '<div class="hk-row-detail" style="display:none;padding:0 14px 12px;border-top:1px dashed #e8e8f0;background:#fafaff;">';
-      html += buildHakenDetailHtml(item);
-      html += '</div>';
+      html += '<span style="font-size:11px;color:#aaa;">›</span>';
       html += '</div>';
     });
     html += '</div>'; // hk-acc-body
@@ -11648,12 +11801,16 @@ async function loadEmployeeProfile() {
   // Sections that must show all fields when commuting by car
   const carRequiredSections = ['vehicle', 'license', 'carInsurance'];
 
+  const isResignedEmp = isResigned(emp);
+
   PROFILE_CATEGORIES.forEach(cat => {
     // Check if category has any data
     let hasData = false;
     const forceShowAll = isCar && carRequiredSections.indexOf(cat.id) >= 0;
     const rows = [];
     cat.fields.forEach(field => {
+      // 退社者のみ表示するフィールド（退職理由・次回採用など）
+      if (field.showOnlyResigned && !isResignedEmp) return;
       // Handle computed fields (prefixed with _calc)
       if (field.format === 'calcAge') {
         const bdKey = keyMap['birthday'];
@@ -11698,13 +11855,29 @@ async function loadEmployeeProfile() {
         return;
       }
       const odataKey = keyMap[field.key];
-      if (!odataKey) return;
-      let val = emp[odataKey];
+      // insurance セクションの指定フィールドは odataKey が無くても表示
+      const isInsuranceAlways = (cat.id === 'insurance' && INSURANCE_ALWAYS_SHOW_KEYS.indexOf(field.key) >= 0);
+      // 退社者の退職理由等は odataKey が無くても空表示
+      const isResignedAlways = (field.showOnlyResigned && isResignedEmp);
+      if (!odataKey && !isInsuranceAlways && !isResignedAlways) return;
+      let val = odataKey ? emp[odataKey] : null;
       const isEmpty = val === null || val === undefined || val === '';
+      // 退社者向けフィールド: 空でも表示
+      if (isEmpty && isResignedAlways) {
+        hasData = true;
+        rows.push({ label: field.label, value: '<span style="color:#bbb;">—</span>' });
+        return;
+      }
       // 通勤方法: always show, even if empty
       if (field.key === 'tsukinHouhou') {
         hasData = true;
         rows.push({ label: field.label, value: isEmpty ? '<span style="color:#ccc;">未登録</span>' : escHtml(String(val)) });
+        return;
+      }
+      // insurance セクション指定フィールド: 空でも常に表示
+      if (isEmpty && isInsuranceAlways) {
+        hasData = true;
+        rows.push({ label: field.label, value: '<span style="color:#bbb;">—</span>' });
         return;
       }
       // Car-required sections: show empty fields as 未登録
@@ -12420,7 +12593,7 @@ async function loadMaebariList() {
       const dateBtn = hasFeeForRow
         ? '<span style="color:#bbb;font-size:18px;">🔒</span>'
         : '<button type="button" class="row-date-btn" onclick="event.stopPropagation();changeRowPayDate(' + r.Id + ',this)" data-current="' + payDateRaw + '">📅</button>';
-      html += '<tr style="cursor:pointer;" onclick="openMaebariEdit(' + r.Id + ')">'
+      html += '<tr style="cursor:pointer;" ontouchstart="tapGuardStart(event)" ontouchmove="tapGuardMove(event)" onclick="tapGuardClick(event, function(){openMaebariEdit(' + r.Id + ')})">'
         + '<td>' + escHtml(String(r[MF.syainNo] || '')) + '</td>'
         + '<td>' + escHtml(haken) + '</td>'
         + '<td>' + escHtml(r[MF.name] || '') + '</td>'
@@ -12431,7 +12604,7 @@ async function loadMaebariList() {
     });
     // 未処理（手数料未入力）件数
     var unprocessed = records.filter(function(r) { return !r[MF.fee] || !String(r[MF.fee]).trim(); });
-    html += '</div><div style="height:50px;"></div>';
+    html += '</tbody></table></div><div style="height:140px;"></div>';
     body.innerHTML = html;
 
     footer.style.display = 'flex';
@@ -12481,6 +12654,29 @@ async function deleteUnprocessedMaebari() {
 function formatTimeShort(isoStr) {
   const d = new Date(isoStr);
   return (d.getMonth()+1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+// ── タップvsスクロール判定ヘルパー ──
+// 指を動かしたらスクロールとみなしてonclickをキャンセル
+var _tapGuard = null;
+function tapGuardStart(e) {
+  var t = (e.touches && e.touches[0]) || e;
+  _tapGuard = { x: t.clientX, y: t.clientY, moved: false };
+}
+function tapGuardMove(e) {
+  if (!_tapGuard) return;
+  var t = (e.touches && e.touches[0]) || e;
+  if (Math.abs(t.clientX - _tapGuard.x) > 8 || Math.abs(t.clientY - _tapGuard.y) > 8) {
+    _tapGuard.moved = true;
+  }
+}
+function tapGuardClick(e, cb) {
+  if (_tapGuard && _tapGuard.moved) {
+    _tapGuard = null;
+    return;
+  }
+  _tapGuard = null;
+  cb();
 }
 
 // ============================================================
@@ -15150,14 +15346,35 @@ async function loadNyutaiScreen() {
     const mStart = new Date(startY, startM, 1);
     const mEnd = new Date(nyutaiYear, nyutaiMonth + 1, 0, 23, 59, 59);
 
-    // Fetch all employees
-    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '');
+    // Fetch all employees (+ フィールドメタ)
+    const [allEmps, fieldsMeta] = await Promise.all([
+      spGetAll(LIST_EMPLOYEES_GUID, ''),
+      fetchEmployeeFields().catch(function() { return {}; })
+    ]);
+    const nyutaiKeyMap = (fieldsMeta && Object.keys(fieldsMeta).length > 0) ? buildFieldKeyMap(fieldsMeta) : {};
 
     // Helper: check if date is in the target range
     function inRange(dateStr) {
       if (!dateStr) return false;
       const d = new Date(dateStr);
       return d >= mStart && d <= mEnd;
+    }
+
+    // Helper: soumu系フィールドの値を取得
+    function getSoumuVal(emp, key) {
+      var ok = nyutaiKeyMap[key];
+      if (!ok) return '';
+      return emp[ok] ? String(emp[ok]) : '';
+    }
+    function soumuBadge(label, val) {
+      var v = val && val.trim() ? val : '—';
+      var isEmpty = !val || !val.trim();
+      var color, bg;
+      if (isEmpty) { color = '#aaa'; bg = '#f5f5f5'; }
+      else if (v.indexOf('✓') >= 0) { color = '#2e7d32'; bg = '#e8f5e9'; }
+      else if (v.indexOf('→') >= 0) { color = '#ef6c00'; bg = '#fff3e0'; }
+      else { color = '#1565c0'; bg = '#e3f2fd'; }
+      return '<span style="display:inline-block;background:' + bg + ';color:' + color + ';font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin:1px 2px 0 0;white-space:nowrap;"><span style="opacity:0.75;">' + label + ':</span> ' + escHtml(v) + '</span>';
     }
 
     // Range of months (as year*12+month) for multi-month check
@@ -15298,9 +15515,17 @@ async function loadNyutaiScreen() {
           const name = emp.Title || '';
           const buka = getBukaValue(emp) || '';
           const isFuture = new Date(emp[F.nyushaDate]) > new Date();
+          // 入社カード: 総務・雇用 + 総務-社保
+          const sKoyou = getSoumuVal(emp, 'soumuKoyou');
+          const sShaho = getSoumuVal(emp, 'soumuShaho');
+          let soumuHtml = '';
+          soumuHtml += soumuBadge('雇用', sKoyou);
+          soumuHtml += soumuBadge('社保', sShaho);
           html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
           html += '<div class="nyutai-emp-date">' + dt.replace(/^\d{4}\//, '') + '</div>';
-          html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div></div>';
+          html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div><div class="nyutai-emp-buka">' + escHtml(buka) + '</div>';
+          html += '<div style="margin-top:3px;line-height:1.5;">' + soumuHtml + '</div>';
+          html += '</div>';
           html += '<span class="nyutai-badge ' + (isFuture ? 'plan' : 'new') + '">' + (isFuture ? '入社予定' : '入社') + '</span>';
           html += '</div>';
         });
@@ -15331,11 +15556,23 @@ async function loadNyutaiScreen() {
           const now = new Date();
           const retDate = new Date(yd || hd);
           const isPlan = retDate > now;
+          // 退社カード: 総務・雇用 + 総務-社保 + 離職票 + 離職票渡し方
+          const sKoyouT = getSoumuVal(emp, 'soumuKoyou');
+          const sShahoT = getSoumuVal(emp, 'soumuShaho');
+          const sRisho = getSoumuVal(emp, 'rishokuhyou');
+          const sRishoW = getSoumuVal(emp, 'rishokuWatashi');
+          let soumuHtmlT = '';
+          soumuHtmlT += soumuBadge('雇用', sKoyouT);
+          soumuHtmlT += soumuBadge('社保', sShahoT);
+          soumuHtmlT += soumuBadge('離職票', sRisho);
+          soumuHtmlT += soumuBadge('渡し方', sRishoW);
           html += '<div class="nyutai-emp-card" onclick="openNyutaiEmployee(' + emp.Id + ')">';
           html += '<div class="nyutai-emp-date">' + displayDate + '</div>';
           html += '<div class="nyutai-emp-info"><div class="nyutai-emp-name">' + escHtml(name) + '</div>';
           html += '<div class="nyutai-emp-buka">' + escHtml(buka) + (tenure ? ' <span style="color:var(--primary);font-weight:600;">(' + tenure + ')</span>' : '') + '</div>';
-          html += '<div style="font-size:10px;color:var(--text-light);margin-top:2px;">' + escHtml(dateInfo) + '</div></div>';
+          html += '<div style="font-size:10px;color:var(--text-light);margin-top:2px;">' + escHtml(dateInfo) + '</div>';
+          html += '<div style="margin-top:3px;line-height:1.7;">' + soumuHtmlT + '</div>';
+          html += '</div>';
           html += '<span class="nyutai-badge ' + (isPlan ? 'plan' : 'retire') + '">' + (isPlan ? '退社予定' : '退社') + '</span>';
           html += '</div>';
         });
