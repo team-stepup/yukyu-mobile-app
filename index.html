@@ -4312,15 +4312,17 @@ select.sankyu-edit-input {
   </div>
 
   <!-- Screen: 社会保険 加入予定 -->
-  <div class="screen" id="shahoKanyuuYoteiScreen" style="position:relative;z-index:1;pointer-events:auto;">
+  <div class="screen" id="shahoKanyuuYoteiScreen">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <button onclick="loadShahoKanyuuYoteiList()" title="更新" style="background:none;border:none;font-size:18px;color:#2e7d32;cursor:pointer;">⟳</button>
       <h2 style="font-size:16px;font-weight:700;color:#1b5e20;margin:0;flex:1;text-align:center;">社会保険加入予定</h2>
       <a href="https://teamstepupcom774.sharepoint.com/Lists/List9/team.aspx?viewid=79cdf88a-a87a-48ba-8b45-5071541eecc0" target="_blank" rel="noopener" style="display:inline-block;background:#43a047;color:#fff;text-decoration:none;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:700;">📋 SPで開く</a>
     </div>
     <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
-      <span class="date-display-text" id="shahoYoteiDateDisplay" onclick="document.getElementById('shahoYoteiDate').showPicker()" style="flex:0 0 auto;padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;"></span>
-      <input type="date" id="shahoYoteiDate" class="date-hidden-input" onchange="onShahoYoteiDateChange()">
+      <div class="date-display-wrap" style="flex:0 0 auto;min-width:160px;">
+        <span class="date-display-text" id="shahoYoteiDateDisplay" onclick="document.getElementById('shahoYoteiDate').showPicker()" style="padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;"></span>
+        <input type="date" id="shahoYoteiDate" class="date-hidden-input" onchange="onShahoYoteiDateChange()">
+      </div>
       <span style="font-size:12px;color:var(--text-light);">〜 (以降 加入者)</span>
     </div>
     <div id="shahoKanyuuYoteiBody"></div>
@@ -7924,14 +7926,6 @@ async function openShahoYoteiEmp(syainNo) {
 }
 
 function openShahoKanyuuYoteiScreen() {
-  // 残っている可能性のあるオーバーレイを全て除去
-  ['soumuListOverlay','confirmOverlay','toastOverlay'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) el.remove();
-  });
-  document.querySelectorAll('.confirm-overlay, .taisha-overlay, .update-panel-overlay').forEach(function(el) {
-    el.remove();
-  });
   switchScreen('shahoKanyuuYoteiScreen');
   // デフォルトは当月1日
   var inp = document.getElementById('shahoYoteiDate');
@@ -8175,30 +8169,7 @@ function renderShahoKanyuuYoteiList() {
   }
   console.log('[社保加入予定] empMap size:', Object.keys(empMap).length);
 
-  // 画面上に常時表示のデバッグバッジを追加 (window-level event capture)
-  // これが動作すれば overlay 問題が確定する
-  if (!document.getElementById('_shahoYoteiDebugBadge')) {
-    var dbg = document.createElement('div');
-    dbg.id = '_shahoYoteiDebugBadge';
-    dbg.style.cssText = 'position:fixed;top:60px;right:8px;z-index:999999;background:#000;color:#0f0;font-size:11px;font-family:monospace;padding:6px 8px;border-radius:6px;pointer-events:none;min-width:120px;max-width:200px;word-break:break-all;';
-    dbg.textContent = 'DBG:タップ待機中';
-    document.body.appendChild(dbg);
-    var evtCount = 0;
-    ['pointerdown','touchstart','mousedown','click'].forEach(function(et) {
-      window.addEventListener(et, function(e) {
-        evtCount++;
-        var tgt = e.target;
-        var tag = tgt && tgt.tagName ? tgt.tagName : '?';
-        var cls = tgt && tgt.className ? String(tgt.className).substring(0,20) : '';
-        dbg.textContent = 'EVT#' + evtCount + ' ' + et + ' ' + tag + ' ' + cls;
-      }, true);
-    });
-  }
-
-  // テストボタン: position:fixed + 極高zIndex でオーバーレイの上に乗せる
-  var html = '<button type="button" onclick="alert(\'クリックOK: inline onclick 発火\');console.log(\'[TEST] inline onclick fired\');" id="_shahoTestBtn1" style="display:block;width:100%;background:#ff5722;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;margin-bottom:6px;cursor:pointer;">🧪 テスト1: 通常ボタン (インラインonclick)</button>';
-  html += '<button type="button" id="_shahoTestBtn2" style="display:block;width:100%;background:#2196f3;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;margin-bottom:10px;cursor:pointer;">🔵 テスト2: addEventListener (タップで反応)</button>';
-  html += '<div style="font-size:12px;color:var(--text-light);margin:0 2px 8px;">' + filtered.length + '件 <span style="color:#888;">(タップで社員情報を開く)</span></div>';
+  var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 8px;">' + filtered.length + '件 <span style="color:#888;">(タップで社員情報を開く)</span></div>';
   // ヘッダー (グリッド)
   html += '<div style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;background:#2e7d32;color:#fff;padding:8px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700;">';
   html += '<div>派遣先</div><div>番号</div><div>氏名</div><div>加入日</div>';
@@ -8235,61 +8206,8 @@ function renderShahoKanyuuYoteiList() {
   html += '<div style="height:30px;"></div>';
   body.innerHTML = html;
 
-  // テスト2ボタンに addEventListener
-  var tb2 = document.getElementById('_shahoTestBtn2');
-  if (tb2) {
-    tb2.addEventListener('click', function(ev) {
-      console.log('[TEST] addEventListener fired');
-      alert('クリックOK: addEventListener 発火');
-      var dbg = document.getElementById('_shahoYoteiDebugBadge');
-      if (dbg) dbg.textContent = '✅ addEL click OK!';
-    });
-    tb2.addEventListener('pointerdown', function(ev) {
-      var dbg = document.getElementById('_shahoYoteiDebugBadge');
-      if (dbg) dbg.textContent = '👆 pointerdown on テスト2';
-    });
-  }
-
-  // 画面上にフロート式の固定位置テストボタンも追加 (何かに覆われていても必ず見える)
-  var floatBtn = document.getElementById('_shahoFloatTestBtn');
-  if (!floatBtn) {
-    floatBtn = document.createElement('button');
-    floatBtn.id = '_shahoFloatTestBtn';
-    floatBtn.type = 'button';
-    floatBtn.textContent = '🎯 FIXED';
-    floatBtn.style.cssText = 'position:fixed;bottom:140px;right:16px;z-index:999998;background:#e91e63;color:#fff;border:none;border-radius:50%;width:64px;height:64px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
-    floatBtn.addEventListener('click', function() {
-      alert('FIXED ボタン反応OK');
-      var dbg = document.getElementById('_shahoYoteiDebugBadge');
-      if (dbg) dbg.textContent = '✅ FIXED click OK!';
-    });
-    document.body.appendChild(floatBtn);
-  }
-
-  // ボタン要素に直接addEventListenerで保険
-  var btns = body.querySelectorAll('button.shaho-yotei-btn');
-  console.log('[社保加入予定] binding direct listeners to', btns.length, 'rows');
-  btns.forEach(function(b) {
-    var bango = b.getAttribute('data-shaho-bango');
-    b.addEventListener('click', function(ev) {
-      console.log('[社保加入予定] DIRECT btn click, bango=', bango);
-      var dbg = document.getElementById('_shahoYoteiDebugBadge');
-      if (dbg) dbg.textContent = '✅ ROW click! bango=' + bango;
-    });
-  });
 }
 
-// グローバル1回だけクリックリスナーを設置 (document level delegation)
-if (!window._shahoYoteiClickAttached) {
-  document.addEventListener('click', function(ev) {
-    var btn = ev.target && ev.target.closest ? ev.target.closest('button.shaho-yotei-btn') : null;
-    if (!btn) return;
-    var bango = btn.getAttribute('data-shaho-bango');
-    console.log('[社保加入予定] DOC click captured, bango=', bango);
-  }, true); // capture phase で確実に捕捉
-  window._shahoYoteiClickAttached = true;
-  console.log('[社保加入予定] document click listener attached');
-}
 
 // 社保加入リストを overlay で表示
 function openSoumuShahoInList() {
