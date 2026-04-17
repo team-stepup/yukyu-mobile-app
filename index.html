@@ -5577,6 +5577,7 @@ function isResigned(emp) {
 
 async function selectEmployee(emp) {
   currentEmployee = emp;
+  _shahoYoteiOpenedItemId = null; // 他画面からの検索で開いた場合は社保加入予定フラグをクリア
   showSpinner();
   try {
     await loadLeaveDetails();
@@ -7895,14 +7896,32 @@ function openShahoListSharepoint() {
 }
 
 // 加入予定者から社員情報詳細へ (番号 → 社員ID → openNyutaiEmployee)
-async function openShahoYoteiEmp(syainNo) {
-  console.log('[社保加入予定] openShahoYoteiEmp called, syainNo=', syainNo, 'empsLoaded=', _soumuAllEmps ? _soumuAllEmps.length : 0);
+// 社保加入予定 → 社員情報 を開くときに List9 アイテムの ID を保持。
+// これで保存後に「加入申請詳細」を再表示できる。
+var _shahoYoteiOpenedItemId = null;
+
+async function openShahoYoteiEmp(syainNo, shahoItemId) {
+  console.log('[社保加入予定] openShahoYoteiEmp called, syainNo=', syainNo, 'shahoItemId=', shahoItemId, 'empsLoaded=', _soumuAllEmps ? _soumuAllEmps.length : 0);
   if (!syainNo) { showToast('社員番号がありません', 'error'); return; }
+  _shahoYoteiOpenedItemId = shahoItemId || null;
   try {
-    // まずローカルの _soumuAllEmps から探す
+    // まずローカルの _soumuAllEmps から探す (同一番号が複数ある場合は在職中を優先)
     if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
-      var found = _soumuAllEmps.find(function(e) { return String(e[F.syainNo]) === String(syainNo); });
-      console.log('[社保加入予定] lookup found:', found ? { id: found.Id, title: found.Title } : null);
+      var matches = _soumuAllEmps.filter(function(e) { return String(e[F.syainNo]) === String(syainNo); });
+      console.log('[社保加入予定] matches:', matches.length);
+      // 在職中を優先。無ければ退社済みのうち最新を使う
+      var active = matches.filter(function(e) { return !isResigned(e); });
+      var found = null;
+      if (active.length > 0) {
+        // 複数在職中が居た場合 Id が大きいもの (後から登録) を優先
+        active.sort(function(a, b) { return (b.Id || 0) - (a.Id || 0); });
+        found = active[0];
+      } else if (matches.length > 0) {
+        // 全員退社済みなら退社日が最も新しい (= Id が最大) を使う
+        matches.sort(function(a, b) { return (b.Id || 0) - (a.Id || 0); });
+        found = matches[0];
+      }
+      console.log('[社保加入予定] lookup found:', found ? { id: found.Id, title: found.Title, resigned: isResigned(found) } : null);
       if (found && found.Id) {
         await openNyutaiEmployee(found.Id);
         return;
@@ -8190,9 +8209,10 @@ function renderShahoKanyuuYoteiList() {
     }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
     var bangoStr = String(bango);
+    var itemId = item.Id || '';
     // 行全体を<button>要素にする (確実にクリック可能)
     if (bangoStr) {
-      html += '<button type="button" class="shaho-yotei-btn" data-shaho-bango="' + escHtml(bangoStr) + '" onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\')" style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;width:100%;padding:10px;background:' + bg + ';border:none;border-bottom:1px solid #e8f5e9;font-size:12px;text-align:left;cursor:pointer;font-family:inherit;">';
+      html += '<button type="button" class="shaho-yotei-btn" data-shaho-bango="' + escHtml(bangoStr) + '" data-shaho-itemid="' + escHtml(String(itemId)) + '" onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\', ' + (itemId || 'null') + ')" style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;width:100%;padding:10px;background:' + bg + ';border:none;border-bottom:1px solid #e8f5e9;font-size:12px;text-align:left;cursor:pointer;font-family:inherit;">';
     } else {
       html += '<div style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;padding:10px;background:' + bg + ';border-bottom:1px solid #e8f5e9;font-size:12px;">';
     }
@@ -8208,6 +8228,262 @@ function renderShahoKanyuuYoteiList() {
 
 }
 
+// ============================================================
+// 社保加入申請 詳細 (List9) の編集オーバーレイ
+// ============================================================
+var _shahoDetailCurrent = null; // 編集中 List9 アイテム
+var _shahoDetailFieldsMeta = null; // [{InternalName,Title,TypeAsString,Choices,OdKey}]
+
+// List9 のフィールドメタを取得
+async function fetchShahoDetailFieldsMeta() {
+  if (_shahoDetailFieldsMeta) return _shahoDetailFieldsMeta;
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var url = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/fields?$filter=Hidden eq false&$select=InternalName,Title,EntityPropertyName,TypeAsString,Choices,ReadOnlyField&$top=300";
+  var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!resp.ok) throw new Error('フィールド取得失敗 HTTP ' + resp.status);
+  var data = await resp.json();
+  var list = ((data.d && data.d.results) || []).map(function(f) {
+    var intName = f.EntityPropertyName || f.InternalName;
+    return {
+      InternalName: f.InternalName,
+      EntityPropertyName: f.EntityPropertyName,
+      Title: f.Title,
+      Type: f.TypeAsString,
+      ReadOnly: f.ReadOnlyField,
+      OdKey: intName.startsWith('_') ? 'OData_' + intName : intName,
+      Choices: (f.Choices && f.Choices.results) ? f.Choices.results : null
+    };
+  });
+  _shahoDetailFieldsMeta = list;
+  return list;
+}
+
+// List9 アイテムを ID で取得
+async function fetchShahoDetailItem(itemId) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var url = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items(" + itemId + ")";
+  var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!resp.ok) throw new Error('アイテム取得失敗 HTTP ' + resp.status);
+  var data = await resp.json();
+  return data.d;
+}
+
+// オーバーレイを開く
+async function openShahoKanyuuDetailOverlay(itemId) {
+  if (!itemId) { showToast('対象レコードが特定できません', 'error'); return; }
+  showSpinner();
+  try {
+    var meta = await fetchShahoDetailFieldsMeta();
+    var item = await fetchShahoDetailItem(itemId);
+    _shahoDetailCurrent = item;
+
+    // 表示対象フィールド (システム系は除く)
+    var SKIP = { 'ID':1, 'Id':1, 'ContentType':1, 'ContentTypeId':1, 'Modified':1, 'Created':1, 'Author':1, 'Editor':1,
+      'AuthorId':1, 'EditorId':1, 'Attachments':1, '_UIVersionString':1, 'GUID':1,
+      'FileRef':1, 'FileDirRef':1, 'FileLeafRef':1, 'Order':1, '_Level':1, 'owshiddenversion':1,
+      'PrincipalCount':1, 'ItemChildCount':1, 'FolderChildCount':1, 'AppAuthor':1, 'AppEditor':1,
+      '_ComplianceFlags':1, '_ComplianceTag':1, '_ComplianceTagWrittenTime':1, '_ComplianceTagUserId':1,
+      '_IsRecord':1, 'WorkflowVersion':1, 'WorkflowInstanceID':1, 'FileSystemObjectType':1,
+      'ParentUniqueId':1, 'MetaInfo':1, 'ParentLeafName':1, 'SMLastModifiedDate':1, 'SMTotalSize':1 };
+
+    var editable = meta.filter(function(f) {
+      if (!f.Title) return false;
+      if (SKIP[f.InternalName]) return false;
+      if (f.ReadOnly) return false;
+      return true;
+    });
+
+    // 確実に並べる順序 (重要フィールドを先頭に)
+    var preferredOrder = ['加入日', '派遣先', '社員番号', '氏名', '申請区分', '給料計算の締日'];
+    editable.sort(function(a, b) {
+      var ia = preferredOrder.indexOf(a.Title); if (ia < 0) ia = 99;
+      var ib = preferredOrder.indexOf(b.Title); if (ib < 0) ib = 99;
+      return ia - ib;
+    });
+
+    // 既存の overlay を除去
+    var old = document.getElementById('shahoDetailOverlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'shahoDetailOverlay';
+    overlay.className = 'taisha-overlay';
+
+    var fieldsHtml = '';
+    editable.forEach(function(f) {
+      var val = item[f.OdKey];
+      var inputHtml = buildShahoDetailInput(f, val);
+      if (!inputHtml) return;
+      fieldsHtml += '<div class="taisha-field">' +
+        '<label>' + escHtml(f.Title) + ' <span style="font-size:10px;color:#aaa;">(' + escHtml(f.Type) + ')</span></label>' +
+        inputHtml +
+      '</div>';
+    });
+
+    overlay.innerHTML =
+      '<div class="taisha-panel">' +
+        '<div class="taisha-header">' +
+          '<div class="taisha-header-bar">' +
+            '<span class="taisha-title">🏥 社保加入申請 詳細 (ID: ' + escHtml(String(itemId)) + ')</span>' +
+            '<button class="taisha-close" onclick="closeShahoDetailOverlay()">✕</button>' +
+          '</div>' +
+          '<div style="font-size:12px;color:#555;margin-top:4px;">内容を修正して「保存」をタップ</div>' +
+        '</div>' +
+        '<div class="taisha-body">' + fieldsHtml + '</div>' +
+        '<div class="taisha-footer">' +
+          '<button class="taisha-submit-btn" id="shahoDetailSaveBtn" onclick="saveShahoDetailOverlay()" style="background:linear-gradient(135deg,#43a047,#2e7d32);">💾 変更を保存</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeShahoDetailOverlay(); });
+  } catch (e) {
+    console.error('openShahoKanyuuDetailOverlay error:', e);
+    showToast('詳細の読み込みに失敗しました: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function buildShahoDetailInput(f, val) {
+  var safeId = 'shahoDet_' + f.InternalName.replace(/[^A-Za-z0-9_]/g, '_');
+  var v = (val === null || val === undefined) ? '' : val;
+  switch (f.Type) {
+    case 'DateTime':
+      var dateStr = '';
+      if (v) {
+        var d = new Date(v);
+        if (!isNaN(d.getTime())) {
+          dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        }
+      }
+      return '<input type="date" id="' + safeId + '" data-iname="' + escHtml(f.InternalName) + '" data-type="DateTime" value="' + escHtml(dateStr) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">';
+    case 'Number':
+    case 'Currency':
+      return '<input type="number" id="' + safeId + '" data-iname="' + escHtml(f.InternalName) + '" data-type="' + f.Type + '" value="' + escHtml(String(v)) + '" step="any" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">';
+    case 'Choice':
+      var options = '<option value="">選択してください</option>';
+      (f.Choices || []).forEach(function(c) {
+        var sel = (String(v) === String(c)) ? ' selected' : '';
+        options += '<option value="' + escHtml(c) + '"' + sel + '>' + escHtml(c) + '</option>';
+      });
+      return '<select id="' + safeId + '" data-iname="' + escHtml(f.InternalName) + '" data-type="Choice" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' + options + '</select>';
+    case 'Boolean':
+      var checked = (v === true || v === 'true' || v === 1) ? ' checked' : '';
+      return '<label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="' + safeId + '" data-iname="' + escHtml(f.InternalName) + '" data-type="Boolean"' + checked + '> <span>はい</span></label>';
+    case 'Note':
+      return '<textarea id="' + safeId + '" data-iname="' + escHtml(f.InternalName) + '" data-type="Note" rows="3" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;resize:vertical;">' + escHtml(String(v)) + '</textarea>';
+    case 'Text':
+    case 'Counter':
+    default:
+      return '<input type="text" id="' + safeId + '" data-iname="' + escHtml(f.InternalName) + '" data-type="Text" value="' + escHtml(String(v)) + '" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">';
+  }
+}
+
+function closeShahoDetailOverlay() {
+  var ov = document.getElementById('shahoDetailOverlay');
+  if (ov) ov.remove();
+  _shahoDetailCurrent = null;
+}
+
+async function saveShahoDetailOverlay() {
+  var item = _shahoDetailCurrent;
+  if (!item || !item.Id) { showToast('対象レコードがありません', 'error'); return; }
+  var btn = document.getElementById('shahoDetailSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var inputs = document.querySelectorAll('#shahoDetailOverlay [data-iname]');
+    var body = {};
+    var changed = false;
+    inputs.forEach(function(el) {
+      var iname = el.getAttribute('data-iname');
+      var type = el.getAttribute('data-type');
+      var newVal;
+      if (type === 'Boolean') {
+        newVal = el.checked;
+      } else if (type === 'Number' || type === 'Currency') {
+        newVal = el.value === '' ? null : parseFloat(el.value);
+      } else if (type === 'DateTime') {
+        newVal = el.value ? (el.value + 'T00:00:00Z') : null;
+      } else {
+        newVal = el.value;
+        if (newVal === '') newVal = null;
+      }
+      // 旧値比較: 型を揃えて比較
+      var odKey = iname.startsWith('_') ? 'OData_' + iname : iname;
+      var oldVal = item[odKey];
+      var isSame = false;
+      if (type === 'DateTime') {
+        var oldDate = oldVal ? String(oldVal).substring(0,10) : '';
+        var newDate = newVal ? String(newVal).substring(0,10) : '';
+        isSame = oldDate === newDate;
+      } else if (type === 'Number' || type === 'Currency') {
+        var oldNum = (oldVal === null || oldVal === undefined || oldVal === '') ? null : parseFloat(oldVal);
+        isSame = (oldNum === null && newVal === null) || (oldNum === newVal);
+      } else if (type === 'Boolean') {
+        isSame = !!oldVal === newVal;
+      } else {
+        isSame = (oldVal || '') === (newVal || '');
+      }
+      if (!isSame) {
+        body[iname] = newVal;
+        changed = true;
+      }
+    });
+
+    if (!changed) {
+      showToast('変更がありません', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '💾 変更を保存'; }
+      return;
+    }
+
+    // エンティティ型を取得
+    var listUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')";
+    var listResp = await fetch(listUrl + "?$select=ListItemEntityTypeFullName", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    var listData = await listResp.json();
+    var entityType = listData.d && listData.d.ListItemEntityTypeFullName;
+    if (!entityType) throw new Error('エンティティ型が取得できません');
+    body['__metadata'] = { type: entityType };
+
+    // CSRF(digest) 取得
+    var digestResp = await fetch(SP_ROOT_URL + "/_api/contextinfo", {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    var digestData = await digestResp.json();
+    var digest = digestData.d && digestData.d.GetContextWebInformation && digestData.d.GetContextWebInformation.FormDigestValue;
+
+    var saveResp = await fetch(listUrl + "/items(" + item.Id + ")", {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'X-HTTP-Method': 'MERGE',
+        'IF-MATCH': '*',
+        'X-RequestDigest': digest || ''
+      },
+      body: JSON.stringify(body)
+    });
+    if (!saveResp.ok) {
+      var errText = await saveResp.text();
+      throw new Error('HTTP ' + saveResp.status + ': ' + errText.substring(0,200));
+    }
+    showToast('社保加入申請を保存しました', 'success');
+    // キャッシュも再読込 (次回は最新データ)
+    _shahoYoteiLoaded = false;
+    closeShahoDetailOverlay();
+  } catch (e) {
+    console.error('saveShahoDetailOverlay error:', e);
+    showToast('保存エラー: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 変更を保存'; }
+  }
+}
 
 // 社保加入リストを overlay で表示
 function openSoumuShahoInList() {
@@ -14738,6 +15014,12 @@ async function saveEditSection(catId) {
     if (!hasChanges) {
       showToast('変更がありません', 'error');
       btn.disabled = false; btn.textContent = '📝 変更保存';
+      // 社保加入予定から開いていた場合は、変更がなくても詳細を開く
+      if (_shahoYoteiOpenedItemId) {
+        var pendingItemId = _shahoYoteiOpenedItemId;
+        _shahoYoteiOpenedItemId = null;
+        setTimeout(function() { openShahoKanyuuDetailOverlay(pendingItemId); }, 300);
+      }
       return;
     }
 
@@ -14756,6 +15038,15 @@ async function saveEditSection(catId) {
     _editDropdownCache = {}; // 次回編集時に最新値を再取得
     // Re-render profile
     await loadEmployeeProfile();
+
+    // 社保加入予定から開いていた場合、社保加入申請詳細を続けて開く
+    if (_shahoYoteiOpenedItemId) {
+      var pendingItemId = _shahoYoteiOpenedItemId;
+      _shahoYoteiOpenedItemId = null; // 1度限り
+      setTimeout(function() {
+        openShahoKanyuuDetailOverlay(pendingItemId);
+      }, 300);
+    }
 
   } catch (e) {
     console.error('Save error:', e);
