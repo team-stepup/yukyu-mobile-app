@@ -6871,7 +6871,7 @@ async function loadHomeBadges() {
   }
 }
 
-// 車両バッジ用データ取得 (使用中台数 ＋ 車検満了日が1ヵ月以内 or 期限切れの車両数)
+// 車両バッジ用データ取得 (使用中台数 ＋ 使用中かつ車検満了日が1ヵ月以内の車両数)
 var _vehicleBadgeFieldsCache = null;
 async function loadVehicleBadgeData() {
   var token = await getToken();
@@ -6919,16 +6919,19 @@ async function loadVehicleBadgeData() {
 
   var syakenCount = 0;
   var useCount = 0;
-  var now = new Date();
-  var nowTs = now.getTime();
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var todayTs = today.getTime();
   viItems.forEach(function(v) {
-    if (uf && (v[uf] || '') === '使用') useCount++;
-    if (sf && v[sf]) {
+    var isUse = uf ? ((v[uf] || '') === '使用') : true;
+    if (isUse && uf) useCount++;
+    // 車検1ヵ月以内は「使用」中かつ 0 <= 残り日数 <= 30
+    if (isUse && sf && v[sf]) {
       var sd = new Date(v[sf]);
       if (!isNaN(sd)) {
-        var diffDays = Math.ceil((sd.getTime() - nowTs) / 86400000);
-        // 期限切れ (< 0) または 1ヵ月以内 (<= 30)
-        if (diffDays <= 30) syakenCount++;
+        sd.setHours(0, 0, 0, 0);
+        var diffDays = Math.round((sd.getTime() - todayTs) / 86400000);
+        if (diffDays >= 0 && diffDays <= 30) syakenCount++;
       }
     }
   });
