@@ -4599,7 +4599,7 @@ let employeeFieldsCache = null; // cached field metadata {internalName: title}
 // Using a baked-in constant ensures we detect updates even when the HTML itself is
 // served from browser cache (a fresh version.json fetch would otherwise overwrite
 // the baseline and hide the update badge).
-const APP_BUILD_VERSION = '176a498';
+const APP_BUILD_VERSION = '__APP_BUILD_VERSION__';
 let initialVersion = (APP_BUILD_VERSION && APP_BUILD_VERSION.indexOf('__') !== 0) ? APP_BUILD_VERSION : null;
 // If page was reloaded via ?v= (update button), treat first version.json fetch as baseline
 // so the display immediately shows "最新" instead of stale "新バージョンあり"
@@ -7993,7 +7993,7 @@ async function loadShahoKanyuuYoteiList() {
 function renderShahoKanyuuYoteiList() {
   var body = document.getElementById('shahoKanyuuYoteiBody');
   if (!body) return;
-  var F = _shahoYoteiFields;
+  var SF = _shahoYoteiFields; // shaho-side field map
   var items = _shahoYoteiItems || [];
   var inp = document.getElementById('shahoYoteiDate');
   var selDate = null;
@@ -8004,7 +8004,7 @@ function renderShahoKanyuuYoteiList() {
 
   // フィールドが解決できていない場合、サンプルアイテムからキー推定
   function detectDateKey() {
-    if (F.kanyuubi) return F.kanyuubi;
+    if (SF.kanyuubi) return SF.kanyuubi;
     if (items.length === 0) return null;
     var sample = items[0];
     var cand = null;
@@ -8089,19 +8089,34 @@ function renderShahoKanyuuYoteiList() {
   // アイテムからkey推定ヘルパー (名前,派遣先,番号のフォールバック用)
   function detectKeyBy(predicate) {
     if (items.length === 0) return null;
-    var sample = items[0];
-    var keys = Object.keys(sample);
-    for (var i = 0; i < keys.length; i++) {
-      var k = keys[i];
-      if (k.startsWith('__')) continue;
-      if (predicate(k, sample[k])) return k;
+    // 最初の5件で試して値があるキーを優先
+    for (var s = 0; s < Math.min(5, items.length); s++) {
+      var sample = items[s];
+      var keys = Object.keys(sample);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k.startsWith('__')) continue;
+        if (predicate(k, sample[k])) return k;
+      }
     }
     return null;
   }
-  var hakenKey = F.hakensaki || detectKeyBy(function(k, v) { return (k.indexOf('_x6d3e__x9063_') >= 0 || k.toLowerCase().indexOf('haken') >= 0); });
-  var bangoKey = F.bango || detectKeyBy(function(k, v) { return (k.indexOf('_x793e__x54e1_') >= 0 || k.toLowerCase().indexOf('syain') >= 0 || k.toLowerCase().indexOf('shain') >= 0 || k === 'SyainNo'); });
-  var nameKey = F.name || detectKeyBy(function(k, v) { return (k.indexOf('_x6c0f__x540d_') >= 0 || k === 'Title'); });
+  var hakenKey = SF.hakensaki || detectKeyBy(function(k, v) { return (k.indexOf('_x6d3e__x9063_') >= 0 || k.toLowerCase().indexOf('haken') >= 0); });
+  var bangoKey = SF.bango || detectKeyBy(function(k, v) { return (k.indexOf('_x793e__x54e1_') >= 0 || k.toLowerCase().indexOf('syain') >= 0 || k.toLowerCase().indexOf('shain') >= 0 || k === 'SyainNo' || k.toLowerCase().indexOf('bango') >= 0); });
+  var nameKey = SF.name || detectKeyBy(function(k, v) { return (k.indexOf('_x6c0f__x540d_') >= 0 || k === 'Title'); });
   if (!nameKey) nameKey = 'Title';
+
+  // 社員データから派遣先を引くためのマップ (番号 → 社員エンティティ)
+  var empMap = {};
+  if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
+    _soumuAllEmps.forEach(function(e) {
+      var n = e[F.syainNo];
+      if (n !== null && n !== undefined) {
+        empMap[String(n)] = e;
+      }
+    });
+  }
+  console.log('[社保加入予定] empMap size:', Object.keys(empMap).length);
 
   var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 6px;">' + filtered.length + '件</div>';
   html += '<table class="list-table" style="width:100%;font-size:11px;table-layout:fixed;">';
@@ -8116,6 +8131,14 @@ function renderShahoKanyuuYoteiList() {
     var bango = bangoKey ? (item[bangoKey] || '') : '';
     var name = nameKey ? (item[nameKey] || item.Title || '') : (item.Title || '');
     var kStr = fmtD(item[kanyuuKey]);
+    // 派遣先が空なら社員データから引く
+    if (!haken && bango) {
+      var emp = empMap[String(bango)];
+      if (emp && typeof getHakensaki === 'function') {
+        var h = getHakensaki(emp);
+        if (h) haken = h;
+      }
+    }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
     html += '<tr style="background:' + bg + ';">';
     html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</td>';
