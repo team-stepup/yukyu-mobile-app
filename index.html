@@ -7957,16 +7957,30 @@ async function loadShahoKanyuuYoteiList() {
     };
     console.log('[社保加入予定] resolved fields:', _shahoYoteiFields);
 
-    // アイテム取得
-    var url = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=500";
-    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    var data = await resp.json();
-    _shahoYoteiItems = (data.d && data.d.results) || [];
+    // アイテム取得 (ページネーション対応で全件取得)
+    var allItems = [];
+    var pageUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=1000";
+    while (pageUrl) {
+      var pResp = await fetch(pageUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+      if (!pResp.ok) throw new Error('HTTP ' + pResp.status);
+      var pData = await pResp.json();
+      var pItems = (pData.d && pData.d.results) || [];
+      allItems = allItems.concat(pItems);
+      // 次のページ
+      pageUrl = (pData.d && pData.d.__next) ? pData.d.__next : null;
+      // 念のため安全装置 (最大50ページ)
+      if (allItems.length > 50000) break;
+    }
+    _shahoYoteiItems = allItems;
     console.log('[社保加入予定] items count:', _shahoYoteiItems.length);
     if (_shahoYoteiItems[0]) {
       console.log('[社保加入予定] sample item keys:', Object.keys(_shahoYoteiItems[0]).filter(function(k) { return _shahoYoteiItems[0][k] !== null && !k.startsWith('__'); }));
       console.log('[社保加入予定] sample item:', _shahoYoteiItems[0]);
+      // 加入日の最新5件をログ
+      if (_shahoYoteiFields.kanyuubi) {
+        var sorted = _shahoYoteiItems.slice().filter(function(x) { return x[_shahoYoteiFields.kanyuubi]; }).sort(function(a, b) { return new Date(b[_shahoYoteiFields.kanyuubi]) - new Date(a[_shahoYoteiFields.kanyuubi]); });
+        console.log('[社保加入予定] latest 5 kanyuubi:', sorted.slice(0, 5).map(function(x) { return { title: x.Title, kanyuubi: x[_shahoYoteiFields.kanyuubi] }; }));
+      }
     }
     _shahoYoteiLoaded = true;
     renderShahoKanyuuYoteiList();
