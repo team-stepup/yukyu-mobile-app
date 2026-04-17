@@ -4379,13 +4379,16 @@ select.sankyu-edit-input {
       <span id="nyutaiMonthLabel" style="font-size:17px;font-weight:800;color:var(--primary);min-width:120px;text-align:center;"></span>
       <button class="nyutai-nav-btn" onclick="changeNyutaiMonth(1)">▶</button>
     </div>
-    <div style="display:flex;justify-content:center;align-items:center;gap:6px;padding:0 0 8px;">
+    <div style="display:flex;justify-content:center;align-items:center;gap:6px;padding:0 0 8px;flex-wrap:wrap;">
       <button class="nyutai-range-btn active" data-range="1" onclick="setNyutaiRange(1)">1</button>
       <button class="nyutai-range-btn" data-range="2" onclick="setNyutaiRange(2)">2</button>
       <button class="nyutai-range-btn" data-range="3" onclick="setNyutaiRange(3)">3</button>
       <button class="nyutai-range-btn" data-range="6" onclick="setNyutaiRange(6)">6</button>
       <button class="nyutai-range-btn" data-range="12" onclick="setNyutaiRange(12)">12</button>
       <span style="font-size:11px;color:var(--text-light);">ヶ月</span>
+      <button class="nyutai-range-btn" data-range="24" onclick="setNyutaiRange(24)" style="margin-left:6px;">2</button>
+      <button class="nyutai-range-btn" data-range="36" onclick="setNyutaiRange(36)">3</button>
+      <span style="font-size:11px;color:var(--text-light);">年</span>
     </div>
     <div id="nyutaiSummary" style="display:flex;gap:6px;padding:0 4px 8px;flex-wrap:wrap;justify-content:center;"></div>
     <div id="nyutaiAnalysisWrap" style="display:none;">
@@ -16405,6 +16408,10 @@ async function loadNyutaiScreen() {
 
   if (nyutaiRange === 1) {
     label.textContent = nyutaiYear + '年' + (nyutaiMonth + 1) + '月';
+  } else if (nyutaiRange >= 13) {
+    // 1年超: 「YYYY年M月〜YYYY年M月 (Nヶ年)」
+    const yrs = Math.round(nyutaiRange / 12);
+    label.textContent = startY + '年' + (startM + 1) + '月〜' + nyutaiYear + '年' + (nyutaiMonth + 1) + '月 (' + yrs + '年間)';
   } else {
     label.textContent = startY + '年' + (startM + 1) + '月〜' + (nyutaiYear !== startY ? nyutaiYear + '年' : '') + (nyutaiMonth + 1) + '月';
   }
@@ -16586,8 +16593,14 @@ async function loadNyutaiScreen() {
     // Build body
     let html = '';
 
-    if (nyutaiRange >= 7) {
-      // ===== 7ヶ月以上: 月別集計テーブルのみ =====
+    if (nyutaiRange >= 13) {
+      // ===== 13ヶ月以上 (1年超): サマリ数字カード + 分析のみ。月別テーブルや個別カードは表示しない =====
+      html += '<div class="card" style="padding:14px 12px;margin-top:4px;text-align:center;color:var(--text-light);font-size:12px;line-height:1.6;">';
+      html += '📊 ' + nyutaiRange + 'ヶ月分の集計結果は上部の数字カードと下部の分析パネルをご確認ください。';
+      html += '<br><span style="font-size:11px;opacity:0.7;">長期間のため個別一覧は表示していません</span>';
+      html += '</div>';
+    } else if (nyutaiRange >= 7) {
+      // ===== 7〜12ヶ月: 月別集計テーブルのみ =====
       html += '<div class="card" style="padding:8px;margin-top:4px;">';
       html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
       html += '<thead><tr style="background:var(--primary);color:#fff;">';
@@ -16848,7 +16861,8 @@ function renderNyutaiAnalysis(nyusha, taishaList, startY, startM) {
       return false;
     }).length;
 
-    monthlyData.push({ label: (mm + 1) + '月', n: mN, t: mT });
+    const _lbl = (nyutaiRange > 12) ? (yy + '/' + (mm + 1)) : ((mm + 1) + '月');
+    monthlyData.push({ label: _lbl, n: mN, t: mT });
     if (mN > maxVal) maxVal = mN;
     if (mT > maxVal) maxVal = mT;
   }
