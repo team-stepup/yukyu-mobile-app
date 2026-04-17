@@ -8208,6 +8208,30 @@ function renderShahoKanyuuYoteiList() {
   html += '</tbody></table>';
   html += '<div style="height:30px;"></div>';
   body.innerHTML = html;
+
+  // 行のボタン/行自体に直接addEventListenerをバインド(3重化)
+  var rows = body.querySelectorAll('tr.shaho-yotei-row');
+  console.log('[社保加入予定] binding direct listeners to', rows.length, 'rows');
+  rows.forEach(function(row) {
+    var bango = row.getAttribute('data-shaho-bango');
+    if (!bango) return;
+    // 行自体のクリック
+    row.addEventListener('click', function(ev) {
+      // ボタンクリックは別ハンドラで処理されるためスキップ
+      if (ev.target && ev.target.tagName === 'BUTTON') return;
+      console.log('[社保加入予定] DIRECT row click, bango=', bango);
+      openShahoYoteiEmp(bango);
+    });
+    // 詳細ボタンのクリック
+    var btn = row.querySelector('button');
+    if (btn) {
+      btn.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        console.log('[社保加入予定] DIRECT button click, bango=', bango);
+        openShahoYoteiEmp(bango);
+      });
+    }
+  });
 }
 
 // グローバル1回だけクリックリスナーを設置 (document level delegation)
