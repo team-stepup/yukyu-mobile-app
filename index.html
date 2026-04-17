@@ -4313,10 +4313,10 @@ select.sankyu-edit-input {
 
   <!-- Screen: 社会保険 加入予定 -->
   <div class="screen" id="shahoKanyuuYoteiScreen">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <button onclick="loadShahoKanyuuYoteiList()" title="更新" style="background:none;border:none;font-size:18px;color:#2e7d32;cursor:pointer;">⟳</button>
       <h2 style="font-size:16px;font-weight:700;color:#1b5e20;margin:0;flex:1;text-align:center;">社会保険加入予定</h2>
-      <button type="button" onclick="openShahoListSharepoint();return false;" title="SharePointで開く" style="background:#e8f5e9;border:1px solid #81c784;border-radius:8px;font-size:16px;color:#2e7d32;cursor:pointer;padding:6px 12px;font-weight:700;">📋 SP</button>
+      <a href="https://teamstepupcom774.sharepoint.com/Lists/List9/team.aspx?viewid=79cdf88a-a87a-48ba-8b45-5071541eecc0" target="_blank" rel="noopener" style="display:inline-block;background:#43a047;color:#fff;text-decoration:none;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:700;">📋 SPで開く</a>
     </div>
     <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
       <span class="date-display-text" id="shahoYoteiDateDisplay" onclick="document.getElementById('shahoYoteiDate').showPicker()" style="flex:0 0 auto;padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;"></span>
@@ -8190,20 +8190,30 @@ function renderShahoKanyuuYoteiList() {
     }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
     var bangoStr = String(bango);
-    var hoverStyle = bangoStr ? 'cursor:pointer;' : '';
-    // 行自体はクリック不可。各tdにonclickをつける。
-    var cellOnclick = bangoStr ? ' onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'").replace(/"/g, '&quot;') + '\')"' : '';
-    var tdStyle = 'padding:7px 4px;border-bottom:1px solid #e8f5e9;' + hoverStyle;
-    html += '<tr style="background:' + bg + ';">';
-    html += '<td style="' + tdStyle + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"' + cellOnclick + '>' + escHtml(haken) + '</td>';
-    html += '<td style="' + tdStyle + 'color:#2e7d32;font-weight:600;"' + cellOnclick + '>' + escHtml(bangoStr) + '</td>';
-    html += '<td style="' + tdStyle + 'font-weight:600;"' + cellOnclick + '>' + escHtml(name) + '</td>';
-    html += '<td style="' + tdStyle + 'color:#1b5e20;"' + cellOnclick + '>' + escHtml(kStr) + '</td>';
+    var tdStyle = 'padding:7px 4px;border-bottom:1px solid #e8f5e9;';
+    html += '<tr class="shaho-yotei-row" data-shaho-bango="' + escHtml(bangoStr) + '" style="background:' + bg + ';' + (bangoStr ? 'cursor:pointer;' : '') + '">';
+    html += '<td style="' + tdStyle + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</td>';
+    html += '<td style="' + tdStyle + 'color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</td>';
+    html += '<td style="' + tdStyle + 'font-weight:600;">' + escHtml(name) + '</td>';
+    html += '<td style="' + tdStyle + 'color:#1b5e20;">' + escHtml(kStr) + '</td>';
     html += '</tr>';
   });
   html += '</tbody></table>';
   html += '<div style="height:30px;"></div>';
   body.innerHTML = html;
+}
+
+// グローバル1回だけクリックリスナーを設置 (document level delegation)
+if (!window._shahoYoteiClickAttached) {
+  document.addEventListener('click', function(ev) {
+    var row = ev.target && ev.target.closest ? ev.target.closest('tr.shaho-yotei-row') : null;
+    if (!row) return;
+    var bango = row.getAttribute('data-shaho-bango');
+    console.log('[社保加入予定] DOC click captured, bango=', bango);
+    if (bango) openShahoYoteiEmp(bango);
+  }, true); // capture phase で確実に捕捉
+  window._shahoYoteiClickAttached = true;
+  console.log('[社保加入予定] document click listener attached');
 }
 
 // 社保加入リストを overlay で表示
