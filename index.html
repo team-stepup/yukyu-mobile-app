@@ -7876,24 +7876,31 @@ var _shahoYoteiFields = {};
 // SharePoint リストを新タブで開く
 function openShahoListSharepoint() {
   var url = 'https://teamstepupcom774.sharepoint.com/Lists/List9/team.aspx?viewid=79cdf88a-a87a-48ba-8b45-5071541eecc0';
-  var w = window.open(url, '_blank');
-  if (!w) {
-    // ポップアップブロックされた場合はlocationで遷移
-    if (confirm('新タブで開けませんでした。現在のタブで開きますか？')) {
-      window.location.href = url;
+  console.log('[社保加入予定] SP button clicked, opening:', url);
+  try {
+    var w = window.open(url, '_blank');
+    console.log('[社保加入予定] window.open result:', w);
+    if (!w || w.closed || typeof w.closed === 'undefined') {
+      // ポップアップブロック
+      if (confirm('新タブで開けませんでした。現在のタブで開きますか？')) {
+        window.location.href = url;
+      }
     }
-  } else {
-    try { w.opener = null; } catch(_) {}
+  } catch (e) {
+    console.error('openShahoListSharepoint error:', e);
+    window.location.href = url;
   }
 }
 
 // 加入予定者から社員情報詳細へ (番号 → 社員ID → openNyutaiEmployee)
 async function openShahoYoteiEmp(syainNo) {
+  console.log('[社保加入予定] openShahoYoteiEmp called, syainNo=', syainNo, 'empsLoaded=', _soumuAllEmps ? _soumuAllEmps.length : 0);
   if (!syainNo) { showToast('社員番号がありません', 'error'); return; }
   try {
     // まずローカルの _soumuAllEmps から探す
     if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
       var found = _soumuAllEmps.find(function(e) { return String(e[F.syainNo]) === String(syainNo); });
+      console.log('[社保加入予定] lookup found:', found ? { id: found.Id, title: found.Title } : null);
       if (found && found.Id) {
         await openNyutaiEmployee(found.Id);
         return;
@@ -7901,7 +7908,9 @@ async function openShahoYoteiEmp(syainNo) {
     }
     // 見つからない場合 fetchFullEmployee にフォールバック
     if (typeof fetchFullEmployee === 'function') {
+      showToast('社員データ取得中...', 'success');
       var full = await fetchFullEmployee(syainNo);
+      console.log('[社保加入予定] fetchFullEmployee result:', full ? { id: full.Id, title: full.Title } : null);
       if (full && full.Id) {
         await openNyutaiEmployee(full.Id);
         return;
@@ -8181,9 +8190,8 @@ function renderShahoKanyuuYoteiList() {
     }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
     var bangoStr = String(bango);
-    var onclickAttr = bangoStr ? ' ontouchstart="tapGuardStart(event)" ontouchmove="tapGuardMove(event)" onclick="tapGuardClick(event, function(){openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\')})"' : '';
     var cursor = bangoStr ? 'cursor:pointer;' : '';
-    html += '<tr style="background:' + bg + ';' + cursor + '"' + onclickAttr + '>';
+    html += '<tr data-bango="' + escHtml(bangoStr) + '" style="background:' + bg + ';' + cursor + '">';
     html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</td>';
     html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</td>';
     html += '<td style="padding:7px 4px;border-bottom:1px solid #e8f5e9;font-weight:600;">' + escHtml(name) + '</td>';
@@ -8193,6 +8201,19 @@ function renderShahoKanyuuYoteiList() {
   html += '</tbody></table>';
   html += '<div style="height:30px;"></div>';
   body.innerHTML = html;
+
+  // 行クリックでopenShahoYoteiEmpを呼ぶ (イベント委任)
+  var tbl = body.querySelector('table.list-table');
+  if (tbl) {
+    tbl.addEventListener('click', function(ev) {
+      var tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-bango]') : null;
+      if (!tr) return;
+      var bango = tr.getAttribute('data-bango');
+      console.log('[社保加入予定] row clicked, bango=', bango);
+      if (!bango) return;
+      openShahoYoteiEmp(bango);
+    });
+  }
 }
 
 // 社保加入リストを overlay で表示
