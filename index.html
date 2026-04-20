@@ -8045,8 +8045,8 @@ async function fetchSoumuSeisanCount() {
   }
 }
 
-// 社会保険加入申請リスト: 加入日>=Today() AND 申請区分!=扶養追加/扶養喪失
-// (社保加入予定画面 loadShahoKanyuuYoteiList / renderShahoKanyuuYoteiList と同じロジック)
+// 社会保険加入申請リスト: 加入日<Today() AND IsBlank(本人加入) AND 申請区分!=扶養追加/扶養喪失
+// (加入日を過ぎているのに本人加入が未処理の人)
 async function fetchSoumuShahoInCount() {
   try {
     var token = await getToken();
@@ -8083,6 +8083,7 @@ async function fetchSoumuShahoInCount() {
     }
     var kanyuuKey = findF('加入日', 'kanyuubi', 'kanyu');
     var kubunKey = findF('申請区分', 'shinseiKubun');
+    var honninKey = findF('本人加入', 'honninKanyuu', 'honnin');
     // アイテム取得 (ページネーション対応で全件)
     var allItems = [];
     var pageUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=1000";
@@ -8100,14 +8101,19 @@ async function fetchSoumuShahoInCount() {
       if (!kVal) return false;
       var kDate = new Date(kVal); kDate.setHours(0,0,0,0);
       if (isNaN(kDate.getTime())) return false;
-      if (kDate < today) return false;     // 加入日>=Today()
+      if (kDate >= today) return false;     // 加入日<Today() (今日より前)
+      // IsBlank(本人加入)
+      if (honninKey) {
+        var hVal = item[honninKey];
+        if (hVal !== null && hVal !== undefined && String(hVal).trim() !== '') return false;
+      }
       if (kubunKey) {
         var kubun = String(item[kubunKey] || '').trim();
         if (kubun === '扶養追加' || kubun === '扶養喪失') return false;
       }
       return true;
     });
-    console.log('[社保加入] total:', allItems.length, 'filtered:', filtered.length, 'kanyuuKey:', kanyuuKey, 'kubunKey:', kubunKey);
+    console.log('[社保加入] total:', allItems.length, 'filtered:', filtered.length, 'kanyuuKey:', kanyuuKey, 'kubunKey:', kubunKey, 'honninKey:', honninKey);
     return { count: filtered.length, items: filtered };
   } catch (e) {
     console.warn('fetchSoumuShahoInCount error:', e);
