@@ -9151,11 +9151,16 @@ function renderSoumuDashboard() {
     });
     try {
       console.log('[社保喪失] totalEmps:', _soumuAllEmps.length, 'retired:', retired.length, 'count:', count);
-      console.log('[社保喪失] 退社者のsoumuShaho値一覧:', retired);
-      console.log('[社保喪失] カウント対象:', matched);
-      console.log('[社保喪失] 70075 ヒルキア:', target70075);
-      console.log('[社保喪失] odShaho key:', odShaho);
-    } catch(_){}
+      console.log('[社保喪失] odShaho key (len=' + odShaho.length + '):', JSON.stringify(odShaho));
+      console.log('[社保喪失] 70075 ヒルキア JSON:', JSON.stringify(target70075));
+      // 退社者のsoumuShaho値をユニーク集計
+      var valueFreq = {};
+      retired.forEach(function(r) { var k = r.shaho || '(空)'; valueFreq[k] = (valueFreq[k] || 0) + 1; });
+      console.log('[社保喪失] 退社者soumuShaho値の分布:', JSON.stringify(valueFreq));
+      // 70075が退社者にいるか
+      var hirukiaRow = retired.find(function(r) { return String(r.no) === '70075'; });
+      console.log('[社保喪失] 70075 退社者に含まれる?', JSON.stringify(hirukiaRow));
+    } catch(e){ console.warn(e); }
     return count;
   })();
 
