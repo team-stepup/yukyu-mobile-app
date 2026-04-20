@@ -5759,6 +5759,7 @@ function exitBadgeInfo(type, isPlan) {
 async function selectEmployee(emp) {
   currentEmployee = emp;
   _shahoYoteiOpenedItemId = null; // 他画面からの検索で開いた場合は社保加入予定フラグをクリア
+  _shahoFromSoumuDash = false;    // 同様に総務発フラグもクリア
   showSpinner();
   try {
     await loadLeaveDetails();
@@ -7050,6 +7051,8 @@ var _soumuKeyMap = null;
 var _soumuSeisanCount = 0;
 var _soumuShahoInCount = 0;
 var _soumuShahoInItems = [];
+var _soumuShahoInFields = {}; // kanyuubi/hakensaki/bango/name のキー
+var _shahoFromSoumuDash = false; // 総務「社保加入」カード発の遷移なら true → 申請詳細保存後に総務へ戻す
 var _soumuSankyuSummary = { active: 0, upcoming: 0, overdue: 0 };
 
 // ── 派遣先バッジ用データ取得 ──
@@ -8084,6 +8087,10 @@ async function fetchSoumuShahoInCount() {
     var kanyuuKey = findF('加入日', 'kanyuubi', 'kanyu');
     var kubunKey = findF('申請区分', 'shinseiKubun');
     var honninKey = findF('本人加入', 'honninKanyuu', 'honnin');
+    var hakenKey = findF('派遣先会社名', '派遣先', 'Hakensaki', '会社名');
+    var bangoKey = findF('社員番号', '社番', '番号', 'SyainNo', '社員No');
+    var nameKey  = findF('氏名', '社員名', '名前') || 'Title';
+    _soumuShahoInFields = { kanyuubi: kanyuuKey, hakensaki: hakenKey, bango: bangoKey, name: nameKey };
     // アイテム取得 (ページネーション対応で全件)
     var allItems = [];
     var pageUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=1000";
@@ -8750,6 +8757,14 @@ async function saveShahoDetailOverlay() {
     // キャッシュも再読込 (次回は最新データ)
     _shahoYoteiLoaded = false;
     closeShahoDetailOverlay();
+    // 総務ダッシュボード発のフローなら 総務ホームへ戻る
+    if (_shahoFromSoumuDash) {
+      _shahoFromSoumuDash = false;
+      setTimeout(function() {
+        if (typeof openSoumuScreen === 'function') openSoumuScreen();
+        else switchScreen('soumuScreen');
+      }, 300);
+    }
   } catch (e) {
     console.error('saveShahoDetailOverlay error:', e);
     showToast('保存エラー: ' + e.message, 'error');
@@ -8904,7 +8919,7 @@ function putShahoField(body, fmap, logicalKey, value) {
   return true;
 }
 
-// 社保加入リストを overlay で表示
+// 社保加入リストを overlay で表示 (派遣先・氏名・加入日 ／ クリックで社員情報詳細へ)
 function openSoumuShahoInList() {
   if (!_soumuShahoInItems || _soumuShahoInItems.length === 0) {
     showToast('該当者なし', 'info');
@@ -8912,23 +8927,84 @@ function openSoumuShahoInList() {
   }
   var existing = document.getElementById('soumuListOverlay');
   if (existing) existing.remove();
+
+  var SF = _soumuShahoInFields || {};
+  // 番号 → 社員エンティティ map (派遣先取得用)
+  var empMap = {};
+  if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
+    _soumuAllEmps.forEach(function(e) {
+      var n = e[F.syainNo];
+      if (n !== null && n !== undefined) empMap[String(n)] = e;
+    });
+  }
+  function fmtD(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+  }
+  function truncHaken(h) {
+    if (!h) return '';
+    var s = String(h);
+    var m = s.match(/(\d+:[^\d].*)/);
+    if (m) s = m[1].replace(/\d+$/, '');
+    var ci = s.indexOf(':');
+    if (ci >= 0) s = s.substring(ci + 1);
+    return s;
+  }
+
+  // 加入日昇順
+  var items = _soumuShahoInItems.slice().sort(function(a, b) {
+    var da = SF.kanyuubi ? new Date(a[SF.kanyuubi]) : 0;
+    var db = SF.kanyuubi ? new Date(b[SF.kanyuubi]) : 0;
+    return da - db;
+  });
+
+  var rows = '';
+  rows += '<div style="display:grid;grid-template-columns:3fr 2.5fr 2fr;gap:4px;background:#2e7d32;color:#fff;padding:8px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700;">';
+  rows += '<div>派遣先</div><div>氏名</div><div>加入日</div>';
+  rows += '</div>';
+  items.forEach(function(item, i) {
+    var bango = SF.bango ? (item[SF.bango] || '') : '';
+    var name  = SF.name ? (item[SF.name] || item.Title || '') : (item.Title || '');
+    var kStr  = SF.kanyuubi ? fmtD(item[SF.kanyuubi]) : '';
+    var haken = SF.hakensaki ? truncHaken(item[SF.hakensaki] || '') : '';
+    if (!haken && bango && empMap[String(bango)] && typeof getHakensaki === 'function') {
+      haken = getHakensaki(empMap[String(bango)]) || '';
+    }
+    var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
+    var bangoStr = String(bango);
+    var itemId = item.Id || '';
+    if (bangoStr) {
+      rows += '<button type="button" onclick="onSoumuShahoRowClick(\'' + bangoStr.replace(/'/g, "\\'") + '\', ' + (itemId || 'null') + ')" style="display:grid;grid-template-columns:3fr 2.5fr 2fr;gap:4px;width:100%;padding:10px;background:' + bg + ';border:none;border-bottom:1px solid #e8f5e9;font-size:12px;text-align:left;cursor:pointer;font-family:inherit;">';
+    } else {
+      rows += '<div style="display:grid;grid-template-columns:3fr 2.5fr 2fr;gap:4px;padding:10px;background:' + bg + ';border-bottom:1px solid #e8f5e9;font-size:12px;">';
+    }
+    rows += '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</div>';
+    rows += '<div style="font-weight:600;">' + escHtml(name) + '</div>';
+    rows += '<div style="color:#1b5e20;">' + escHtml(kStr) + '</div>';
+    rows += bangoStr ? '</button>' : '</div>';
+  });
+
   var ov = document.createElement('div');
   ov.id = 'soumuListOverlay';
   ov.className = 'confirm-overlay';
-  var itemsHtml = '';
-  _soumuShahoInItems.forEach(function(item) {
-    var name = item.Title || '';
-    itemsHtml += '<div class="soumu-list-item">';
-    itemsHtml += '<div class="soumu-list-name">' + escHtml(name) + '</div>';
-    itemsHtml += '</div>';
-  });
   ov.innerHTML =
-    '<div class="confirm-box" style="max-height:80vh;overflow-y:auto;">' +
-      '<div style="font-weight:700;font-size:16px;margin-bottom:12px;">社保 加入 (' + _soumuShahoInItems.length + '名)</div>' +
-      '<div>' + itemsHtml + '</div>' +
-      '<button class="confirm-btn confirm-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">閉じる</button>' +
+    '<div class="confirm-box" style="max-height:85vh;overflow-y:auto;max-width:520px;width:92%;padding:16px;">' +
+      '<div style="font-weight:700;font-size:16px;margin-bottom:8px;color:#1b5e20;">社保 加入 (' + items.length + '名)</div>' +
+      '<div style="font-size:11px;color:#666;margin-bottom:8px;">タップで社員情報を開きます</div>' +
+      '<div style="border:1px solid #c8e6c9;border-radius:8px;overflow:hidden;">' + rows + '</div>' +
+      '<div style="text-align:center;margin-top:12px;"><button class="confirm-btn confirm-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">閉じる</button></div>' +
     '</div>';
   document.body.appendChild(ov);
+}
+
+// 社保加入リスト行タップ: フラグを立てて社員情報詳細へ
+function onSoumuShahoRowClick(syainNo, shahoItemId) {
+  _shahoFromSoumuDash = true;
+  var ov = document.getElementById('soumuListOverlay');
+  if (ov) ov.remove();
+  openShahoYoteiEmp(syainNo, shahoItemId);
 }
 
 // 指定フィールドの値でフィルターした件数をカウント
