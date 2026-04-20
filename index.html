@@ -8046,52 +8046,68 @@ async function fetchSoumuSeisanCount() {
 }
 
 // 社会保険加入申請リスト: 加入日>=Today() AND 申請区分!=扶養追加/扶養喪失
-// (社保加入予定画面 renderShahoKanyuuYoteiList と同じフィルタ)
+// (社保加入予定画面 loadShahoKanyuuYoteiList / renderShahoKanyuuYoteiList と同じロジック)
 async function fetchSoumuShahoInCount() {
   try {
     var token = await getToken();
     if (!token) return { count: 0, items: [] };
-    // フィールドメタ取得
-    var fieldsUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName&$top=200";
-    var fResp = await fetch(fieldsUrl, {
-      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
-    });
-    var kanyuuKey = null, nameKey = null, kubunKey = null;
+    var hdrs = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
+    // フィールドメタ取得 (Hidden/ReadOnly でフィルターしない — 画面側と同じ)
+    var fieldsUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/fields?$select=InternalName,Title,EntityPropertyName,TypeAsString&$top=300";
+    var fResp = await fetch(fieldsUrl, { headers: hdrs });
+    var fMap = {}, fMapLower = {};
     if (fResp.ok) {
       var fData = await fResp.json();
-      var fields = (fData.d && fData.d.results) || [];
-      fields.forEach(function(f) {
-        var t = f.Title || '';
+      ((fData.d && fData.d.results) || []).forEach(function(f) {
         var intName = f.EntityPropertyName || f.InternalName;
         var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
-        if (t === '加入日' || t.indexOf('加入日') >= 0) kanyuuKey = odKey;
-        if (t === '氏名' || t === '社員名') nameKey = odKey;
-        if (t === '申請区分' || t.indexOf('申請区分') >= 0) kubunKey = odKey;
+        fMap[f.Title] = odKey;
+        var norm = String(f.Title || '').replace(/\s+/g, '').replace(/[\r\n]/g, '').toLowerCase();
+        if (norm) fMapLower[norm] = odKey;
       });
     }
-    // アイテム取得
-    var url = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=500";
-    var resp = await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
-    });
-    if (!resp.ok) return { count: 0, items: [] };
-    var data = await resp.json();
-    var allItems = (data.d && data.d.results) || [];
+    var titles = Object.keys(fMap);
+    function findF() {
+      var kws = Array.prototype.slice.call(arguments);
+      for (var i = 0; i < kws.length; i++) { if (fMap[kws[i]]) return fMap[kws[i]]; }
+      for (var i = 0; i < kws.length; i++) {
+        var k = String(kws[i]).replace(/\s+/g, '').replace(/[\r\n]/g, '').toLowerCase();
+        if (fMapLower[k]) return fMapLower[k];
+      }
+      for (var i = 0; i < kws.length; i++) {
+        for (var j = 0; j < titles.length; j++) {
+          if (titles[j].indexOf(kws[i]) >= 0) return fMap[titles[j]];
+        }
+      }
+      return null;
+    }
+    var kanyuuKey = findF('加入日', 'kanyuubi', 'kanyu');
+    var kubunKey = findF('申請区分', 'shinseiKubun');
+    // アイテム取得 (ページネーション対応で全件)
+    var allItems = [];
+    var pageUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=1000";
+    while (pageUrl) {
+      var pResp = await fetch(pageUrl, { headers: hdrs });
+      if (!pResp.ok) break;
+      var pData = await pResp.json();
+      allItems = allItems.concat((pData.d && pData.d.results) || []);
+      pageUrl = (pData.d && pData.d.__next) ? pData.d.__next : null;
+      if (allItems.length > 50000) break; // 安全装置
+    }
     var today = new Date(); today.setHours(0,0,0,0);
     var filtered = allItems.filter(function(item) {
-      // 加入日チェック (今日以降)
       var kVal = kanyuuKey ? item[kanyuuKey] : null;
       if (!kVal) return false;
       var kDate = new Date(kVal); kDate.setHours(0,0,0,0);
       if (isNaN(kDate.getTime())) return false;
       if (kDate < today) return false;     // 加入日>=Today()
-      // 扶養追加/喪失 は加入予定から除外
       if (kubunKey) {
         var kubun = String(item[kubunKey] || '').trim();
         if (kubun === '扶養追加' || kubun === '扶養喪失') return false;
       }
       return true;
     });
+    console.log('[社保加入] total:', allItems.length, 'filtered:', filtered.length, 'kanyuuKey:', kanyuuKey, 'kubunKey:', kubunKey);
     return { count: filtered.length, items: filtered };
   } catch (e) {
     console.warn('fetchSoumuShahoInCount error:', e);
