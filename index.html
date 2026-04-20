@@ -9128,18 +9128,24 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 社保喪失: Power Apps: soumusyaho="✓取得完了" AND zaisyoku="退社"
+  // 社保喪失: soumusyaho="✓取得完了" AND zaisyoku="退社"
+  // 「取得完了」含み「喪失」含まないでトレランス比較 (✓文字のバリエーション対応)
   var shahoOutCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odShaho = _soumuKeyMap['soumuShaho'];
     if (!odShaho) return 0;
     var count = 0;
+    var debugList = [];
     _soumuAllEmps.forEach(function(emp) {
       if (!emp.Title) return;
-      if (empZaisyoku(emp) !== '退社') return;
+      if (empZaisyoku(emp).trim() !== '退社') return;
       var v = String(emp[odShaho] || '');
-      if (v === '✓取得完了') count++;
+      if (v.indexOf('取得完了') >= 0 && v.indexOf('喪失') < 0) {
+        count++;
+        debugList.push({ no: emp[F.syainNo], name: emp.Title, val: v });
+      }
     });
+    try { console.log('[社保喪失] count:', count, 'items:', debugList); } catch(_){}
     return count;
   })();
 
@@ -9361,7 +9367,7 @@ function openSoumuFilterList(filterKey) {
       openSoumuShahoInList();
       return;
     case 'shaho-soushitsu':
-      // soumusyaho="✓取得完了" AND zaisyoku="退社"
+      // soumusyaho="✓取得完了" AND zaisyoku="退社" (トレランス比較)
       (function() {
         var odShaho = _soumuKeyMap['soumuShaho'];
         var odZ = _soumuKeyMap['zaisyoku'];
@@ -9369,8 +9375,9 @@ function openSoumuFilterList(filterKey) {
         var filteredList = _soumuAllEmps.filter(function(emp) {
           if (!emp.Title) return false;
           var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
-          if (zVal !== '退社') return false;
-          return String(emp[odShaho] || '') === '✓取得完了';
+          if (zVal.trim() !== '退社') return false;
+          var sv = String(emp[odShaho] || '');
+          return sv.indexOf('取得完了') >= 0 && sv.indexOf('喪失') < 0;
         });
         openSoumuListOverlay('社保 喪失', filteredList, odShaho, { field: F.yukyuTaisha, fallback: F.hakenTaisha, label: '退社日' });
       })();
