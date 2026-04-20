@@ -9063,17 +9063,24 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 雇用加入: Power Apps: soumukoyou="未加入" AND zaisyoku="在職"
+  // 雇用加入: soumukoyou="未加入" AND zaisyoku="在職" AND 入社日<今日
   var koyouInCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odKoyou = _soumuKeyMap['soumuKoyou'];
     if (!odKoyou) return 0;
+    var today = new Date(); today.setHours(0,0,0,0);
     var count = 0;
     _soumuAllEmps.forEach(function(emp) {
       if (!emp.Title) return; // 氏名なしスキップ
       if (empZaisyoku(emp) !== '在職') return;
       var v = String(emp[odKoyou] || '');
-      if (v === '未加入') count++;
+      if (v !== '未加入') return;
+      // 入社日<今日
+      var ndVal = F.nyushaDate ? emp[F.nyushaDate] : null;
+      if (!ndVal) return;
+      var nd = new Date(ndVal); nd.setHours(0,0,0,0);
+      if (isNaN(nd.getTime()) || nd >= today) return;
+      count++;
     });
     return count;
   })();
@@ -9284,18 +9291,24 @@ function openSoumuFilterList(filterKey) {
       matcher = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
       break;
     case 'koyou-kanyuu':
-      // Power Apps: soumukoyou="未加入" AND zaisyoku="在職"
+      // soumukoyou="未加入" AND zaisyoku="在職" AND 入社日<今日
       (function() {
         var odKoyou = _soumuKeyMap['soumuKoyou'];
         var odZ = _soumuKeyMap['zaisyoku'];
         if (!odKoyou) { showToast('フィールド「soumuKoyou」が見つかりません', 'error'); return; }
+        var today = new Date(); today.setHours(0,0,0,0);
         var filteredList = _soumuAllEmps.filter(function(emp) {
           if (!emp.Title) return false;
           var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
           if (zVal !== '在職') return false;
-          return String(emp[odKoyou] || '') === '未加入';
+          if (String(emp[odKoyou] || '') !== '未加入') return false;
+          var ndVal = F.nyushaDate ? emp[F.nyushaDate] : null;
+          if (!ndVal) return false;
+          var nd = new Date(ndVal); nd.setHours(0,0,0,0);
+          if (isNaN(nd.getTime()) || nd >= today) return false;
+          return true;
         });
-        openSoumuListOverlay('雇用 加入', filteredList, odKoyou);
+        openSoumuListOverlay('雇用 加入', filteredList, odKoyou, F.nyushaDate);
       })();
       return;
     case 'koyou-soushitsu':
@@ -9351,7 +9364,7 @@ function openSoumuFilterList(filterKey) {
   openSoumuListOverlay(title, list, odKey);
 }
 
-function openSoumuListOverlay(title, list, badgeField) {
+function openSoumuListOverlay(title, list, badgeField, extraDateField) {
   var existing = document.getElementById('soumuListOverlay');
   if (existing) existing.remove();
   var ov = document.createElement('div');
@@ -9366,11 +9379,19 @@ function openSoumuListOverlay(title, list, badgeField) {
       var no = emp[F.syainNo] || '';
       var haken = getHakensaki(emp) || '';
       var badge = badgeField ? (emp[badgeField] || '') : '';
+      var extraDate = '';
+      if (extraDateField && emp[extraDateField]) {
+        var d = new Date(emp[extraDateField]);
+        if (!isNaN(d.getTime())) {
+          extraDate = d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+        }
+      }
       var safeEmp = JSON.stringify(emp).replace(/'/g, '&#39;');
       itemsHtml += '<div class="soumu-list-item" onclick=\'document.getElementById("soumuListOverlay").remove();selectEmployee(' + safeEmp + ')\'>';
       itemsHtml +=   '<div style="flex:1;min-width:0;">';
       itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(name) + '</div>';
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);">No.' + escHtml(no) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
+      if (extraDate) itemsHtml += '<div style="font-size:11px;color:#1976d2;margin-top:2px;">入社日: ' + escHtml(extraDate) + '</div>';
       itemsHtml +=   '</div>';
       if (badge) itemsHtml += '<div style="font-size:11px;background:#f0f0f0;padding:3px 8px;border-radius:10px;white-space:nowrap;">' + escHtml(badge) + '</div>';
       itemsHtml += '</div>';
