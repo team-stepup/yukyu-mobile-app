@@ -4410,12 +4410,15 @@ select.sankyu-edit-input {
       <h2 style="font-size:16px;font-weight:700;color:#1b5e20;margin:0;flex:1;text-align:center;">社会保険加入予定</h2>
       <a href="https://teamstepupcom774.sharepoint.com/Lists/List9/team.aspx?viewid=79cdf88a-a87a-48ba-8b45-5071541eecc0" target="_blank" rel="noopener" style="display:inline-block;background:#43a047;color:#fff;text-decoration:none;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:700;">📋 SPで開く</a>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
-      <div class="date-display-wrap" style="flex:0 0 auto;min-width:160px;">
-        <span class="date-display-text" id="shahoYoteiDateDisplay" onclick="document.getElementById('shahoYoteiDate').showPicker()" style="padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;"></span>
-        <input type="date" id="shahoYoteiDate" class="date-hidden-input" onchange="onShahoYoteiDateChange()">
-      </div>
-      <span style="font-size:12px;color:var(--text-light);">〜 (以降 加入者)</span>
+    <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);flex-wrap:wrap;">
+      <label style="position:relative;display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:2px solid #81c784;border-radius:8px;font-size:14px;font-weight:700;color:#1b5e20;cursor:pointer;background:#f1f8e9;">
+        <span>📅</span>
+        <span id="shahoYoteiDateDisplay">選択</span>
+        <span style="font-size:11px;color:#4caf50;">▼</span>
+        <input type="date" id="shahoYoteiDate" onchange="onShahoYoteiDateChange()" style="position:absolute;inset:0;opacity:0;cursor:pointer;">
+      </label>
+      <span style="font-size:12px;color:var(--text-light);">以降の加入者</span>
+      <button type="button" onclick="resetShahoYoteiToToday()" style="margin-left:auto;background:#43a047;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">今日</button>
     </div>
     <div id="shahoKanyuuYoteiBody"></div>
   </div>
@@ -8236,6 +8239,14 @@ function onShahoYoteiDateChange() {
   renderShahoKanyuuYoteiList();
 }
 
+function resetShahoYoteiToToday() {
+  var inp = document.getElementById('shahoYoteiDate');
+  if (!inp) return;
+  var t = new Date();
+  inp.value = t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  onShahoYoteiDateChange();
+}
+
 async function loadShahoKanyuuYoteiList() {
   var body = document.getElementById('shahoKanyuuYoteiBody');
   if (!body) return;
@@ -9155,26 +9166,6 @@ function renderSoumuDashboard() {
   html +=   '</div>';
   html += '</div>';
 
-  // 🌐 外部勤怠サービス (3列カード)
-  html += '<div class="soumu-section-label">外部サービス</div>';
-  html += '<div class="soumu-grid-3">';
-  html += '<div class="soumu-svc-card soumu-svc-trex" onclick="soumuOpenExt(\'trex\')">';
-  html +=   '<div class="soumu-svc-icon">🦖</div>';
-  html +=   '<div class="soumu-svc-name">T-REX</div>';
-  html +=   '<div class="soumu-svc-sub">勤怠</div>';
-  html += '</div>';
-  html += '<div class="soumu-svc-card soumu-svc-goodjob" onclick="soumuOpenExt(\'goodjob\')">';
-  html +=   '<div class="soumu-svc-icon">💼</div>';
-  html +=   '<div class="soumu-svc-name">グッジョブ</div>';
-  html +=   '<div class="soumu-svc-sub">ハケン管理</div>';
-  html += '</div>';
-  html += '<div class="soumu-svc-card soumu-svc-tot" onclick="soumuOpenExt(\'touchontime\')">';
-  html +=   '<div class="soumu-svc-icon">⏰</div>';
-  html +=   '<div class="soumu-svc-name">Touch On Time</div>';
-  html +=   '<div class="soumu-svc-sub">勤怠</div>';
-  html += '</div>';
-  html += '</div>';
-
   // 🕒 申請中カウント (3列)
   html += '<div class="soumu-section-label">申請中</div>';
   html += '<div class="soumu-grid-3">';
@@ -9247,6 +9238,26 @@ function renderSoumuDashboard() {
   html +=     '</div>';
   html +=     '<div class="sankyu-pink-sub" style="color:#2e7d32;">加入予定者を日付で絞り込み ▸</div>';
   html +=   '</div>';
+  html += '</div>';
+
+  // 🌐 外部勤怠サービス (一番下・3列カード)
+  html += '<div class="soumu-section-label">外部サービス</div>';
+  html += '<div class="soumu-grid-3">';
+  html += '<div class="soumu-svc-card soumu-svc-trex" onclick="soumuOpenExt(\'trex\')">';
+  html +=   '<div class="soumu-svc-icon">🦖</div>';
+  html +=   '<div class="soumu-svc-name">T-REX</div>';
+  html +=   '<div class="soumu-svc-sub">勤怠</div>';
+  html += '</div>';
+  html += '<div class="soumu-svc-card soumu-svc-goodjob" onclick="soumuOpenExt(\'goodjob\')">';
+  html +=   '<div class="soumu-svc-icon">💼</div>';
+  html +=   '<div class="soumu-svc-name">グッジョブ</div>';
+  html +=   '<div class="soumu-svc-sub">ハケン管理</div>';
+  html += '</div>';
+  html += '<div class="soumu-svc-card soumu-svc-tot" onclick="soumuOpenExt(\'touchontime\')">';
+  html +=   '<div class="soumu-svc-icon">⏰</div>';
+  html +=   '<div class="soumu-svc-name">Touch On Time</div>';
+  html +=   '<div class="soumu-svc-sub">勤怠</div>';
+  html += '</div>';
   html += '</div>';
 
   html += '<div style="height:30px;"></div>';
