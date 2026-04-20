@@ -9133,19 +9133,29 @@ function renderSoumuDashboard() {
   var shahoOutCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odShaho = _soumuKeyMap['soumuShaho'];
-    if (!odShaho) return 0;
+    if (!odShaho) { try { console.log('[社保喪失] soumuShaho キー未解決'); } catch(_){}; return 0; }
     var count = 0;
-    var debugList = [];
+    var matched = [], retired = [], target70075 = null;
     _soumuAllEmps.forEach(function(emp) {
+      var no = F.syainNo ? emp[F.syainNo] : '';
+      if (String(no) === '70075') target70075 = { no: no, name: emp.Title, zaisyoku: empZaisyoku(emp), soumuShaho: String(emp[odShaho] || ''), rawKeys: Object.keys(emp).filter(function(k){ return k.indexOf('52d9') >= 0 || k.indexOf('7dcf') >= 0; }) };
       if (!emp.Title) return;
-      if (empZaisyoku(emp).trim() !== '退社') return;
+      var z = empZaisyoku(emp).trim();
+      if (z !== '退社') return;
       var v = String(emp[odShaho] || '');
+      retired.push({ no: no, name: emp.Title, shaho: v });
       if (v.indexOf('取得完了') >= 0 && v.indexOf('喪失') < 0) {
         count++;
-        debugList.push({ no: emp[F.syainNo], name: emp.Title, val: v });
+        matched.push({ no: no, name: emp.Title, val: v });
       }
     });
-    try { console.log('[社保喪失] count:', count, 'items:', debugList); } catch(_){}
+    try {
+      console.log('[社保喪失] totalEmps:', _soumuAllEmps.length, 'retired:', retired.length, 'count:', count);
+      console.log('[社保喪失] 退社者のsoumuShaho値一覧:', retired);
+      console.log('[社保喪失] カウント対象:', matched);
+      console.log('[社保喪失] 70075 ヒルキア:', target70075);
+      console.log('[社保喪失] odShaho key:', odShaho);
+    } catch(_){}
     return count;
   })();
 
