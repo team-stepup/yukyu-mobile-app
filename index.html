@@ -8045,7 +8045,7 @@ async function fetchSoumuSeisanCount() {
   }
 }
 
-// 社会保険加入申請リスト: 加入日<Today() AND IsBlank(本人加入) AND 申請区分!=扶養追加/扶養喪失
+// 社会保険加入申請リスト: 加入日<Today() AND IsBlank(本人加入) AND 申請区分 in {新規加入,扶養追加,氏名変更,その他,空白}
 // (加入日を過ぎているのに本人加入が未処理の人)
 async function fetchSoumuShahoInCount() {
   try {
@@ -8109,7 +8109,8 @@ async function fetchSoumuShahoInCount() {
       }
       if (kubunKey) {
         var kubun = String(item[kubunKey] || '').trim();
-        if (kubun === '扶養追加' || kubun === '扶養喪失') return false;
+        var ALLOWED_KUBUN = ['', '新規加入', '扶養追加', '氏名変更', 'その他'];
+        if (ALLOWED_KUBUN.indexOf(kubun) < 0) return false;
       }
       return true;
     });
