@@ -9100,6 +9100,23 @@ function renderSoumuDashboard() {
     return count;
   })();
 
+  // 離職票: zaisyoku="退社" AND rishokuhyou="必要" AND soumuRishoku="不要"
+  var rishokuhyouCount = (function() {
+    if (!_soumuAllEmps || !_soumuKeyMap) return 0;
+    var odRishokuhyou = _soumuKeyMap['rishokuhyou'];
+    var odRishoku = _soumuKeyMap['soumuRishoku'];
+    if (!odRishokuhyou || !odRishoku) return 0;
+    var count = 0;
+    _soumuAllEmps.forEach(function(emp) {
+      if (!emp.Title) return;
+      if (empZaisyoku(emp) !== '退社') return;
+      if (String(emp[odRishokuhyou] || '').trim() !== '必要') return;
+      if (String(emp[odRishoku] || '').trim() !== '不要') return;
+      count++;
+    });
+    return count;
+  })();
+
   // 社保喪失: Power Apps: soumusyaho="✓取得完了" AND zaisyoku="退社"
   var shahoOutCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
@@ -9123,7 +9140,7 @@ function renderSoumuDashboard() {
     koyouOut: koyouOutCount,
     shahoIn: _soumuShahoInCount || 0,
     shahoOut: shahoOutCount,
-    rishokuhyou: soumuCount('soumuRishoku', mRishokuhyou, true),
+    rishokuhyou: rishokuhyouCount,
     kyuryoSeisan: _soumuSeisanCount || 0
   };
 
@@ -9348,9 +9365,23 @@ function openSoumuFilterList(filterKey) {
       })();
       return;
     case 'rishokuhyou':
-      badgeKey = 'soumuRishoku'; title = '離職票';
-      matcher = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
-      break;
+      // zaisyoku="退社" AND rishokuhyou="必要" AND soumuRishoku="不要"
+      (function() {
+        var odRishokuhyou = _soumuKeyMap['rishokuhyou'];
+        var odRishoku = _soumuKeyMap['soumuRishoku'];
+        var odZ = _soumuKeyMap['zaisyoku'];
+        if (!odRishokuhyou || !odRishoku) { showToast('フィールドが見つかりません', 'error'); return; }
+        var filteredList = _soumuAllEmps.filter(function(emp) {
+          if (!emp.Title) return false;
+          var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
+          if (zVal !== '退社') return false;
+          if (String(emp[odRishokuhyou] || '').trim() !== '必要') return false;
+          if (String(emp[odRishoku] || '').trim() !== '不要') return false;
+          return true;
+        });
+        openSoumuListOverlay('離職票', filteredList, odRishoku, { field: F.yukyuTaisha, fallback: F.hakenTaisha, label: '退社日' });
+      })();
+      return;
     case 'kyuryo-seisan':
       soumuOpenSeisanList();
       return;
