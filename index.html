@@ -9085,7 +9085,7 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 雇用喪失: Power Apps: soumukoyou="✓取得完了" AND zaisyoku="退社"
+  // 雇用喪失: (soumukoyou="✓取得完了" Or "→取得申請中") AND zaisyoku="退社"
   var koyouOutCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odKoyou = _soumuKeyMap['soumuKoyou'];
@@ -9095,7 +9095,7 @@ function renderSoumuDashboard() {
       if (!emp.Title) return;
       if (empZaisyoku(emp) !== '退社') return;
       var v = String(emp[odKoyou] || '');
-      if (v === '✓取得完了') count++;
+      if (v === '✓取得完了' || v === '→取得申請中') count++;
     });
     return count;
   })();
@@ -9312,7 +9312,7 @@ function openSoumuFilterList(filterKey) {
       })();
       return;
     case 'koyou-soushitsu':
-      // Power Apps: soumukoyou="✓取得完了" AND zaisyoku="退社"
+      // (soumukoyou="✓取得完了" Or "→取得申請中") AND zaisyoku="退社"
       (function() {
         var odKoyou = _soumuKeyMap['soumuKoyou'];
         var odZ = _soumuKeyMap['zaisyoku'];
@@ -9321,9 +9321,10 @@ function openSoumuFilterList(filterKey) {
           if (!emp.Title) return false;
           var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
           if (zVal !== '退社') return false;
-          return String(emp[odKoyou] || '') === '✓取得完了';
+          var kv = String(emp[odKoyou] || '');
+          return kv === '✓取得完了' || kv === '→取得申請中';
         });
-        openSoumuListOverlay('雇用 喪失', filteredList, odKoyou);
+        openSoumuListOverlay('雇用 喪失', filteredList, odKoyou, { field: F.yukyuTaisha, fallback: F.hakenTaisha, label: '退社日' });
       })();
       return;
     case 'shaho-kanyuu':
@@ -9364,12 +9365,28 @@ function openSoumuFilterList(filterKey) {
   openSoumuListOverlay(title, list, odKey);
 }
 
-function openSoumuListOverlay(title, list, badgeField, extraDateField) {
+// extraDate: null | string (field) | { field, fallback, label }
+function openSoumuListOverlay(title, list, badgeField, extraDate) {
   var existing = document.getElementById('soumuListOverlay');
   if (existing) existing.remove();
   var ov = document.createElement('div');
   ov.id = 'soumuListOverlay';
   ov.className = 'confirm-overlay';
+  // extraDate を正規化
+  var extraCfg = null;
+  if (extraDate) {
+    if (typeof extraDate === 'string') {
+      extraCfg = { field: extraDate, fallback: null, label: '入社日' };
+    } else {
+      extraCfg = { field: extraDate.field, fallback: extraDate.fallback || null, label: extraDate.label || '日付' };
+    }
+  }
+  function fmtDate(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+  }
   var itemsHtml = '';
   if (list.length === 0) {
     itemsHtml = '<div style="text-align:center;padding:30px;color:var(--text-light);">該当者なし</div>';
@@ -9379,19 +9396,17 @@ function openSoumuListOverlay(title, list, badgeField, extraDateField) {
       var no = emp[F.syainNo] || '';
       var haken = getHakensaki(emp) || '';
       var badge = badgeField ? (emp[badgeField] || '') : '';
-      var extraDate = '';
-      if (extraDateField && emp[extraDateField]) {
-        var d = new Date(emp[extraDateField]);
-        if (!isNaN(d.getTime())) {
-          extraDate = d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
-        }
+      var extraStr = '';
+      if (extraCfg) {
+        extraStr = fmtDate(extraCfg.field ? emp[extraCfg.field] : null);
+        if (!extraStr && extraCfg.fallback) extraStr = fmtDate(emp[extraCfg.fallback]);
       }
       var safeEmp = JSON.stringify(emp).replace(/'/g, '&#39;');
       itemsHtml += '<div class="soumu-list-item" onclick=\'document.getElementById("soumuListOverlay").remove();selectEmployee(' + safeEmp + ')\'>';
       itemsHtml +=   '<div style="flex:1;min-width:0;">';
       itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(name) + '</div>';
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);">No.' + escHtml(no) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
-      if (extraDate) itemsHtml += '<div style="font-size:11px;color:#1976d2;margin-top:2px;">入社日: ' + escHtml(extraDate) + '</div>';
+      if (extraStr) itemsHtml += '<div style="font-size:11px;color:#1976d2;margin-top:2px;">' + escHtml(extraCfg.label) + ': ' + escHtml(extraStr) + '</div>';
       itemsHtml +=   '</div>';
       if (badge) itemsHtml += '<div style="font-size:11px;background:#f0f0f0;padding:3px 8px;border-radius:10px;white-space:nowrap;">' + escHtml(badge) + '</div>';
       itemsHtml += '</div>';
