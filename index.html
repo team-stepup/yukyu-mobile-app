@@ -9128,16 +9128,22 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 社保喪失: 退社日が設定されている(過去・未来問わず) AND soumuShaho="✓取得完了"
-  // zaisyoku フィールドは更新漏れがあるため、退社日の有無で退社判定する
+  // 社保喪失: 退社日(有給使用後退社日と派遣先退社日の遅い方)が今日以前 AND soumuShaho="✓取得完了"
+  // 未来の退社予定は除外 (まだ社保喪失処理のタイミングではないため)
   var shahoOutCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odShaho = _soumuKeyMap['soumuShaho'];
     if (!odShaho) return 0;
+    var today = new Date(); today.setHours(0,0,0,0);
     var count = 0;
     _soumuAllEmps.forEach(function(emp) {
       if (!emp.Title) return;
-      if (!emp[F.yukyuTaisha] && !emp[F.hakenTaisha]) return;
+      var yd = emp[F.yukyuTaisha] ? new Date(emp[F.yukyuTaisha]) : null;
+      var hd = emp[F.hakenTaisha] ? new Date(emp[F.hakenTaisha]) : null;
+      if (!yd && !hd) return;                       // 退社日なし
+      var latest = (yd && hd) ? (yd.getTime() > hd.getTime() ? yd : hd) : (yd || hd);
+      latest.setHours(0,0,0,0);
+      if (latest > today) return;                   // 遅い方が未来 → カウント除外
       var v = String(emp[odShaho] || '');
       if (v.indexOf('取得完了') >= 0 && v.indexOf('喪失') < 0) count++;
     });
@@ -9362,13 +9368,19 @@ function openSoumuFilterList(filterKey) {
       openSoumuShahoInList();
       return;
     case 'shaho-soushitsu':
-      // 退社日が設定されている(過去・未来問わず) AND soumuShaho="✓取得完了" (トレランス比較)
+      // 退社日(遅い方)が今日以前 AND soumuShaho="✓取得完了" (トレランス比較)
       (function() {
         var odShaho = _soumuKeyMap['soumuShaho'];
         if (!odShaho) { showToast('フィールド「soumuShaho」が見つかりません', 'error'); return; }
+        var today = new Date(); today.setHours(0,0,0,0);
         var filteredList = _soumuAllEmps.filter(function(emp) {
           if (!emp.Title) return false;
-          if (!emp[F.yukyuTaisha] && !emp[F.hakenTaisha]) return false;
+          var yd = emp[F.yukyuTaisha] ? new Date(emp[F.yukyuTaisha]) : null;
+          var hd = emp[F.hakenTaisha] ? new Date(emp[F.hakenTaisha]) : null;
+          if (!yd && !hd) return false;
+          var latest = (yd && hd) ? (yd.getTime() > hd.getTime() ? yd : hd) : (yd || hd);
+          latest.setHours(0,0,0,0);
+          if (latest > today) return false;
           var sv = String(emp[odShaho] || '');
           return sv.indexOf('取得完了') >= 0 && sv.indexOf('喪失') < 0;
         });
