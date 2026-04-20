@@ -9128,39 +9128,19 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 社保喪失: soumusyaho="✓取得完了" AND zaisyoku="退社"
-  // 「取得完了」含み「喪失」含まないでトレランス比較 (✓文字のバリエーション対応)
+  // 社保喪失: isResigned(退社日がある) AND soumuShaho="✓取得完了"
+  // zaisyoku フィールドは更新漏れがあるため、退社日の有無で退社判定する
   var shahoOutCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odShaho = _soumuKeyMap['soumuShaho'];
-    if (!odShaho) { try { console.log('[社保喪失] soumuShaho キー未解決'); } catch(_){}; return 0; }
+    if (!odShaho) return 0;
     var count = 0;
-    var matched = [], retired = [], target70075 = null;
     _soumuAllEmps.forEach(function(emp) {
-      var no = F.syainNo ? emp[F.syainNo] : '';
-      if (String(no) === '70075') target70075 = { no: no, name: emp.Title, zaisyoku: empZaisyoku(emp), soumuShaho: String(emp[odShaho] || ''), rawKeys: Object.keys(emp).filter(function(k){ return k.indexOf('52d9') >= 0 || k.indexOf('7dcf') >= 0; }) };
       if (!emp.Title) return;
-      var z = empZaisyoku(emp).trim();
-      if (z !== '退社') return;
+      if (!isResigned(emp)) return;
       var v = String(emp[odShaho] || '');
-      retired.push({ no: no, name: emp.Title, shaho: v });
-      if (v.indexOf('取得完了') >= 0 && v.indexOf('喪失') < 0) {
-        count++;
-        matched.push({ no: no, name: emp.Title, val: v });
-      }
+      if (v.indexOf('取得完了') >= 0 && v.indexOf('喪失') < 0) count++;
     });
-    try {
-      console.log('[社保喪失] totalEmps:', _soumuAllEmps.length, 'retired:', retired.length, 'count:', count);
-      console.log('[社保喪失] odShaho key (len=' + odShaho.length + '):', JSON.stringify(odShaho));
-      console.log('[社保喪失] 70075 ヒルキア JSON:', JSON.stringify(target70075));
-      // 退社者のsoumuShaho値をユニーク集計
-      var valueFreq = {};
-      retired.forEach(function(r) { var k = r.shaho || '(空)'; valueFreq[k] = (valueFreq[k] || 0) + 1; });
-      console.log('[社保喪失] 退社者soumuShaho値の分布:', JSON.stringify(valueFreq));
-      // 70075が退社者にいるか
-      var hirukiaRow = retired.find(function(r) { return String(r.no) === '70075'; });
-      console.log('[社保喪失] 70075 退社者に含まれる?', JSON.stringify(hirukiaRow));
-    } catch(e){ console.warn(e); }
     return count;
   })();
 
@@ -9382,15 +9362,13 @@ function openSoumuFilterList(filterKey) {
       openSoumuShahoInList();
       return;
     case 'shaho-soushitsu':
-      // soumusyaho="✓取得完了" AND zaisyoku="退社" (トレランス比較)
+      // isResigned(退社日あり) AND soumuShaho="✓取得完了" (トレランス比較)
       (function() {
         var odShaho = _soumuKeyMap['soumuShaho'];
-        var odZ = _soumuKeyMap['zaisyoku'];
         if (!odShaho) { showToast('フィールド「soumuShaho」が見つかりません', 'error'); return; }
         var filteredList = _soumuAllEmps.filter(function(emp) {
           if (!emp.Title) return false;
-          var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
-          if (zVal.trim() !== '退社') return false;
+          if (!isResigned(emp)) return false;
           var sv = String(emp[odShaho] || '');
           return sv.indexOf('取得完了') >= 0 && sv.indexOf('喪失') < 0;
         });
