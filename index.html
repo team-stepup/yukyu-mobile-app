@@ -6159,15 +6159,21 @@ async function loadLeaveDetails() {
         if (v.indexOf('申請中') >= 0 || /発行|交付|郵送|手渡し|送付/.test(v)) return 's-pending';
         return 's-skip';
       }
-      function buildChip(label, val) {
-        var c = chipClass(val);
+      function buildChip(label, val, opts) {
+        opts = opts || {};
+        var trimmed = String(val || '').trim();
+        // 在職中(退社日未設定)の「不要」は非表示 (対応不要なので表示しない)
+        if (opts.hideIfUnneeded && trimmed === '不要') return '';
+        var c = chipClass(trimmed);
         if (!c) return '';
-        return '<span class="profile-status-chip ' + c + '"><span class="psc-lbl">' + label + '</span><span class="psc-val">' + escHtml(String(val)) + '</span></span>';
+        return '<span class="profile-status-chip ' + c + '"><span class="psc-lbl">' + label + '</span><span class="psc-val">' + escHtml(trimmed) + '</span></span>';
       }
+      // 退社日(過去・未来問わず)があるかどうか
+      var hasRetireDate = !!(emp[F.yukyuTaisha] || emp[F.hakenTaisha]);
       var html = '';
       html += buildChip('雇用',   koyouKey   ? emp[koyouKey]   : '');
       html += buildChip('社保',   shahoKey   ? emp[shahoKey]   : '');
-      html += buildChip('離職票', rishokuKey ? emp[rishokuKey] : '');
+      html += buildChip('離職票', rishokuKey ? emp[rishokuKey] : '', { hideIfUnneeded: !hasRetireDate });
       var row = document.getElementById('profileStatusRow');
       if (row && html) {
         row.innerHTML = html;
