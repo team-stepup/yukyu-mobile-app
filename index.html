@@ -15236,6 +15236,49 @@ var DROPDOWN_NEW_FIELDS = {
   nationality: { label: '本(国)籍' },
   zairyuShikaku: { label: '在留資格' }
 };
+
+// 職業安定統計R8 の職種コード+名称一覧 (このリストにない場合は「その他」で手入力)
+// 値の保存形式: "コード名称" (例: "03401一般事務員") — Excel の A列に揃える
+var JOB_CODE_LIST = [
+  { code: '03401', name: '一般事務員' },
+  { code: '06704', name: '金属プレス設備オペレーター' },
+  { code: '07103', name: '金属熱処理工' },
+  { code: '07105', name: '汎用金属工作機械工' },
+  { code: '07111', name: 'めっき工、金属研磨工' },
+  { code: '07305', name: 'パルプ・紙製品製造工' },
+  { code: '07307', name: 'ゴム製品製造工' },
+  { code: '07308', name: 'プラスチック製品製造工' },
+  { code: '07402', name: '電気機械組立工' },
+  { code: '07403', name: '電気通信機械器具組立工' },
+  { code: '07408', name: '電線製造工' },
+  { code: '07409', name: '電子機器部品組立工' },
+  { code: '07411', name: '自動車組立工' },
+  { code: '07601', name: '金属材料検査工' },
+  { code: '09502', name: '陸上荷役・運搬作業員' },
+  { code: '09601', name: 'ビル・建物清掃員' },
+  { code: '09701', name: '製品包装作業員' }
+];
+
+// 職種ドロップダウンの onchange: 「その他」選択時はテキスト欄を表示
+function onSyokusyuDropdownChange(sel) {
+  var selId = sel.id;
+  var baseId = selId.replace(/_sel$/, '');
+  var txt = document.getElementById(baseId + '_text');
+  var hidden = document.getElementById(baseId);
+  if (sel.value === '__other__') {
+    if (txt) { txt.style.display = ''; if (hidden) hidden.value = txt.value || ''; txt.focus(); }
+  } else {
+    if (txt) txt.style.display = 'none';
+    if (hidden) hidden.value = sel.value || '';
+  }
+}
+// 職種「その他」テキスト欄の入力反映
+function onSyokusyuTextChange(txt) {
+  var txtId = txt.id;
+  var baseId = txtId.replace(/_text$/, '');
+  var hidden = document.getElementById(baseId);
+  if (hidden) hidden.value = txt.value || '';
+}
 var _editDropdownCache = {};
 // 連動マップ: { dependentKey: { sourceValue: [allowed dependent values] } }
 var _editDropdownLinkMaps = {};
@@ -15402,6 +15445,31 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
       });
     }
     html += '</select>';
+    return html;
+  }
+
+  // 職種: JOB_CODE_LIST からドロップダウン + 「その他」手入力切替
+  if (field.key === 'syokusyu') {
+    var selId = id + '_sel';
+    var txtId = id + '_text';
+    var listValues = JOB_CODE_LIST.map(function(j) { return j.code + j.name; });
+    var inList = val && listValues.indexOf(String(val)) >= 0;
+    var html = '<div class="syokusyu-wrap" style="display:flex;flex-direction:column;gap:4px;">';
+    html += '<select class="edit-select" id="' + selId + '" onchange="onSyokusyuDropdownChange(this)">';
+    html += '<option value="">（未選択）</option>';
+    JOB_CODE_LIST.forEach(function(j) {
+      var optVal = j.code + j.name;
+      var sel = (String(val) === optVal) ? ' selected' : '';
+      html += '<option value="' + escHtml(optVal) + '"' + sel + '>' + escHtml(j.code) + '　' + escHtml(j.name) + '</option>';
+    });
+    var otherSel = (val && !inList) ? ' selected' : '';
+    html += '<option value="__other__"' + otherSel + '>その他（手入力）</option>';
+    html += '</select>';
+    var otherVal = (val && !inList) ? String(val) : '';
+    var txtStyle = (val && !inList) ? '' : 'display:none;';
+    html += '<input type="text" class="edit-input" id="' + txtId + '" value="' + escHtml(otherVal) + '" placeholder="職種名を入力" style="' + txtStyle + '" oninput="onSyokusyuTextChange(this)">';
+    html += '<input type="hidden" id="' + id + '" data-field="' + field.key + '" value="' + escHtml(String(val)) + '">';
+    html += '</div>';
     return html;
   }
 
