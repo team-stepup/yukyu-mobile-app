@@ -21353,12 +21353,29 @@ var COMPANY_INFO_SECTIONS = [
   ]}
 ];
 
+// 設立年月日から経過年月を算出して 基本情報 セクションに動的追加したセクション配列を返す
+function buildCompanyInfoSections() {
+  var start = new Date(2004, 9, 7); // 2004/10/7
+  var now = new Date();
+  var y = now.getFullYear() - start.getFullYear();
+  var m = now.getMonth() - start.getMonth();
+  if (now.getDate() < start.getDate()) m--;
+  if (m < 0) { y--; m += 12; }
+  var foundedStr = '2004年10月7日（設立' + y + '年' + m + 'ヶ月）';
+  return COMPANY_INFO_SECTIONS.map(function(sec) {
+    var rows = sec.rows.slice();
+    if (sec.title.indexOf('基本情報') >= 0) rows.push(['設立年月日', foundedStr]);
+    return { title: sec.title, color: sec.color, rows: rows };
+  });
+}
+
 function openCompanyInfoPopup() {
   var existing = document.getElementById('companyInfoOverlay');
   if (existing) existing.remove();
   var overlay = document.createElement('div');
   overlay.id = 'companyInfoOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px;';
+  var sections = buildCompanyInfoSections();
   var html = '<div style="background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.35);">';
   html +=   '<div style="background:linear-gradient(135deg,#6a1b9a,#7b1fa2,#9c27b0);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">';
   html +=     '<div style="font-size:22px;line-height:1;">🏢</div>';
@@ -21366,7 +21383,7 @@ function openCompanyInfoPopup() {
   html +=     '<button onclick="closeCompanyInfoPopup()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">×</button>';
   html +=   '</div>';
   html +=   '<div style="flex:1;overflow-y:auto;padding:12px;background:#fafafa;-webkit-overflow-scrolling:touch;">';
-  COMPANY_INFO_SECTIONS.forEach(function(sec) {
+  sections.forEach(function(sec) {
     html += '<div style="margin-bottom:12px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid #e0e0e0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">';
     html +=   '<div style="background:' + sec.color + ';color:#fff;padding:8px 12px;font-size:13px;font-weight:700;">' + escHtml(sec.title) + '</div>';
     html +=   '<div>';
