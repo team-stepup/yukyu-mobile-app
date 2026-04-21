@@ -15803,18 +15803,19 @@ const DOC_TYPES = [
 const capturedDocs = {};
 
 function onDocCapture(docId, input) {
-  const file = input.files[0];
-  if (!file) return;
+  const files = Array.from(input.files || []);
+  if (files.length === 0) return;
   if (!capturedDocs[docId]) capturedDocs[docId] = [];
 
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    const idx = capturedDocs[docId].length;
-    capturedDocs[docId].push({ file: file, dataUrl: e.target.result });
-    renderDocPreview(docId);
-  };
-  reader.readAsDataURL(file);
-  // Reset input so same file can be re-selected
+  files.forEach(function(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      capturedDocs[docId].push({ file: file, dataUrl: e.target.result });
+      renderDocPreview(docId);
+    };
+    reader.readAsDataURL(file);
+  });
+  // Reset input so same file(s) can be re-selected
   input.value = '';
 }
 
@@ -16606,14 +16607,17 @@ async function renderAddEmployeeForm() {
   // Document capture section
   html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
   html += '<div class="section-title">📷 書類撮影</div>';
-  html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:8px;">撮影した画像はSharePointに自動保存されます。テキスト抽出でコピペも可能です。</div>';
+  html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:8px;">📷 カメラで撮影、または 📁 既存の画像ファイルを選択できます（複数選択可）。SharePointに自動保存され、テキスト抽出でコピペも可能です。</div>';
   DOC_TYPES.forEach(doc => {
     html += '<div class="doc-capture-card" id="docCard_' + doc.id + '">';
     html += '<div class="doc-capture-header">';
     html += '<span class="doc-icon">' + doc.icon + '</span>';
     html += '<span class="doc-label">' + doc.label + (doc.hint ? ' <span style="font-size:10px;color:var(--text-light);font-weight:400;">(' + doc.hint + ')</span>' : '') + '</span>';
     html += '<span id="docCount_' + doc.id + '" style="font-size:10px;color:var(--primary);font-weight:700;min-width:28px;text-align:center;"></span>';
-    html += '<label class="doc-capture-btn"><input type="file" accept="image/*" capture="environment" style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📷 撮影</label>';
+    html += '<div style="display:flex;gap:4px;">';
+    html +=   '<label class="doc-capture-btn"><input type="file" accept="image/*" capture="environment" style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📷 カメラ</label>';
+    html +=   '<label class="doc-capture-btn" style="background:#455a64;"><input type="file" accept="image/*" multiple style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📁 ファイル</label>';
+    html += '</div>';
     html += '</div>';
     html += '<div class="doc-preview" id="docPreview_' + doc.id + '" style="display:none;"></div>';
     html += '</div>';
