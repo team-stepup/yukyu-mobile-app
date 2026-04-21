@@ -4268,6 +4268,9 @@ select.sankyu-edit-input {
       </button>
     </div>
 
+    <!-- 最低賃金チェック＋10〜11月リマインダーバナー -->
+    <div id="minWageBanner" style="display:none;"></div>
+
     <div class="home-search-card">
       <div class="home-search-title">社員検索</div>
       <div class="home-search-wrap">
@@ -6721,6 +6724,8 @@ function categoryHasAlert(emp, keyMap, category) {
 // Open expiry alert list — shows all employees with deadlines within 60 days
 // Home badge counts (前払い・入退・期限注意)
 async function loadHomeBadges() {
+  // 最低賃金チェックとリマインダーバナー (APIコール不要なので先に描画)
+  try { renderMinWageBanner(); } catch(e) { console.warn('minWage banner error:', e); }
   var today = new Date();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
@@ -15258,6 +15263,52 @@ var JOB_CODE_LIST = [
   { code: '09601', name: 'ビル・建物清掃員' },
   { code: '09701', name: '製品包装作業員' }
 ];
+
+// ── 最低賃金チェック ────────────────────────────────
+// 静岡県の最低賃金 (円/時)。10月頃改定のため、改定後ここを更新する。
+var SHIZUOKA_MIN_WAGE = 1097;
+// 職業安定統計R8 地域指数「静岡100.7」0年目の時給 (円) — 最低賃金改定時に要確認
+var JOB_WAGE_DATA_SHIZUOKA = {
+  '03401': 1130, '06704': 1155, '07103': 1194, '07105': 1177,
+  '07111': 1165, '07305': 1139, '07307': 1138, '07308': 1166,
+  '07402': 1158, '07403': 1175, '07408': 1097, '07409': 1105,
+  '07411': 1182, '07601': 1164, '09502': 1276, '09601': 1146,
+  '09701': 1107
+};
+
+// ホーム画面の最低賃金チェック＋10〜11月リマインダーバナー描画
+function renderMinWageBanner() {
+  var container = document.getElementById('minWageBanner');
+  if (!container) return;
+  var violations = [];
+  JOB_CODE_LIST.forEach(function(j) {
+    var w = JOB_WAGE_DATA_SHIZUOKA[j.code];
+    if (typeof w === 'number' && w < SHIZUOKA_MIN_WAGE) {
+      violations.push({ code: j.code, name: j.name, wage: w });
+    }
+  });
+  var month = new Date().getMonth() + 1;
+  var showReminder = (month === 10 || month === 11);
+  var html = '';
+  if (violations.length > 0) {
+    html += '<div style="background:linear-gradient(135deg,#ffebee,#ffcdd2);border:2px solid #c62828;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(198,40,40,0.15);">';
+    html +=   '<div style="font-size:14px;font-weight:700;color:#b71c1c;margin-bottom:6px;">⚠️ 最低賃金 ' + SHIZUOKA_MIN_WAGE + '円 未満の職種があります</div>';
+    html +=   '<div style="font-size:12px;color:#424242;">';
+    violations.forEach(function(v) {
+      html += '<div style="padding:2px 0;">・<b>' + escHtml(v.code) + '</b> ' + escHtml(v.name) + '（<b style="color:#c62828;">' + v.wage + '円</b>）</div>';
+    });
+    html +=   '</div>';
+    html += '</div>';
+  }
+  if (showReminder) {
+    html += '<div style="background:linear-gradient(135deg,#fff8e1,#ffecb3);border:2px solid #f57c00;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(245,124,0,0.12);">';
+    html +=   '<div style="font-size:13px;font-weight:700;color:#e65100;">📅 最低賃金の更新確認時期です</div>';
+    html +=   '<div style="font-size:11px;color:#6d4c41;margin-top:4px;line-height:1.5;">現在の設定: <b>静岡県 ' + SHIZUOKA_MIN_WAGE + '円/時</b>。10〜11月は最低賃金が改定されるので、最新値を確認して更新依頼してください。</div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+  container.style.display = html ? 'block' : 'none';
+}
 
 // 職種ドロップダウンの onchange: 「その他」選択時はテキスト欄を表示
 function onSyokusyuDropdownChange(sel) {
