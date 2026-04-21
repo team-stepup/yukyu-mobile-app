@@ -5606,6 +5606,18 @@ function parseDateQuery(query) {
   return null;
 }
 
+// ひらがな ⇔ カタカナ 変換 (検索のかな揺らぎ対応)
+function toKatakana(s) {
+  return String(s || '').replace(/[\u3041-\u3096]/g, function(ch) {
+    return String.fromCharCode(ch.charCodeAt(0) + 0x60);
+  });
+}
+function toHiragana(s) {
+  return String(s || '').replace(/[\u30A1-\u30F6]/g, function(ch) {
+    return String.fromCharCode(ch.charCodeAt(0) - 0x60);
+  });
+}
+
 async function searchEmployee() {
   const query = document.getElementById('searchInput').value.trim();
   const container = document.getElementById('searchResults');
@@ -5638,8 +5650,15 @@ async function searchEmployee() {
       // Number only → search by employee number
       filter = "$filter=" + F.syainNo + " eq " + query + "&$top=10";
     } else {
-      // Text → search by name (Title contains query)
-      filter = "$filter=substringof('" + query.replace(/'/g, "''") + "',Title)&$top=20";
+      // Text → ひらがな/カタカナ/原文 のすべてで Title を部分一致検索
+      var qOrig = query.replace(/'/g, "''");
+      var qKata = toKatakana(query).replace(/'/g, "''");
+      var qHira = toHiragana(query).replace(/'/g, "''");
+      var seen = {};
+      var variants = [];
+      [qOrig, qKata, qHira].forEach(function(v) { if (v && !seen[v]) { seen[v] = 1; variants.push(v); } });
+      var orClauses = variants.map(function(v) { return "substringof('" + v + "',Title)"; }).join(' or ');
+      filter = "$filter=(" + orClauses + ")&$top=30";
     }
     const results = await spGet(LIST_EMPLOYEES_GUID, filter);
 
