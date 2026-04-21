@@ -9039,10 +9039,10 @@ function renderSoumuDashboard() {
   if (!body) return;
 
   // 各種カウント (badgeフィールドの値で集計)
-  // Power Apps: soumukoyou="→取得申請中" Or soumukoyou="→喪失申請中"
-  var mKoyou = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
-  // Power Apps: soumusyaho="→取得申請中" Or soumusyaho="→喪失申請中"
-  var mShaho = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
+  // 雇用申請中: 取得申請中 または 喪失申請中 (→文字や前後空白のバリエーションに強いtolerant比較)
+  var mKoyou = function(v) { return v.indexOf('取得申請中') >= 0 || v.indexOf('喪失申請中') >= 0; };
+  // 社保申請中: 取得申請中 または 喪失申請中 (同上)
+  var mShaho = function(v) { return v.indexOf('取得申請中') >= 0 || v.indexOf('喪失申請中') >= 0; };
   var mRishokuhyou = function(v) { return v.indexOf('発行') >= 0 || v.indexOf('交付') >= 0 || v.indexOf('送付') >= 0 || v.indexOf('手渡し') >= 0 || v.indexOf('郵送') >= 0; };
 
   // ── zaisyoku フィールドの OData キー取得 ──
@@ -9295,7 +9295,7 @@ function openSoumuFilterList(filterKey) {
   switch (filterKey) {
     case 'koyou-mochuu':
       badgeKey = 'soumuKoyou'; title = '雇用 申請中';
-      matcher = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
+      matcher = function(v) { return v.indexOf('取得申請中') >= 0 || v.indexOf('喪失申請中') >= 0; };
       break;
     case 'rishoku-mochuu':
       // 離職票申請中: zaisyoku="退社" && 離職票risyokuhyou="必要" && 総務-離職票="→申請中"
@@ -9322,8 +9322,8 @@ function openSoumuFilterList(filterKey) {
       return;
     case 'shaho-mochuu':
       badgeKey = 'soumuShaho'; title = '社保 申請中';
-      // Power Apps: soumusyaho="→取得申請中" Or soumusyaho="→喪失申請中"
-      matcher = function(v) { return v === '→取得申請中' || v === '→喪失申請中'; };
+      // 取得申請中 または 喪失申請中 (tolerant比較)
+      matcher = function(v) { return v.indexOf('取得申請中') >= 0 || v.indexOf('喪失申請中') >= 0; };
       break;
     case 'koyou-kanyuu':
       // soumukoyou="未加入" AND zaisyoku="在職" AND 入社日<今日
