@@ -23310,42 +23310,66 @@ function openFilePreviewFromPayload(payloadB64) {
   }
 }
 
-// PDFプレビューを iframe 表示に切替 (PDF.jsで描画不良の場合のフォールバック)
+// PDFプレビューをブラウザ内蔵PDFビューア(Blob URL iframe)に切替
+// cross-origin iframe は SharePoint の X-Frame-Options で blocked されるため、
+// OAuth で取得した PDF バイナリを Blob URL にしてブラウザ native ビューアで表示する
 function switchPreviewToIframe(payloadB64, btnEl) {
   try {
     var p = JSON.parse(decodeURIComponent(escape(atob(payloadB64))));
     var body = document.getElementById('previewBody');
     if (!body) return;
-    body.innerHTML = '';
-    // SharePointはURLに ?web=1 で PDFをブラウザ内ビューア表示する
-    var iframeUrl = p.ext + '?web=1';
-    var iframe = document.createElement('iframe');
-    iframe.src = iframeUrl;
-    iframe.style.cssText = 'width:100%;height:80vh;border:0;background:#fff;';
-    iframe.setAttribute('allowfullscreen', '');
-    body.appendChild(iframe);
-    // 切替ボタンを "PDF.js表示" に変更
-    if (btnEl) {
-      btnEl.textContent = '🔄 PDF.js表示に戻す';
-      btnEl.onclick = function() {
-        // 再度ボタンを元に戻して PDF.js でレンダリング
-        btnEl.textContent = '📺 iframe表示';
-        btnEl.onclick = function() { switchPreviewToIframe(payloadB64, btnEl); };
-        body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">📄</div><div>PDF.js で再読み込み中...</div></div>';
-        (async function() {
-          try {
-            var token = await getToken();
-            var srMatch = p.ext.match(/https?:\/\/[^/]+(\/.*)$/);
-            var srUrl = srMatch ? srMatch[1] : '';
-            if (!srUrl) throw new Error('srUrl 取得失敗');
-            var pbuf = await downloadSpFile(token, srUrl);
-            await renderPdfBufferToBody(pbuf, body);
-          } catch(e) {
-            body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">⚠️</div><div>再読み込み失敗: ' + escHtml(e.message || String(e)) + '</div></div>';
+    body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">📺</div><div>ブラウザ内蔵ビューアで読み込み中...</div></div>';
+    (async function() {
+      try {
+        var token = await getToken();
+        var srMatch = p.ext.match(/https?:\/\/[^/]+(\/.*)$/);
+        var srUrl = srMatch ? srMatch[1] : '';
+        if (!srUrl) throw new Error('srUrl 取得失敗');
+        var pbuf = await downloadSpFile(token, srUrl);
+        var blob = new Blob([pbuf], { type: 'application/pdf' });
+        var blobUrl = URL.createObjectURL(blob);
+        body.innerHTML = '';
+        var iframe = document.createElement('iframe');
+        iframe.src = blobUrl;
+        iframe.style.cssText = 'width:100%;height:80vh;border:0;background:#fff;';
+        iframe.setAttribute('allowfullscreen', '');
+        body.appendChild(iframe);
+        // メモリリーク防止: 閉じたら revoke
+        var ov = body.closest('.preview-overlay');
+        if (ov) {
+          var origRemove = function() { try { URL.revokeObjectURL(blobUrl); } catch(_){} };
+          ov.addEventListener('remove', origRemove);
+          // 念のため閉じボタンにも仕込む
+          var closeBtn = ov.querySelector('.preview-close');
+          if (closeBtn) {
+            var orig = closeBtn.onclick;
+            closeBtn.onclick = function(e) { origRemove(); if (orig) orig.call(this, e); };
           }
-        })();
-      };
-    }
+        }
+        // 切替ボタンを "PDF.js表示" に変更
+        if (btnEl) {
+          btnEl.innerHTML = '🔄 PDF.js表示に戻す';
+          btnEl.onclick = function() {
+            btnEl.innerHTML = '📺 iframe表示';
+            btnEl.onclick = function() { switchPreviewToIframe(payloadB64, btnEl); };
+            try { URL.revokeObjectURL(blobUrl); } catch(_){}
+            body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">📄</div><div>PDF.js で再読み込み中...</div></div>';
+            (async function() {
+              try {
+                var tok2 = await getToken();
+                var buf2 = await downloadSpFile(tok2, srUrl);
+                await renderPdfBufferToBody(buf2, body);
+              } catch(e2) {
+                body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">⚠️</div><div>再読み込み失敗: ' + escHtml(e2.message || String(e2)) + '</div></div>';
+              }
+            })();
+          };
+        }
+      } catch(e) {
+        console.error('iframe PDF load error:', e);
+        body.innerHTML = '<div class="preview-loading-box"><div class="pl-icon">⚠️</div><div>iframe読み込み失敗: ' + escHtml(e.message || String(e)) + '</div></div>';
+      }
+    })();
   } catch(e) {
     console.error('switchPreviewToIframe error:', e);
     showToast('iframe切替失敗: ' + e.message, 'error');
