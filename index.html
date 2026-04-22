@@ -22313,11 +22313,15 @@ async function _syainMoveSpItem(srcSrUrl, destSrUrl, isFolder) {
   if (!digest) throw new Error('digestが空');
   var url, body, headers;
   if (isFolder) {
-    // MoveFolderByPath (SP.MoveCopyUtil)
+    // MoveFolderByPath (SP.MoveCopyUtil) は絶対URL (https://host/sites/...) を要求
+    var origin = '';
+    try { origin = new URL(SP_DOC_SITE_URL).origin; } catch(_) { origin = 'https://teamstepupcom774.sharepoint.com'; }
+    var srcAbs = srcSrUrl.indexOf('http') === 0 ? srcSrUrl : (origin + srcSrUrl);
+    var destAbs = destSrUrl.indexOf('http') === 0 ? destSrUrl : (origin + destSrUrl);
     url = SP_DOC_SITE_URL + '/_api/SP.MoveCopyUtil.MoveFolderByPath';
     body = JSON.stringify({
-      srcPath: { DecodedUrl: srcSrUrl },
-      destPath: { DecodedUrl: destSrUrl },
+      srcPath: { DecodedUrl: srcAbs },
+      destPath: { DecodedUrl: destAbs },
       options: { KeepBoth: false, ResetAuthorAndCreatedOnCopy: false, ShouldBypassSharedLocks: true }
     });
     headers = {
