@@ -10595,7 +10595,7 @@ function renderShahoMochuuList(list) {
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
 }
 
-// 社保取得申請中の社員 編集ダイアログ (8項目 + 公文書PDFアップロード)
+// 社保取得申請中の社員 編集ダイアログ (7項目 + 公文書PDFドラッグ&ドロップ)
 async function openShahoShutokuEditDialog(emp) {
   try {
     var meta = await fetchEmployeeFields();
@@ -10607,7 +10607,6 @@ async function openShahoShutokuEditDialog(emp) {
       { key: 'kenpoShutoku', label: '健保：資格取得日', type: 'date' },
       { key: 'shahoHyojunHoushu', label: '社保標準報酬月額', type: 'number' },
       { key: 'kisoNenkinNo', label: '基礎年金番号', type: 'text' },
-      { key: 'shainFolderSave', label: 'ファイル保存用社員フォルダ', type: 'url' },
       { key: 'soumuShaho', label: '総務-社保 状況', type: 'choice' }
     ];
     var existing = document.getElementById('shahoShutokuEditOverlay');
@@ -10655,13 +10654,27 @@ async function openShahoShutokuEditDialog(emp) {
         inputHtml +
         '</div>';
     }).join('');
-    // 公文書PDF アップロード セクション
+    // 公文書PDF アップロード セクション (ドラッグ&ドロップ対応)
     var pdfUploadHtml =
-      '<div style="margin-top:14px;padding:12px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:2px dashed #f57c00;border-radius:10px;">' +
-        '<label style="display:block;font-size:12px;font-weight:800;color:#bf360c;margin-bottom:6px;">📄 公文書PDF アップロード</label>' +
-        '<div style="font-size:10px;color:#6d4c41;margin-bottom:8px;line-height:1.5;">選択したPDFファイルを保存時にこの社員の社員フォルダへアップロードします。</div>' +
-        '<input type="file" id="shahoShutokuPdfInput" accept="application/pdf,.pdf" style="width:100%;padding:8px;border:1.5px solid #ffcc80;border-radius:8px;font-size:13px;background:#fff;box-sizing:border-box;">' +
-        '<div id="shahoShutokuPdfInfo" style="font-size:10px;color:#6d4c41;margin-top:6px;"></div>' +
+      '<div style="margin-top:14px;padding:10px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-radius:10px;">' +
+        '<label style="display:block;font-size:12px;font-weight:800;color:#bf360c;margin-bottom:8px;">📄 公文書PDF アップロード</label>' +
+        '<div id="shahoShutokuPdfDropZone" style="padding:24px 12px;border:2px dashed #f57c00;border-radius:10px;background:#fff;text-align:center;cursor:pointer;transition:background 0.2s;">' +
+          '<div style="font-size:30px;">📥</div>' +
+          '<div style="font-size:13px;font-weight:700;color:#bf360c;margin-top:4px;">PDFをドラッグ&ドロップ</div>' +
+          '<div style="font-size:10px;color:#8d6e63;margin-top:2px;">または タップして選択</div>' +
+          '<input type="file" id="shahoShutokuPdfInput" accept="application/pdf,.pdf" style="display:none;">' +
+        '</div>' +
+        '<div id="shahoShutokuPdfInfo" style="font-size:11px;color:#6d4c41;margin-top:8px;text-align:center;"></div>' +
+      '</div>';
+    // ヘッダー情報: 氏名 / 社員番号 / 派遣先
+    var hakenStr = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
+    var headerInfoHtml =
+      '<div style="padding:10px 16px;background:#e3f2fd;font-size:13px;color:#0d47a1;border-bottom:1px solid #90caf9;">' +
+        '<div style="font-weight:800;font-size:15px;">' + escHtml(emp.Title || '') + '</div>' +
+        '<div style="font-size:11px;font-weight:600;color:#455a64;margin-top:3px;display:flex;gap:12px;flex-wrap:wrap;">' +
+          '<span>📛 No.' + escHtml(String(emp[F.syainNo] || '')) + '</span>' +
+          (hakenStr ? '<span>🏭 ' + escHtml(hakenStr) + '</span>' : '') +
+        '</div>' +
       '</div>';
     ov.innerHTML =
       '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.35);">' +
@@ -10670,31 +10683,64 @@ async function openShahoShutokuEditDialog(emp) {
           '<div style="flex:1;font-size:15px;font-weight:800;letter-spacing:0.5px;">社保取得申請中 情報編集</div>' +
           '<button onclick="closeShahoShutokuEditDialog()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">×</button>' +
         '</div>' +
-        '<div style="padding:12px 16px;background:#e3f2fd;font-size:13px;color:#0d47a1;font-weight:700;border-bottom:1px solid #90caf9;">' +
-          escHtml(emp.Title || '') + ' <span style="font-size:11px;font-weight:600;color:#555;">(No.' + escHtml(String(emp[F.syainNo] || '')) + ')</span>' +
-        '</div>' +
+        headerInfoHtml +
         '<div style="padding:14px 16px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + fieldsHtml + pdfUploadHtml + '</div>' +
         '<div style="padding:12px 16px;background:#f5f5f5;border-top:1px solid #e0e0e0;display:flex;gap:8px;flex-shrink:0;">' +
           '<button onclick="closeShahoShutokuEditDialog()" style="flex:1;padding:11px;background:#e0e0e0;color:#555;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px;">キャンセル</button>' +
-          '<button id="shahoShutokuSaveBtn" onclick="saveShahoShutokuEditDialog()" style="flex:2;padding:11px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 2px 8px rgba(46,125,50,0.3);">💾 保存＋PDFアップロード</button>' +
+          '<button id="shahoShutokuSaveBtn" onclick="saveShahoShutokuEditDialog()" style="flex:2;padding:11px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 2px 8px rgba(46,125,50,0.3);">💾 保存</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(ov);
-    // PDF 選択時のファイル情報表示
+    // PDF ドロップゾーン: クリック → ファイル選択ダイアログ
+    var dropZone = document.getElementById('shahoShutokuPdfDropZone');
     var pdfIn = document.getElementById('shahoShutokuPdfInput');
-    if (pdfIn) {
+    function updatePdfInfo(file) {
+      var info = document.getElementById('shahoShutokuPdfInfo');
+      if (!info) return;
+      if (file) {
+        info.innerHTML = '✅ <b>' + escHtml(file.name) + '</b> <span style="color:#888;">(' + (file.size / 1024).toFixed(1) + ' KB)</span>';
+        info.style.color = '#2e7d32';
+      } else {
+        info.textContent = '';
+      }
+    }
+    if (dropZone && pdfIn) {
+      dropZone.addEventListener('click', function() { pdfIn.click(); });
       pdfIn.addEventListener('change', function() {
-        var info = document.getElementById('shahoShutokuPdfInfo');
-        if (!info) return;
-        if (pdfIn.files && pdfIn.files[0]) {
-          var f = pdfIn.files[0];
-          info.innerHTML = '✅ <b>' + escHtml(f.name) + '</b> (' + (f.size / 1024).toFixed(1) + ' KB)';
-          info.style.color = '#2e7d32';
-        } else {
-          info.textContent = '';
+        var f = pdfIn.files && pdfIn.files[0];
+        window._shahoShutokuPdfFile = f || null;
+        updatePdfInfo(f);
+      });
+      // ドラッグ&ドロップ
+      dropZone.addEventListener('dragover', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        dropZone.style.background = '#ffe0b2';
+        dropZone.style.borderColor = '#e65100';
+      });
+      dropZone.addEventListener('dragleave', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        dropZone.style.background = '#fff';
+        dropZone.style.borderColor = '#f57c00';
+      });
+      dropZone.addEventListener('drop', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        dropZone.style.background = '#fff';
+        dropZone.style.borderColor = '#f57c00';
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length > 0) {
+          var f = files[0];
+          // PDF以外は警告
+          var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+          if (!isPdf) {
+            showToast('PDFファイルを選択してください', 'error');
+            return;
+          }
+          window._shahoShutokuPdfFile = f;
+          updatePdfInfo(f);
         }
       });
     }
+    window._shahoShutokuPdfFile = null;
     window._shahoShutokuEmpData = { emp: emp, km: km, meta: meta };
   } catch (e) {
     console.error('openShahoShutokuEditDialog error:', e);
@@ -10779,13 +10825,24 @@ async function saveShahoShutokuEditDialog() {
         changed++;
       }
     });
-    // PDFファイル選択有無確認
-    var pdfInput = document.getElementById('shahoShutokuPdfInput');
-    var pdfFile = (pdfInput && pdfInput.files && pdfInput.files[0]) ? pdfInput.files[0] : null;
+    // PDFファイル (input or drag-drop で設定された window._shahoShutokuPdfFile)
+    var pdfFile = window._shahoShutokuPdfFile || null;
     if (changed === 0 && !pdfFile) {
       showToast('変更もPDFも選択されていません', 'info');
-      if (btn) { btn.disabled = false; btn.textContent = '💾 保存＋PDFアップロード'; }
+      if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
       return;
+    }
+    // soumuShaho が ✓取得完了 に設定されたかチェック (変更検出)
+    var soumuShahoSetToComplete = false;
+    var odShaho = km['soumuShaho'];
+    if (odShaho) {
+      var internalShaho = odataKeyToInternal(odShaho);
+      if (internalShaho && body[internalShaho]) {
+        var newShahoVal = String(body[internalShaho] || '');
+        if (newShahoVal.indexOf('取得完了') >= 0 && newShahoVal.indexOf('喪失') < 0) {
+          soumuShahoSetToComplete = true;
+        }
+      }
     }
     // 社員データPATCH (変更があれば)
     if (changed > 0) {
@@ -10805,11 +10862,27 @@ async function saveShahoShutokuEditDialog() {
       } catch (upErr) {
         console.error('PDF upload error:', upErr);
         showToast('PDFアップロード失敗: ' + upErr.message, 'error');
-        if (btn) { btn.disabled = false; btn.textContent = '💾 保存＋PDFアップロード'; }
+        if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
         return;
       }
     }
-    showToast((changed > 0 ? changed + '項目を保存' : '項目変更なし') + pdfMessage, 'success');
+    // List9 の 本人加入/扶養加入 を完了に (soumuShaho=✓取得完了 時)
+    var list9Message = '';
+    if (soumuShahoSetToComplete) {
+      try {
+        if (btn) btn.textContent = 'List9 更新中...';
+        var r = await completeShahoList9ForEmp(emp);
+        if (r && r.updated > 0) {
+          list9Message = ' / 加入申請 ' + r.updated + '件を完了に';
+        } else if (r && r.msg) {
+          console.log('[List9 update]', r.msg);
+        }
+      } catch (l9Err) {
+        console.error('List9 update error:', l9Err);
+        // List9 更新失敗でも他の保存は成功として継続
+      }
+    }
+    showToast((changed > 0 ? changed + '項目を保存' : '項目変更なし') + pdfMessage + list9Message, 'success');
     // 最新データを再取得
     try {
       var updated = await fetchFullEmployee(emp[F.syainNo]);
@@ -10830,8 +10903,100 @@ async function saveShahoShutokuEditDialog() {
   } catch (e) {
     console.error('saveShahoShutokuEditDialog error:', e);
     showToast('保存エラー: ' + e.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = '💾 保存＋PDFアップロード'; }
+    if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
   }
+}
+
+// List9 (社会保険加入申請) の 本人加入/扶養加入 を '完了' に更新
+// 社員番号でフィルタして、申請区分に応じた列を更新
+async function completeShahoList9ForEmp(emp) {
+  if (!emp || !F.syainNo) return { updated: 0, msg: 'emp/syainNoなし' };
+  var bango = emp[F.syainNo];
+  if (!bango) return { updated: 0, msg: '社員番号なし' };
+  var token = await getToken();
+  if (!token) return { updated: 0, msg: '認証エラー' };
+  var hdrs = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
+  // List9 フィールドメタ取得
+  var fUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/fields?$select=InternalName,Title,EntityPropertyName&$top=200";
+  var fResp = await fetch(fUrl, { headers: hdrs });
+  if (!fResp.ok) return { updated: 0, msg: 'フィールドメタ取得失敗' };
+  var fData = await fResp.json();
+  var fields = (fData.d && fData.d.results) || [];
+  var bangoKey = null, honninKey = null, huyouKey = null, kubunKey = null;
+  fields.forEach(function(f) {
+    var t = f.Title || '';
+    var intName = f.EntityPropertyName || f.InternalName;
+    var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
+    if ((t === '社員番号' || t === '番号' || t === '社番' || t.indexOf('社員番号') >= 0) && !bangoKey) bangoKey = odKey;
+    if ((t === '本人加入' || t.indexOf('本人加入') >= 0) && !honninKey) honninKey = odKey;
+    if ((t === '扶養加入' || t.indexOf('扶養加入') >= 0) && !huyouKey) huyouKey = odKey;
+    if ((t === '申請区分' || t.indexOf('申請区分') >= 0) && !kubunKey) kubunKey = odKey;
+  });
+  if (!bangoKey) return { updated: 0, msg: '社員番号フィールド未解決' };
+  if (!honninKey && !huyouKey) return { updated: 0, msg: '本人加入/扶養加入フィールドどちらも未解決' };
+  // ページネーションで全件取得して社員番号フィルタ
+  var allItems = [];
+  var pageUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=1000";
+  while (pageUrl) {
+    var pResp = await fetch(pageUrl, { headers: hdrs });
+    if (!pResp.ok) break;
+    var pData = await pResp.json();
+    allItems = allItems.concat((pData.d && pData.d.results) || []);
+    pageUrl = (pData.d && pData.d.__next) ? pData.d.__next : null;
+    if (allItems.length > 50000) break;
+  }
+  var myItems = allItems.filter(function(it) { return String(it[bangoKey] || '') === String(bango); });
+  if (myItems.length === 0) return { updated: 0, msg: '該当List9アイテムなし (bango=' + bango + ')' };
+  // エンティティ型取得
+  var listResp = await fetch(SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')?$select=ListItemEntityTypeFullName", { headers: hdrs });
+  var listData = await listResp.json();
+  var entityType = listData.d && listData.d.ListItemEntityTypeFullName;
+  // CSRF digest
+  var digestResp = await fetch(SP_ROOT_URL + "/_api/contextinfo", {
+    method: 'POST',
+    headers: hdrs
+  });
+  var digestData = await digestResp.json();
+  var digest = digestData.d && digestData.d.GetContextWebInformation && digestData.d.GetContextWebInformation.FormDigestValue;
+  var updated = 0;
+  // 各 List9 アイテムを確認して更新
+  for (var i = 0; i < myItems.length; i++) {
+    var it = myItems[i];
+    var kubun = String(kubunKey ? (it[kubunKey] || '') : '').trim();
+    var body = {};
+    // 申請区分で分岐: 扶養追加 は 扶養加入 / それ以外 は 本人加入
+    var targetHuyou = (kubun === '扶養追加');
+    if (targetHuyou && huyouKey) {
+      var curHuyou = String(it[huyouKey] || '').trim();
+      if (curHuyou === '') body[huyouKey.replace(/^OData_/, '')] = '完了';
+    } else if (!targetHuyou && honninKey) {
+      var curHonnin = String(it[honninKey] || '').trim();
+      if (curHonnin === '') body[honninKey.replace(/^OData_/, '')] = '完了';
+    }
+    if (Object.keys(body).length === 0) continue;
+    if (entityType) body['__metadata'] = { type: entityType };
+    try {
+      var patchResp = await fetch(SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items(" + it.Id + ")", {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Accept': 'application/json;odata=verbose',
+          'Content-Type': 'application/json;odata=verbose',
+          'X-HTTP-Method': 'MERGE',
+          'IF-MATCH': '*',
+          'X-RequestDigest': digest || ''
+        },
+        body: JSON.stringify(body)
+      });
+      if (patchResp.ok) updated++;
+      else console.warn('[List9 PATCH fail]', it.Id, patchResp.status, await patchResp.text());
+    } catch (pErr) {
+      console.warn('[List9 PATCH error]', it.Id, pErr);
+    }
+  }
+  // キャッシュを再読込対象に
+  _shahoYoteiLoaded = false;
+  return { updated: updated, total: myItems.length, msg: updated + '件更新' };
 }
 
 // extraDate: null | string (field) | { field, fallback, label }
