@@ -9633,8 +9633,8 @@ function renderKoyouKanyuuDownloadOverlay(list) {
       '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + itemsHtml + '</div>' +
       (list.length > 0 ? (
         '<div style="padding:10px 14px;background:#f5f5f5;border-top:1px solid #e0e0e0;flex-shrink:0;">' +
-          '<button onclick="downloadKoyouKanyuuExcel()" style="width:100%;padding:11px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(46,125,50,0.3);">📊 選択中の社員をダウンロード (Excel/CSV)</button>' +
-          '<div style="font-size:10px;color:#777;margin-top:6px;text-align:center;line-height:1.5;">届書作成プログラムに手入力する際の参照用データです。<br>UTF-8 BOM付き CSV → Excelで開いて確認できます。</div>' +
+          '<button onclick="downloadKoyouKanyuuExcel()" style="width:100%;padding:11px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(46,125,50,0.3);">📊 選択中の社員をExcelでダウンロード</button>' +
+          '<div style="font-size:10px;color:#777;margin-top:6px;text-align:center;line-height:1.5;">届書作成プログラム手入力補助用の参照データ (.xlsx)<br>C2でウィンドウ枠固定・列幅自動調整・ゼブラストライプ</div>' +
         '</div>'
       ) : '') +
     '</div>';
@@ -9661,7 +9661,19 @@ function koyouDlUpdateCount() {
   if (cnt) cnt.textContent = selected + '/' + total + ' 名選択中';
 }
 
-function downloadKoyouKanyuuExcel() {
+// XLSX ライブラリの動的ロード (初回のみ)
+function _loadXlsxLib() {
+  if (typeof XLSX !== 'undefined') return Promise.resolve();
+  return new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
+    s.onload = function() { resolve(); };
+    s.onerror = function() { reject(new Error('xlsx-js-style ライブラリの読み込みに失敗')); };
+    document.head.appendChild(s);
+  });
+}
+
+async function downloadKoyouKanyuuExcel() {
   var list = window._koyouDlList || [];
   var selected = [];
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
@@ -9671,6 +9683,13 @@ function downloadKoyouKanyuuExcel() {
     }
   });
   if (selected.length === 0) { showToast('1名以上選択してください', 'error'); return; }
+  try {
+    showToast('Excel生成中...', 'info');
+    await _loadXlsxLib();
+  } catch (e) {
+    showToast('Excelライブラリの読み込み失敗 (ネット接続を確認)', 'error');
+    return;
+  }
   var km = _soumuKeyMap || {};
   function get(emp, k) { var key = km[k]; return (key && emp[key] !== null && emp[key] !== undefined) ? emp[key] : ''; }
   function fmtDate(v) { if (!v) return ''; var d = new Date(v); if (isNaN(d.getTime())) return String(v); return d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0'); }
@@ -9750,26 +9769,73 @@ function downloadKoyouKanyuuExcel() {
       '該当'                                                // 25 派遣・請負就労区分 (固定)
     ]);
   });
-  // CSV化 (RFC4180: CR+LF, 必要時 " でエスケープ)
-  var csv = rows.map(function(r) {
-    return r.map(function(c) {
-      var s = String(c == null ? '' : c);
-      if (/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
-      return s;
-    }).join(',');
-  }).join('\r\n');
-  // Blob + ダウンロード (UTF-8 BOM で Excel が日本語を正しく表示)
-  var BOM = '\ufeff';
-  var blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8' });
-  var url = URL.createObjectURL(blob);
+  // XLSX生成 (書式付き: C2でウィンドウ枠固定・列幅自動・ゼブラストライプ)
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  // 列幅自動計算 (全角=2文字分, min 8 max 40)
+  ws['!cols'] = headers.map(function(h, i) {
+    var maxLen = 0;
+    rows.forEach(function(row) {
+      var s = String(row[i] == null ? '' : row[i]);
+      // 全角文字は2文字分として計算
+      var len = 0;
+      for (var ci = 0; ci < s.length; ci++) {
+        len += (s.charCodeAt(ci) > 255 ? 2 : 1);
+      }
+      if (len > maxLen) maxLen = len;
+    });
+    return { wch: Math.min(Math.max(maxLen + 2, 8), 42) };
+  });
+  // ウィンドウ枠固定 C2: ヘッダー行(1) + 社員番号・氏名 の2列を固定
+  ws['!views'] = [{ state: 'frozen', xSplit: 2, ySplit: 1, topLeftCell: 'C2', activePane: 'bottomRight' }];
+  ws['!freeze'] = { xSplit: 2, ySplit: 1 };
+  // セル書式付与: ヘッダー濃青, データ行ゼブラ
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  var headerStyle = {
+    fill: { patternType: 'solid', fgColor: { rgb: '1565C0' } },
+    font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 11 },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: { top:{style:'thin',color:{rgb:'0D47A1'}}, bottom:{style:'thin',color:{rgb:'0D47A1'}}, left:{style:'thin',color:{rgb:'0D47A1'}}, right:{style:'thin',color:{rgb:'0D47A1'}} }
+  };
+  for (var c = range.s.c; c <= range.e.c; c++) {
+    var ha = XLSX.utils.encode_cell({ r: 0, c: c });
+    if (ws[ha]) ws[ha].s = headerStyle;
+  }
+  for (var r = 1; r <= range.e.r; r++) {
+    var bg = (r % 2 === 1) ? 'FFFFFF' : 'E8F0FE'; // 奇数=白, 偶数=薄青
+    var rowStyle = {
+      fill: { patternType: 'solid', fgColor: { rgb: bg } },
+      font: { sz: 11 },
+      alignment: { horizontal: 'left', vertical: 'center', wrapText: false },
+      border: { top:{style:'thin',color:{rgb:'E0E0E0'}}, bottom:{style:'thin',color:{rgb:'E0E0E0'}}, left:{style:'thin',color:{rgb:'E0E0E0'}}, right:{style:'thin',color:{rgb:'E0E0E0'}} }
+    };
+    for (var c2 = range.s.c; c2 <= range.e.c; c2++) {
+      var cellAddr = XLSX.utils.encode_cell({ r: r, c: c2 });
+      if (!ws[cellAddr]) ws[cellAddr] = { v: '', t: 's' };
+      // 社員番号・氏名 は太字で固定列を目立たせる
+      var cellStyle = Object.assign({}, rowStyle);
+      if (c2 <= 1) {
+        cellStyle = Object.assign({}, cellStyle, { font: { sz: 11, bold: true } });
+      }
+      ws[cellAddr].s = cellStyle;
+    }
+  }
+  // 行高 (ヘッダー+データ)
+  ws['!rows'] = [{ hpt: 24 }];
+  for (var ri = 1; ri <= range.e.r; ri++) ws['!rows'].push({ hpt: 20 });
+  // workbook作成
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '雇用保険加入');
+  // ファイル出力
   var today = new Date();
   var ymd = today.getFullYear() + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
-  var fname = '雇用保険加入_' + ymd + '_' + selected.length + '名.csv';
-  var a = document.createElement('a');
-  a.href = url; a.download = fname;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(function() { URL.revokeObjectURL(url); }, 100);
-  showToast(selected.length + '名分のCSVをダウンロードしました', 'success');
+  var fname = '雇用保険加入_' + ymd + '_' + selected.length + '名.xlsx';
+  try {
+    XLSX.writeFile(wb, fname);
+    showToast(selected.length + '名分のExcelをダウンロードしました', 'success');
+  } catch (e) {
+    console.error('XLSX write error:', e);
+    showToast('Excel書き出しエラー: ' + e.message, 'error');
+  }
 }
 
 // extraDate: null | string (field) | { field, fallback, label }
