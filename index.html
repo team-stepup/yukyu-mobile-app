@@ -8440,6 +8440,22 @@ async function loadShahoKanyuuYoteiList() {
     }
     _shahoYoteiLoaded = true;
     renderShahoKanyuuYoteiList();
+    // 社員データ＋フィールドメタ を非同期ロード (総務-社保 チップ表示用)
+    (async function() {
+      try {
+        var needEmps = !_soumuAllEmps || _soumuAllEmps.length === 0;
+        var needKmap = !_soumuKeyMap || !_soumuKeyMap.soumuShaho;
+        if (needEmps || needKmap) {
+          var promises = [];
+          if (needEmps) promises.push(spGetAll(LIST_EMPLOYEES_GUID, '$top=500').catch(function(){ return []; }));
+          if (needKmap) promises.push(fetchEmployeeFields().catch(function(){ return {}; }));
+          var res = await Promise.all(promises);
+          if (needEmps) _soumuAllEmps = res[0] || [];
+          if (needKmap) _soumuKeyMap = buildFieldKeyMap(res[needEmps ? 1 : 0] || {});
+          renderShahoKanyuuYoteiList(); // 社員データ入手後に再描画
+        }
+      } catch (e) { console.warn('shaho yotei soumu data load failed:', e); }
+    })();
   } catch (e) {
     console.error('loadShahoKanyuuYoteiList error:', e);
     body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--danger);">読み込みエラー: ' + escHtml(e.message) + '</div>';
@@ -8568,7 +8584,7 @@ function renderShahoKanyuuYoteiList() {
   var nameKey = SF.name || detectKeyBy(function(k, v) { return (k.indexOf('_x6c0f__x540d_') >= 0 || k === 'Title'); });
   if (!nameKey) nameKey = 'Title';
 
-  // 社員データから派遣先を引くためのマップ (番号 → 社員エンティティ)
+  // 社員データから派遣先・総務社保を引くためのマップ (番号 → 社員エンティティ)
   var empMap = {};
   if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
     _soumuAllEmps.forEach(function(e) {
@@ -8579,6 +8595,19 @@ function renderShahoKanyuuYoteiList() {
     });
   }
   console.log('[社保加入予定] empMap size:', Object.keys(empMap).length);
+  var odShaho = (_soumuKeyMap && _soumuKeyMap.soumuShaho) || null;
+
+  // 総務-社保の値に応じたミニチップHTMLを返す
+  function buildShahoMiniChip(val) {
+    var v = String(val || '').trim();
+    if (!v) return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f5f5f5;color:#aaa;">未設定</span>';
+    var bg = '#eceff1', color = '#607d8b', border = '#cfd8dc';
+    if (v === '未加入')                   { bg = '#ffebee'; color = '#c62828'; border = '#ef9a9a'; }
+    else if (v.indexOf('申請中') >= 0)    { bg = '#fff8e1'; color = '#ef6c00'; border = '#ffe082'; }
+    else if (v.indexOf('取得完了') >= 0)  { bg = '#e8f5e9'; color = '#2e7d32'; border = '#a5d6a7'; }
+    else if (v.indexOf('喪失完了') >= 0)  { bg = '#eceff1'; color = '#546e7a'; border = '#b0bec5'; }
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';line-height:1.3;">総務-社保: ' + escHtml(v) + '</span>';
+  }
 
   var html = '<div style="font-size:12px;color:var(--text-light);margin:0 2px 8px;">' + filtered.length + '件 <span style="color:#888;">(タップで社員情報を開く)</span></div>';
   // ヘッダー (グリッド)
@@ -8591,27 +8620,34 @@ function renderShahoKanyuuYoteiList() {
     var bango = bangoKey ? (item[bangoKey] || '') : '';
     var name = nameKey ? (item[nameKey] || item.Title || '') : (item.Title || '');
     var kStr = fmtD(item[kanyuuKey]);
-    // 派遣先が空なら社員データから引く
-    if (!haken && bango) {
+    var shahoVal = '';
+    // 派遣先が空なら社員データから引く / 社保状況も取得
+    if (bango) {
       var emp = empMap[String(bango)];
-      if (emp && typeof getHakensaki === 'function') {
-        var h = getHakensaki(emp);
-        if (h) haken = h;
+      if (emp) {
+        if (!haken && typeof getHakensaki === 'function') {
+          var h = getHakensaki(emp);
+          if (h) haken = h;
+        }
+        if (odShaho) shahoVal = String(emp[odShaho] || '');
       }
     }
     var bg = i % 2 === 0 ? '#fff' : '#f8fdf8';
     var bangoStr = String(bango);
     var itemId = item.Id || '';
-    // 行全体を<button>要素にする (確実にクリック可能)
+    // 行全体を<button>要素にする (flex-column で メイン4列行 + 社保チップ行 の2段構成)
     if (bangoStr) {
-      html += '<button type="button" class="shaho-yotei-btn" data-shaho-bango="' + escHtml(bangoStr) + '" data-shaho-itemid="' + escHtml(String(itemId)) + '" onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\', ' + (itemId || 'null') + ')" style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;width:100%;padding:10px;background:' + bg + ';border:none;border-bottom:1px solid #e8f5e9;font-size:12px;text-align:left;cursor:pointer;font-family:inherit;">';
+      html += '<button type="button" class="shaho-yotei-btn" data-shaho-bango="' + escHtml(bangoStr) + '" data-shaho-itemid="' + escHtml(String(itemId)) + '" onclick="openShahoYoteiEmp(\'' + bangoStr.replace(/'/g, "\\'") + '\', ' + (itemId || 'null') + ')" style="display:flex;flex-direction:column;gap:4px;width:100%;padding:9px 10px;background:' + bg + ';border:none;border-bottom:1px solid #e8f5e9;font-size:12px;text-align:left;cursor:pointer;font-family:inherit;">';
     } else {
-      html += '<div style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;padding:10px;background:' + bg + ';border-bottom:1px solid #e8f5e9;font-size:12px;">';
+      html += '<div style="display:flex;flex-direction:column;gap:4px;padding:9px 10px;background:' + bg + ';border-bottom:1px solid #e8f5e9;font-size:12px;">';
     }
-    html += '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</div>';
-    html += '<div style="color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</div>';
-    html += '<div style="font-weight:600;">' + escHtml(name) + '</div>';
-    html += '<div style="color:#1b5e20;">' + escHtml(kStr) + '</div>';
+    html += '<div style="display:grid;grid-template-columns:3fr 1.8fr 2.8fr 2.3fr;gap:4px;">';
+    html +=   '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(haken) + '</div>';
+    html +=   '<div style="color:#2e7d32;font-weight:600;">' + escHtml(bangoStr) + '</div>';
+    html +=   '<div style="font-weight:600;">' + escHtml(name) + '</div>';
+    html +=   '<div style="color:#1b5e20;">' + escHtml(kStr) + '</div>';
+    html += '</div>';
+    html += '<div style="text-align:right;">' + buildShahoMiniChip(shahoVal) + '</div>';
     html += bangoStr ? '</button>' : '</div>';
   });
   html += '</div>'; // row container
