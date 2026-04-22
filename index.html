@@ -9487,9 +9487,8 @@ function openSoumuFilterList(filterKey) {
       openKoyouSoushitsuDownloadList();
       return;
     case 'shaho-kanyuu':
-      // 社会保険加入: 別リスト(社会保険加入申請)から取得
-      showToast('社保加入データを表示します', 'info');
-      openSoumuShahoInList();
+      // 社会保険加入: チェックボックス選択 + XLSXダウンロード
+      openShahoKanyuuDownloadList();
       return;
     case 'shaho-soushitsu':
       // 退社日(遅い方)が今日以前 AND soumuShaho="✓取得完了" (トレランス比較)
@@ -10045,6 +10044,267 @@ async function downloadKoyouSoushitsuExcel() {
   var today = new Date();
   var ymd = today.getFullYear() + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
   var fname = '雇用保険喪失_' + ymd + '_' + selected.length + '名.xlsx';
+  try {
+    XLSX.writeFile(wb, fname);
+    showToast(selected.length + '名分のExcelをダウンロードしました', 'success');
+  } catch (e) {
+    console.error('XLSX write error:', e);
+    showToast('Excel書き出しエラー: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// 社会保険 加入 - XLSX ダウンロード用 オーバーレイ (List9 ベース)
+// ============================================================
+function openShahoKanyuuDownloadList() {
+  var items = _soumuShahoInItems || [];
+  if (items.length === 0) { showToast('該当者なし', 'info'); return; }
+  renderShahoKanyuuDownloadOverlay(items);
+}
+
+function renderShahoKanyuuDownloadOverlay(items) {
+  var existing = document.getElementById('soumuListOverlay');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'soumuListOverlay';
+  ov.className = 'confirm-overlay';
+
+  // 社員番号 → 社員データ map
+  var empMap = {};
+  if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
+    _soumuAllEmps.forEach(function(e) {
+      var n = e[F.syainNo];
+      if (n !== null && n !== undefined) empMap[String(n)] = e;
+    });
+  }
+  var SF = _soumuShahoInFields || {};
+
+  function fmtD(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+  }
+
+  var itemsHtml = '';
+  if (items.length === 0) {
+    itemsHtml = '<div style="text-align:center;padding:30px;color:var(--text-light);">該当者なし</div>';
+  } else {
+    items.forEach(function(item, i) {
+      var bango = SF.bango ? (item[SF.bango] || '') : '';
+      var name  = (SF.name && item[SF.name]) || item.Title || '';
+      var kStr  = SF.kanyuubi ? fmtD(item[SF.kanyuubi]) : '';
+      var emp   = empMap[String(bango)] || null;
+      // 社員フォルダURL
+      var folderUrl = '';
+      if (emp) {
+        for (var _k in emp) {
+          var _v = emp[_k];
+          if (_v && typeof _v === 'object' && _v.Url) { folderUrl = _v.Url; break; }
+        }
+      }
+      var haken = '';
+      if (emp && typeof getHakensaki === 'function') haken = getHakensaki(emp) || '';
+      itemsHtml += '<label class="koyou-dl-row" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;background:#fff;">';
+      itemsHtml +=   '<input type="checkbox" class="koyou-dl-chk" data-emp-idx="' + i + '" checked style="transform:scale(1.3);flex-shrink:0;">';
+      itemsHtml +=   '<div style="flex:1;min-width:0;">';
+      itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(name) + '</div>';
+      itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(bango)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
+      if (kStr) itemsHtml += '<div style="font-size:11px;color:#2e7d32;margin-top:1px;">加入日: ' + escHtml(kStr) + '</div>';
+      itemsHtml +=   '</div>';
+      if (folderUrl) {
+        itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
+      } else {
+        itemsHtml += '<span style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:#f0f0f0;color:#bbb;font-size:14px;flex-shrink:0;" title="社員フォルダ未設定">—</span>';
+      }
+      itemsHtml += '</label>';
+    });
+  }
+
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:92vw;width:520px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 16px;background:linear-gradient(135deg,#e53935,#b71c1c);color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+        '<div style="font-size:22px;">🏥</div>' +
+        '<div style="flex:1;font-size:15px;font-weight:800;letter-spacing:0.5px;">社会保険 加入 (' + items.length + '名)</div>' +
+        '<button onclick="document.getElementById(\'soumuListOverlay\').remove()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">×</button>' +
+      '</div>' +
+      (items.length > 0 ? (
+        '<div style="padding:8px 14px;background:#f5f5f5;display:flex;gap:8px;align-items:center;border-bottom:1px solid #e0e0e0;flex-shrink:0;">' +
+          '<button onclick="koyouDlToggleAll(true)" style="padding:5px 12px;background:#c62828;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">全選択</button>' +
+          '<button onclick="koyouDlToggleAll(false)" style="padding:5px 12px;background:#757575;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">選択解除</button>' +
+          '<span id="koyouDlCount" style="margin-left:auto;font-size:11px;color:#555;font-weight:700;">' + items.length + '/' + items.length + ' 名選択中</span>' +
+        '</div>'
+      ) : '') +
+      '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + itemsHtml + '</div>' +
+      (items.length > 0 ? (
+        '<div style="padding:10px 14px;background:#f5f5f5;border-top:1px solid #e0e0e0;flex-shrink:0;">' +
+          '<button onclick="downloadShahoKanyuuExcel()" style="width:100%;padding:11px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(46,125,50,0.3);">📊 選択中の社員をExcelでダウンロード</button>' +
+          '<div style="font-size:10px;color:#777;margin-top:6px;text-align:center;line-height:1.5;">届書作成プログラム(健康保険・厚生年金 資格取得届)手入力補助用 (.xlsx)<br>C2でウィンドウ枠固定・列幅自動調整・ゼブラストライプ</div>' +
+        '</div>'
+      ) : '') +
+    '</div>';
+  document.body.appendChild(ov);
+  window._koyouDlList = items;
+  document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
+    cb.addEventListener('change', koyouDlUpdateCount);
+  });
+}
+
+async function downloadShahoKanyuuExcel() {
+  var items = window._koyouDlList || [];
+  var selected = [];
+  document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
+    if (cb.checked) {
+      var idx = parseInt(cb.getAttribute('data-emp-idx'));
+      if (!isNaN(idx) && items[idx]) selected.push(items[idx]);
+    }
+  });
+  if (selected.length === 0) { showToast('1名以上選択してください', 'error'); return; }
+  try {
+    showToast('Excel生成中...', 'info');
+    await _loadXlsxLib();
+  } catch (e) {
+    showToast('Excelライブラリの読み込み失敗 (ネット接続を確認)', 'error');
+    return;
+  }
+  // 社員データマップ
+  var empMap = {};
+  if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
+    _soumuAllEmps.forEach(function(e) {
+      var n = e[F.syainNo];
+      if (n !== null && n !== undefined) empMap[String(n)] = e;
+    });
+  }
+  var km = _soumuKeyMap || {};
+  var SF = _soumuShahoInFields || {};
+  function get(emp, k) { if (!emp) return ''; var key = km[k]; return (key && emp[key] !== null && emp[key] !== undefined) ? emp[key] : ''; }
+  function fmtDate(v) { if (!v) return ''; var d = new Date(v); if (isNaN(d.getTime())) return String(v); return d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0'); }
+  function toWareki(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+    var gengo, gy;
+    if (y > 2019 || (y === 2019 && (m > 5 || (m === 5 && day >= 1)))) { gengo = '令和'; gy = y - 2018; }
+    else if (y > 1989 || (y === 1989 && (m > 1 || (m === 1 && day >= 8)))) { gengo = '平成'; gy = y - 1988; }
+    else if (y > 1926 || (y === 1926 && (m > 12 || (m === 12 && day >= 25)))) { gengo = '昭和'; gy = y - 1925; }
+    else if (y > 1912 || (y === 1912 && (m > 7 || (m === 7 && day >= 30)))) { gengo = '大正'; gy = y - 1911; }
+    else { gengo = '明治'; gy = y - 1867; }
+    return gengo + (gy === 1 ? '元' : gy) + '年' + m + '月' + day + '日';
+  }
+  function sexCode(emp) {
+    var v = String(get(emp, 'sex') || '').trim();
+    if (v.indexOf('男') >= 0) return '1';
+    if (v.indexOf('女') >= 0) return '2';
+    return '';
+  }
+  // 報酬月額: 時給×19 × 定時間 (定時間は手入力)
+  function wageFormula(emp) {
+    var raw = String(get(emp, 'kyuyoTaikei') || '').replace(/[,\s]/g, '');
+    var hourly = parseFloat(raw);
+    if (hourly && !isNaN(hourly)) return Math.round(hourly * 19) + ' × 定時間';
+    return '時給×19×定時間';
+  }
+  // ヘッダー + データ行 (14列)
+  var headers = [
+    '社員番号','氏名','被保険者氏名（口座名義）','生年月日（和暦）','種別',
+    '取得区分','個人番号（社員フォルダ）','資格取得年月日','被扶養者の有無','報酬月額',
+    '郵便番号','被保険者住所','住所（カナ）','資格確認書発行要否'
+  ];
+  var folderUrls = []; // 個人番号列にハイパーリンク付与用
+  var rows = [headers];
+  selected.forEach(function(item) {
+    var bango = SF.bango ? (item[SF.bango] || '') : '';
+    var empName = (SF.name && item[SF.name]) || item.Title || '';
+    var kanyuubiStr = SF.kanyuubi ? fmtDate(item[SF.kanyuubi]) : '';
+    var emp = empMap[String(bango)] || null;
+    // 社員フォルダURL
+    var folderUrl = '';
+    if (emp) {
+      for (var _k in emp) {
+        var _v = emp[_k];
+        if (_v && typeof _v === 'object' && _v.Url) { folderUrl = _v.Url; break; }
+      }
+    }
+    folderUrls.push(folderUrl);
+    var addr = String(get(emp, 'address') || '');
+    var addrKana = typeof toKatakana === 'function' ? toKatakana(addr) : addr;
+    rows.push([
+      String(bango || ''),                                  // 1 社員番号
+      String(empName || ''),                                // 2 氏名
+      String(get(emp, 'bankMeigi') || ''),                  // 3 被保険者氏名(口座名義)
+      toWareki(get(emp, 'birthday')),                       // 4 生年月日(和暦)
+      sexCode(emp),                                         // 5 種別 (1=男/2=女)
+      '1',                                                  // 6 取得区分 (固定)
+      folderUrl ? '📂 社員フォルダ' : '',                   // 7 個人番号 (社員フォルダ への hyperlink)
+      kanyuubiStr || fmtDate(get(emp, 'shahoKanyuubi')),    // 8 資格取得年月日 (社保加入日)
+      '選択して',                                           // 9 被扶養者の有無 (固定)
+      wageFormula(emp),                                     // 10 報酬月額 (時給×19×定時間)
+      String(get(emp, 'yubin') || ''),                      // 11 郵便番号
+      addr,                                                 // 12 被保険者住所
+      addrKana,                                             // 13 住所(カナ) (toKatakana)
+      '1発行が必要'                                         // 14 資格確認書発行要否 (固定)
+    ]);
+  });
+  // XLSX生成 (書式付き: C2でウィンドウ枠固定・列幅自動・ゼブラストライプ)
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = headers.map(function(h, i) {
+    var maxLen = 0;
+    rows.forEach(function(row) {
+      var s = String(row[i] == null ? '' : row[i]);
+      var len = 0;
+      for (var ci = 0; ci < s.length; ci++) { len += (s.charCodeAt(ci) > 255 ? 2 : 1); }
+      if (len > maxLen) maxLen = len;
+    });
+    return { wch: Math.min(Math.max(maxLen + 2, 8), 42) };
+  });
+  ws['!views'] = [{ state: 'frozen', xSplit: 2, ySplit: 1, topLeftCell: 'C2', activePane: 'bottomRight' }];
+  ws['!freeze'] = { xSplit: 2, ySplit: 1 };
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  var headerStyle = {
+    fill: { patternType: 'solid', fgColor: { rgb: 'C62828' } },
+    font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 11 },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: { top:{style:'thin',color:{rgb:'B71C1C'}}, bottom:{style:'thin',color:{rgb:'B71C1C'}}, left:{style:'thin',color:{rgb:'B71C1C'}}, right:{style:'thin',color:{rgb:'B71C1C'}} }
+  };
+  for (var c = range.s.c; c <= range.e.c; c++) {
+    var ha = XLSX.utils.encode_cell({ r: 0, c: c });
+    if (ws[ha]) ws[ha].s = headerStyle;
+  }
+  // データ行の書式 + 個人番号列にハイパーリンク付与 (col index 6)
+  for (var r = 1; r <= range.e.r; r++) {
+    var bg = (r % 2 === 1) ? 'FFFFFF' : 'FFEBEE'; // 奇数=白, 偶数=薄ピンク
+    var rowStyle = {
+      fill: { patternType: 'solid', fgColor: { rgb: bg } },
+      font: { sz: 11 },
+      alignment: { horizontal: 'left', vertical: 'center', wrapText: false },
+      border: { top:{style:'thin',color:{rgb:'E0E0E0'}}, bottom:{style:'thin',color:{rgb:'E0E0E0'}}, left:{style:'thin',color:{rgb:'E0E0E0'}}, right:{style:'thin',color:{rgb:'E0E0E0'}} }
+    };
+    for (var c2 = range.s.c; c2 <= range.e.c; c2++) {
+      var cellAddr = XLSX.utils.encode_cell({ r: r, c: c2 });
+      if (!ws[cellAddr]) ws[cellAddr] = { v: '', t: 's' };
+      var cellStyle = Object.assign({}, rowStyle);
+      if (c2 <= 1) {
+        cellStyle = Object.assign({}, cellStyle, { font: { sz: 11, bold: true } });
+      }
+      // 個人番号 列 (0-indexed 6) にハイパーリンク付与
+      if (c2 === 6) {
+        var fu = folderUrls[r - 1];
+        if (fu) {
+          ws[cellAddr].l = { Target: fu, Tooltip: '社員フォルダを開く' };
+          cellStyle = Object.assign({}, cellStyle, { font: { sz: 11, color: { rgb: '1565C0' }, underline: true } });
+        }
+      }
+      ws[cellAddr].s = cellStyle;
+    }
+  }
+  ws['!rows'] = [{ hpt: 24 }];
+  for (var ri = 1; ri <= range.e.r; ri++) ws['!rows'].push({ hpt: 20 });
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '社会保険加入');
+  var today = new Date();
+  var ymd = today.getFullYear() + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
+  var fname = '社会保険加入_' + ymd + '_' + selected.length + '名.xlsx';
   try {
     XLSX.writeFile(wb, fname);
     showToast(selected.length + '名分のExcelをダウンロードしました', 'success');
