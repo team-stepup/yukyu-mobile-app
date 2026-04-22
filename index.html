@@ -10804,15 +10804,22 @@ function getEmpFolderPath(emp) {
     try {
       // URLデコードしてサーバー相対パスを抽出
       var decoded = decodeURIComponent(folderUrl);
-      // https://host/sites/... から /sites/... を取り出す
-      var m = decoded.match(/https?:\/\/[^/]+(\/.*)$/);
-      if (m) {
-        var p = m[1];
-        var qIdx = p.indexOf('?');
-        if (qIdx >= 0) p = p.substring(0, qIdx);
-        // trailing slash 除去
-        if (p.endsWith('/')) p = p.substring(0, p.length - 1);
-        return p;
+      // SP共有リンク(":f:" ":b:" ":w:" 等) はサーバー相対パスではないのでスキップ→フォールバック
+      if (/\/:[a-z]:\//i.test(decoded)) {
+        console.log('[社員フォルダ] 共有リンク形式のためフォールバック:', decoded);
+      } else {
+        // https://host/sites/... から /sites/... を取り出す
+        var m = decoded.match(/https?:\/\/[^/]+(\/.*)$/);
+        if (m) {
+          var p = m[1];
+          var qIdx = p.indexOf('?');
+          if (qIdx >= 0) p = p.substring(0, qIdx);
+          // trailing slash 除去
+          if (p.endsWith('/')) p = p.substring(0, p.length - 1);
+          // 先頭が /sites/ で始まる場合のみ採用 (OneDriveやその他パスは除外)
+          if (p.indexOf('/sites/') === 0) return p;
+          console.log('[社員フォルダ] /sites/ で始まらないためフォールバック:', p);
+        }
       }
     } catch(_) {}
   }
