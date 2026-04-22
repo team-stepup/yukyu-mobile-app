@@ -10789,15 +10789,42 @@ async function openShahoShutokuEditDialog(emp) {
   }
 }
 
-// 社員フォルダのサーバー相対パスを取得 (SP_DOC_LIB_PATH + 部課 + 番号 名前)
+// 社員フォルダのサーバー相対パスを取得
+// 優先1: emp の spUrl型(社員ファイル) フィールドから抽出 (既存フォルダURL)
+// 優先2: 部課+番号+氏名 で構築 (SP禁止文字 : * ? " < > | # % は '-' に置換)
 function getEmpFolderPath(emp) {
   if (!emp) return null;
+  // 優先1: emp 内の spUrl 型フィールドの Url から抽出
+  var folderUrl = '';
+  for (var _k in emp) {
+    var _v = emp[_k];
+    if (_v && typeof _v === 'object' && _v.Url) { folderUrl = _v.Url; break; }
+  }
+  if (folderUrl) {
+    try {
+      // URLデコードしてサーバー相対パスを抽出
+      var decoded = decodeURIComponent(folderUrl);
+      // https://host/sites/... から /sites/... を取り出す
+      var m = decoded.match(/https?:\/\/[^/]+(\/.*)$/);
+      if (m) {
+        var p = m[1];
+        var qIdx = p.indexOf('?');
+        if (qIdx >= 0) p = p.substring(0, qIdx);
+        // trailing slash 除去
+        if (p.endsWith('/')) p = p.substring(0, p.length - 1);
+        return p;
+      }
+    } catch(_) {}
+  }
+  // 優先2: フォールバック - 部課+番号+氏名 で構築
   var buka = (typeof getBukaValue === 'function') ? getBukaValue(emp) : '';
   if (!buka && typeof bukaODataKey !== 'undefined' && bukaODataKey) buka = String(emp[bukaODataKey] || '');
   var syainNo = emp[F.syainNo];
   var name = emp.Title || '';
   if (!buka || !syainNo || !name) return null;
-  return SP_DOC_LIB_PATH + '/' + buka + '/' + syainNo + ' ' + name;
+  // SPフォルダ禁止文字 : * ? " < > | # % ~ & { } を '-' に置換
+  function sanitize(s) { return String(s).replace(/[:*?"<>|#%~&{}]/g, '-'); }
+  return SP_DOC_LIB_PATH + '/' + sanitize(buka) + '/' + syainNo + ' ' + sanitize(name);
 }
 
 function closeShahoShutokuEditDialog() {
