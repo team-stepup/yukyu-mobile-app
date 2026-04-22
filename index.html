@@ -10829,40 +10829,42 @@ async function saveShahoShutokuEditDialog() {
       var rawInput = (el.value || '').trim();
       var oldVal = emp[odKey];
       var newVal;
-      // 型変換
-      if (type === 'date') {
-        newVal = rawInput ? (rawInput + 'T00:00:00Z') : null;
-      } else if (type === 'number') {
-        newVal = rawInput ? parseFloat(rawInput) : null;
-        if (isNaN(newVal)) newVal = null;
-      } else if (type === 'url') {
-        if (rawInput) {
-          newVal = { __metadata: { type: 'SP.FieldUrlValue' }, Url: rawInput, Description: rawInput };
-        } else {
-          newVal = null;
-        }
-      } else if (type === 'choice') {
-        newVal = rawInput === '' ? null : rawInput;
-      } else {
-        newVal = rawInput === '' ? null : rawInput;
+      // SP側の実際の型を検査してそれに合わせた変換 (Edm.String エラー回避)
+      var spType = 'Text';
+      if (typeof employeeFieldsCache !== 'undefined' && employeeFieldsCache && employeeFieldsCache[internalName]) {
+        spType = employeeFieldsCache[internalName].type || 'Text';
       }
-      // 変更検出
+      if (rawInput === '') {
+        newVal = null;
+      } else if (spType === 'DateTime') {
+        newVal = rawInput + 'T00:00:00Z';
+      } else if (spType === 'Number' || spType === 'Currency') {
+        var n = parseFloat(rawInput);
+        newVal = isNaN(n) ? null : n;
+      } else if (spType === 'URL') {
+        newVal = { __metadata: { type: 'SP.FieldUrlValue' }, Url: rawInput, Description: rawInput };
+      } else {
+        // Text, Note, Choice などはすべて文字列として送信
+        newVal = rawInput;
+      }
+      // 変更検出 (SP型ベース)
       var isSame = false;
-      if (type === 'date') {
+      if (spType === 'DateTime') {
         var od = oldVal ? String(oldVal).substring(0,10) : '';
         var nd = newVal ? String(newVal).substring(0,10) : '';
         isSame = od === nd;
-      } else if (type === 'number') {
+      } else if (spType === 'Number' || spType === 'Currency') {
         var on = (oldVal === null || oldVal === undefined || oldVal === '') ? null : parseFloat(String(oldVal).replace(/,/g,''));
         isSame = (on === null && newVal === null) || (on === newVal);
-      } else if (type === 'url') {
+      } else if (spType === 'URL') {
         var oldUrl = (typeof oldVal === 'object' && oldVal && oldVal.Url) ? oldVal.Url : (typeof oldVal === 'string' ? oldVal : '');
         var newUrl = newVal && newVal.Url ? newVal.Url : '';
         isSame = oldUrl === newUrl;
       } else {
-        isSame = (oldVal || '') === (newVal || '');
+        // Text, Note, Choice: string 比較
+        isSame = String(oldVal == null ? '' : oldVal) === String(newVal == null ? '' : newVal);
       }
-      debug.push({ key: key, type: type, odKey: odKey, internal: internalName, oldVal: oldVal, newVal: newVal, changed: !isSame });
+      debug.push({ key: key, dialogType: type, spType: spType, odKey: odKey, internal: internalName, oldVal: oldVal, newVal: newVal, changed: !isSame });
       if (!isSame) {
         body[internalName] = newVal;
         changed++;
