@@ -9704,9 +9704,9 @@ async function downloadKoyouKanyuuExcel() {
     if (!hourly || isNaN(hourly)) return '';
     return String(Math.round(hourly * 8 * 19 / 1000));
   }
-  // ヘッダー + データ行 (25列)
+  // ヘッダー + データ行 (27列)
   var headers = [
-    '社員番号','氏名','雇用保険被保険者番号','取得区分','性別',
+    '社員番号','氏名','派遣先','Koyou Name','雇用保険被保険者番号','取得区分','性別',
     '生年月日（和暦）','資格取得年月日','被保険者となったことの原因',
     '賃金（支払の態様）','賃金月額（千円）','雇用形態','職種','就職経路',
     '1週間の所定労働時間','期間の定め','契約期間','更新の有無','あて先',
@@ -9719,29 +9719,31 @@ async function downloadKoyouKanyuuExcel() {
     rows.push([
       String(emp[F.syainNo] || ''),                         // 1 社員番号
       String(emp.Title || ''),                              // 2 氏名
-      String(get(emp, 'koyouNo') || ''),                    // 3 雇用保険被保険者番号
-      shutokuKubun(emp),                                    // 4 取得区分 (1/2/エラー)
-      sexCode(emp),                                         // 5 性別 (1=男/2=女)
-      toWareki(get(emp, 'birthday')),                       // 6 生年月日(和暦)
-      nyushaStr,                                            // 7 資格取得年月日
-      '2',                                                  // 8 被保険者となったことの原因 (固定)
-      '4',                                                  // 9 賃金(支払の態様) (固定)
-      wageThousand(emp),                                    // 10 賃金月額(千円) = 時給×8×19/1000
-      '2',                                                  // 11 雇用形態 (固定=派遣)
-      '08',                                                 // 12 職種 (固定)
-      '4',                                                  // 13 就職経路 (固定)
-      '派遣先定時間×5',                                     // 14 1週間の所定労働時間 (要手入力)
-      '有',                                                 // 15 期間の定め (固定)
-      nyushaStr + ' ～ (雇用契約書を確認)',                 // 16 契約期間
-      '有',                                                 // 17 更新の有無 (固定)
-      '総務部',                                             // 18 あて先 (固定)
-      String(get(emp, 'tokki1') || ''),                     // 19 被保険者氏名(ローマ字)
-      String(get(emp, 'nationality') || ''),                // 20 国籍
-      String(get(emp, 'zairyuShikaku') || ''),              // 21 在留資格
-      fmtDate(get(emp, 'zairyuKigen')),                     // 22 在留期間
-      '無',                                                 // 23 資格外活動許可の有無 (固定)
-      String(get(emp, 'zairyuBikou') || ''),                // 24 在留カード番号 (zairyuBikou=在留：備考１)
-      '該当'                                                // 25 派遣・請負就労区分 (固定)
+      (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '', // 3 派遣先
+      String(get(emp, 'koyouName') || ''),                  // 4 Koyou Name
+      String(get(emp, 'koyouNo') || ''),                    // 5 雇用保険被保険者番号
+      shutokuKubun(emp),                                    // 6 取得区分 (1/2/エラー)
+      sexCode(emp),                                         // 7 性別 (1=男/2=女)
+      toWareki(get(emp, 'birthday')),                       // 8 生年月日(和暦)
+      nyushaStr,                                            // 9 資格取得年月日
+      '2',                                                  // 10 被保険者となったことの原因 (固定)
+      '4',                                                  // 11 賃金(支払の態様) (固定)
+      wageThousand(emp),                                    // 12 賃金月額(千円) = 時給×8×19/1000
+      '2',                                                  // 13 雇用形態 (固定=派遣)
+      '08',                                                 // 14 職種 (固定)
+      '4',                                                  // 15 就職経路 (固定)
+      '派遣先定時間×5',                                     // 16 1週間の所定労働時間 (要手入力)
+      '有',                                                 // 17 期間の定め (固定)
+      nyushaStr + ' ～ (雇用契約書を確認)',                 // 18 契約期間
+      '有',                                                 // 19 更新の有無 (固定)
+      '総務部',                                             // 20 あて先 (固定)
+      String(get(emp, 'tokki1') || ''),                     // 21 被保険者氏名(ローマ字)
+      String(get(emp, 'nationality') || ''),                // 22 国籍
+      String(get(emp, 'zairyuShikaku') || ''),              // 23 在留資格
+      fmtDate(get(emp, 'zairyuKigen')),                     // 24 在留期間
+      '無',                                                 // 25 資格外活動許可の有無 (固定)
+      String(get(emp, 'zairyuBikou') || ''),                // 26 在留カード番号 (zairyuBikou=在留：備考１)
+      '該当'                                                // 27 派遣・請負就労区分 (固定)
     ]);
   });
   // XLSX生成 (書式付き: C2でウィンドウ枠固定・列幅自動・ゼブラストライプ)
