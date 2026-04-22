@@ -23310,6 +23310,41 @@ function openFilePreviewFromPayload(payloadB64) {
   }
 }
 
+// PDFをブラウザの新規タブで開く (OAuth で取得 → Blob URL → window.open)
+// iframeの cross-origin 問題を回避、ブラウザ内蔵PDFビューアで XFA フォームも対応
+async function openPdfInNewTab(payloadB64) {
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(payloadB64))));
+    showToast('PDF を取得中...', 'info');
+    var token = await getToken();
+    var srMatch = p.ext.match(/https?:\/\/[^/]+(\/.*)$/);
+    var srUrl = srMatch ? srMatch[1] : '';
+    if (!srUrl) throw new Error('srUrl 取得失敗');
+    var pbuf = await downloadSpFile(token, srUrl);
+    var blob = new Blob([pbuf], { type: 'application/pdf' });
+    var blobUrl = URL.createObjectURL(blob);
+    // 新規タブで開く (ポップアップブロッカー回避のためユーザー操作起点)
+    var w = window.open(blobUrl, '_blank');
+    if (!w) {
+      // ポップアップブロック時のフォールバック: ダウンロードリンク
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.download = p.name || 'document.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    // 30秒後にメモリ解放 (ブラウザが読み込み完了を待つため遅延)
+    setTimeout(function() { try { URL.revokeObjectURL(blobUrl); } catch(_){} }, 30000);
+    showToast('新規タブで PDF を開きました', 'success');
+  } catch (e) {
+    console.error('openPdfInNewTab error:', e);
+    showToast('新規タブ表示失敗: ' + e.message, 'error');
+  }
+}
+
 // PDFプレビューをブラウザ内蔵PDFビューア(Blob URL iframe)に切替
 // cross-origin iframe は SharePoint の X-Frame-Options で blocked されるため、
 // OAuth で取得した PDF バイナリを Blob URL にしてブラウザ native ビューアで表示する
@@ -23396,7 +23431,7 @@ async function openFilePreview(srUrl, name, ext) {
       '<div class="preview-loading-box"><div class="pl-icon">⏳</div><div>読み込み中...</div></div>' +
     '</div>' +
     '<div class="preview-actions">' +
-      (isPdf ? '<a href="javascript:void(0)" onclick="switchPreviewToIframe(\'' + switchPayload + '\', this)">📺 iframe表示</a>' : '') +
+      (isPdf ? '<a href="javascript:void(0)" onclick="openPdfInNewTab(\'' + switchPayload + '\')">🆕 新規タブで表示</a>' : '') +
       '<a href="' + escHtml(externalUrl) + '" target="_blank" rel="noopener">📁 開く</a>' +
       '<a href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener">⬇️ DL</a>' +
     '</div>' +
