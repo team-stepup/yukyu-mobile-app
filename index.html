@@ -10598,6 +10598,30 @@ function renderShahoMochuuList(list) {
 }
 
 // 社保取得申請中の社員 編集ダイアログ (7項目 + 公文書PDFドラッグ&ドロップ)
+// buildFieldKeyMap でタイトル検索できないSPフィールドの OData キー直接指定 (最終フォールバック)
+// ユーザーがSP上で確認した実際のキーを指定。見つからない場合はこちらを優先使用。
+var SHAHO_EDIT_FALLBACK_KEYS = {
+  shahoNamae:          'OData__x793e__x4fdd__x540d__x524d_',
+  shahoNamaeFurigana:  'OData__x793e__x4fdd__x540d__x524d__x30',
+  shahoHyojunHoushu:   'OData__x793e__x4fdd__x6a19__x6e96__x58',
+  kisoNenkinNo:        'OData__x57fa__x790e__x5e74__x91d1__x75'
+};
+// emp内に該当キーが存在するかチェック、大文字小文字変種も試す
+function resolveEmpOdKey(emp, odKey) {
+  if (!odKey || !emp) return null;
+  if (odKey in emp) return odKey;
+  // 大文字小文字の変種も試す
+  var alts = [
+    odKey.replace(/^OData_/i, 'OData_'),
+    odKey.replace(/^OData_/i, 'Odata_'),
+    odKey.replace(/^OData_/i, 'ODATA_')
+  ];
+  for (var i = 0; i < alts.length; i++) {
+    if (alts[i] !== odKey && alts[i] in emp) return alts[i];
+  }
+  return null;
+}
+
 async function openShahoShutokuEditDialog(emp) {
   try {
     var meta = await fetchEmployeeFields();
@@ -10611,6 +10635,14 @@ async function openShahoShutokuEditDialog(emp) {
       { key: 'kisoNenkinNo', label: '基礎年金番号', type: 'text' },
       { key: 'soumuShaho', label: '総務-社保 状況', type: 'choice' }
     ];
+    // タイトル検索で見つからなかったフィールドは SHAHO_EDIT_FALLBACK_KEYS を使用
+    Object.keys(SHAHO_EDIT_FALLBACK_KEYS).forEach(function(k) {
+      if (!km[k]) {
+        var fallback = SHAHO_EDIT_FALLBACK_KEYS[k];
+        var actualKey = resolveEmpOdKey(emp, fallback);
+        if (actualKey) km[k] = actualKey;
+      }
+    });
     // フィールド解決状況をログ出力 (デバッグ用)
     console.log('[社保取得編集] 開いた社員:', { id: emp.Id, name: emp.Title, no: emp[F.syainNo] });
     console.log('[社保取得編集] 各フィールドのキー解決状況:');
