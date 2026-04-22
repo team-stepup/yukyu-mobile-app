@@ -3581,6 +3581,46 @@ select.sankyu-edit-input {
   transform: scale(0.94);
   box-shadow: 0 2px 8px rgba(198,40,40,0.25);
 }
+/* 名前変更ボタン (✏️) */
+.vfolder-rename-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  border-radius: 12px;
+  border: 1px solid #bbdefb;
+  background: linear-gradient(180deg, #e3f2fd, #bbdefb);
+  color: #1565c0;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+  margin-left: 4px;
+}
+.vfolder-rename-btn:active {
+  transform: scale(0.94);
+  box-shadow: 0 2px 8px rgba(21,101,192,0.25);
+}
+/* 移動ボタン (📦) */
+.vfolder-move-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  border-radius: 12px;
+  border: 1px solid #c5cae9;
+  background: linear-gradient(180deg, #e8eaf6, #c5cae9);
+  color: #283593;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+  margin-left: 4px;
+}
+.vfolder-move-btn:active {
+  transform: scale(0.94);
+  box-shadow: 0 2px 8px rgba(40,53,147,0.25);
+}
 .vfolder-folder-del-btn {
   flex-shrink: 0;
   display: flex;
@@ -22260,6 +22300,149 @@ function deleteFolderFromPayload(b64) {
   } catch(e) { showToast('削除情報の解析に失敗', 'error'); }
 }
 
+// ============================================================
+// 社員ファイル: 名前変更 ＋ 移動 機能 (SP REST API)
+// ============================================================
+async function _syainMoveSpItem(srcSrUrl, destSrUrl, isFolder) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var digestResp = await fetch(SP_DOC_SITE_URL + "/_api/contextinfo", {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+  });
+  if (!digestResp.ok) throw new Error('digest失敗 HTTP ' + digestResp.status);
+  var digestData = await digestResp.json();
+  var digest = digestData.d && digestData.d.GetContextWebInformation && digestData.d.GetContextWebInformation.FormDigestValue;
+  if (!digest) throw new Error('digestが空');
+  var url, body, headers;
+  if (isFolder) {
+    // MoveFolderByPath (SP.MoveCopyUtil)
+    url = SP_DOC_SITE_URL + '/_api/SP.MoveCopyUtil.MoveFolderByPath';
+    body = JSON.stringify({
+      srcPath: { DecodedUrl: srcSrUrl },
+      destPath: { DecodedUrl: destSrUrl },
+      options: { KeepBoth: false, ResetAuthorAndCreatedOnCopy: false, ShouldBypassSharedLocks: true }
+    });
+    headers = {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'X-RequestDigest': digest
+    };
+  } else {
+    // File moveto
+    url = SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + encodeURIComponent(srcSrUrl).replace(/'/g, '%27') + "')/moveto(newurl='" + encodeURIComponent(destSrUrl).replace(/'/g, '%27') + "',flags=1)";
+    body = null;
+    headers = {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'X-RequestDigest': digest
+    };
+  }
+  var resp = await fetch(url, { method: 'POST', headers: headers, body: body });
+  if (!resp.ok) {
+    var errText = await resp.text();
+    throw new Error('HTTP ' + resp.status + ': ' + errText.substring(0, 300));
+  }
+  return resp;
+}
+
+async function _syainRefreshCurrent() {
+  if (!_sfNavStack || _sfNavStack.length === 0) return;
+  var cur = _sfNavStack[_sfNavStack.length - 1];
+  try {
+    var token = await getToken();
+    var contents = await loadVehicleFolderContents(token, cur.srUrl);
+    renderSyainFolderContents(contents.folders, contents.files);
+  } catch(e) { console.warn('refresh folder failed:', e); }
+}
+
+// 名前変更 (ファイル or フォルダ)
+function renameSyainItemFromPayload(payloadB64) {
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(payloadB64))));
+    var isFolder = p.type !== 'file';
+    var currentName = p.name || '';
+    var newName = prompt((isFolder ? 'フォルダ' : 'ファイル') + 'の新しい名前:', currentName);
+    if (newName === null) return; // cancelled
+    newName = String(newName || '').trim();
+    if (!newName || newName === currentName) return;
+    var srcSrUrl = p.srUrl;
+    var parentPath = srcSrUrl.substring(0, srcSrUrl.lastIndexOf('/'));
+    var destSrUrl = parentPath + '/' + newName;
+    (async function() {
+      try {
+        showToast('名前変更中...', 'info');
+        await _syainMoveSpItem(srcSrUrl, destSrUrl, isFolder);
+        showToast('「' + currentName + '」→「' + newName + '」に変更', 'success');
+        await _syainRefreshCurrent();
+      } catch(e) { console.error('rename error:', e); showToast('名前変更失敗: ' + e.message, 'error'); }
+    })();
+  } catch(e) { showToast('情報解析失敗', 'error'); }
+}
+
+// 移動: 移動先フォルダ選択モーダルを表示
+async function moveSyainItemFromPayload(payloadB64) {
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(payloadB64))));
+    var isFolder = p.type !== 'file';
+    if (!_sfNavStack || _sfNavStack.length === 0) { showToast('社員フォルダを先に開いてください', 'error'); return; }
+    var rootEntry = _sfNavStack[0];
+    showToast('移動先候補を取得中...', 'info');
+    var token = await getToken();
+    var allFolders = [{ srUrl: rootEntry.srUrl, name: rootEntry.name + ' (ルート)' }];
+    async function collect(srUrl, label, depth) {
+      if (depth > 3) return;
+      var contents = await loadVehicleFolderContents(token, srUrl);
+      var subs = contents.folders || [];
+      for (var i = 0; i < subs.length; i++) {
+        var sub = subs[i];
+        if (sub.ServerRelativeUrl === p.srUrl) continue; // 自分自身は除外
+        var subLabel = label + ' / ' + sub.Name;
+        allFolders.push({ srUrl: sub.ServerRelativeUrl, name: subLabel });
+        try { await collect(sub.ServerRelativeUrl, subLabel, depth + 1); } catch(_) {}
+      }
+    }
+    try { await collect(rootEntry.srUrl, rootEntry.name, 0); } catch(_) {}
+    // モーダル表示
+    var existing = document.getElementById('syainMoveTargetModal');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'syainMoveTargetModal';
+    ov.className = 'confirm-overlay';
+    var listHtml = allFolders.map(function(f) {
+      var payload = btoa(unescape(encodeURIComponent(JSON.stringify({
+        src: p.srUrl, dest: f.srUrl, name: p.name, isFolder: isFolder
+      }))));
+      return '<div class="syain-move-target" onclick="_syainDoMoveFromPayload(\'' + payload + '\')" style="padding:10px 14px;border-bottom:1px solid #eee;cursor:pointer;display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:18px;">📁</span>' +
+        '<span style="flex:1;font-size:13px;">' + escHtml(f.name) + '</span>' +
+        '<span style="color:#1565c0;font-size:16px;">›</span>' +
+        '</div>';
+    }).join('');
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:92vw;width:480px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;">' +
+      '<div style="padding:12px 14px;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;display:flex;align-items:center;gap:8px;"><span style="font-size:20px;">📦</span><span style="font-weight:700;flex:1;">「' + escHtml(p.name) + '」の移動先を選択</span><button onclick="document.getElementById(\'syainMoveTargetModal\').remove()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:18px;">×</button></div>' +
+      '<div style="overflow-y:auto;flex:1;">' + (listHtml || '<div style="padding:30px;text-align:center;color:#999;">候補フォルダなし</div>') + '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  } catch(e) { console.error('move picker error:', e); showToast('移動先取得失敗: ' + e.message, 'error'); }
+}
+
+async function _syainDoMoveFromPayload(payloadB64) {
+  var modal = document.getElementById('syainMoveTargetModal');
+  if (modal) modal.remove();
+  try {
+    var p = JSON.parse(decodeURIComponent(escape(atob(payloadB64))));
+    var destSrUrl = p.dest + '/' + p.name;
+    if (destSrUrl === p.src) { showToast('同じ場所には移動できません', 'warn'); return; }
+    showToast('移動中...', 'info');
+    await _syainMoveSpItem(p.src, destSrUrl, p.isFolder);
+    showToast('「' + p.name + '」を移動しました', 'success');
+    await _syainRefreshCurrent();
+  } catch(e) { console.error('move error:', e); showToast('移動失敗: ' + e.message, 'error'); }
+}
+
 function formatFileSize(bytes) {
   if (!bytes || isNaN(bytes)) return '';
   if (bytes < 1024) return bytes + ' B';
@@ -23639,6 +23822,7 @@ function renderSyainFolderContents(subfolders, files) {
     var count = (typeof sub.ItemCount === 'number') ? sub.ItemCount : null;
     var subSrUrl = sub.ServerRelativeUrl || '';
     var delPayload = subSrUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: subSrUrl, name: sub.Name, ctx: 'syain' })))) : '';
+    var moveRenamePayload = subSrUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: subSrUrl, name: sub.Name, type: 'folder' })))) : '';
     html += '<div class="vfolder-row">' +
       '<div class="vfolder-file vfolder-subfolder" onclick="openSyainSubfolderByIdx(' + i + ')">' +
         '<div class="vfolder-file-icon" style="background:#fff3e0;color:#ef6c00;">📁</div>' +
@@ -23651,6 +23835,8 @@ function renderSyainFolderContents(subfolders, files) {
         '</div>' +
         '<span class="vfolder-file-arrow">›</span>' +
       '</div>' +
+      (moveRenamePayload ? '<button class="vfolder-rename-btn" onclick="event.stopPropagation();renameSyainItemFromPayload(\'' + moveRenamePayload + '\')" title="名前変更">✏️</button>' : '') +
+      (moveRenamePayload ? '<button class="vfolder-move-btn" onclick="event.stopPropagation();moveSyainItemFromPayload(\'' + moveRenamePayload + '\')" title="移動">📦</button>' : '') +
       (delPayload ? '<button class="vfolder-del-btn" onclick="event.stopPropagation();deleteFolderFromPayload(\'' + delPayload + '\')" title="削除">🗑</button>' : '') +
     '</div>';
   });
@@ -23666,6 +23852,7 @@ function renderSyainFolderContents(subfolders, files) {
     var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
     var prevB64 = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ext: ext })))) : '';
     var delPayload = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ctx: 'syain', type: 'file' })))) : '';
+    var moveRenamePayload = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, type: 'file' })))) : '';
 
     html += '<div class="vfolder-row">' +
       (prevB64
@@ -23683,6 +23870,8 @@ function renderSyainFolderContents(subfolders, files) {
         '<span class="vfolder-file-arrow">›</span>' +
       (prevB64 ? '</div>' : '</a>') +
       '<a class="vfolder-dl-btn" href="' + escHtml(dlUrl) + '" target="_blank" rel="noopener" title="ダウンロード">⬇️</a>' +
+      (moveRenamePayload ? '<button class="vfolder-rename-btn" onclick="event.stopPropagation();renameSyainItemFromPayload(\'' + moveRenamePayload + '\')" title="名前変更">✏️</button>' : '') +
+      (moveRenamePayload ? '<button class="vfolder-move-btn" onclick="event.stopPropagation();moveSyainItemFromPayload(\'' + moveRenamePayload + '\')" title="移動">📦</button>' : '') +
       (delPayload ? '<button class="vfolder-del-btn" onclick="event.stopPropagation();deleteFileFromPayload(\'' + delPayload + '\')" title="削除">🗑</button>' : '') +
     '</div>';
   });
