@@ -10830,39 +10830,27 @@ async function openShahoShutokuEditDialog(emp) {
   }
 }
 
-// 社員フォルダのサーバー相対パスを取得
-// 優先1: emp の spUrl型(社員ファイル) フィールドから抽出 (既存フォルダURL)
-// 優先2: 部課+番号+氏名 で構築 (SP禁止文字 : * ? " < > | # % は '-' に置換)
-function getEmpFolderPath(emp) {
+// 社員フォルダのサーバー相対パスを取得 (async)
+// 優先1: emp の spUrl型(社員ファイル) フィールドの URL を resolveSyainServerRelativeUrl で解決
+//         → 共有リンク(:f:) でも v2.0/shares API で本物のパスに変換
+// 優先2: 部課+番号+氏名 で構築 (SP禁止文字 : * ? " < > | # % ~ & { } は '-' に置換)
+async function getEmpFolderPath(emp) {
   if (!emp) return null;
-  // 優先1: emp 内の spUrl 型フィールドの Url から抽出
+  // 優先1: emp 内の spUrl 型フィールドの Url を解決
   var folderUrl = '';
   for (var _k in emp) {
     var _v = emp[_k];
     if (_v && typeof _v === 'object' && _v.Url) { folderUrl = _v.Url; break; }
   }
-  if (folderUrl) {
+  if (folderUrl && typeof resolveSyainServerRelativeUrl === 'function') {
     try {
-      // URLデコードしてサーバー相対パスを抽出
-      var decoded = decodeURIComponent(folderUrl);
-      // SP共有リンク(":f:" ":b:" ":w:" 等) はサーバー相対パスではないのでスキップ→フォールバック
-      if (/\/:[a-z]:\//i.test(decoded)) {
-        console.log('[社員フォルダ] 共有リンク形式のためフォールバック:', decoded);
-      } else {
-        // https://host/sites/... から /sites/... を取り出す
-        var m = decoded.match(/https?:\/\/[^/]+(\/.*)$/);
-        if (m) {
-          var p = m[1];
-          var qIdx = p.indexOf('?');
-          if (qIdx >= 0) p = p.substring(0, qIdx);
-          // trailing slash 除去
-          if (p.endsWith('/')) p = p.substring(0, p.length - 1);
-          // 先頭が /sites/ で始まる場合のみ採用 (OneDriveやその他パスは除外)
-          if (p.indexOf('/sites/') === 0) return p;
-          console.log('[社員フォルダ] /sites/ で始まらないためフォールバック:', p);
-        }
+      var token = await getToken();
+      var srUrl = await resolveSyainServerRelativeUrl(folderUrl, token);
+      if (srUrl) {
+        console.log('[社員フォルダ] 解決済パス:', srUrl);
+        return srUrl;
       }
-    } catch(_) {}
+    } catch(e) { console.warn('resolveSyainServerRelativeUrl failed:', e); }
   }
   // 優先2: フォールバック - 部課+番号+氏名 で構築
   var buka = (typeof getBukaValue === 'function') ? getBukaValue(emp) : '';
@@ -10870,9 +10858,10 @@ function getEmpFolderPath(emp) {
   var syainNo = emp[F.syainNo];
   var name = emp.Title || '';
   if (!buka || !syainNo || !name) return null;
-  // SPフォルダ禁止文字 : * ? " < > | # % ~ & { } を '-' に置換
   function sanitize(s) { return String(s).replace(/[:*?"<>|#%~&{}]/g, '-'); }
-  return SP_DOC_LIB_PATH + '/' + sanitize(buka) + '/' + syainNo + ' ' + sanitize(name);
+  var fallback = SP_DOC_LIB_PATH + '/' + sanitize(buka) + '/' + syainNo + ' ' + sanitize(name);
+  console.log('[社員フォルダ] フォールバック構築パス:', fallback);
+  return fallback;
 }
 
 function closeShahoShutokuEditDialog() {
@@ -10979,9 +10968,12 @@ async function saveShahoShutokuEditDialog() {
     if (pdfFile) {
       try {
         if (btn) btn.textContent = 'PDFアップロード中...';
-        var folderPath = getEmpFolderPath(emp);
+        var folderPath = await getEmpFolderPath(emp);
         if (!folderPath) throw new Error('社員フォルダパスが取得できません (部課・番号・氏名 要確認)');
-        await ensureSpFolder(folderPath);
+        // 既存社員フォルダがあればそのまま利用、なければ作成
+        try { await ensureSpFolder(folderPath); } catch(e) {
+          console.warn('ensureSpFolder 失敗: 既存フォルダと仮定してアップロード続行', e);
+        }
         await uploadFileToSp(folderPath, pdfFile.name, pdfFile);
         pdfMessage = ' / PDF「' + pdfFile.name + '」を社員フォルダに保存';
       } catch (upErr) {
