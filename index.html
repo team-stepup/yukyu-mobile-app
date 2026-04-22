@@ -10611,6 +10611,13 @@ async function openShahoShutokuEditDialog(emp) {
       { key: 'kisoNenkinNo', label: '基礎年金番号', type: 'text' },
       { key: 'soumuShaho', label: '総務-社保 状況', type: 'choice' }
     ];
+    // フィールド解決状況をログ出力 (デバッグ用)
+    console.log('[社保取得編集] 開いた社員:', { id: emp.Id, name: emp.Title, no: emp[F.syainNo] });
+    console.log('[社保取得編集] 各フィールドのキー解決状況:');
+    fieldDefs.forEach(function(f) {
+      var odKey = km[f.key];
+      console.log('  ' + f.label + ' (' + f.key + '): ' + (odKey ? '✓ ' + odKey : '✗ 未検出'));
+    });
     var existing = document.getElementById('shahoShutokuEditOverlay');
     if (existing) existing.remove();
     var ov = document.createElement('div');
@@ -10778,14 +10785,15 @@ async function saveShahoShutokuEditDialog() {
     var body = {};
     var changed = 0;
     var skipped = [];
+    var debug = [];
     document.querySelectorAll('.shaho-shutoku-field').forEach(function(el) {
-      if (el.disabled) { skipped.push(el.getAttribute('data-key') + ' (フィールド未検出)'); return; }
       var key = el.getAttribute('data-key');
       var type = el.getAttribute('data-type');
+      if (el.disabled) { skipped.push(key + '(フィールド未検出)'); return; }
       var odKey = km[key];
-      if (!odKey) { skipped.push(key + ' (キー解決失敗)'); return; }
+      if (!odKey) { skipped.push(key + '(キー解決失敗)'); return; }
       var internalName = odataKeyToInternal(odKey);
-      if (!internalName) { skipped.push(key + ' (内部名解決失敗)'); return; }
+      if (!internalName) { skipped.push(key + '(内部名解決失敗)'); return; }
       var rawInput = (el.value || '').trim();
       var oldVal = emp[odKey];
       var newVal;
@@ -10822,15 +10830,21 @@ async function saveShahoShutokuEditDialog() {
       } else {
         isSame = (oldVal || '') === (newVal || '');
       }
+      debug.push({ key: key, type: type, odKey: odKey, internal: internalName, oldVal: oldVal, newVal: newVal, changed: !isSame });
       if (!isSame) {
         body[internalName] = newVal;
         changed++;
       }
     });
+    console.log('[社保取得編集] debug:', debug);
+    console.log('[社保取得編集] skipped:', skipped);
+    console.log('[社保取得編集] body to save:', body);
     // PDFファイル (input or drag-drop で設定された window._shahoShutokuPdfFile)
     var pdfFile = window._shahoShutokuPdfFile || null;
     if (changed === 0 && !pdfFile) {
-      showToast('変更もPDFも選択されていません', 'info');
+      var msg = '変更もPDFも選択されていません';
+      if (skipped.length > 0) msg += ' (未保存項目: ' + skipped.join(', ') + ')';
+      showToast(msg, 'info');
       if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
       return;
     }
@@ -10886,21 +10900,23 @@ async function saveShahoShutokuEditDialog() {
     }
     showToast((changed > 0 ? changed + '項目を保存' : '項目変更なし') + pdfMessage + list9Message, 'success');
     // 最新データを再取得
+    var updatedEmp = emp;
     try {
       var updated = await fetchFullEmployee(emp[F.syainNo]);
       if (updated) {
+        updatedEmp = Object.assign({}, emp, updated);
         for (var i = 0; i < _soumuAllEmps.length; i++) {
           if (_soumuAllEmps[i].Id === emp.Id) {
-            _soumuAllEmps[i] = Object.assign({}, _soumuAllEmps[i], updated);
+            _soumuAllEmps[i] = updatedEmp;
             break;
           }
         }
       }
     } catch(_) {}
     closeShahoShutokuEditDialog();
-    // 総務部ダッシュボードを再描画
+    // 編集した社員の 社員情報詳細画面 を開く
     setTimeout(function() {
-      if (typeof renderSoumuDashboard === 'function') renderSoumuDashboard();
+      if (typeof selectEmployee === 'function') selectEmployee(updatedEmp);
     }, 200);
   } catch (e) {
     console.error('saveShahoShutokuEditDialog error:', e);
