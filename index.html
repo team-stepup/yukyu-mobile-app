@@ -6977,6 +6977,48 @@ function formatProfileValue(val, format) {
   return escHtml(str);
 }
 
+// 状況ドロップダウン(総務-社保/雇用/離職票等)の色分け定義
+// 戻り値: null または {icon, bg, color, border}
+function _getStatusStyle(val) {
+  var v = String(val || '');
+  if (!v) return null;
+  if (v.indexOf('喪失申請中') >= 0) return { icon:'🔴', bg:'#ffebee', color:'#b71c1c', border:'#c62828' };
+  if (v.indexOf('取得申請中') >= 0) return { icon:'🔵', bg:'#e3f2fd', color:'#0d47a1', border:'#1565c0' };
+  if (v.indexOf('喪失完了') >= 0) return { icon:'⬛', bg:'#eceff1', color:'#263238', border:'#455a64' };
+  if (v.indexOf('取得完了') >= 0) return { icon:'✅', bg:'#e8f5e9', color:'#1b5e20', border:'#2e7d32' };
+  if (v.indexOf('申請中') >= 0) return { icon:'🟠', bg:'#fff3e0', color:'#e65100', border:'#ef6c00' };
+  if (v.indexOf('完了') >= 0) return { icon:'✅', bg:'#e8f5e9', color:'#1b5e20', border:'#2e7d32' };
+  if (v === '必要') return { icon:'⚠️', bg:'#fff3e0', color:'#e65100', border:'#ef6c00' };
+  if (v === '不要') return { icon:'⚪', bg:'#f5f5f5', color:'#757575', border:'#bdbdbd' };
+  if (v === '未加入') return { icon:'⚪', bg:'#fff3e0', color:'#e65100', border:'#ffb74d' };
+  if (v === '手渡し') return { icon:'✋', bg:'#fff8e1', color:'#f57f17', border:'#fbc02d' };
+  if (v === '郵送') return { icon:'📮', bg:'#e8eaf6', color:'#303f9f', border:'#5c6bc0' };
+  return null;
+}
+
+// <select>要素に現在値に応じた背景/ボーダー色を適用(onchangeで呼ぶ)
+function _applySelectStatusStyle(selectEl) {
+  if (!selectEl) return;
+  var sty = _getStatusStyle(selectEl.value);
+  if (sty) {
+    selectEl.style.backgroundColor = sty.bg;
+    selectEl.style.borderColor = sty.border;
+    selectEl.style.color = sty.color;
+    selectEl.style.fontWeight = '700';
+  } else {
+    selectEl.style.backgroundColor = '';
+    selectEl.style.borderColor = '';
+    selectEl.style.color = '';
+    selectEl.style.fontWeight = '';
+  }
+}
+
+// choice値にアイコン接頭辞を付与(オプション表示用)
+function _formatStatusChoice(c) {
+  var sty = _getStatusStyle(c);
+  return (sty && sty.icon) ? (sty.icon + ' ' + c) : c;
+}
+
 // Check if a category has any expiry alerts
 function categoryHasAlert(emp, keyMap, category) {
   if (isResigned(emp)) return false;
@@ -10881,17 +10923,19 @@ async function openShahoShutokuEditDialog(emp, mode) {
       var bgStyle = odKey ? '' : 'background:#f5f5f5;';
       var inputHtml;
       if (f.type === 'choice') {
-        // Choice field → <select>
+        // Choice field → <select> (状況系は色分け・アイコン付与)
         var choices = getFieldChoices(f.key, km) || [];
-        inputHtml = '<select class="shaho-shutoku-field" data-key="' + f.key + '" data-type="' + f.type + '" style="width:100%;padding:9px 11px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;' + bgStyle + '"' + disabled + '>';
+        var curSty = _getStatusStyle(curVal);
+        var statusStyle = curSty ? ('background-color:' + curSty.bg + ';border-color:' + curSty.border + ';color:' + curSty.color + ';font-weight:700;') : '';
+        inputHtml = '<select class="shaho-shutoku-field" data-key="' + f.key + '" data-type="' + f.type + '" onchange="_applySelectStatusStyle(this)" style="width:100%;padding:9px 11px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;' + bgStyle + statusStyle + '"' + disabled + '>';
         inputHtml += '<option value="">（未選択）</option>';
         choices.forEach(function(c) {
           var sel = (String(curVal) === c) ? ' selected' : '';
-          inputHtml += '<option value="' + escHtml(c) + '"' + sel + '>' + escHtml(c) + '</option>';
+          inputHtml += '<option value="' + escHtml(c) + '"' + sel + '>' + escHtml(_formatStatusChoice(c)) + '</option>';
         });
         // 現在値が選択肢に無い場合、追加
         if (curVal && choices.indexOf(curVal) < 0) {
-          inputHtml += '<option value="' + escHtml(curVal) + '" selected>' + escHtml(curVal) + ' (現在値)</option>';
+          inputHtml += '<option value="' + escHtml(curVal) + '" selected>' + escHtml(_formatStatusChoice(curVal)) + ' (現在値)</option>';
         }
         inputHtml += '</select>';
       } else {
@@ -11423,14 +11467,16 @@ async function openKoyouEditDialog(emp, mode) {
       var inputHtml;
       if (f.type === 'choice') {
         var choices = getFieldChoices(f.key, km) || [];
-        inputHtml = '<select class="koyou-edit-field" data-key="' + f.key + '" data-type="' + f.type + '" style="width:100%;padding:9px 11px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;' + bgStyle + '"' + disabled + '>';
+        var curSty = _getStatusStyle(curVal);
+        var statusStyle = curSty ? ('background-color:' + curSty.bg + ';border-color:' + curSty.border + ';color:' + curSty.color + ';font-weight:700;') : '';
+        inputHtml = '<select class="koyou-edit-field" data-key="' + f.key + '" data-type="' + f.type + '" onchange="_applySelectStatusStyle(this)" style="width:100%;padding:9px 11px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;' + bgStyle + statusStyle + '"' + disabled + '>';
         inputHtml += '<option value="">（未選択）</option>';
         choices.forEach(function(c) {
           var sel = (String(curVal) === c) ? ' selected' : '';
-          inputHtml += '<option value="' + escHtml(c) + '"' + sel + '>' + escHtml(c) + '</option>';
+          inputHtml += '<option value="' + escHtml(c) + '"' + sel + '>' + escHtml(_formatStatusChoice(c)) + '</option>';
         });
         if (curVal && choices.indexOf(curVal) < 0) {
-          inputHtml += '<option value="' + escHtml(curVal) + '" selected>' + escHtml(curVal) + ' (現在値)</option>';
+          inputHtml += '<option value="' + escHtml(curVal) + '" selected>' + escHtml(_formatStatusChoice(curVal)) + ' (現在値)</option>';
         }
         inputHtml += '</select>';
       } else {
@@ -17807,13 +17853,15 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
   if (field.format === 'email') {
     return '<input type="email" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
   }
-  // Choice field with choices → dropdown select
+  // Choice field with choices → dropdown select (状況系は色分け・アイコン付与)
   if ((fieldType === 'Choice' || field.format === 'badge') && choices && choices.length > 0) {
-    let html = '<select class="edit-select" id="' + id + '" data-field="' + field.key + '">';
+    const curSty = _getStatusStyle(val);
+    const selStyle = curSty ? (' style="background-color:' + curSty.bg + ';border-color:' + curSty.border + ';color:' + curSty.color + ';font-weight:700;"') : '';
+    let html = '<select class="edit-select" id="' + id + '" data-field="' + field.key + '" onchange="_applySelectStatusStyle(this)"' + selStyle + '>';
     html += '<option value="">（未選択）</option>';
     choices.forEach(c => {
       const selected = (String(val) === c) ? ' selected' : '';
-      html += '<option value="' + escHtml(c) + '"' + selected + '>' + escHtml(c) + '</option>';
+      html += '<option value="' + escHtml(c) + '"' + selected + '>' + escHtml(_formatStatusChoice(c)) + '</option>';
     });
     html += '</select>';
     return html;
