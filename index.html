@@ -9619,9 +9619,9 @@ function openSoumuFilterList(filterKey) {
   var matcher, title, badgeKey;
   switch (filterKey) {
     case 'koyou-mochuu':
-      badgeKey = 'soumuKoyou'; title = '雇用 申請中';
-      matcher = function(v) { return v.indexOf('取得申請中') >= 0 || v.indexOf('喪失申請中') >= 0; };
-      break;
+      // 雇用申請中: 取得申請中なら取得編集ダイアログ、喪失申請中なら喪失編集ダイアログ
+      openKoyouMochuuList();
+      return;
     case 'rishoku-mochuu':
       // 離職票申請中: zaisyoku="退社" && 離職票risyokuhyou="必要" && 総務-離職票="→申請中"
       // Custom multi-field filter
@@ -11295,6 +11295,376 @@ async function completeShahoList9ForEmp(emp) {
   // キャッシュを再読込対象に
   _shahoYoteiLoaded = false;
   return { updated: updated, total: myItems.length, msg: updated + '件更新' };
+}
+
+// ============================================================
+// 雇用保険 申請中 (取得申請中/喪失申請中) の一覧と編集ダイアログ
+// 社保と同じパターン: 取得→青系ダイアログ / 喪失→赤系ダイアログ
+// ============================================================
+function openKoyouMochuuList() {
+  if (!_soumuAllEmps || !_soumuKeyMap) { showToast('データ未取得', 'warn'); return; }
+  var odKoyou = _soumuKeyMap['soumuKoyou'];
+  if (!odKoyou) { showToast('フィールド「soumuKoyou」が見つかりません', 'error'); return; }
+  var list = _soumuAllEmps.filter(function(emp) {
+    if (!emp.Title) return false;
+    var v = String(emp[odKoyou] || '');
+    return v.indexOf('取得申請中') >= 0 || v.indexOf('喪失申請中') >= 0;
+  });
+  renderKoyouMochuuList(list);
+}
+
+function renderKoyouMochuuList(list) {
+  var existing = document.getElementById('soumuListOverlay');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'soumuListOverlay';
+  ov.className = 'confirm-overlay';
+  var odKoyou = _soumuKeyMap['soumuKoyou'];
+  var itemsHtml = '';
+  if (list.length === 0) {
+    itemsHtml = '<div style="text-align:center;padding:30px;color:var(--text-light);">該当者なし</div>';
+  } else {
+    list.forEach(function(emp, i) {
+      var name = emp.Title || '';
+      var no = emp[F.syainNo] || '';
+      var haken = getHakensaki(emp) || '';
+      var koyouVal = String(emp[odKoyou] || '');
+      var isShutoku = koyouVal.indexOf('取得申請中') >= 0;
+      var badgeStyle = isShutoku ? 'background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;' : 'background:#ffebee;color:#c62828;border:1px solid #ef9a9a;';
+      var borderColor = isShutoku ? '#1565c0' : '#c62828';
+      var action = isShutoku ? 'openKoyouShutokuEditDialogById' : 'openKoyouSoushitsuEditDialogById';
+      itemsHtml += '<div class="soumu-list-item" data-emp-id="' + emp.Id + '" data-action="' + action + '" style="border-left:4px solid ' + borderColor + ';cursor:pointer;">';
+      itemsHtml +=   '<div style="flex:1;min-width:0;">';
+      itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(name) + '</div>';
+      itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
+      itemsHtml +=   '</div>';
+      itemsHtml +=   '<div style="font-size:11px;padding:3px 8px;border-radius:10px;white-space:nowrap;font-weight:700;' + badgeStyle + '">' + escHtml(koyouVal) + '</div>';
+      itemsHtml += '</div>';
+    });
+  }
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:92vw;width:500px;max-height:85vh;display:flex;flex-direction:column;">' +
+      '<div style="padding:14px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;">' +
+        '<div style="font-size:15px;font-weight:700;flex:1;">👔 雇用 申請中 (' + list.length + '名)</div>' +
+        '<button onclick="document.getElementById(\'soumuListOverlay\').remove()" style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;">×</button>' +
+      '</div>' +
+      '<div style="padding:8px 12px;background:#f5f5f5;font-size:10px;color:#555;border-bottom:1px solid #e0e0e0;line-height:1.5;">🔵 取得申請中 → 雇用取得編集ダイアログ<br>🔴 喪失申請中 → 雇用喪失編集ダイアログ</div>' +
+      '<div style="overflow-y:auto;padding:10px 14px;flex:1;">' + itemsHtml + '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  document.querySelectorAll('#soumuListOverlay .soumu-list-item').forEach(function(row) {
+    row.addEventListener('click', function() {
+      var empId = parseInt(row.getAttribute('data-emp-id'));
+      var action = row.getAttribute('data-action');
+      var emp = _soumuAllEmps.find(function(e) { return e.Id === empId; });
+      if (!emp) return;
+      document.getElementById('soumuListOverlay').remove();
+      if (action === 'openKoyouShutokuEditDialogById') {
+        openKoyouEditDialog(emp, 'shutoku');
+      } else if (action === 'openKoyouSoushitsuEditDialogById') {
+        openKoyouEditDialog(emp, 'soushitsu');
+      } else {
+        selectEmployee(emp);
+      }
+    });
+  });
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+}
+
+// 雇用保険 取得/喪失 申請中 編集ダイアログ
+async function openKoyouEditDialog(emp, mode) {
+  mode = mode || 'shutoku';
+  var isSoushitsu = (mode === 'soushitsu');
+  try {
+    var meta = await fetchEmployeeFields();
+    var km = buildFieldKeyMap(meta);
+    var fieldDefs = isSoushitsu ? [
+      { key: 'seiriNo', label: '整理番号', type: 'text' },
+      { key: 'koyouNo', label: '雇用：被保険者番号', type: 'text' },
+      { key: 'koyouName', label: '雇用保険名前', type: 'text' },
+      { key: 'koyouSoushitsu', label: '雇用保険喪失日', type: 'date' },
+      { key: 'taisyokuRiyuu', label: '退職理由', type: 'choice' },
+      { key: 'soumuKoyou', label: '総務・雇用 状況', type: 'choice' }
+    ] : [
+      { key: 'seiriNo', label: '整理番号', type: 'text' },
+      { key: 'koyouNo', label: '雇用：被保険者番号', type: 'text' },
+      { key: 'koyouName', label: '雇用保険名前', type: 'text' },
+      { key: 'koyouShutoku', label: '雇用：資格取得日', type: 'date' },
+      { key: 'soumuKoyou', label: '総務・雇用 状況', type: 'choice' }
+    ];
+    var logPrefix = isSoushitsu ? '[雇用喪失編集]' : '[雇用取得編集]';
+    console.log(logPrefix + ' 開いた社員:', { id: emp.Id, name: emp.Title, no: emp[F.syainNo] });
+    console.log(logPrefix + ' 各フィールドのキー解決状況:');
+    fieldDefs.forEach(function(f) {
+      var odKey = km[f.key];
+      console.log('  ' + f.label + ' (' + f.key + '): ' + (odKey ? '✓ ' + odKey : '✗ 未検出'));
+    });
+    var existing = document.getElementById('koyouEditOverlay');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'koyouEditOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px;';
+    var fieldsHtml = fieldDefs.map(function(f) {
+      var odKey = km[f.key];
+      var curVal = '';
+      if (odKey && emp[odKey] !== null && emp[odKey] !== undefined) {
+        var raw = emp[odKey];
+        if (f.type === 'date') {
+          curVal = raw ? String(raw).substring(0, 10) : '';
+        } else if (f.type === 'url') {
+          curVal = (typeof raw === 'object' && raw && raw.Url) ? raw.Url : (typeof raw === 'string' ? raw : '');
+        } else {
+          curVal = typeof raw === 'object' ? '' : String(raw);
+        }
+      }
+      var notFound = !odKey ? ' <span style="color:#c62828;font-size:10px;font-weight:600;">(SPフィールド未検出)</span>' : '';
+      var disabled = odKey ? '' : ' disabled';
+      var bgStyle = odKey ? '' : 'background:#f5f5f5;';
+      var inputHtml;
+      if (f.type === 'choice') {
+        var choices = getFieldChoices(f.key, km) || [];
+        inputHtml = '<select class="koyou-edit-field" data-key="' + f.key + '" data-type="' + f.type + '" style="width:100%;padding:9px 11px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;' + bgStyle + '"' + disabled + '>';
+        inputHtml += '<option value="">（未選択）</option>';
+        choices.forEach(function(c) {
+          var sel = (String(curVal) === c) ? ' selected' : '';
+          inputHtml += '<option value="' + escHtml(c) + '"' + sel + '>' + escHtml(c) + '</option>';
+        });
+        if (curVal && choices.indexOf(curVal) < 0) {
+          inputHtml += '<option value="' + escHtml(curVal) + '" selected>' + escHtml(curVal) + ' (現在値)</option>';
+        }
+        inputHtml += '</select>';
+      } else {
+        var inputType = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : (f.type === 'url' ? 'url' : 'text'));
+        inputHtml = '<input type="' + inputType + '" class="koyou-edit-field" data-key="' + f.key + '" data-type="' + f.type + '" value="' + escHtml(curVal) + '" style="width:100%;padding:9px 11px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box;' + bgStyle + '"' + disabled + '>';
+      }
+      return '<div style="margin-bottom:12px;">' +
+        '<label style="display:block;font-size:11px;font-weight:700;color:#555;margin-bottom:4px;">' + escHtml(f.label) + notFound + '</label>' +
+        inputHtml +
+        '</div>';
+    }).join('');
+    var pdfUploadHtml =
+      '<div style="margin-top:14px;padding:10px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-radius:10px;">' +
+        '<label style="display:block;font-size:12px;font-weight:800;color:#bf360c;margin-bottom:8px;">📄 公文書PDF アップロード</label>' +
+        '<div id="koyouEditPdfDropZone" style="padding:24px 12px;border:2px dashed #f57c00;border-radius:10px;background:#fff;text-align:center;cursor:pointer;transition:background 0.2s;">' +
+          '<div style="font-size:30px;">📥</div>' +
+          '<div style="font-size:13px;font-weight:700;color:#bf360c;margin-top:4px;">PDFをドラッグ&ドロップ</div>' +
+          '<div style="font-size:10px;color:#8d6e63;margin-top:2px;">または タップして選択</div>' +
+          '<input type="file" id="koyouEditPdfInput" accept="application/pdf,.pdf" style="display:none;">' +
+        '</div>' +
+        '<div id="koyouEditPdfInfo" style="font-size:11px;color:#6d4c41;margin-top:8px;text-align:center;"></div>' +
+      '</div>';
+    var hakenStr = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
+    var taishaStr = '';
+    if (isSoushitsu) {
+      var ydRaw = emp[F.yukyuTaisha], hdRaw = emp[F.hakenTaisha];
+      var tRaw = ydRaw || hdRaw;
+      if (tRaw) { try { var td = new Date(tRaw); if (!isNaN(td.getTime())) taishaStr = td.getFullYear() + '/' + String(td.getMonth()+1).padStart(2,'0') + '/' + String(td.getDate()).padStart(2,'0'); } catch(_) {} }
+    }
+    var headerBg = isSoushitsu ? '#fce4ec' : '#e3f2fd';
+    var headerColor = isSoushitsu ? '#ad1457' : '#0d47a1';
+    var headerBorder = isSoushitsu ? '#f48fb1' : '#90caf9';
+    var headerInfoHtml =
+      '<div style="padding:10px 16px;background:' + headerBg + ';font-size:13px;color:' + headerColor + ';border-bottom:1px solid ' + headerBorder + ';">' +
+        '<div style="font-weight:800;font-size:15px;">' + escHtml(emp.Title || '') + '</div>' +
+        '<div style="font-size:11px;font-weight:600;color:#455a64;margin-top:3px;display:flex;gap:12px;flex-wrap:wrap;">' +
+          '<span>📛 No.' + escHtml(String(emp[F.syainNo] || '')) + '</span>' +
+          (hakenStr ? '<span>🏭 ' + escHtml(hakenStr) + '</span>' : '') +
+          (taishaStr ? '<span style="color:#c62828;">🚪 退社日 ' + escHtml(taishaStr) + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    var titleText = isSoushitsu ? '雇用保険 喪失申請中 情報編集' : '雇用保険 取得申請中 情報編集';
+    var headerGradient = isSoushitsu ? 'linear-gradient(135deg,#c62828,#b71c1c)' : 'linear-gradient(135deg,#1565c0,#0d47a1)';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.35);">' +
+        '<div style="background:' + headerGradient + ';color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+          '<div style="font-size:22px;">👔</div>' +
+          '<div style="flex:1;font-size:15px;font-weight:800;letter-spacing:0.5px;">' + titleText + '</div>' +
+          '<button onclick="closeKoyouEditDialog()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">×</button>' +
+        '</div>' +
+        headerInfoHtml +
+        '<div style="padding:14px 16px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + fieldsHtml + pdfUploadHtml + '</div>' +
+        '<div style="padding:12px 16px;background:#f5f5f5;border-top:1px solid #e0e0e0;display:flex;gap:8px;flex-shrink:0;">' +
+          '<button onclick="closeKoyouEditDialog()" style="flex:1;padding:11px;background:#e0e0e0;color:#555;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px;">キャンセル</button>' +
+          '<button id="koyouEditSaveBtn" onclick="saveKoyouEditDialog()" style="flex:2;padding:11px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-weight:800;cursor:pointer;font-size:14px;box-shadow:0 2px 8px rgba(46,125,50,0.3);">💾 保存</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    var dropZone = document.getElementById('koyouEditPdfDropZone');
+    var pdfIn = document.getElementById('koyouEditPdfInput');
+    function updatePdfInfo(file) {
+      var info = document.getElementById('koyouEditPdfInfo');
+      if (!info) return;
+      if (file) {
+        info.innerHTML = '✅ <b>' + escHtml(file.name) + '</b> <span style="color:#888;">(' + (file.size / 1024).toFixed(1) + ' KB)</span>';
+        info.style.color = '#2e7d32';
+      } else {
+        info.textContent = '';
+      }
+    }
+    if (dropZone && pdfIn) {
+      dropZone.addEventListener('click', function() { pdfIn.click(); });
+      pdfIn.addEventListener('change', function() {
+        var f = pdfIn.files && pdfIn.files[0];
+        window._koyouEditPdfFile = f || null;
+        updatePdfInfo(f);
+      });
+      dropZone.addEventListener('dragover', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        dropZone.style.background = '#ffe0b2';
+        dropZone.style.borderColor = '#e65100';
+      });
+      dropZone.addEventListener('dragleave', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        dropZone.style.background = '#fff';
+        dropZone.style.borderColor = '#f57c00';
+      });
+      dropZone.addEventListener('drop', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        dropZone.style.background = '#fff';
+        dropZone.style.borderColor = '#f57c00';
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length > 0) {
+          var f = files[0];
+          var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+          if (!isPdf) {
+            showToast('PDFファイルを選択してください', 'error');
+            return;
+          }
+          window._koyouEditPdfFile = f;
+          updatePdfInfo(f);
+        }
+      });
+    }
+    window._koyouEditPdfFile = null;
+    window._koyouEditEmpData = { emp: emp, km: km, meta: meta };
+  } catch (e) {
+    console.error('openKoyouEditDialog error:', e);
+    showToast('編集ダイアログのオープンに失敗: ' + e.message, 'error');
+  }
+}
+
+function closeKoyouEditDialog() {
+  var ov = document.getElementById('koyouEditOverlay');
+  if (ov) ov.remove();
+  window._koyouEditEmpData = null;
+}
+
+async function saveKoyouEditDialog() {
+  var ctx = window._koyouEditEmpData;
+  if (!ctx || !ctx.emp) { showToast('データがありません', 'error'); return; }
+  var emp = ctx.emp;
+  var km = ctx.km;
+  var btn = document.getElementById('koyouEditSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+  try {
+    var body = {};
+    var changed = 0;
+    var skipped = [];
+    var debug = [];
+    document.querySelectorAll('.koyou-edit-field').forEach(function(el) {
+      var key = el.getAttribute('data-key');
+      var type = el.getAttribute('data-type');
+      if (el.disabled) { skipped.push(key + '(フィールド未検出)'); return; }
+      var odKey = km[key];
+      if (!odKey) { skipped.push(key + '(キー解決失敗)'); return; }
+      var internalName = odataKeyToInternal(odKey);
+      if (!internalName) { skipped.push(key + '(内部名解決失敗)'); return; }
+      var rawInput = (el.value || '').trim();
+      var oldVal = emp[odKey];
+      var newVal;
+      var spType = 'Text';
+      if (typeof employeeFieldsCache !== 'undefined' && employeeFieldsCache && employeeFieldsCache[internalName]) {
+        spType = employeeFieldsCache[internalName].type || 'Text';
+      }
+      if (rawInput === '') {
+        newVal = null;
+      } else if (spType === 'DateTime') {
+        newVal = rawInput + 'T00:00:00Z';
+      } else if (spType === 'Number' || spType === 'Currency') {
+        var n = parseFloat(rawInput);
+        newVal = isNaN(n) ? null : n;
+      } else if (spType === 'URL') {
+        newVal = { __metadata: { type: 'SP.FieldUrlValue' }, Url: rawInput, Description: rawInput };
+      } else {
+        newVal = rawInput;
+      }
+      var isSame = false;
+      if (spType === 'DateTime') {
+        var od = oldVal ? String(oldVal).substring(0,10) : '';
+        var nd = newVal ? String(newVal).substring(0,10) : '';
+        isSame = od === nd;
+      } else if (spType === 'Number' || spType === 'Currency') {
+        var on = (oldVal === null || oldVal === undefined || oldVal === '') ? null : parseFloat(String(oldVal).replace(/,/g,''));
+        isSame = (on === null && newVal === null) || (on === newVal);
+      } else if (spType === 'URL') {
+        var oldUrl = (typeof oldVal === 'object' && oldVal && oldVal.Url) ? oldVal.Url : (typeof oldVal === 'string' ? oldVal : '');
+        var newUrl = newVal && newVal.Url ? newVal.Url : '';
+        isSame = oldUrl === newUrl;
+      } else {
+        isSame = String(oldVal == null ? '' : oldVal) === String(newVal == null ? '' : newVal);
+      }
+      debug.push({ key: key, spType: spType, odKey: odKey, internal: internalName, oldVal: oldVal, newVal: newVal, changed: !isSame });
+      if (!isSame) {
+        body[internalName] = newVal;
+        changed++;
+      }
+    });
+    console.log('[雇用編集] debug:', debug);
+    console.log('[雇用編集] skipped:', skipped);
+    console.log('[雇用編集] body to save:', body);
+    var pdfFile = window._koyouEditPdfFile || null;
+    if (changed === 0 && !pdfFile) {
+      var msg = '変更もPDFも選択されていません';
+      if (skipped.length > 0) msg += ' (未保存項目: ' + skipped.join(', ') + ')';
+      showToast(msg, 'info');
+      if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+      return;
+    }
+    if (changed > 0) {
+      console.log('[雇用編集] 保存body:', body, 'skipped:', skipped);
+      await spPatchEmployee(emp.Id, body);
+    }
+    var pdfMessage = '';
+    if (pdfFile) {
+      try {
+        if (btn) btn.textContent = 'PDFアップロード中...';
+        var folderPath = await getEmpFolderPath(emp);
+        if (!folderPath) throw new Error('社員フォルダパスが取得できません (部課・番号・氏名 要確認)');
+        try { await ensureSpFolder(folderPath); } catch(e) {
+          console.warn('ensureSpFolder 失敗: 既存フォルダと仮定してアップロード続行', e);
+        }
+        await uploadFileToSp(folderPath, pdfFile.name, pdfFile);
+        pdfMessage = ' / PDF「' + pdfFile.name + '」を社員フォルダに保存';
+      } catch (upErr) {
+        console.error('PDF upload error:', upErr);
+        showToast('PDFアップロード失敗: ' + upErr.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+        return;
+      }
+    }
+    showToast((changed > 0 ? changed + '項目を保存' : '項目変更なし') + pdfMessage, 'success');
+    var updatedEmp = emp;
+    try {
+      var updated = await fetchFullEmployee(emp[F.syainNo]);
+      if (updated) {
+        updatedEmp = Object.assign({}, emp, updated);
+        for (var i = 0; i < _soumuAllEmps.length; i++) {
+          if (_soumuAllEmps[i].Id === emp.Id) {
+            _soumuAllEmps[i] = updatedEmp;
+            break;
+          }
+        }
+      }
+    } catch(_) {}
+    closeKoyouEditDialog();
+    setTimeout(function() {
+      if (typeof selectEmployee === 'function') selectEmployee(updatedEmp);
+    }, 200);
+  } catch (e) {
+    console.error('saveKoyouEditDialog error:', e);
+    showToast('保存エラー: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+  }
 }
 
 // extraDate: null | string (field) | { field, fallback, label }
