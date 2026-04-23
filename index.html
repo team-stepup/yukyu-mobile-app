@@ -4363,16 +4363,106 @@ select.sankyu-edit-input {
 
     <div id="hakenSectionCard" class="home-haken-card">
       <div class="home-search-title">派遣先一覧</div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <select id="hakenSelect" style="flex:1;padding:10px 12px;border:1.5px solid #e8e8f0;border-radius:12px;font-size:14px;background:#fafaff;outline:none;">
-          <option value="">派遣先を選択...</option>
-        </select>
+      <!-- 追加/編集フォームが参照する全部課リスト（非表示） -->
+      <select id="hakenSelect" style="display:none;">
+        <option value="">派遣先を選択...</option>
+      </select>
+      <div style="position:relative;">
+        <button type="button" id="hakenMultiBtn" onclick="toggleHakenMultiPanel(event)" style="width:100%;padding:10px 32px 10px 12px;border:1.5px solid #e8e8f0;border-radius:12px;font-size:14px;background:#fafaff;text-align:left;cursor:pointer;color:#888;position:relative;box-sizing:border-box;">
+          <span id="hakenMultiBtnText">派遣先を選択...</span>
+          <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#bbb;font-size:11px;pointer-events:none;">▼</span>
+        </button>
+        <div id="hakenMultiPanel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:100;max-height:340px;overflow-y:auto;padding:6px;"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:8px;">
         <label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px;color:var(--text-light);">
-          <input type="checkbox" id="hakenIncludeRetired" style="accent-color:var(--primary);"> 退職含む
+          <input type="checkbox" id="hakenIncludeRetired" onchange="onHakenIncludeRetiredChange()" style="accent-color:var(--primary);"> 退職含む
         </label>
+        <button type="button" onclick="clearHakenMultiSelection()" style="font-size:11px;background:none;border:none;color:var(--text-light);cursor:pointer;padding:0;text-decoration:underline;">選択クリア</button>
       </div>
       <button class="home-search-btn" style="width:100%;margin-top:10px;padding:11px;border-radius:12px;" onclick="openHakenList()">表示</button>
     </div>
+
+    <!-- 役員専用セクション (権限チェックで表示制御) -->
+    <div id="adminSection" class="admin-only" style="display:none;background:linear-gradient(135deg,#fff9e6,#fff3d4);border:1.5px solid #f0c040;border-radius:14px;padding:12px;margin-top:12px;">
+      <div style="font-size:13px;font-weight:700;color:#c68200;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+        <span>👔</span><span>役員専用</span>
+      </div>
+      <button type="button" onclick="openAdminDashScreen()" style="width:100%;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <span style="font-size:20px;">📊</span>
+        <span style="flex:1;font-weight:600;">派遣先別 在職者分析</span>
+        <span style="color:#bbb;font-size:14px;">›</span>
+      </button>
+      <button type="button" onclick="openAdminAnalyticsScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <span style="font-size:20px;">📈</span>
+        <span style="flex:1;font-weight:600;">月次 入退社推移 / 経営分析</span>
+        <span style="color:#bbb;font-size:14px;">›</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Screen: 経営分析（月次入退社推移） -->
+  <div class="screen" id="adminAnalyticsScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">📈 月次入退社推移</h2>
+    </div>
+    <!-- 期間選択 + 基準月ナビゲーション -->
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--text-light);">期間:</span>
+      <button type="button" data-anarange="6" onclick="setAnalyticsRange(6,this)" style="font-size:11px;padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">6ヶ月</button>
+      <button type="button" data-anarange="12" onclick="setAnalyticsRange(12,this)" style="font-size:11px;padding:5px 9px;border:1px solid var(--primary);border-radius:6px;background:var(--primary);color:#fff;cursor:pointer;">12ヶ月</button>
+      <button type="button" data-anarange="24" onclick="setAnalyticsRange(24,this)" style="font-size:11px;padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">24ヶ月</button>
+      <button type="button" data-anarange="36" onclick="setAnalyticsRange(36,this)" style="font-size:11px;padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">36ヶ月</button>
+      <span style="flex:1;"></span>
+      <button onclick="changeAnalyticsEndMonth(-1)" style="background:none;border:1px solid #ddd;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;">◀</button>
+      <span id="analyticsEndLabel" style="font-size:12px;font-weight:600;color:var(--primary);min-width:70px;text-align:center;"></span>
+      <button onclick="changeAnalyticsEndMonth(1)" style="background:none;border:1px solid #ddd;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;">▶</button>
+    </div>
+    <!-- サマリー -->
+    <div id="analyticsSummary" style="padding:12px 14px;margin-bottom:10px;background:linear-gradient(135deg,#fff9e6,#fff3d4);border-radius:12px;border:1px solid #f0c040;"></div>
+    <!-- 全体推移グラフ -->
+    <div class="card" style="padding:12px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px;">📊 全体 月別推移</div>
+      <div id="analyticsOverallChart"></div>
+    </div>
+    <!-- 派遣先別サマリー -->
+    <div class="card" style="padding:12px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:700;">🏭 派遣先別 期間合計</span>
+        <span style="flex:1;"></span>
+        <span style="font-size:11px;color:var(--text-light);">並び順:</span>
+        <button type="button" data-anasort="net" onclick="setAnalyticsSort('net',this)" style="font-size:11px;padding:4px 8px;border:1px solid var(--primary);border-radius:6px;background:var(--primary);color:#fff;cursor:pointer;">純増減順</button>
+        <button type="button" data-anasort="nyusha" onclick="setAnalyticsSort('nyusha',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">入社順</button>
+        <button type="button" data-anasort="taisha" onclick="setAnalyticsSort('taisha',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">退社順</button>
+        <button type="button" data-anasort="name" onclick="setAnalyticsSort('name',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">名前順</button>
+      </div>
+      <div id="analyticsByBukaTable" style="overflow-x:auto;"></div>
+    </div>
+    <!-- Excel出力 -->
+    <div style="margin-bottom:20px;">
+      <button onclick="downloadAnalyticsExcel()" style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:#fff;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(46,125,50,0.3);">📥 Excel ダウンロード</button>
+    </div>
+  </div>
+
+  <!-- Screen: 役員ダッシュボード (派遣先別在職者分析) -->
+  <div class="screen" id="adminDashScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">📊 派遣先別 在職者分析</h2>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--text-light);">並び順:</span>
+      <button type="button" data-sort="count" onclick="setAdminDashSort('count',this)" style="font-size:11px;padding:5px 10px;border:1px solid var(--primary);border-radius:6px;background:var(--primary);color:#fff;cursor:pointer;">在職数順</button>
+      <button type="button" data-sort="name" onclick="setAdminDashSort('name',this)" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">部課名順</button>
+      <span style="flex:1;"></span>
+      <label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px;color:var(--text-light);">
+        <input type="checkbox" id="adminDashIncludeRetired" onchange="renderAdminDashboard()" style="accent-color:var(--primary);"> 退職含む
+      </label>
+      <button type="button" onclick="refreshAdminDashboard()" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">⟳ 更新</button>
+    </div>
+    <div id="adminDashSummary" style="padding:12px 14px;margin-bottom:10px;background:linear-gradient(135deg,#fff9e6,#fff3d4);border-radius:12px;border:1px solid #f0c040;"></div>
+    <div id="adminDashBody"></div>
   </div>
 
   <!-- Screen: 派遣先一覧 (REST API) -->
@@ -5021,7 +5111,7 @@ function initMsal() {
         if (resp) { onLoginSuccess(resp); }
         else {
           const accounts = msalInstance.getAllAccounts();
-          if (accounts.length > 0) { acquireToken().then(() => populateHakenDropdown()); }
+          if (accounts.length > 0) { acquireToken().then(() => { populateHakenDropdown(); applyAdminVisibility(); }); }
         }
       }).catch(err => console.error('Redirect error:', err));
     });
@@ -5064,6 +5154,7 @@ async function onLoginSuccess(resp) {
   switchScreen('searchScreen');
   showToast('ログインしました', 'success');
   populateHakenDropdown();
+  applyAdminVisibility();
   loadHomeBadges();
   loadSharedConfig();
   // Teams 未読バッジ初期化
@@ -5592,6 +5683,10 @@ function resetSearch() {
   document.getElementById('searchClearBtn').style.display = 'none';
   document.getElementById('hakenSelect').value = '';
   document.getElementById('hakenIncludeRetired').checked = false;
+  hakenMultiSelected = [];
+  const mp = document.getElementById('hakenMultiPanel');
+  if (mp) mp.style.display = 'none';
+  if (typeof updateHakenMultiBtnText === 'function') updateHakenMultiBtnText();
   document.getElementById('hakenSectionCard').style.display = '';
   document.getElementById('addEmpBtn').style.display = '';
 }
@@ -5750,19 +5845,32 @@ async function searchEmployee() {
       return ar - br;
     });
     container.innerHTML = sortedResults.map(emp => {
-      const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
+      const nyushaRaw = emp[F.nyushaDate];
+      const kisanRaw = emp[F.kisanDate];
       const resigned = isResigned(emp);
       const hakensaki = getHakensaki(emp);
       const resignedStyle = resigned ? 'background:#f0f0f0;opacity:0.75;' : '';
+      const retireForTenure = resigned ? (emp[F.yukyuTaisha] || emp[F.hakenTaisha]) : null;
+      const tenure = calcTenure(nyushaRaw, retireForTenure);
+      const showKisan = kisanRaw && nyushaRaw && formatDate(kisanRaw) !== formatDate(nyushaRaw);
+      const syainNo = emp[F.syainNo] || '';
+      const nameEsc = escHtml(emp.Title || '');
+      const empJson = JSON.stringify(emp).replace(/'/g, "&#39;");
+      const tenureHtml = tenure ? ' <span style="color:' + (resigned ? '#888' : '#2e7d32') + ';font-weight:700;">(' + escHtml(tenure) + ')</span>' : '';
       return `
-        <div class="card card-clickable" style="${resignedStyle}" onclick='selectEmployee(${JSON.stringify(emp).replace(/'/g, "&#39;")})'>
-          <div class="emp-card-arrow">&#8250;</div>
-          <div class="emp-card-name">${escHtml(emp.Title || '')}${resigned ? '<span class="resigned-badge">退社</span>' : ''}</div>
-          <div class="emp-card-num">社員番号: ${emp[F.syainNo] || ''}</div>
-          ${hakensaki ? '<div class="emp-card-hakensaki">派遣先: ' + escHtml(hakensaki) + '</div>' : ''}
-          <div class="emp-card-date">入社日: ${formatDate(emp[F.nyushaDate])}</div>
-          <div class="emp-card-date">起算日: ${formatDate(kisanDate)}</div>
-          ${resigned ? '<div class="emp-card-date" style="color:var(--danger);">退社日: ' + getRetireDateStr(emp) + '</div>' : ''}
+        <div class="card card-clickable" style="position:relative;padding-right:28px;${resignedStyle}" onclick='selectEmployee(${empJson})'>
+          <span style="position:absolute;top:14px;right:12px;color:var(--primary);font-size:22px;line-height:1;">&#8250;</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+            <span class="emp-card-name" style="margin:0;">${nameEsc}</span>
+            ${resigned ? '<span class="resigned-badge">退社</span>' : ''}
+            <span style="display:inline-flex;align-items:center;padding:2px 9px;background:#eef0f8;border-radius:10px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.3px;">№ ${escHtml(String(syainNo))}</span>
+          </div>
+          ${hakensaki ? '<div style="display:inline-flex;align-items:center;gap:4px;background:rgba(98,100,167,0.1);border:1px solid rgba(98,100,167,0.2);border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600;color:var(--primary);margin-bottom:6px;">🏭 ' + escHtml(hakensaki) + '</div>' : ''}
+          <div style="display:flex;gap:4px 14px;font-size:12px;color:var(--text-light);flex-wrap:wrap;align-items:center;line-height:1.5;">
+            <span>📅 入社 ${formatDate(nyushaRaw)}${tenureHtml}</span>
+            ${showKisan ? '<span>🕐 起算 ' + formatDate(kisanRaw) + '</span>' : ''}
+            ${resigned ? '<span style="color:var(--danger);font-weight:600;">🚪 退社 ' + getRetireDateStr(emp) + '</span>' : ''}
+          </div>
         </div>
       `;
     }).join('');
@@ -18560,17 +18668,25 @@ function getBukaValue(emp) {
   return '';
 }
 
+// 部課ごとの在職/退職カウント（複数選択UIが参照）
+var _hakenEmpByBuka = {};
+var hakenMultiSelected = [];
+
 async function populateHakenDropdown() {
   try {
     const select = document.getElementById('hakenSelect');
     await resolveBukaKey();
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
-    const bukaSet = new Set();
+    _hakenEmpByBuka = {};
     allEmps.forEach(emp => {
       const b = getBukaValue(emp);
-      if (b) bukaSet.add(b);
+      if (!b) return;
+      if (!_hakenEmpByBuka[b]) _hakenEmpByBuka[b] = { active: 0, retired: 0, total: 0 };
+      _hakenEmpByBuka[b].total++;
+      if (isResigned(emp)) _hakenEmpByBuka[b].retired++;
+      else _hakenEmpByBuka[b].active++;
     });
-    const sorted = Array.from(bukaSet).sort();
+    const sorted = Object.keys(_hakenEmpByBuka).sort();
     select.innerHTML = '<option value="">派遣先(部課)を選択...</option>';
     sorted.forEach(b => {
       const opt = document.createElement('option');
@@ -18578,8 +18694,556 @@ async function populateHakenDropdown() {
       opt.textContent = b;
       select.appendChild(opt);
     });
+    buildHakenMultiPanel();
   } catch (e) {
     console.error('Haken dropdown error:', e);
+  }
+}
+
+function buildHakenMultiPanel() {
+  const panel = document.getElementById('hakenMultiPanel');
+  if (!panel) return;
+  const includeRetired = document.getElementById('hakenIncludeRetired').checked;
+  const sorted = Object.keys(_hakenEmpByBuka).sort();
+  // 在職ゼロの部課は退職含むONの時だけ表示
+  const visible = sorted.filter(b => {
+    const c = _hakenEmpByBuka[b];
+    return includeRetired ? c.total > 0 : c.active > 0;
+  });
+  // 退職含むOFF時、非表示になった部課は選択から除外
+  if (!includeRetired) {
+    hakenMultiSelected = hakenMultiSelected.filter(b => visible.indexOf(b) >= 0);
+  }
+  if (visible.length === 0) {
+    panel.innerHTML = '<div style="padding:16px;color:var(--text-light);font-size:12px;text-align:center;">該当する派遣先がありません</div>';
+    updateHakenMultiBtnText();
+    return;
+  }
+  // 全選択/解除ヘッダー
+  let html = '<div style="display:flex;gap:8px;padding:4px 8px 8px;border-bottom:1px solid #eee;margin-bottom:4px;">';
+  html += '<button type="button" onclick="selectAllHakenMulti()" style="flex:1;font-size:11px;padding:4px;background:#f5f5fa;border:1px solid #e0e0e8;border-radius:6px;cursor:pointer;">全て選択</button>';
+  html += '<button type="button" onclick="clearHakenMultiSelection()" style="flex:1;font-size:11px;padding:4px;background:#fff;border:1px solid #e0e0e8;border-radius:6px;cursor:pointer;">全て解除</button>';
+  html += '</div>';
+  visible.forEach(b => {
+    const c = _hakenEmpByBuka[b];
+    const checked = hakenMultiSelected.indexOf(b) >= 0 ? 'checked' : '';
+    const countBadge = includeRetired
+      ? '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">在職' + c.active + ' / 退職' + c.retired + '</span>'
+      : '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">在職' + c.active + '名</span>';
+    html += '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;">' +
+      '<input type="checkbox" value="' + escHtml(b) + '" ' + checked + ' onchange="onHakenMultiToggle(this)" style="accent-color:var(--primary);">' +
+      '<span style="flex:1;font-size:13px;">' + escHtml(b) + '</span>' +
+      countBadge +
+      '</label>';
+  });
+  panel.innerHTML = html;
+  updateHakenMultiBtnText();
+}
+
+function toggleHakenMultiPanel(ev) {
+  if (ev) ev.stopPropagation();
+  const panel = document.getElementById('hakenMultiPanel');
+  if (!panel) return;
+  const open = panel.style.display !== 'none';
+  if (open) {
+    panel.style.display = 'none';
+  } else {
+    buildHakenMultiPanel();
+    panel.style.display = 'block';
+  }
+}
+
+function onHakenMultiToggle(cb) {
+  const val = cb.value;
+  if (cb.checked) {
+    if (hakenMultiSelected.indexOf(val) < 0) hakenMultiSelected.push(val);
+  } else {
+    hakenMultiSelected = hakenMultiSelected.filter(b => b !== val);
+  }
+  updateHakenMultiBtnText();
+}
+
+function selectAllHakenMulti() {
+  const includeRetired = document.getElementById('hakenIncludeRetired').checked;
+  const sorted = Object.keys(_hakenEmpByBuka).sort();
+  hakenMultiSelected = sorted.filter(b => {
+    const c = _hakenEmpByBuka[b];
+    return includeRetired ? c.total > 0 : c.active > 0;
+  });
+  buildHakenMultiPanel();
+}
+
+function updateHakenMultiBtnText() {
+  const el = document.getElementById('hakenMultiBtnText');
+  const btn = document.getElementById('hakenMultiBtn');
+  if (!el || !btn) return;
+  if (hakenMultiSelected.length === 0) {
+    el.textContent = '派遣先を選択...';
+    btn.style.color = '#888';
+  } else if (hakenMultiSelected.length <= 2) {
+    el.textContent = hakenMultiSelected.join(', ');
+    btn.style.color = '#222';
+  } else {
+    el.textContent = hakenMultiSelected.slice(0, 2).join(', ') + ' 他' + (hakenMultiSelected.length - 2) + '件';
+    btn.style.color = '#222';
+  }
+}
+
+function onHakenIncludeRetiredChange() {
+  buildHakenMultiPanel();
+}
+
+function clearHakenMultiSelection() {
+  hakenMultiSelected = [];
+  buildHakenMultiPanel();
+}
+
+// パネル外クリックで閉じる
+document.addEventListener('click', function(e) {
+  const panel = document.getElementById('hakenMultiPanel');
+  const btn = document.getElementById('hakenMultiBtn');
+  if (!panel || !btn) return;
+  if (panel.style.display === 'none') return;
+  if (!panel.contains(e.target) && !btn.contains(e.target)) {
+    panel.style.display = 'none';
+  }
+});
+
+// ============================================================
+// 役員専用ダッシュボード（派遣先別在職者分析）
+// ============================================================
+const ADMIN_USERS = ['h.yamashita@team-stepup.com', 'a.yamashita@team-stepup.com'];
+
+function isAdminUser() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    if (typeof msalInstance === 'undefined' || !msalInstance) return false;
+    const accounts = msalInstance.getAllAccounts();
+    if (!accounts || accounts.length === 0) return false;
+    const email = String(accounts[0].username || '').toLowerCase();
+    return ADMIN_USERS.indexOf(email) >= 0;
+  } catch (e) { return false; }
+}
+
+function applyAdminVisibility() {
+  const admin = isAdminUser();
+  document.querySelectorAll('.admin-only').forEach(el => {
+    el.style.display = admin ? '' : 'none';
+  });
+}
+
+let _adminDashSort = 'count';
+let _adminDashCache = null;
+
+async function openAdminDashScreen() {
+  if (!isAdminUser()) {
+    showToast('このページへのアクセス権限がありません', 'error');
+    return;
+  }
+  switchScreen('adminDashScreen');
+  if (!_adminDashCache) {
+    showSpinner();
+    try {
+      await loadAdminDashData();
+    } catch (e) {
+      console.error('Admin dash error:', e);
+      showToast('読み込みエラー: ' + e.message, 'error');
+      hideSpinner();
+      return;
+    }
+    hideSpinner();
+  }
+  renderAdminDashboard();
+}
+
+async function loadAdminDashData() {
+  await resolveBukaKey();
+  const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+  const byBuka = {};
+  let totalActive = 0, totalRetired = 0;
+  allEmps.forEach(emp => {
+    const b = getBukaValue(emp);
+    if (!b) return;
+    if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0 };
+    byBuka[b].total++;
+    if (isResigned(emp)) { byBuka[b].retired++; totalRetired++; }
+    else { byBuka[b].active++; totalActive++; }
+  });
+  _adminDashCache = { byBuka: byBuka, totalActive: totalActive, totalRetired: totalRetired };
+}
+
+async function refreshAdminDashboard() {
+  if (!isAdminUser()) return;
+  showSpinner();
+  try {
+    await loadAdminDashData();
+    renderAdminDashboard();
+    showToast('更新しました', 'success');
+  } catch (e) {
+    showToast('更新エラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function setAdminDashSort(sort, btn) {
+  _adminDashSort = sort;
+  document.querySelectorAll('#adminDashScreen [data-sort]').forEach(b => {
+    const active = b === btn;
+    b.style.background = active ? 'var(--primary)' : '#fff';
+    b.style.color = active ? '#fff' : 'var(--text-light)';
+    b.style.borderColor = active ? 'var(--primary)' : '#ddd';
+  });
+  renderAdminDashboard();
+}
+
+function renderAdminDashboard() {
+  if (!_adminDashCache) return;
+  const body = document.getElementById('adminDashBody');
+  const summary = document.getElementById('adminDashSummary');
+  const includeRetired = document.getElementById('adminDashIncludeRetired').checked;
+  const byBuka = _adminDashCache.byBuka;
+  const totalActive = _adminDashCache.totalActive;
+  const totalRetired = _adminDashCache.totalRetired;
+
+  const entries = Object.keys(byBuka).map(b => ({
+    name: b, active: byBuka[b].active, retired: byBuka[b].retired, total: byBuka[b].total
+  }));
+  const visible = includeRetired ? entries : entries.filter(e => e.active > 0);
+
+  if (_adminDashSort === 'count') {
+    visible.sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name, 'ja'));
+  } else {
+    visible.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  }
+
+  let summaryHtml = '<div style="display:flex;gap:18px;flex-wrap:wrap;">' +
+    '<div><div style="font-size:10px;color:#888;">派遣先数</div><div style="font-size:22px;font-weight:800;color:var(--primary);">' + visible.length + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">件</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">在職者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + totalActive + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+  if (includeRetired) {
+    summaryHtml += '<div><div style="font-size:10px;color:#888;">退職者 合計</div><div style="font-size:22px;font-weight:800;color:#c62828;">' + totalRetired + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+  }
+  summaryHtml += '</div>';
+  summary.innerHTML = summaryHtml;
+
+  if (visible.length === 0) {
+    body.innerHTML = '<div class="empty-state"><p>該当する派遣先がありません</p></div>';
+    return;
+  }
+
+  const maxActive = Math.max(1, ...visible.map(e => e.active));
+  let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+  visible.forEach(e => {
+    const barPct = Math.round((e.active / maxActive) * 100);
+    const retiredNote = (includeRetired && e.retired > 0)
+      ? '<span style="font-size:10px;color:#c62828;margin-left:6px;font-weight:600;">退職 ' + e.retired + '</span>'
+      : '';
+    const nameEsc = escHtml(e.name);
+    const nameArg = nameEsc.replace(/'/g, "\\'");
+    html += '<div onclick="openHakenListFromAdmin(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
+      '<span style="font-size:14px;font-weight:700;color:var(--primary);">' + nameEsc + '</span>' +
+      '<span><span style="font-size:18px;font-weight:800;color:#2e7d32;">' + e.active + '</span><span style="font-size:11px;font-weight:500;color:#888;margin-left:2px;">名</span>' + retiredNote + '</span>' +
+      '</div>' +
+      '<div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden;">' +
+      '<div style="height:100%;width:' + barPct + '%;background:linear-gradient(90deg,#66bb6a,#2e7d32);border-radius:3px;"></div>' +
+      '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+async function openHakenListFromAdmin(buka) {
+  if (!buka) return;
+  hakenMultiSelected = [buka];
+  const incRetired = document.getElementById('adminDashIncludeRetired').checked;
+  document.getElementById('hakenIncludeRetired').checked = incRetired;
+  if (typeof updateHakenMultiBtnText === 'function') updateHakenMultiBtnText();
+  await openHakenList();
+}
+
+// ============================================================
+// 経営分析（月次入退社推移）
+// ============================================================
+let _anaRange = 12;
+let _anaEndY = new Date().getFullYear();
+let _anaEndM = new Date().getMonth(); // 0-based, 基準月 (末月)
+let _anaSort = 'net';
+let _anaCache = null; // { months: [{y,m,label}], overall: [{nyusha,taisha}], byBuka: {name: [{nyusha,taisha}]} }
+
+async function openAdminAnalyticsScreen() {
+  if (!isAdminUser()) {
+    showToast('このページへのアクセス権限がありません', 'error');
+    return;
+  }
+  switchScreen('adminAnalyticsScreen');
+  if (!_anaCache) {
+    showSpinner();
+    try {
+      await loadAnalyticsData();
+    } catch (e) {
+      console.error('Analytics error:', e);
+      showToast('読み込みエラー: ' + e.message, 'error');
+      hideSpinner();
+      return;
+    }
+    hideSpinner();
+  }
+  renderAnalytics();
+}
+
+function _parseYM(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return { y: d.getFullYear(), m: d.getMonth() }; // 0-based
+}
+
+async function loadAnalyticsData() {
+  await resolveBukaKey();
+  const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+  // Build window: _anaRange months ending at _anaEndY/_anaEndM
+  const months = [];
+  const endTotal = _anaEndY * 12 + _anaEndM;
+  const startTotal = endTotal - _anaRange + 1;
+  const monthKeyIdx = {}; // "YYYY-M" -> index in months array
+  for (let i = 0; i < _anaRange; i++) {
+    const t = startTotal + i;
+    const y = Math.floor(t / 12);
+    const m = ((t % 12) + 12) % 12;
+    const label = (_anaRange > 12) ? (y + '/' + (m + 1)) : ((m + 1) + '月');
+    const labelFull = y + '/' + String(m + 1).padStart(2, '0');
+    months.push({ y: y, m: m, label: label, labelFull: labelFull });
+    monthKeyIdx[y + '-' + m] = i;
+  }
+  const overall = months.map(() => ({ nyusha: 0, taisha: 0 }));
+  const byBuka = {};
+  allEmps.forEach(emp => {
+    const buka = getBukaValue(emp) || '(未設定)';
+    if (!byBuka[buka]) byBuka[buka] = months.map(() => ({ nyusha: 0, taisha: 0 }));
+    // 入社
+    const n = _parseYM(emp[F.nyushaDate]);
+    if (n) {
+      const k = n.y + '-' + n.m;
+      if (monthKeyIdx[k] !== undefined) {
+        const idx = monthKeyIdx[k];
+        overall[idx].nyusha++;
+        byBuka[buka][idx].nyusha++;
+      }
+    }
+    // 退社 (有給退社日優先、なければ派遣先退社日)
+    const retireStr = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+    const t = _parseYM(retireStr);
+    if (t) {
+      const k = t.y + '-' + t.m;
+      if (monthKeyIdx[k] !== undefined) {
+        const idx = monthKeyIdx[k];
+        overall[idx].taisha++;
+        byBuka[buka][idx].taisha++;
+      }
+    }
+  });
+  _anaCache = { months: months, overall: overall, byBuka: byBuka };
+}
+
+function setAnalyticsRange(range, btn) {
+  _anaRange = range;
+  document.querySelectorAll('#adminAnalyticsScreen [data-anarange]').forEach(b => {
+    const active = b === btn;
+    b.style.background = active ? 'var(--primary)' : '#fff';
+    b.style.color = active ? '#fff' : '';
+    b.style.borderColor = active ? 'var(--primary)' : '#ddd';
+  });
+  _anaCache = null;
+  (async function() {
+    showSpinner();
+    try { await loadAnalyticsData(); renderAnalytics(); }
+    catch (e) { showToast('読み込みエラー: ' + e.message, 'error'); }
+    finally { hideSpinner(); }
+  })();
+}
+
+function changeAnalyticsEndMonth(delta) {
+  _anaEndM += delta;
+  while (_anaEndM > 11) { _anaEndM -= 12; _anaEndY++; }
+  while (_anaEndM < 0) { _anaEndM += 12; _anaEndY--; }
+  _anaCache = null;
+  (async function() {
+    showSpinner();
+    try { await loadAnalyticsData(); renderAnalytics(); }
+    catch (e) { showToast('読み込みエラー: ' + e.message, 'error'); }
+    finally { hideSpinner(); }
+  })();
+}
+
+function setAnalyticsSort(sort, btn) {
+  _anaSort = sort;
+  document.querySelectorAll('#adminAnalyticsScreen [data-anasort]').forEach(b => {
+    const active = b === btn;
+    b.style.background = active ? 'var(--primary)' : '#fff';
+    b.style.color = active ? '#fff' : 'var(--text-light)';
+    b.style.borderColor = active ? 'var(--primary)' : '#ddd';
+  });
+  renderAnalytics();
+}
+
+function renderAnalytics() {
+  if (!_anaCache) return;
+  const months = _anaCache.months;
+  const overall = _anaCache.overall;
+  const byBuka = _anaCache.byBuka;
+  // End label
+  const endLbl = document.getElementById('analyticsEndLabel');
+  if (endLbl) endLbl.textContent = _anaEndY + '/' + (_anaEndM + 1) + '末';
+
+  // Summary
+  let sumN = 0, sumT = 0;
+  overall.forEach(o => { sumN += o.nyusha; sumT += o.taisha; });
+  const net = sumN - sumT;
+  const netColor = net > 0 ? '#2e7d32' : net < 0 ? '#c62828' : 'var(--text-light)';
+  const netSign = net > 0 ? '+' : '';
+  document.getElementById('analyticsSummary').innerHTML =
+    '<div style="font-size:11px;color:#888;margin-bottom:4px;">' + months[0].labelFull + ' 〜 ' + months[months.length - 1].labelFull + '（' + _anaRange + 'ヶ月）</div>' +
+    '<div style="display:flex;gap:18px;flex-wrap:wrap;">' +
+    '<div><div style="font-size:10px;color:#888;">入社 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + sumN + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">退社 合計</div><div style="font-size:22px;font-weight:800;color:#c62828;">' + sumT + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">純増減</div><div style="font-size:22px;font-weight:800;color:' + netColor + ';">' + netSign + net + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+    '</div>';
+
+  // Overall monthly bar chart
+  let maxVal = 1;
+  overall.forEach(o => { if (o.nyusha > maxVal) maxVal = o.nyusha; if (o.taisha > maxVal) maxVal = o.taisha; });
+  let html = '';
+  months.forEach((mo, i) => {
+    const o = overall[i];
+    const nPct = Math.round((o.nyusha / maxVal) * 100);
+    const tPct = Math.round((o.taisha / maxVal) * 100);
+    const n2 = o.nyusha - o.taisha;
+    const netColor2 = n2 > 0 ? '#2e7d32' : n2 < 0 ? '#c62828' : 'var(--text-light)';
+    const netSign2 = n2 > 0 ? '+' : '';
+    html += '<div style="margin-bottom:10px;">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">';
+    html += '<span style="font-size:11px;font-weight:700;color:var(--text);">' + mo.label + '</span>';
+    html += '<span style="font-size:10px;font-weight:700;color:' + netColor2 + ';">純増 ' + netSign2 + n2 + '</span>';
+    html += '</div>';
+    html += '<div class="nyutai-chart-bar-wrap">';
+    html += '<div class="nyutai-chart-label" style="color:#2e7d32;">入社</div>';
+    html += '<div class="nyutai-chart-bar-bg"><div class="nyutai-chart-bar" style="width:' + nPct + '%;background:linear-gradient(90deg,#66bb6a,#2e7d32);"></div></div>';
+    html += '<div class="nyutai-chart-val" style="color:#2e7d32;">' + o.nyusha + '</div>';
+    html += '</div>';
+    html += '<div class="nyutai-chart-bar-wrap">';
+    html += '<div class="nyutai-chart-label" style="color:#c62828;">退社</div>';
+    html += '<div class="nyutai-chart-bar-bg"><div class="nyutai-chart-bar" style="width:' + tPct + '%;background:linear-gradient(90deg,#ef9a9a,#c62828);"></div></div>';
+    html += '<div class="nyutai-chart-val" style="color:#c62828;">' + o.taisha + '</div>';
+    html += '</div>';
+    html += '</div>';
+  });
+  document.getElementById('analyticsOverallChart').innerHTML = html;
+
+  // Per-buka summary table
+  const bukaList = Object.keys(byBuka).map(b => {
+    let n = 0, t = 0;
+    byBuka[b].forEach(m => { n += m.nyusha; t += m.taisha; });
+    return { name: b, nyusha: n, taisha: t, net: n - t };
+  }).filter(b => b.nyusha > 0 || b.taisha > 0); // 期間内に動きがあった派遣先のみ
+  if (_anaSort === 'net') bukaList.sort((a, b) => b.net - a.net || a.name.localeCompare(b.name, 'ja'));
+  else if (_anaSort === 'nyusha') bukaList.sort((a, b) => b.nyusha - a.nyusha || a.name.localeCompare(b.name, 'ja'));
+  else if (_anaSort === 'taisha') bukaList.sort((a, b) => b.taisha - a.taisha || a.name.localeCompare(b.name, 'ja'));
+  else bukaList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+  if (bukaList.length === 0) {
+    document.getElementById('analyticsByBukaTable').innerHTML = '<div style="padding:16px;color:var(--text-light);font-size:12px;text-align:center;">期間内に入退社の動きがありません</div>';
+  } else {
+    let tbl = '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">派遣先</th><th style="text-align:center;width:45px;">入社</th><th style="text-align:center;width:45px;">退社</th><th style="text-align:center;width:50px;">純増減</th></tr>';
+    bukaList.forEach(b => {
+      const jColor = b.net > 0 ? '#2e7d32' : b.net < 0 ? '#c62828' : 'var(--text-light)';
+      const jSign = b.net > 0 ? '+' : '';
+      tbl += '<tr>';
+      tbl += '<td style="font-weight:600;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(b.name) + '</td>';
+      tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;">' + (b.nyusha || '-') + '</td>';
+      tbl += '<td style="text-align:center;color:#c62828;font-weight:700;">' + (b.taisha || '-') + '</td>';
+      tbl += '<td style="text-align:center;color:' + jColor + ';font-weight:700;">' + jSign + b.net + '</td>';
+      tbl += '</tr>';
+    });
+    tbl += '</table>';
+    document.getElementById('analyticsByBukaTable').innerHTML = tbl;
+  }
+}
+
+function downloadAnalyticsExcel() {
+  if (!_anaCache) { showToast('データがまだ読み込まれていません', 'error'); return; }
+  if (typeof XLSX === 'undefined') { showToast('Excel ライブラリが利用できません', 'error'); return; }
+  try {
+    const months = _anaCache.months;
+    const overall = _anaCache.overall;
+    const byBuka = _anaCache.byBuka;
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: 月別推移（全体）
+    const s1Rows = [['年月', '入社', '退社', '純増減']];
+    months.forEach((mo, i) => {
+      const o = overall[i];
+      s1Rows.push([mo.labelFull, o.nyusha, o.taisha, o.nyusha - o.taisha]);
+    });
+    // 合計行
+    let tN = 0, tT = 0;
+    overall.forEach(o => { tN += o.nyusha; tT += o.taisha; });
+    s1Rows.push(['合計', tN, tT, tN - tT]);
+    const ws1 = XLSX.utils.aoa_to_sheet(s1Rows);
+    ws1['!cols'] = [{ wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, ws1, '月別推移');
+
+    // Sheet 2-4: 派遣先×月 マトリックス（入社/退社/純増減）
+    const bukaNames = Object.keys(byBuka).filter(b => {
+      return byBuka[b].some(m => m.nyusha > 0 || m.taisha > 0);
+    }).sort((a, b) => a.localeCompare(b, 'ja'));
+
+    function buildMatrix(valueFn) {
+      const rows = [['派遣先'].concat(months.map(m => m.labelFull)).concat(['合計'])];
+      bukaNames.forEach(name => {
+        const row = [name];
+        let sum = 0;
+        byBuka[name].forEach(m => {
+          const v = valueFn(m);
+          row.push(v);
+          sum += v;
+        });
+        row.push(sum);
+        rows.push(row);
+      });
+      // 合計行
+      const totalRow = ['合計'];
+      let grandSum = 0;
+      for (let i = 0; i < months.length; i++) {
+        let col = 0;
+        bukaNames.forEach(name => { col += valueFn(byBuka[name][i]); });
+        totalRow.push(col);
+        grandSum += col;
+      }
+      totalRow.push(grandSum);
+      rows.push(totalRow);
+      return rows;
+    }
+
+    const sNyusha = XLSX.utils.aoa_to_sheet(buildMatrix(m => m.nyusha));
+    const sTaisha = XLSX.utils.aoa_to_sheet(buildMatrix(m => m.taisha));
+    const sNet = XLSX.utils.aoa_to_sheet(buildMatrix(m => m.nyusha - m.taisha));
+    const bukaCol = { wch: 20 };
+    const monCols = months.map(() => ({ wch: 9 }));
+    sNyusha['!cols'] = [bukaCol].concat(monCols).concat([{ wch: 9 }]);
+    sTaisha['!cols'] = [bukaCol].concat(monCols).concat([{ wch: 9 }]);
+    sNet['!cols'] = [bukaCol].concat(monCols).concat([{ wch: 9 }]);
+    XLSX.utils.book_append_sheet(wb, sNyusha, '派遣先別_入社');
+    XLSX.utils.book_append_sheet(wb, sTaisha, '派遣先別_退社');
+    XLSX.utils.book_append_sheet(wb, sNet, '派遣先別_純増減');
+
+    const fname = '月次入退社推移_' + months[0].labelFull.replace('/', '') + '-' + months[months.length - 1].labelFull.replace('/', '') + '.xlsx';
+    XLSX.writeFile(wb, fname);
+    showToast('Excel を保存しました', 'success');
+  } catch (e) {
+    console.error('Analytics Excel error:', e);
+    showToast('Excel 出力エラー: ' + e.message, 'error');
   }
 }
 
@@ -25045,18 +25709,26 @@ async function openNyutaiEmployee(empId) {
   }
 }
 
+function getHakenDisplayTitle(bukaList) {
+  if (!bukaList || bukaList.length === 0) return '';
+  if (bukaList.length === 1) return bukaList[0];
+  if (bukaList.length <= 3) return bukaList.join(' / ');
+  return bukaList.slice(0, 2).join(' / ') + ' 他' + (bukaList.length - 2) + '件';
+}
+
 async function openHakenList() {
-  const select = document.getElementById('hakenSelect');
-  const buka = select.value;
-  if (!buka) {
+  if (!hakenMultiSelected || hakenMultiSelected.length === 0) {
     showToast('派遣先(部課)を選択してください', 'error');
     return;
   }
+  const bukaList = hakenMultiSelected.slice();
   const includeRetired = document.getElementById('hakenIncludeRetired').checked;
   showSpinner();
   try {
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
-    let filtered = allEmps.filter(emp => getBukaValue(emp) === buka);
+    const bukaSet = {};
+    bukaList.forEach(b => { bukaSet[b] = true; });
+    let filtered = allEmps.filter(emp => bukaSet[getBukaValue(emp)] === true);
     if (!includeRetired) {
       filtered = filtered.filter(emp => !isResigned(emp));
     }
@@ -25065,7 +25737,7 @@ async function openHakenList() {
     await ensureHakenKeyMap();
     switchScreen('hakenListScreen');
     initHakenColumnSelector();
-    renderHakenList(buka, filtered);
+    renderHakenList(getHakenDisplayTitle(bukaList), filtered);
   } catch (e) {
     console.error('Haken list error:', e);
     showToast('読み込みエラー: ' + e.message, 'error');
@@ -25264,19 +25936,20 @@ function renderHakenTable(employees, container) {
 }
 
 async function refreshHakenList() {
-  const select = document.getElementById('hakenSelect');
-  const buka = select.value;
-  if (!buka) return;
+  if (!hakenMultiSelected || hakenMultiSelected.length === 0) return;
+  const bukaList = hakenMultiSelected.slice();
   const includeRetired = document.getElementById('hakenIncludeRetired').checked;
   showSpinner();
   try {
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
-    let filtered = allEmps.filter(emp => getBukaValue(emp) === buka);
+    const bukaSet = {};
+    bukaList.forEach(b => { bukaSet[b] = true; });
+    let filtered = allEmps.filter(emp => bukaSet[getBukaValue(emp)] === true);
     if (!includeRetired) {
       filtered = filtered.filter(emp => !isResigned(emp));
     }
     hakenEmployeesCache = filtered;
-    renderHakenList(buka, filtered);
+    renderHakenList(getHakenDisplayTitle(bukaList), filtered);
     // Re-apply current filter
     if (hakenCurrentFilter !== 'all') {
       const btn = document.querySelector('#hakenFilterBtns .haken-filter-btn[data-filter="' + hakenCurrentFilter + '"]');
@@ -25301,7 +25974,9 @@ function downloadHakenExcel() {
     data = data.filter(emp => !getTsukinValue(emp));
   }
 
-  const buka = document.getElementById('hakenSelect').value || '部課';
+  const buka = (hakenMultiSelected && hakenMultiSelected.length > 0)
+    ? (hakenMultiSelected.length === 1 ? hakenMultiSelected[0] : hakenMultiSelected.join('_'))
+    : '部課';
 
   // Build extra columns from selected categories
   const extraCols = [];
@@ -25566,6 +26241,22 @@ if (PREVIEW_MODE) {
           sel.appendChild(opt);
         });
       }
+      // 複数選択UI用モックカウント
+      _hakenEmpByBuka = {
+        'テスト工場A': { active: 5, retired: 1, total: 6 },
+        'テスト工場B': { active: 3, retired: 0, total: 3 }
+      };
+      if (typeof buildHakenMultiPanel === 'function') buildHakenMultiPanel();
+      // 役員専用ページもモックで表示（プレビュー確認用）
+      _adminDashCache = {
+        byBuka: {
+          'テスト工場A': { active: 5, retired: 1, total: 6 },
+          'テスト工場B': { active: 3, retired: 0, total: 3 },
+          'テスト工場C (退職のみ)': { active: 0, retired: 2, total: 2 }
+        },
+        totalActive: 8, totalRetired: 3
+      };
+      if (typeof applyAdminVisibility === 'function') applyAdminVisibility();
       switchScreen('searchScreen');
       showToast('🔍 プレビューモード（モックデータ）', 'success');
     }, 300);
