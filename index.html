@@ -4435,6 +4435,7 @@ select.sankyu-edit-input {
         <button type="button" data-anasort="net" onclick="setAnalyticsSort('net',this)" style="font-size:11px;padding:4px 8px;border:1px solid var(--primary);border-radius:6px;background:var(--primary);color:#fff;cursor:pointer;">純増減順</button>
         <button type="button" data-anasort="nyusha" onclick="setAnalyticsSort('nyusha',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">入社順</button>
         <button type="button" data-anasort="taisha" onclick="setAnalyticsSort('taisha',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">退社順</button>
+        <button type="button" data-anasort="sankyu" onclick="setAnalyticsSort('sankyu',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">🌸順</button>
         <button type="button" data-anasort="name" onclick="setAnalyticsSort('name',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">名前順</button>
       </div>
       <div id="analyticsByBukaTable" style="overflow-x:auto;"></div>
@@ -18817,6 +18818,49 @@ document.addEventListener('click', function(e) {
 });
 
 // ============================================================
+// 共通: 現在の産休育休中人数を派遣先別にカウント
+// ============================================================
+async function _loadCurrentSankyuCounts(allEmps) {
+  try {
+    const [fields, items] = await Promise.all([
+      fetchSankyuFields().catch(() => null),
+      fetchSankyuItems().catch(() => [])
+    ]);
+    if (!fields || !items || items.length === 0) return { total: 0, byBuka: {} };
+    const kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+    const kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+    const kYotei = sankyuKeyByTitle('出産予定日');
+    const kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+    const empByNo = {};
+    allEmps.forEach(e => {
+      const no = e[F.syainNo];
+      if (no !== null && no !== undefined && no !== '') empByNo[String(no)] = e;
+    });
+    const byBuka = {};
+    const seen = {};
+    let total = 0;
+    items.forEach(item => {
+      const cat = sankyuItemCategory(item, kStatus, kBirth, kYotei);
+      if (cat === 'owari') return;
+      const no = item[kSyainNo];
+      if (no === null || no === undefined || no === '') return;
+      const noStr = String(no);
+      if (seen[noStr]) return; // 同一社員の重複行を防止
+      seen[noStr] = true;
+      const emp = empByNo[noStr];
+      const buka = emp ? getBukaValue(emp) : '';
+      if (!buka || !isHakensakiBuka(buka)) return;
+      byBuka[buka] = (byBuka[buka] || 0) + 1;
+      total++;
+    });
+    return { total: total, byBuka: byBuka };
+  } catch (e) {
+    console.warn('_loadCurrentSankyuCounts error:', e);
+    return { total: 0, byBuka: {} };
+  }
+}
+
+// ============================================================
 // 役員専用ダッシュボード（派遣先別在職者分析）
 // ============================================================
 const ADMIN_USERS = ['h.yamashita@team-stepup.com', 'a.yamashita@team-stepup.com'];
@@ -18872,12 +18916,17 @@ async function loadAdminDashData() {
     const b = getBukaValue(emp);
     if (!b) return;
     if (!isHakensakiBuka(b)) return; // 本社等は派遣先分析対象外
-    if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0 };
+    if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0, sankyu: 0 };
     byBuka[b].total++;
     if (isResigned(emp)) { byBuka[b].retired++; totalRetired++; }
     else { byBuka[b].active++; totalActive++; }
   });
-  _adminDashCache = { byBuka: byBuka, totalActive: totalActive, totalRetired: totalRetired };
+  // 産休育休中の人数を派遣先別に付加
+  const sankyuCounts = await _loadCurrentSankyuCounts(allEmps);
+  Object.keys(sankyuCounts.byBuka).forEach(b => {
+    if (byBuka[b]) byBuka[b].sankyu = sankyuCounts.byBuka[b];
+  });
+  _adminDashCache = { byBuka: byBuka, totalActive: totalActive, totalRetired: totalRetired, totalSankyu: sankyuCounts.total };
 }
 
 async function refreshAdminDashboard() {
@@ -18913,9 +18962,10 @@ function renderAdminDashboard() {
   const byBuka = _adminDashCache.byBuka;
   const totalActive = _adminDashCache.totalActive;
   const totalRetired = _adminDashCache.totalRetired;
+  const totalSankyu = _adminDashCache.totalSankyu || 0;
 
   const entries = Object.keys(byBuka).map(b => ({
-    name: b, active: byBuka[b].active, retired: byBuka[b].retired, total: byBuka[b].total
+    name: b, active: byBuka[b].active, retired: byBuka[b].retired, total: byBuka[b].total, sankyu: byBuka[b].sankyu || 0
   }));
   const visible = includeRetired ? entries : entries.filter(e => e.active > 0);
 
@@ -18927,7 +18977,8 @@ function renderAdminDashboard() {
 
   let summaryHtml = '<div style="display:flex;gap:18px;flex-wrap:wrap;">' +
     '<div><div style="font-size:10px;color:#888;">派遣先数</div><div style="font-size:22px;font-weight:800;color:var(--primary);">' + visible.length + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">件</span></div></div>' +
-    '<div><div style="font-size:10px;color:#888;">在職者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + totalActive + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+    '<div><div style="font-size:10px;color:#888;">在職者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + totalActive + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">🌸 産休育休中</div><div style="font-size:22px;font-weight:800;color:#d81b60;">' + totalSankyu + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   if (includeRetired) {
     summaryHtml += '<div><div style="font-size:10px;color:#888;">退職者 合計</div><div style="font-size:22px;font-weight:800;color:#c62828;">' + totalRetired + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   }
@@ -18946,11 +18997,14 @@ function renderAdminDashboard() {
     const retiredNote = (includeRetired && e.retired > 0)
       ? '<span style="font-size:10px;color:#c62828;margin-left:6px;font-weight:600;">退職 ' + e.retired + '</span>'
       : '';
+    const sankyuBadge = e.sankyu > 0
+      ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:1px 6px;background:#fce4ec;border:1px solid #f8bbd0;border-radius:8px;font-size:10px;font-weight:700;color:#d81b60;">🌸 ' + e.sankyu + '</span>'
+      : '';
     const nameEsc = escHtml(e.name);
     const nameArg = nameEsc.replace(/'/g, "\\'");
     html += '<div onclick="openHakenListFromAdmin(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
-      '<span style="font-size:14px;font-weight:700;color:var(--primary);">' + nameEsc + '</span>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
+      '<span style="font-size:14px;font-weight:700;color:var(--primary);display:inline-flex;align-items:center;flex-wrap:wrap;">' + nameEsc + sankyuBadge + '</span>' +
       '<span><span style="font-size:18px;font-weight:800;color:#2e7d32;">' + e.active + '</span><span style="font-size:11px;font-weight:500;color:#888;margin-left:2px;">名</span>' + retiredNote + '</span>' +
       '</div>' +
       '<div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden;">' +
@@ -19054,7 +19108,9 @@ async function loadAnalyticsData() {
       }
     }
   });
-  _anaCache = { months: months, overall: overall, byBuka: byBuka };
+  // 現在の産休育休中人数を派遣先別にカウント
+  const sankyuCounts = await _loadCurrentSankyuCounts(allEmps);
+  _anaCache = { months: months, overall: overall, byBuka: byBuka, sankyuByBuka: sankyuCounts.byBuka, totalSankyu: sankyuCounts.total };
 }
 
 function setAnalyticsRange(range, btn) {
@@ -19113,12 +19169,14 @@ function renderAnalytics() {
   const net = sumN - sumT;
   const netColor = net > 0 ? '#2e7d32' : net < 0 ? '#c62828' : 'var(--text-light)';
   const netSign = net > 0 ? '+' : '';
+  const totalSankyuAna = _anaCache.totalSankyu || 0;
   document.getElementById('analyticsSummary').innerHTML =
     '<div style="font-size:11px;color:#888;margin-bottom:4px;">' + months[0].labelFull + ' 〜 ' + months[months.length - 1].labelFull + '（' + _anaRange + 'ヶ月）</div>' +
     '<div style="display:flex;gap:18px;flex-wrap:wrap;">' +
     '<div><div style="font-size:10px;color:#888;">入社 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + sumN + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
     '<div><div style="font-size:10px;color:#888;">退社 合計</div><div style="font-size:22px;font-weight:800;color:#c62828;">' + sumT + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
     '<div><div style="font-size:10px;color:#888;">純増減</div><div style="font-size:22px;font-weight:800;color:' + netColor + ';">' + netSign + net + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">🌸 産休育休中</div><div style="font-size:22px;font-weight:800;color:#d81b60;">' + totalSankyuAna + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div><div style="font-size:9px;color:#aaa;">現在時点</div></div>' +
     '</div>';
 
   // Overall monthly bar chart
@@ -19152,20 +19210,22 @@ function renderAnalytics() {
   document.getElementById('analyticsOverallChart').innerHTML = html;
 
   // Per-buka summary table
+  const sankyuByBukaAna = _anaCache.sankyuByBuka || {};
   const bukaList = Object.keys(byBuka).map(b => {
     let n = 0, t = 0;
     byBuka[b].forEach(m => { n += m.nyusha; t += m.taisha; });
-    return { name: b, nyusha: n, taisha: t, net: n - t };
-  }).filter(b => b.nyusha > 0 || b.taisha > 0); // 期間内に動きがあった派遣先のみ
+    return { name: b, nyusha: n, taisha: t, net: n - t, sankyu: sankyuByBukaAna[b] || 0 };
+  }).filter(b => b.nyusha > 0 || b.taisha > 0 || b.sankyu > 0); // 期間内に動きがあった or 現在産休育休中の派遣先のみ
   if (_anaSort === 'net') bukaList.sort((a, b) => b.net - a.net || a.name.localeCompare(b.name, 'ja'));
   else if (_anaSort === 'nyusha') bukaList.sort((a, b) => b.nyusha - a.nyusha || a.name.localeCompare(b.name, 'ja'));
   else if (_anaSort === 'taisha') bukaList.sort((a, b) => b.taisha - a.taisha || a.name.localeCompare(b.name, 'ja'));
+  else if (_anaSort === 'sankyu') bukaList.sort((a, b) => b.sankyu - a.sankyu || a.name.localeCompare(b.name, 'ja'));
   else bukaList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
 
   if (bukaList.length === 0) {
     document.getElementById('analyticsByBukaTable').innerHTML = '<div style="padding:16px;color:var(--text-light);font-size:12px;text-align:center;">期間内に入退社の動きがありません</div>';
   } else {
-    let tbl = '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">派遣先</th><th style="text-align:center;width:45px;">入社</th><th style="text-align:center;width:45px;">退社</th><th style="text-align:center;width:50px;">純増減</th></tr>';
+    let tbl = '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">派遣先</th><th style="text-align:center;width:45px;">入社</th><th style="text-align:center;width:45px;">退社</th><th style="text-align:center;width:50px;">純増減</th><th style="text-align:center;width:45px;" title="現在時点">🌸</th></tr>';
     bukaList.forEach(b => {
       const jColor = b.net > 0 ? '#2e7d32' : b.net < 0 ? '#c62828' : 'var(--text-light)';
       const jSign = b.net > 0 ? '+' : '';
@@ -19174,6 +19234,7 @@ function renderAnalytics() {
       tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;">' + (b.nyusha || '-') + '</td>';
       tbl += '<td style="text-align:center;color:#c62828;font-weight:700;">' + (b.taisha || '-') + '</td>';
       tbl += '<td style="text-align:center;color:' + jColor + ';font-weight:700;">' + jSign + b.net + '</td>';
+      tbl += '<td style="text-align:center;color:' + (b.sankyu > 0 ? '#d81b60' : '#ccc') + ';font-weight:700;">' + (b.sankyu || '-') + '</td>';
       tbl += '</tr>';
     });
     tbl += '</table>';
@@ -19205,8 +19266,9 @@ function downloadAnalyticsExcel() {
     XLSX.utils.book_append_sheet(wb, ws1, '月別推移');
 
     // Sheet 2-4: 派遣先×月 マトリックス（入社/退社/純増減）
+    const sankyuByBukaExp = _anaCache.sankyuByBuka || {};
     const bukaNames = Object.keys(byBuka).filter(b => {
-      return byBuka[b].some(m => m.nyusha > 0 || m.taisha > 0);
+      return byBuka[b].some(m => m.nyusha > 0 || m.taisha > 0) || (sankyuByBukaExp[b] || 0) > 0;
     }).sort((a, b) => a.localeCompare(b, 'ja'));
 
     function buildMatrix(valueFn) {
@@ -19247,6 +19309,19 @@ function downloadAnalyticsExcel() {
     XLSX.utils.book_append_sheet(wb, sNyusha, '派遣先別_入社');
     XLSX.utils.book_append_sheet(wb, sTaisha, '派遣先別_退社');
     XLSX.utils.book_append_sheet(wb, sNet, '派遣先別_純増減');
+
+    // Sheet 5: 産休育休中（現在時点の派遣先別スナップショット）
+    const sankyuRows = [['派遣先', '産休育休中 人数']];
+    let sankyuGrandTotal = 0;
+    bukaNames.forEach(name => {
+      const cnt = sankyuByBukaExp[name] || 0;
+      sankyuRows.push([name, cnt]);
+      sankyuGrandTotal += cnt;
+    });
+    sankyuRows.push(['合計', sankyuGrandTotal]);
+    const sSankyu = XLSX.utils.aoa_to_sheet(sankyuRows);
+    sSankyu['!cols'] = [{ wch: 20 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, sSankyu, '派遣先別_産休育休（現在）');
 
     const fname = '月次入退社推移_' + months[0].labelFull.replace('/', '') + '-' + months[months.length - 1].labelFull.replace('/', '') + '.xlsx';
     XLSX.writeFile(wb, fname);
