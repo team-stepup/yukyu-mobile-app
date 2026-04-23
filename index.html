@@ -3134,6 +3134,10 @@ select.sankyu-edit-input {
 .profile-status-chip.s-pending { background: #fff8e1; color: #ef6c00; border-color: #ffe082; }
 .profile-status-chip.s-need    { background: #ffebee; color: #c62828; border-color: #ef9a9a; }
 .profile-status-chip.s-skip    { background: #eceff1; color: #607d8b; border-color: #cfd8dc; opacity: 0.78; }
+/* 離職票渡し方チップ (方法別に色分け) */
+.profile-status-chip.s-mail    { background: linear-gradient(135deg,#e1f5fe,#b3e5fc); color: #0277bd; border-color: #4fc3f7; font-size: 11px; padding: 4px 10px; }
+.profile-status-chip.s-post    { background: linear-gradient(135deg,#fff3e0,#ffe0b2); color: #ef6c00; border-color: #ffb74d; font-size: 11px; padding: 4px 10px; }
+.profile-status-chip.s-hand    { background: linear-gradient(135deg,#e0f2f1,#b2dfdb); color: #00796b; border-color: #4db6ac; font-size: 11px; padding: 4px 10px; }
 
 .profile-date-chip.chip-plan {
   background: linear-gradient(135deg,#fff8e1,#ffe082);
@@ -5168,6 +5172,13 @@ async function onLoginSuccess(resp) {
     const token = await acquireToken();
     if (!token) { showToast('トークン取得に失敗しました', 'error'); return; }
   }
+  // 許可ユーザーでなければここで遮断（将来は社員番号所持者も許可予定）
+  if (!isAllowedUser()) {
+    accessToken = null;
+    hideSpinner();
+    showAccessDeniedOverlay(getLoggedInEmail());
+    return;
+  }
   document.getElementById('authBtn').textContent = 'logout';
   switchScreen('searchScreen');
   showToast('ログインしました', 'success');
@@ -5187,6 +5198,12 @@ async function acquireToken() {
   if (accounts.length === 0) return null;
   try {
     const resp = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0] });
+    // 許可ユーザーでなければ遮断（リロード等で再入する経路）
+    if (!isAllowedUser()) {
+      accessToken = null;
+      showAccessDeniedOverlay(getLoggedInEmail());
+      return null;
+    }
     accessToken = resp.accessToken;
     document.getElementById('authBtn').textContent = 'logout';
     switchScreen('searchScreen');
@@ -6234,6 +6251,10 @@ async function loadLeaveDetails() {
   const _isFuture = _retRaw ? (new Date(_retRaw) > new Date()) : false;
   const _nyushaDate = emp[F.nyushaDate] || '';
   const _retireStr = _retRaw ? formatDate(_retRaw) : '';
+  // 入社日 と 起算日 が同じ日付なら1つのチップにまとめて表示
+  const _nyushaFmt = _nyushaDate ? formatDate(_nyushaDate) : '';
+  const _kisanFmt  = kisanDate ? formatDate(kisanDate) : '';
+  const _sameNyushaKisan = !!(_nyushaFmt && _kisanFmt && _nyushaFmt === _kisanFmt);
 
   // 通勤方法 for header badge
   const tsukinKeyH = Object.keys(emp).find(k => k.indexOf('x901a__x52e4__x65b9__x6cd5') >= 0);
@@ -6275,8 +6296,11 @@ async function loadLeaveDetails() {
         ${_buildProfBadges(_entryType, _exitType, _isFuture)}
       </div>
       <div class="profile-dates-row">
-        <div class="profile-date-chip"><span class="pdc-lbl">入社日</span><span class="pdc-val">${_nyushaDate ? escHtml(formatDate(_nyushaDate)) : '未設定'}</span></div>
-        <div class="profile-date-chip"><span class="pdc-lbl">起算日</span><span class="pdc-val">${formatDate(kisanDate) || '未設定'}</span></div>
+        ${_sameNyushaKisan
+          ? `<div class="profile-date-chip"><span class="pdc-lbl">入社・起算日</span><span class="pdc-val">${escHtml(_nyushaFmt)}</span></div>`
+          : `<div class="profile-date-chip"><span class="pdc-lbl">入社日</span><span class="pdc-val">${_nyushaFmt ? escHtml(_nyushaFmt) : '未設定'}</span></div>
+        <div class="profile-date-chip"><span class="pdc-lbl">起算日</span><span class="pdc-val">${_kisanFmt || '未設定'}</span></div>`
+        }
         ${_retRaw ? '<div class="profile-date-chip ' + (_isFuture ? 'chip-plan' : 'chip-retire') + '"><span class="pdc-lbl">' + (_isFuture ? '退社予定' : '退社日') + '</span><span class="pdc-val">' + escHtml(_retireStr) + '</span></div>' : ''}
       </div>
       <div id="profileStatusRow" class="profile-status-row" style="display:none;"></div>
@@ -6341,6 +6365,17 @@ async function loadLeaveDetails() {
       html += buildChip('雇用',   koyouKey   ? emp[koyouKey]   : '');
       html += buildChip('社保',   shahoKey   ? emp[shahoKey]   : '');
       html += buildChip('離職票', rishokuKey ? emp[rishokuKey] : '', { hideIfUnneeded: !hasRetireDate });
+      // 離職票渡し方: 退社日ありかつ「不要」以外のときだけ明示表示
+      var watashiKey = km['rishokuWatashi'];
+      var watashiVal = String((watashiKey ? emp[watashiKey] : '') || '').trim();
+      if (hasRetireDate && watashiVal && watashiVal !== '不要') {
+        var wCls, wIcon;
+        if (watashiVal === 'メール')       { wCls = 's-mail'; wIcon = '✉️'; }
+        else if (watashiVal === '郵送')    { wCls = 's-post'; wIcon = '📮'; }
+        else if (watashiVal === '手渡し')  { wCls = 's-hand'; wIcon = '🤝'; }
+        else                               { wCls = 's-pending'; wIcon = '📤'; }
+        html += '<span class="profile-status-chip ' + wCls + '"><span class="psc-lbl">渡し方</span><span class="psc-val">' + wIcon + ' ' + escHtml(watashiVal) + '</span></span>';
+      }
       var row = document.getElementById('profileStatusRow');
       if (row && html) {
         row.innerHTML = html;
@@ -19382,16 +19417,76 @@ async function _loadCurrentSankyuCounts(allEmps) {
 // 役員専用ダッシュボード（派遣先別在職者分析）
 // ============================================================
 const ADMIN_USERS = ['h.yamashita@team-stepup.com', 'a.yamashita@team-stepup.com'];
+// アプリ全体へのログイン許可リスト。現状は役員2名のみ。
+// 将来: 社員番号を持つユーザーも許可する予定 → isAllowedUser() 内に分岐追加
+const ALLOWED_EMAILS = ADMIN_USERS.slice();
+
+function getLoggedInEmail() {
+  try {
+    if (typeof msalInstance === 'undefined' || !msalInstance) return '';
+    const accounts = msalInstance.getAllAccounts();
+    if (!accounts || accounts.length === 0) return '';
+    return String(accounts[0].username || '').toLowerCase();
+  } catch (e) { return ''; }
+}
 
 function isAdminUser() {
   try {
     if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
-    if (typeof msalInstance === 'undefined' || !msalInstance) return false;
-    const accounts = msalInstance.getAllAccounts();
-    if (!accounts || accounts.length === 0) return false;
-    const email = String(accounts[0].username || '').toLowerCase();
+    const email = getLoggedInEmail();
+    if (!email) return false;
     return ADMIN_USERS.indexOf(email) >= 0;
   } catch (e) { return false; }
+}
+
+function isAllowedUser() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    const email = getLoggedInEmail();
+    if (!email) return false;
+    if (ALLOWED_EMAILS.indexOf(email) >= 0) return true;
+    // TODO: 将来ここに「社員番号を持つユーザーを許可」のロジックを追加
+    // if (hasCompanyId(email)) return true;
+    return false;
+  } catch (e) { return false; }
+}
+
+function showAccessDeniedOverlay(email) {
+  if (document.getElementById('accessDeniedOverlay')) return;
+  if (!document.getElementById('accessDeniedKeyframes')) {
+    const st = document.createElement('style');
+    st.id = 'accessDeniedKeyframes';
+    st.textContent = '@keyframes adGlitch{0%,100%{transform:translate(0,0);text-shadow:0 0 12px #ff3b3b,0 0 28px #ff3b3b}20%{transform:translate(-2px,1px);text-shadow:2px 0 #00e5ff,-2px 0 #ff3b3b}40%{transform:translate(2px,-1px);text-shadow:-2px 0 #00e5ff,2px 0 #ff3b3b}60%{transform:translate(-1px,0);text-shadow:0 0 20px #ff3b3b}80%{transform:translate(0,2px);text-shadow:1px 0 #00e5ff,-1px 0 #ff3b3b}}@keyframes adFlicker{0%,100%{opacity:1}50%{opacity:.82}52%{opacity:.4}54%{opacity:1}}@keyframes adScan{0%{transform:translateY(-100%)}100%{transform:translateY(100%)}}@keyframes adType{from{width:0}to{width:100%}}';
+    document.head.appendChild(st);
+  }
+  const safeEmail = String(email || 'unknown').replace(/[<>&]/g, '');
+  const nonce = Math.floor(Math.random() * 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
+  const overlay = document.createElement('div');
+  overlay.id = 'accessDeniedOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:radial-gradient(ellipse at center,#1a0000 0%,#000 75%);color:#ff3b3b;font-family:"Courier New",Consolas,monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;overflow:hidden;animation:adFlicker 3.2s infinite;';
+  overlay.innerHTML = ''
+    + '<div style="position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,0.035) 0,rgba(255,255,255,0.035) 1px,transparent 1px,transparent 3px);"></div>'
+    + '<div style="position:absolute;left:0;right:0;height:30%;background:linear-gradient(180deg,transparent,rgba(255,59,59,0.08),transparent);animation:adScan 4s linear infinite;pointer-events:none;"></div>'
+    + '<div style="font-size:13px;color:#ff8080;letter-spacing:6px;margin-bottom:8px;opacity:.85;">// SECURE  SYSTEM  //</div>'
+    + '<div style="font-size:64px;font-weight:900;letter-spacing:10px;margin-bottom:6px;animation:adGlitch 2.4s infinite;">&#9991; DENIED</div>'
+    + '<div style="font-size:13px;color:#ff8080;letter-spacing:4px;margin-bottom:28px;">— INTRUSION  BLOCKED —</div>'
+    + '<div style="font-size:12px;color:#ffaaaa;line-height:1.95;max-width:520px;background:rgba(255,59,59,0.05);border:1px solid rgba(255,59,59,0.35);padding:16px 18px;border-radius:4px;">'
+    +   '<div style="color:#ff3b3b;margin-bottom:10px;letter-spacing:2px;">[ ERR  0xA4F9-UNKNOWN-ENTITY ]</div>'
+    +   '<div style="margin-bottom:6px;">&gt; validating credentials... <span style="color:#ff3b3b;">FAILED</span></div>'
+    +   '<div style="margin-bottom:6px;">&gt; identity &lt;<span style="color:#fff;">' + safeEmail + '</span>&gt; not found in registry</div>'
+    +   '<div style="margin-bottom:6px;">&gt; clearance level insufficient</div>'
+    +   '<div style="margin-bottom:6px;">&gt; session &#35;' + nonce + ' purged</div>'
+    +   '<div style="margin-top:10px;opacity:.55;font-size:11px;">— this incident has been logged —</div>'
+    + '</div>'
+    + '<button id="accessDeniedDisconnectBtn" style="margin-top:34px;background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;padding:12px 38px;font-family:\'Courier New\',monospace;letter-spacing:5px;cursor:pointer;font-size:13px;font-weight:700;transition:all .2s;">[ DISCONNECT ]</button>'
+    + '<div style="margin-top:18px;font-size:10px;color:#663333;letter-spacing:3px;">STEP&middot;UP / node-0xF4 &middot; trace ' + nonce + '</div>';
+  document.body.appendChild(overlay);
+  const btn = document.getElementById('accessDeniedDisconnectBtn');
+  btn.addEventListener('mouseenter', function(){ btn.style.background='#ff3b3b';btn.style.color='#000'; });
+  btn.addEventListener('mouseleave', function(){ btn.style.background='transparent';btn.style.color='#ff3b3b'; });
+  btn.addEventListener('click', function(){
+    try { accessToken = null; if (msalInstance) msalInstance.logoutRedirect(); } catch(e){ location.reload(); }
+  });
 }
 
 function applyAdminVisibility() {
