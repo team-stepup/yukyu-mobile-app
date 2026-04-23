@@ -3138,6 +3138,34 @@ select.sankyu-edit-input {
 .profile-status-chip.s-mail    { background: linear-gradient(135deg,#e1f5fe,#b3e5fc); color: #0277bd; border-color: #4fc3f7; font-size: 11px; padding: 4px 10px; }
 .profile-status-chip.s-post    { background: linear-gradient(135deg,#fff3e0,#ffe0b2); color: #ef6c00; border-color: #ffb74d; font-size: 11px; padding: 4px 10px; }
 .profile-status-chip.s-hand    { background: linear-gradient(135deg,#e0f2f1,#b2dfdb); color: #00796b; border-color: #4db6ac; font-size: 11px; padding: 4px 10px; }
+/* 役員専用セクション: 金バッジ & アコーディオン */
+.admin-gold-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 3px 11px; border-radius: 999px;
+  background: linear-gradient(135deg,#fff4c2 0%,#ffd700 30%,#ffb300 50%,#ffd700 70%,#fff4c2 100%);
+  color: #5a3500; font-size: 11px; font-weight: 900; letter-spacing: 0.5px;
+  border: 1px solid #caa300;
+  box-shadow: 0 2px 5px rgba(218,165,32,0.45), inset 0 1px 0 rgba(255,255,255,0.55);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.35);
+  white-space: nowrap;
+}
+#adminSectionBody {
+  overflow: hidden;
+  transition: max-height 0.3s ease, margin-top 0.3s ease, opacity 0.25s ease;
+  max-height: 600px; margin-top: 10px; opacity: 1;
+}
+#adminSection.collapsed #adminSectionBody {
+  max-height: 0; margin-top: 0; opacity: 0;
+}
+#adminSectionChevron {
+  transition: transform 0.25s ease;
+  display: inline-block;
+}
+#adminSection.collapsed #adminSectionChevron {
+  transform: rotate(-90deg);
+}
+#adminSection .admin-toggle-btn:hover { opacity: 0.85; }
+#adminSection .admin-toggle-btn:active { transform: scale(0.98); }
 
 .profile-date-chip.chip-plan {
   background: linear-gradient(135deg,#fff8e1,#ffe082);
@@ -4404,21 +4432,26 @@ select.sankyu-edit-input {
       <button class="home-search-btn" style="width:100%;margin-top:10px;padding:11px;border-radius:12px;" onclick="openHakenList()">表示</button>
     </div>
 
-    <!-- 役員専用セクション (権限チェックで表示制御) -->
+    <!-- 役員専用セクション (権限チェックで表示制御, アコーディオン式) -->
     <div id="adminSection" class="admin-only" style="display:none;background:linear-gradient(135deg,#fff9e6,#fff3d4);border:1.5px solid #f0c040;border-radius:14px;padding:12px;margin-top:12px;">
-      <div style="font-size:13px;font-weight:700;color:#c68200;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-        <span>👔</span><span>役員専用</span>
+      <button type="button" class="admin-toggle-btn" onclick="toggleAdminSection()" style="width:100%;display:flex;align-items:center;gap:8px;background:transparent;border:none;cursor:pointer;padding:0;text-align:left;">
+        <span class="admin-gold-badge">👑 役員</span>
+        <span style="font-size:13px;font-weight:700;color:#c68200;">専用メニュー</span>
+        <span style="flex:1;"></span>
+        <span id="adminSectionChevron" style="font-size:13px;color:#c68200;font-weight:700;">▼</span>
+      </button>
+      <div id="adminSectionBody">
+        <button type="button" onclick="openAdminDashScreen()" style="width:100%;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">📊</span>
+          <span style="flex:1;font-weight:600;">派遣先別 在職者分析</span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
+        <button type="button" onclick="openAdminAnalyticsScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">📈</span>
+          <span style="flex:1;font-weight:600;">月次 入退社推移 / 経営分析</span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
       </div>
-      <button type="button" onclick="openAdminDashScreen()" style="width:100%;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-        <span style="font-size:20px;">📊</span>
-        <span style="flex:1;font-weight:600;">派遣先別 在職者分析</span>
-        <span style="color:#bbb;font-size:14px;">›</span>
-      </button>
-      <button type="button" onclick="openAdminAnalyticsScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-        <span style="font-size:20px;">📈</span>
-        <span style="flex:1;font-weight:600;">月次 入退社推移 / 経営分析</span>
-        <span style="color:#bbb;font-size:14px;">›</span>
-      </button>
     </div>
   </div>
 
@@ -19494,6 +19527,24 @@ function applyAdminVisibility() {
   document.querySelectorAll('.admin-only').forEach(el => {
     el.style.display = admin ? '' : 'none';
   });
+  // 役員セクションの折りたたみ状態を復元
+  if (admin) {
+    try {
+      var sec = document.getElementById('adminSection');
+      if (sec && localStorage.getItem('adminSectionCollapsed') === '1') {
+        sec.classList.add('collapsed');
+      }
+    } catch (e) {}
+  }
+}
+
+function toggleAdminSection() {
+  var sec = document.getElementById('adminSection');
+  if (!sec) return;
+  sec.classList.toggle('collapsed');
+  try {
+    localStorage.setItem('adminSectionCollapsed', sec.classList.contains('collapsed') ? '1' : '0');
+  } catch (e) {}
 }
 
 let _adminDashSort = 'count';
