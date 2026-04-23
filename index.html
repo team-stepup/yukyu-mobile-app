@@ -10111,10 +10111,11 @@ async function downloadKoyouSoushitsuExcel() {
     if (v.indexOf('自己都合') >= 0) return '3';
     return '2';
   }
-  // ヘッダー + データ行 (21列)
+  // ヘッダー + データ行 (24列)
   var headers = [
     '社員番号','氏名','雇用保険被保険者番号','雇用保険名前','性別',
-    '生年月日（和暦）','資格取得年月日','離職等年月日','喪失原因',
+    '生年月日（和暦）','郵便番号','住所','電話番号',
+    '資格取得年月日','離職等年月日','喪失原因',
     '離職票交付希望','補充採用の有無','1週間の所定労働時間','あて先',
     '被保険者でなくなった原因','被保険者氏名（ローマ字）','国籍',
     '在留資格','在留期間','資格外活動許可の有無','在留カード番号','派遣・請負就労区分'
@@ -10131,21 +10132,24 @@ async function downloadKoyouSoushitsuExcel() {
       String(get(emp, 'koyouName') || ''),                  // 4 雇用保険名前
       sexCode(emp),                                         // 5 性別 (1=男/2=女)
       toWareki(get(emp, 'birthday')),                       // 6 生年月日(和暦)
-      nyushaStr,                                            // 7 資格取得年月日 (入社日)
-      taishaStr,                                            // 8 離職等年月日 (有給使用後退社日→派遣先退社日)
-      soushitsuReason(emp),                                 // 9 喪失原因 (自己都合=3/他=2/空=エラー)
-      '無',                                                 // 10 離職票交付希望 (固定)
-      '無',                                                 // 11 補充採用の有無 (固定)
-      '派遣先定時間×5',                                     // 12 1週間の所定労働時間 (要手入力)
-      '総務部',                                             // 13 あて先 (固定)
-      String(get(emp, 'taisyokuRiyuu') || ''),              // 14 被保険者でなくなった原因 (退職理由そのまま)
-      String(get(emp, 'tokki1') || ''),                     // 15 被保険者氏名(ローマ字)
-      String(get(emp, 'nationality') || ''),                // 16 国籍
-      String(get(emp, 'zairyuShikaku') || ''),              // 17 在留資格
-      fmtDate(get(emp, 'zairyuKigen')),                     // 18 在留期間
-      '無',                                                 // 19 資格外活動許可の有無 (固定)
-      String(get(emp, 'zairyuBikou') || ''),                // 20 在留カード番号 (zairyuBikou=在留：備考１)
-      '該当'                                                // 21 派遣・請負就労区分 (固定)
+      String(get(emp, 'yubin') || ''),                      // 7 郵便番号
+      String(get(emp, 'address') || ''),                    // 8 住所
+      String(get(emp, 'keitai') || ''),                     // 9 電話番号 (携帯)
+      nyushaStr,                                            // 10 資格取得年月日 (入社日)
+      taishaStr,                                            // 11 離職等年月日 (有給使用後退社日→派遣先退社日)
+      soushitsuReason(emp),                                 // 12 喪失原因 (自己都合=3/他=2/空=エラー)
+      '無',                                                 // 13 離職票交付希望 (固定)
+      '無',                                                 // 14 補充採用の有無 (固定)
+      '派遣先定時間×5',                                     // 15 1週間の所定労働時間 (要手入力)
+      '総務部',                                             // 16 あて先 (固定)
+      String(get(emp, 'taisyokuRiyuu') || ''),              // 17 被保険者でなくなった原因 (退職理由そのまま)
+      String(get(emp, 'tokki1') || ''),                     // 18 被保険者氏名(ローマ字)
+      String(get(emp, 'nationality') || ''),                // 19 国籍
+      String(get(emp, 'zairyuShikaku') || ''),              // 20 在留資格
+      fmtDate(get(emp, 'zairyuKigen')),                     // 21 在留期間
+      '無',                                                 // 22 資格外活動許可の有無 (固定)
+      String(get(emp, 'zairyuBikou') || ''),                // 23 在留カード番号 (zairyuBikou=在留：備考１)
+      '該当'                                                // 24 派遣・請負就労区分 (固定)
     ]);
   });
   // XLSX生成 (書式付き: C2でウィンドウ枠固定・列幅自動・ゼブラストライプ)
