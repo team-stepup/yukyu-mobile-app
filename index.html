@@ -9867,10 +9867,11 @@ async function downloadKoyouKanyuuExcel() {
     if (!hourly || isNaN(hourly)) return '';
     return String(Math.round(hourly * 8 * 19 / 1000));
   }
-  // ヘッダー + データ行 (27列)
+  // ヘッダー + データ行 (30列)
   var headers = [
     '社員番号','氏名','派遣先','Koyou Name','雇用保険被保険者番号','取得区分','性別',
-    '生年月日（和暦）','資格取得年月日','被保険者となったことの原因',
+    '生年月日（和暦）','郵便番号','住所','電話番号',
+    '資格取得年月日','被保険者となったことの原因',
     '賃金（支払の態様）','賃金月額（千円）','雇用形態','職種','就職経路',
     '1週間の所定労働時間','期間の定め','契約期間','更新の有無','あて先',
     '被保険者氏名（ローマ字）','国籍','在留資格','在留期間',
@@ -9888,25 +9889,28 @@ async function downloadKoyouKanyuuExcel() {
       shutokuKubun(emp),                                    // 6 取得区分 (1/2/エラー)
       sexCode(emp),                                         // 7 性別 (1=男/2=女)
       toWareki(get(emp, 'birthday')),                       // 8 生年月日(和暦)
-      nyushaStr,                                            // 9 資格取得年月日
-      '2',                                                  // 10 被保険者となったことの原因 (固定)
-      '4',                                                  // 11 賃金(支払の態様) (固定)
-      wageThousand(emp),                                    // 12 賃金月額(千円) = 時給×8×19/1000
-      '2',                                                  // 13 雇用形態 (固定=派遣)
-      '08',                                                 // 14 職種 (固定)
-      '4',                                                  // 15 就職経路 (固定)
-      '派遣先定時間×5',                                     // 16 1週間の所定労働時間 (要手入力)
-      '有',                                                 // 17 期間の定め (固定)
-      nyushaStr + ' ～ (雇用契約書を確認)',                 // 18 契約期間
-      '有',                                                 // 19 更新の有無 (固定)
-      '総務部',                                             // 20 あて先 (固定)
-      String(get(emp, 'tokki1') || ''),                     // 21 被保険者氏名(ローマ字)
-      String(get(emp, 'nationality') || ''),                // 22 国籍
-      String(get(emp, 'zairyuShikaku') || ''),              // 23 在留資格
-      fmtDate(get(emp, 'zairyuKigen')),                     // 24 在留期間
-      '無',                                                 // 25 資格外活動許可の有無 (固定)
-      String(get(emp, 'zairyuBikou') || ''),                // 26 在留カード番号 (zairyuBikou=在留：備考１)
-      '該当'                                                // 27 派遣・請負就労区分 (固定)
+      String(get(emp, 'yubin') || ''),                      // 9 郵便番号
+      String(get(emp, 'address') || ''),                    // 10 住所
+      String(get(emp, 'keitai') || ''),                     // 11 電話番号 (携帯)
+      nyushaStr,                                            // 12 資格取得年月日
+      '2',                                                  // 13 被保険者となったことの原因 (固定)
+      '4',                                                  // 14 賃金(支払の態様) (固定)
+      wageThousand(emp),                                    // 15 賃金月額(千円) = 時給×8×19/1000
+      '2',                                                  // 16 雇用形態 (固定=派遣)
+      '08',                                                 // 17 職種 (固定)
+      '4',                                                  // 18 就職経路 (固定)
+      '派遣先定時間×5',                                     // 19 1週間の所定労働時間 (要手入力)
+      '有',                                                 // 20 期間の定め (固定)
+      nyushaStr + ' ～ (雇用契約書を確認)',                 // 21 契約期間
+      '有',                                                 // 22 更新の有無 (固定)
+      '総務部',                                             // 23 あて先 (固定)
+      String(get(emp, 'tokki1') || ''),                     // 24 被保険者氏名(ローマ字)
+      String(get(emp, 'nationality') || ''),                // 25 国籍
+      String(get(emp, 'zairyuShikaku') || ''),              // 26 在留資格
+      fmtDate(get(emp, 'zairyuKigen')),                     // 27 在留期間
+      '無',                                                 // 28 資格外活動許可の有無 (固定)
+      String(get(emp, 'zairyuBikou') || ''),                // 29 在留カード番号 (zairyuBikou=在留：備考１)
+      '該当'                                                // 30 派遣・請負就労区分 (固定)
     ]);
   });
   // XLSX生成 (書式付き: C2でウィンドウ枠固定・列幅自動・ゼブラストライプ)
@@ -10364,9 +10368,9 @@ async function downloadShahoKanyuuExcel() {
     if (hourly && !isNaN(hourly)) return Math.round(hourly * 19) + ' × 定時間';
     return '時給×19×定時間';
   }
-  // ヘッダー + データ行 (14列)
+  // ヘッダー + データ行 (15列)
   var headers = [
-    '社員番号','氏名','被保険者氏名（口座名義）','生年月日（和暦）','種別',
+    '社員番号','氏名','被保険者氏名（口座名義）','生年月日（和暦）','電話番号','種別',
     '取得区分','個人番号（社員フォルダ）','資格取得年月日','被扶養者の有無','報酬月額',
     '郵便番号','被保険者住所','住所（カナ）','資格確認書発行要否'
   ];
@@ -10393,16 +10397,17 @@ async function downloadShahoKanyuuExcel() {
       String(empName || ''),                                // 2 氏名
       String(get(emp, 'bankMeigi') || ''),                  // 3 被保険者氏名(口座名義)
       toWareki(get(emp, 'birthday')),                       // 4 生年月日(和暦)
-      sexCode(emp),                                         // 5 種別 (1=男/2=女)
-      '1',                                                  // 6 取得区分 (固定)
-      folderUrl ? '📂 社員フォルダ' : '',                   // 7 個人番号 (社員フォルダ への hyperlink)
-      kanyuubiStr || fmtDate(get(emp, 'shahoKanyuubi')),    // 8 資格取得年月日 (社保加入日)
-      '選択して',                                           // 9 被扶養者の有無 (固定)
-      wageFormula(emp),                                     // 10 報酬月額 (時給×19×定時間)
-      String(get(emp, 'yubin') || ''),                      // 11 郵便番号
-      addr,                                                 // 12 被保険者住所
-      addrKana,                                             // 13 住所(カナ) (toKatakana)
-      '1発行が必要'                                         // 14 資格確認書発行要否 (固定)
+      String(get(emp, 'keitai') || ''),                     // 5 電話番号 (携帯)
+      sexCode(emp),                                         // 6 種別 (1=男/2=女)
+      '1',                                                  // 7 取得区分 (固定)
+      folderUrl ? '📂 社員フォルダ' : '',                   // 8 個人番号 (社員フォルダ への hyperlink)
+      kanyuubiStr || fmtDate(get(emp, 'shahoKanyuubi')),    // 9 資格取得年月日 (社保加入日)
+      '選択して',                                           // 10 被扶養者の有無 (固定)
+      wageFormula(emp),                                     // 11 報酬月額 (時給×19×定時間)
+      String(get(emp, 'yubin') || ''),                      // 12 郵便番号
+      addr,                                                 // 13 被保険者住所
+      addrKana,                                             // 14 住所(カナ) (toKatakana)
+      '1発行が必要'                                         // 15 資格確認書発行要否 (固定)
     ]);
   });
   // XLSX生成 (書式付き: C2でウィンドウ枠固定・列幅自動・ゼブラストライプ)
@@ -10430,7 +10435,7 @@ async function downloadShahoKanyuuExcel() {
     var ha = XLSX.utils.encode_cell({ r: 0, c: c });
     if (ws[ha]) ws[ha].s = headerStyle;
   }
-  // データ行の書式 + 個人番号列にハイパーリンク付与 (col index 6)
+  // データ行の書式 + 個人番号列にハイパーリンク付与 (col index 7, 電話番号追加で+1シフト)
   for (var r = 1; r <= range.e.r; r++) {
     var bg = (r % 2 === 1) ? 'FFFFFF' : 'FFEBEE'; // 奇数=白, 偶数=薄ピンク
     var rowStyle = {
@@ -10446,8 +10451,8 @@ async function downloadShahoKanyuuExcel() {
       if (c2 <= 1) {
         cellStyle = Object.assign({}, cellStyle, { font: { sz: 11, bold: true } });
       }
-      // 個人番号 列 (0-indexed 6) にハイパーリンク付与
-      if (c2 === 6) {
+      // 個人番号 列 (0-indexed 7) にハイパーリンク付与
+      if (c2 === 7) {
         var fu = folderUrls[r - 1];
         if (fu) {
           ws[cellAddr].l = { Target: fu, Tooltip: '社員フォルダを開く' };
@@ -10597,12 +10602,13 @@ async function downloadShahoSoushitsuExcel() {
     else { gengo = '明治'; gy = y - 1867; }
     return gengo + (gy === 1 ? '元' : gy) + '年' + m + '月' + day + '日';
   }
-  // ヘッダー + データ行 (10列)
+  // ヘッダー + データ行 (13列)
   var headers = [
     '社員番号','氏名','整理番号','被保険者氏名（社員ファイル）','生年月日（和暦）',
+    '郵便番号','住所','電話番号',
     '個人番号（社員フォルダ）','喪失年月日','喪失原因','退職年月日','資格確認書回収'
   ];
-  var folderUrls = []; // 被保険者氏名(col3)と個人番号(col5)の両方にハイパーリンク付与用
+  var folderUrls = []; // 被保険者氏名(col3)と個人番号(col8)の両方にハイパーリンク付与用
   var rows = [headers];
   selected.forEach(function(emp) {
     // 社員フォルダURL
@@ -10620,11 +10626,14 @@ async function downloadShahoSoushitsuExcel() {
       String(get(emp, 'seiriNo') || ''),           // 3 整理番号
       String(emp.Title || ''),                     // 4 被保険者氏名 (hyperlink付与→社員フォルダ)
       toWareki(get(emp, 'birthday')),              // 5 生年月日(和暦)
-      folderUrl ? '📂 社員フォルダ' : '',          // 6 個人番号 (hyperlink付与→社員フォルダ)
-      shahoSoushitsuStr,                           // 7 喪失年月日 (社保喪失日)
-      '4',                                         // 8 喪失原因 (固定)
-      taishaStr,                                   // 9 退職年月日 (有給使用後退社日→派遣先退社日)
-      '枚数を入力して'                             // 10 資格確認書回収 (要手入力)
+      String(get(emp, 'yubin') || ''),             // 6 郵便番号
+      String(get(emp, 'address') || ''),           // 7 住所
+      String(get(emp, 'keitai') || ''),            // 8 電話番号 (携帯)
+      folderUrl ? '📂 社員フォルダ' : '',          // 9 個人番号 (hyperlink付与→社員フォルダ)
+      shahoSoushitsuStr,                           // 10 喪失年月日 (社保喪失日)
+      '4',                                         // 11 喪失原因 (固定)
+      taishaStr,                                   // 12 退職年月日 (有給使用後退社日→派遣先退社日)
+      '枚数を入力して'                             // 13 資格確認書回収 (要手入力)
     ]);
   });
   // XLSX生成 (書式付き: C2でウィンドウ枠固定・列幅自動・ゼブラストライプ)
@@ -10652,7 +10661,7 @@ async function downloadShahoSoushitsuExcel() {
     var ha = XLSX.utils.encode_cell({ r: 0, c: c });
     if (ws[ha]) ws[ha].s = headerStyle;
   }
-  // データ行の書式 + col3(被保険者氏名)とcol5(個人番号)にハイパーリンク付与
+  // データ行の書式 + col3(被保険者氏名)とcol8(個人番号)にハイパーリンク付与
   for (var r = 1; r <= range.e.r; r++) {
     var bg = (r % 2 === 1) ? 'FFFFFF' : 'FCE4EC'; // 奇数=白, 偶数=薄ピンク
     var rowStyle = {
@@ -10668,8 +10677,8 @@ async function downloadShahoSoushitsuExcel() {
       if (c2 <= 1) {
         cellStyle = Object.assign({}, cellStyle, { font: { sz: 11, bold: true } });
       }
-      // 被保険者氏名(col 3) と 個人番号(col 5) にハイパーリンク付与
-      if ((c2 === 3 || c2 === 5)) {
+      // 被保険者氏名(col 3) と 個人番号(col 8) にハイパーリンク付与
+      if ((c2 === 3 || c2 === 8)) {
         var fu = folderUrls[r - 1];
         if (fu) {
           ws[cellAddr].l = { Target: fu, Tooltip: '社員フォルダを開く' };
