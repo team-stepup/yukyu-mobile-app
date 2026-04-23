@@ -9402,7 +9402,7 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 雇用喪失: (soumukoyou="✓取得完了" Or "→取得申請中") AND zaisyoku="退社"
+  // 雇用喪失: soumukoyou="✓取得完了" AND zaisyoku="退社" (取得済みのみ、申請中は除外)
   var koyouOutCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odKoyou = _soumuKeyMap['soumuKoyou'];
@@ -9412,7 +9412,7 @@ function renderSoumuDashboard() {
       if (!emp.Title) return;
       if (empZaisyoku(emp) !== '退社') return;
       var v = String(emp[odKoyou] || '');
-      if (v === '✓取得完了' || v === '→取得申請中') count++;
+      if (v === '✓取得完了') count++;
     });
     return count;
   })();
@@ -9979,7 +9979,7 @@ function openKoyouSoushitsuDownloadList() {
     var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
     if (zVal !== '退社') return false;
     var kv = String(emp[odKoyou] || '');
-    return kv === '✓取得完了' || kv === '→取得申請中';
+    return kv === '✓取得完了'; // 取得済みのみ、申請中は除外
   });
   renderKoyouSoushitsuDownloadOverlay(filteredList);
 }
