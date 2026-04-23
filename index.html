@@ -9684,6 +9684,17 @@ function openSoumuFilterList(filterKey) {
 // ============================================================
 // 雇用保険加入 - CSV ダウンロード用 オーバーレイ (Phase 1: 手入力補助)
 // ============================================================
+
+// 総務系オーバーレイ（雇用加入/喪失・社保加入/喪失）から社員詳細画面を開く共通ヘルパー
+function openEmpDetailFromSoumuList(idx) {
+  var list = window._koyouDlList || [];
+  if (!list[idx]) return;
+  var emp = list[idx];
+  var ov = document.getElementById('soumuListOverlay');
+  if (ov) ov.remove();
+  if (typeof selectEmployee === 'function') selectEmployee(emp);
+}
+
 function openKoyouKanyuuDownloadList() {
   if (!_soumuAllEmps || !_soumuKeyMap) { showToast('データ未取得', 'warn'); return; }
   var odKoyou = _soumuKeyMap['soumuKoyou'];
@@ -9733,6 +9744,7 @@ function renderKoyouKanyuuDownloadOverlay(list) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (nyusha) itemsHtml += '<div style="font-size:11px;color:#1976d2;margin-top:1px;">入社日: ' + escHtml(nyusha) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
       } else {
@@ -10014,6 +10026,7 @@ function renderKoyouSoushitsuDownloadOverlay(list) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (taishaStr) itemsHtml += '<div style="font-size:11px;color:#c62828;margin-top:1px;">退社日: ' + escHtml(taishaStr) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
       } else {
@@ -10253,6 +10266,7 @@ function renderShahoKanyuuDownloadOverlay(items) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(bango)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (kStr) itemsHtml += '<div style="font-size:11px;color:#2e7d32;margin-top:1px;">加入日: ' + escHtml(kStr) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
       } else {
@@ -10507,6 +10521,7 @@ function renderShahoSoushitsuDownloadOverlay(list) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (taishaStr) itemsHtml += '<div style="font-size:11px;color:#c62828;margin-top:1px;">退社日: ' + escHtml(taishaStr) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
       } else {
