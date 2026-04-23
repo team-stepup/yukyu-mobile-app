@@ -7019,6 +7019,56 @@ function _formatStatusChoice(c) {
   return (sty && sty.icon) ? (sty.icon + ' ' + c) : c;
 }
 
+// ============================================================
+// 複数PDFアップロード共通ヘルパー (最大3ファイル)
+// filesVar: window上の配列変数名 (例: '_koyouEditPdfFiles')
+// infoId: 情報表示div要素のID
+// ============================================================
+var _PDF_MAX_FILES = 3;
+function _updatePdfInfoCommon(infoId, filesVar) {
+  var info = document.getElementById(infoId);
+  if (!info) return;
+  var files = window[filesVar] || [];
+  if (files.length === 0) { info.innerHTML = ''; return; }
+  var html = '<div style="font-size:11px;color:#2e7d32;font-weight:700;margin-bottom:4px;">✅ ' + files.length + ' / ' + _PDF_MAX_FILES + ' ファイル選択中</div>';
+  html += '<div style="display:flex;flex-direction:column;gap:4px;">';
+  files.forEach(function(f, idx) {
+    html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:#fff;border-radius:6px;border:1px solid #ffb74d;">' +
+      '<span style="font-size:14px;flex-shrink:0;">📄</span>' +
+      '<span style="flex:1;font-size:11px;color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(f.name) + '</span>' +
+      '<span style="font-size:10px;color:#888;flex-shrink:0;">' + (f.size / 1024).toFixed(1) + ' KB</span>' +
+      '<button type="button" onclick="event.stopPropagation();_removePdfFile(\'' + filesVar + '\',\'' + infoId + '\',' + idx + ')" title="削除" style="background:none;border:none;color:#c62828;font-size:16px;cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0;">×</button>' +
+      '</div>';
+  });
+  html += '</div>';
+  info.innerHTML = html;
+}
+
+function _addPdfFiles(filesVar, infoId, newFiles) {
+  if (!newFiles || newFiles.length === 0) return;
+  var files = window[filesVar] || [];
+  var added = 0, skipped = 0, overMax = false;
+  for (var i = 0; i < newFiles.length; i++) {
+    var f = newFiles[i];
+    if (files.length >= _PDF_MAX_FILES) { overMax = true; break; }
+    var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    if (!isPdf) { skipped++; continue; }
+    files.push(f);
+    added++;
+  }
+  window[filesVar] = files;
+  _updatePdfInfoCommon(infoId, filesVar);
+  if (overMax) showToast('最大' + _PDF_MAX_FILES + 'ファイルまでです (超過分は無視)', 'warn');
+  if (skipped > 0) showToast('PDF以外は無視しました (' + skipped + '件)', 'warn');
+}
+
+function _removePdfFile(filesVar, infoId, idx) {
+  var files = window[filesVar] || [];
+  files.splice(idx, 1);
+  window[filesVar] = files;
+  _updatePdfInfoCommon(infoId, filesVar);
+}
+
 // Check if a category has any expiry alerts
 function categoryHasAlert(emp, keyMap, category) {
   if (isResigned(emp)) return false;
@@ -10947,17 +10997,17 @@ async function openShahoShutokuEditDialog(emp, mode) {
         inputHtml +
         '</div>';
     }).join('');
-    // 公文書PDF アップロード セクション (ドラッグ&ドロップ対応)
+    // 公文書PDF アップロード セクション (ドラッグ&ドロップ対応・最大3ファイル)
     var pdfUploadHtml =
       '<div style="margin-top:14px;padding:10px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-radius:10px;">' +
-        '<label style="display:block;font-size:12px;font-weight:800;color:#bf360c;margin-bottom:8px;">📄 公文書PDF アップロード</label>' +
+        '<label style="display:block;font-size:12px;font-weight:800;color:#bf360c;margin-bottom:8px;">📄 公文書PDF アップロード <span style="font-size:10px;font-weight:500;color:#8d6e63;">(最大3ファイル)</span></label>' +
         '<div id="shahoShutokuPdfDropZone" style="padding:24px 12px;border:2px dashed #f57c00;border-radius:10px;background:#fff;text-align:center;cursor:pointer;transition:background 0.2s;">' +
           '<div style="font-size:30px;">📥</div>' +
           '<div style="font-size:13px;font-weight:700;color:#bf360c;margin-top:4px;">PDFをドラッグ&ドロップ</div>' +
-          '<div style="font-size:10px;color:#8d6e63;margin-top:2px;">または タップして選択</div>' +
-          '<input type="file" id="shahoShutokuPdfInput" accept="application/pdf,.pdf" style="display:none;">' +
+          '<div style="font-size:10px;color:#8d6e63;margin-top:2px;">または タップして選択（最大3ファイル）</div>' +
+          '<input type="file" id="shahoShutokuPdfInput" accept="application/pdf,.pdf" multiple style="display:none;">' +
         '</div>' +
-        '<div id="shahoShutokuPdfInfo" style="font-size:11px;color:#6d4c41;margin-top:8px;text-align:center;"></div>' +
+        '<div id="shahoShutokuPdfInfo" style="font-size:11px;color:#6d4c41;margin-top:8px;"></div>' +
       '</div>';
     // ヘッダー情報: 氏名 / 社員番号 / 派遣先 (喪失モードは退社日も表示)
     var hakenStr = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
@@ -10996,27 +11046,16 @@ async function openShahoShutokuEditDialog(emp, mode) {
         '</div>' +
       '</div>';
     document.body.appendChild(ov);
-    // PDF ドロップゾーン: クリック → ファイル選択ダイアログ
+    window._shahoShutokuPdfFiles = [];
+    // PDF ドロップゾーン: クリック → ファイル選択ダイアログ (最大3ファイル)
     var dropZone = document.getElementById('shahoShutokuPdfDropZone');
     var pdfIn = document.getElementById('shahoShutokuPdfInput');
-    function updatePdfInfo(file) {
-      var info = document.getElementById('shahoShutokuPdfInfo');
-      if (!info) return;
-      if (file) {
-        info.innerHTML = '✅ <b>' + escHtml(file.name) + '</b> <span style="color:#888;">(' + (file.size / 1024).toFixed(1) + ' KB)</span>';
-        info.style.color = '#2e7d32';
-      } else {
-        info.textContent = '';
-      }
-    }
     if (dropZone && pdfIn) {
       dropZone.addEventListener('click', function() { pdfIn.click(); });
       pdfIn.addEventListener('change', function() {
-        var f = pdfIn.files && pdfIn.files[0];
-        window._shahoShutokuPdfFile = f || null;
-        updatePdfInfo(f);
+        _addPdfFiles('_shahoShutokuPdfFiles', 'shahoShutokuPdfInfo', pdfIn.files || []);
+        pdfIn.value = '';
       });
-      // ドラッグ&ドロップ
       dropZone.addEventListener('dragover', function(e) {
         e.preventDefault(); e.stopPropagation();
         dropZone.style.background = '#ffe0b2';
@@ -11032,20 +11071,9 @@ async function openShahoShutokuEditDialog(emp, mode) {
         dropZone.style.background = '#fff';
         dropZone.style.borderColor = '#f57c00';
         var files = e.dataTransfer && e.dataTransfer.files;
-        if (files && files.length > 0) {
-          var f = files[0];
-          // PDF以外は警告
-          var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
-          if (!isPdf) {
-            showToast('PDFファイルを選択してください', 'error');
-            return;
-          }
-          window._shahoShutokuPdfFile = f;
-          updatePdfInfo(f);
-        }
+        _addPdfFiles('_shahoShutokuPdfFiles', 'shahoShutokuPdfInfo', files || []);
       });
     }
-    window._shahoShutokuPdfFile = null;
     window._shahoShutokuEmpData = { emp: emp, km: km, meta: meta };
   } catch (e) {
     console.error('openShahoShutokuEditDialog error:', e);
@@ -11160,9 +11188,9 @@ async function saveShahoShutokuEditDialog() {
     console.log('[社保取得編集] debug:', debug);
     console.log('[社保取得編集] skipped:', skipped);
     console.log('[社保取得編集] body to save:', body);
-    // PDFファイル (input or drag-drop で設定された window._shahoShutokuPdfFile)
-    var pdfFile = window._shahoShutokuPdfFile || null;
-    if (changed === 0 && !pdfFile) {
+    // PDFファイル (input or drag-drop で設定された window._shahoShutokuPdfFiles)
+    var pdfFiles = window._shahoShutokuPdfFiles || [];
+    if (changed === 0 && pdfFiles.length === 0) {
       var msg = '変更もPDFも選択されていません';
       if (skipped.length > 0) msg += ' (未保存項目: ' + skipped.join(', ') + ')';
       showToast(msg, 'info');
@@ -11186,19 +11214,22 @@ async function saveShahoShutokuEditDialog() {
       console.log('[社保取得編集] 保存body:', body, 'skipped:', skipped);
       await spPatchEmployee(emp.Id, body);
     }
-    // PDF アップロード
+    // PDF アップロード (最大3ファイル)
     var pdfMessage = '';
-    if (pdfFile) {
+    if (pdfFiles.length > 0) {
       try {
-        if (btn) btn.textContent = 'PDFアップロード中...';
         var folderPath = await getEmpFolderPath(emp);
         if (!folderPath) throw new Error('社員フォルダパスが取得できません (部課・番号・氏名 要確認)');
         // 既存社員フォルダがあればそのまま利用、なければ作成
         try { await ensureSpFolder(folderPath); } catch(e) {
           console.warn('ensureSpFolder 失敗: 既存フォルダと仮定してアップロード続行', e);
         }
-        await uploadFileToSp(folderPath, pdfFile.name, pdfFile);
-        pdfMessage = ' / PDF「' + pdfFile.name + '」を社員フォルダに保存';
+        for (var pi = 0; pi < pdfFiles.length; pi++) {
+          var pdf = pdfFiles[pi];
+          if (btn) btn.textContent = 'PDFアップロード中 (' + (pi + 1) + '/' + pdfFiles.length + ')...';
+          await uploadFileToSp(folderPath, pdf.name, pdf);
+        }
+        pdfMessage = ' / PDF ' + pdfFiles.length + '件を社員フォルダに保存';
       } catch (upErr) {
         console.error('PDF upload error:', upErr);
         showToast('PDFアップロード失敗: ' + upErr.message, 'error');
@@ -11490,14 +11521,14 @@ async function openKoyouEditDialog(emp, mode) {
     }).join('');
     var pdfUploadHtml =
       '<div style="margin-top:14px;padding:10px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-radius:10px;">' +
-        '<label style="display:block;font-size:12px;font-weight:800;color:#bf360c;margin-bottom:8px;">📄 公文書PDF アップロード</label>' +
+        '<label style="display:block;font-size:12px;font-weight:800;color:#bf360c;margin-bottom:8px;">📄 公文書PDF アップロード <span style="font-size:10px;font-weight:500;color:#8d6e63;">(最大3ファイル)</span></label>' +
         '<div id="koyouEditPdfDropZone" style="padding:24px 12px;border:2px dashed #f57c00;border-radius:10px;background:#fff;text-align:center;cursor:pointer;transition:background 0.2s;">' +
           '<div style="font-size:30px;">📥</div>' +
           '<div style="font-size:13px;font-weight:700;color:#bf360c;margin-top:4px;">PDFをドラッグ&ドロップ</div>' +
-          '<div style="font-size:10px;color:#8d6e63;margin-top:2px;">または タップして選択</div>' +
-          '<input type="file" id="koyouEditPdfInput" accept="application/pdf,.pdf" style="display:none;">' +
+          '<div style="font-size:10px;color:#8d6e63;margin-top:2px;">または タップして選択（最大3ファイル）</div>' +
+          '<input type="file" id="koyouEditPdfInput" accept="application/pdf,.pdf" multiple style="display:none;">' +
         '</div>' +
-        '<div id="koyouEditPdfInfo" style="font-size:11px;color:#6d4c41;margin-top:8px;text-align:center;"></div>' +
+        '<div id="koyouEditPdfInfo" style="font-size:11px;color:#6d4c41;margin-top:8px;"></div>' +
       '</div>';
     var hakenStr = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
     var taishaStr = '';
@@ -11535,24 +11566,14 @@ async function openKoyouEditDialog(emp, mode) {
         '</div>' +
       '</div>';
     document.body.appendChild(ov);
+    window._koyouEditPdfFiles = [];
     var dropZone = document.getElementById('koyouEditPdfDropZone');
     var pdfIn = document.getElementById('koyouEditPdfInput');
-    function updatePdfInfo(file) {
-      var info = document.getElementById('koyouEditPdfInfo');
-      if (!info) return;
-      if (file) {
-        info.innerHTML = '✅ <b>' + escHtml(file.name) + '</b> <span style="color:#888;">(' + (file.size / 1024).toFixed(1) + ' KB)</span>';
-        info.style.color = '#2e7d32';
-      } else {
-        info.textContent = '';
-      }
-    }
     if (dropZone && pdfIn) {
       dropZone.addEventListener('click', function() { pdfIn.click(); });
       pdfIn.addEventListener('change', function() {
-        var f = pdfIn.files && pdfIn.files[0];
-        window._koyouEditPdfFile = f || null;
-        updatePdfInfo(f);
+        _addPdfFiles('_koyouEditPdfFiles', 'koyouEditPdfInfo', pdfIn.files || []);
+        pdfIn.value = ''; // 同じファイルを再度選択可能にリセット
       });
       dropZone.addEventListener('dragover', function(e) {
         e.preventDefault(); e.stopPropagation();
@@ -11569,19 +11590,9 @@ async function openKoyouEditDialog(emp, mode) {
         dropZone.style.background = '#fff';
         dropZone.style.borderColor = '#f57c00';
         var files = e.dataTransfer && e.dataTransfer.files;
-        if (files && files.length > 0) {
-          var f = files[0];
-          var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
-          if (!isPdf) {
-            showToast('PDFファイルを選択してください', 'error');
-            return;
-          }
-          window._koyouEditPdfFile = f;
-          updatePdfInfo(f);
-        }
+        _addPdfFiles('_koyouEditPdfFiles', 'koyouEditPdfInfo', files || []);
       });
     }
-    window._koyouEditPdfFile = null;
     window._koyouEditEmpData = { emp: emp, km: km, meta: meta };
   } catch (e) {
     console.error('openKoyouEditDialog error:', e);
@@ -11658,8 +11669,8 @@ async function saveKoyouEditDialog() {
     console.log('[雇用編集] debug:', debug);
     console.log('[雇用編集] skipped:', skipped);
     console.log('[雇用編集] body to save:', body);
-    var pdfFile = window._koyouEditPdfFile || null;
-    if (changed === 0 && !pdfFile) {
+    var pdfFiles = window._koyouEditPdfFiles || [];
+    if (changed === 0 && pdfFiles.length === 0) {
       var msg = '変更もPDFも選択されていません';
       if (skipped.length > 0) msg += ' (未保存項目: ' + skipped.join(', ') + ')';
       showToast(msg, 'info');
@@ -11671,16 +11682,19 @@ async function saveKoyouEditDialog() {
       await spPatchEmployee(emp.Id, body);
     }
     var pdfMessage = '';
-    if (pdfFile) {
+    if (pdfFiles.length > 0) {
       try {
-        if (btn) btn.textContent = 'PDFアップロード中...';
         var folderPath = await getEmpFolderPath(emp);
         if (!folderPath) throw new Error('社員フォルダパスが取得できません (部課・番号・氏名 要確認)');
         try { await ensureSpFolder(folderPath); } catch(e) {
           console.warn('ensureSpFolder 失敗: 既存フォルダと仮定してアップロード続行', e);
         }
-        await uploadFileToSp(folderPath, pdfFile.name, pdfFile);
-        pdfMessage = ' / PDF「' + pdfFile.name + '」を社員フォルダに保存';
+        for (var pi = 0; pi < pdfFiles.length; pi++) {
+          var pdf = pdfFiles[pi];
+          if (btn) btn.textContent = 'PDFアップロード中 (' + (pi + 1) + '/' + pdfFiles.length + ')...';
+          await uploadFileToSp(folderPath, pdf.name, pdf);
+        }
+        pdfMessage = ' / PDF ' + pdfFiles.length + '件を社員フォルダに保存';
       } catch (upErr) {
         console.error('PDF upload error:', upErr);
         showToast('PDFアップロード失敗: ' + upErr.message, 'error');
