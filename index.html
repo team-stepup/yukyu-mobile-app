@@ -10738,7 +10738,7 @@ function renderShahoMochuuList(list) {
       var isShutoku = shahoVal.indexOf('取得申請中') >= 0;
       var badgeStyle = isShutoku ? 'background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;' : 'background:#ffebee;color:#c62828;border:1px solid #ef9a9a;';
       var borderColor = isShutoku ? '#1565c0' : '#c62828';
-      var action = isShutoku ? 'openShahoShutokuEditDialogById' : 'openEmpFromList';
+      var action = isShutoku ? 'openShahoShutokuEditDialogById' : 'openShahoSoushitsuEditDialogById';
       itemsHtml += '<div class="soumu-list-item" data-emp-id="' + emp.Id + '" data-action="' + action + '" style="border-left:4px solid ' + borderColor + ';cursor:pointer;">';
       itemsHtml +=   '<div style="flex:1;min-width:0;">';
       itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(name) + '</div>';
@@ -10754,7 +10754,7 @@ function renderShahoMochuuList(list) {
         '<div style="font-size:15px;font-weight:700;flex:1;">🏥 社保 申請中 (' + list.length + '名)</div>' +
         '<button onclick="document.getElementById(\'soumuListOverlay\').remove()" style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;">×</button>' +
       '</div>' +
-      '<div style="padding:8px 12px;background:#f5f5f5;font-size:10px;color:#555;border-bottom:1px solid #e0e0e0;line-height:1.5;">🔵 取得申請中 → 社保情報編集ダイアログ<br>🔴 喪失申請中 → 社員詳細画面</div>' +
+      '<div style="padding:8px 12px;background:#f5f5f5;font-size:10px;color:#555;border-bottom:1px solid #e0e0e0;line-height:1.5;">🔵 取得申請中 → 社保取得編集ダイアログ<br>🔴 喪失申請中 → 社保喪失編集ダイアログ</div>' +
       '<div style="overflow-y:auto;padding:10px 14px;flex:1;">' + itemsHtml + '</div>' +
     '</div>';
   document.body.appendChild(ov);
@@ -10767,7 +10767,9 @@ function renderShahoMochuuList(list) {
       if (!emp) return;
       document.getElementById('soumuListOverlay').remove();
       if (action === 'openShahoShutokuEditDialogById') {
-        openShahoShutokuEditDialog(emp);
+        openShahoShutokuEditDialog(emp, 'shutoku');
+      } else if (action === 'openShahoSoushitsuEditDialogById') {
+        openShahoShutokuEditDialog(emp, 'soushitsu');
       } else {
         selectEmployee(emp);
       }
@@ -10801,11 +10803,17 @@ function resolveEmpOdKey(emp, odKey) {
   return null;
 }
 
-async function openShahoShutokuEditDialog(emp) {
+async function openShahoShutokuEditDialog(emp, mode) {
+  mode = mode || 'shutoku';
+  var isSoushitsu = (mode === 'soushitsu');
   try {
     var meta = await fetchEmployeeFields();
     var km = buildFieldKeyMap(meta);
-    var fieldDefs = [
+    var fieldDefs = isSoushitsu ? [
+      { key: 'seiriNo', label: '整理番号', type: 'text' },
+      { key: 'shahoSoushitsu', label: '社保：資格喪失日', type: 'date' },
+      { key: 'soumuShaho', label: '総務-社保 状況', type: 'choice' }
+    ] : [
       { key: 'seiriNo', label: '整理番号', type: 'text' },
       { key: 'shahoNamae', label: '社保名前', type: 'text' },
       { key: 'shahoNamaeFurigana', label: '社保名前フリガナ', type: 'text' },
@@ -10823,8 +10831,9 @@ async function openShahoShutokuEditDialog(emp) {
       }
     });
     // フィールド解決状況をログ出力 (デバッグ用)
-    console.log('[社保取得編集] 開いた社員:', { id: emp.Id, name: emp.Title, no: emp[F.syainNo] });
-    console.log('[社保取得編集] 各フィールドのキー解決状況:');
+    var logPrefix = isSoushitsu ? '[社保喪失編集]' : '[社保取得編集]';
+    console.log(logPrefix + ' 開いた社員:', { id: emp.Id, name: emp.Title, no: emp[F.syainNo] });
+    console.log(logPrefix + ' 各フィールドのキー解決状況:');
     fieldDefs.forEach(function(f) {
       var odKey = km[f.key];
       console.log('  ' + f.label + ' (' + f.key + '): ' + (odKey ? '✓ ' + odKey : '✗ 未検出'));
@@ -10886,21 +10895,33 @@ async function openShahoShutokuEditDialog(emp) {
         '</div>' +
         '<div id="shahoShutokuPdfInfo" style="font-size:11px;color:#6d4c41;margin-top:8px;text-align:center;"></div>' +
       '</div>';
-    // ヘッダー情報: 氏名 / 社員番号 / 派遣先
+    // ヘッダー情報: 氏名 / 社員番号 / 派遣先 (喪失モードは退社日も表示)
     var hakenStr = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
+    var taishaStr = '';
+    if (isSoushitsu) {
+      var ydRaw = emp[F.yukyuTaisha], hdRaw = emp[F.hakenTaisha];
+      var tRaw = ydRaw || hdRaw;
+      if (tRaw) { try { var td = new Date(tRaw); if (!isNaN(td.getTime())) taishaStr = td.getFullYear() + '/' + String(td.getMonth()+1).padStart(2,'0') + '/' + String(td.getDate()).padStart(2,'0'); } catch(_) {} }
+    }
+    var headerBg = isSoushitsu ? '#fce4ec' : '#e3f2fd';
+    var headerColor = isSoushitsu ? '#ad1457' : '#0d47a1';
+    var headerBorder = isSoushitsu ? '#f48fb1' : '#90caf9';
     var headerInfoHtml =
-      '<div style="padding:10px 16px;background:#e3f2fd;font-size:13px;color:#0d47a1;border-bottom:1px solid #90caf9;">' +
+      '<div style="padding:10px 16px;background:' + headerBg + ';font-size:13px;color:' + headerColor + ';border-bottom:1px solid ' + headerBorder + ';">' +
         '<div style="font-weight:800;font-size:15px;">' + escHtml(emp.Title || '') + '</div>' +
         '<div style="font-size:11px;font-weight:600;color:#455a64;margin-top:3px;display:flex;gap:12px;flex-wrap:wrap;">' +
           '<span>📛 No.' + escHtml(String(emp[F.syainNo] || '')) + '</span>' +
           (hakenStr ? '<span>🏭 ' + escHtml(hakenStr) + '</span>' : '') +
+          (taishaStr ? '<span style="color:#c62828;">🚪 退社日 ' + escHtml(taishaStr) + '</span>' : '') +
         '</div>' +
       '</div>';
+    var titleText = isSoushitsu ? '社保喪失申請中 情報編集' : '社保取得申請中 情報編集';
+    var headerGradient = isSoushitsu ? 'linear-gradient(135deg,#c62828,#b71c1c)' : 'linear-gradient(135deg,#1565c0,#0d47a1)';
     ov.innerHTML =
       '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.35);">' +
-        '<div style="background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+        '<div style="background:' + headerGradient + ';color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
           '<div style="font-size:22px;">🏥</div>' +
-          '<div style="flex:1;font-size:15px;font-weight:800;letter-spacing:0.5px;">社保取得申請中 情報編集</div>' +
+          '<div style="flex:1;font-size:15px;font-weight:800;letter-spacing:0.5px;">' + titleText + '</div>' +
           '<button onclick="closeShahoShutokuEditDialog()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">×</button>' +
         '</div>' +
         headerInfoHtml +
