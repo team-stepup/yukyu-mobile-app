@@ -6745,6 +6745,10 @@ const PROFILE_CATEGORIES = [
       { key: 'kenpoHihokensha', label: '健保：被保険者' },
       { key: 'kenpoShutoku', label: '健保：資格取得日', format: 'date' },
       { key: 'seiriNo', label: '整理番号' },
+      { key: 'shahoNamae', label: '社保名前' },
+      { key: 'shahoNamaeFurigana', label: '社保名前フリガナ' },
+      { key: 'kisoNenkinNo', label: '基礎年金番号' },
+      { key: 'shahoHyojunHoushu', label: '社保標準報酬月額' },
       { key: 'koyouNo', label: '雇用：被保険者番号' },
       { key: 'koyouShutoku', label: '雇用：資格取得日', format: 'date' },
       { key: 'koyouName', label: 'Koyou Name' },
@@ -6760,7 +6764,7 @@ const PROFILE_CATEGORIES = [
 ];
 
 // insurance セクションで値が空でも常に表示するフィールド
-const INSURANCE_ALWAYS_SHOW_KEYS = ['shahoKanyuubi', 'shahoSoushitsu', 'koyouSoushitsu', 'soumuKoyou', 'soumuShaho', 'soumuRishoku', 'rishokuhyou', 'rishokuWatashi'];
+const INSURANCE_ALWAYS_SHOW_KEYS = ['shahoKanyuubi', 'shahoNamae', 'shahoNamaeFurigana', 'kisoNenkinNo', 'shahoHyojunHoushu', 'shahoSoushitsu', 'koyouSoushitsu', 'soumuKoyou', 'soumuShaho', 'soumuRishoku', 'rishokuhyou', 'rishokuWatashi'];
 
 // Map profile category field keys to actual OData field names found in employee data
 // This mapping is built dynamically from field metadata
@@ -6890,6 +6894,18 @@ function buildFieldKeyMap(fieldsMeta) {
       const found = Object.keys(titleToKey).find(t => t.indexOf(title) >= 0 || title.indexOf(t) >= 0);
       if (found) map[key] = titleToKey[found];
     }
+  });
+
+  // 社保系の一部フィールドは Japanese encoding の 32文字制限でタイトル検索に失敗する
+  // SHAHO_EDIT_FALLBACK_KEYS と同じ固定ODataキーをフォールバック適用
+  const SHAHO_HARDCODED_FALLBACKS = {
+    shahoNamae:          'OData__x793e__x4fdd__x540d__x524d_',
+    shahoNamaeFurigana:  'OData__x793e__x4fdd__x540d__x524d__x30',
+    shahoHyojunHoushu:   'OData__x793e__x4fdd__x6a19__x6e96__x58',
+    kisoNenkinNo:        'OData__x57fa__x790e__x5e74__x91d1__x75'
+  };
+  Object.keys(SHAHO_HARDCODED_FALLBACKS).forEach(k => {
+    if (!map[k]) map[k] = SHAHO_HARDCODED_FALLBACKS[k];
   });
 
   return map;
