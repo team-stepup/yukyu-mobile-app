@@ -18673,6 +18673,12 @@ function getBukaValue(emp) {
 var _hakenEmpByBuka = {};
 var hakenMultiSelected = [];
 
+// 派遣先扱いしない部課（本社など自社内部課）
+var EXCLUDED_BUKA_FROM_HAKEN = ['001:本社'];
+function isHakensakiBuka(name) {
+  return !!name && EXCLUDED_BUKA_FROM_HAKEN.indexOf(name) < 0;
+}
+
 async function populateHakenDropdown() {
   try {
     const select = document.getElementById('hakenSelect');
@@ -18706,15 +18712,14 @@ function buildHakenMultiPanel() {
   if (!panel) return;
   const includeRetired = document.getElementById('hakenIncludeRetired').checked;
   const sorted = Object.keys(_hakenEmpByBuka).sort();
-  // 在職ゼロの部課は退職含むONの時だけ表示
+  // 本社等の非派遣先部課・在職ゼロの部課(退職含むOFF時)を除外
   const visible = sorted.filter(b => {
+    if (!isHakensakiBuka(b)) return false;
     const c = _hakenEmpByBuka[b];
     return includeRetired ? c.total > 0 : c.active > 0;
   });
-  // 退職含むOFF時、非表示になった部課は選択から除外
-  if (!includeRetired) {
-    hakenMultiSelected = hakenMultiSelected.filter(b => visible.indexOf(b) >= 0);
-  }
+  // 非表示になった部課(非派遣先含む)は選択から除外
+  hakenMultiSelected = hakenMultiSelected.filter(b => visible.indexOf(b) >= 0);
   if (visible.length === 0) {
     panel.innerHTML = '<div style="padding:16px;color:var(--text-light);font-size:12px;text-align:center;">該当する派遣先がありません</div>';
     updateHakenMultiBtnText();
@@ -18768,6 +18773,7 @@ function selectAllHakenMulti() {
   const includeRetired = document.getElementById('hakenIncludeRetired').checked;
   const sorted = Object.keys(_hakenEmpByBuka).sort();
   hakenMultiSelected = sorted.filter(b => {
+    if (!isHakensakiBuka(b)) return false;
     const c = _hakenEmpByBuka[b];
     return includeRetired ? c.total > 0 : c.active > 0;
   });
@@ -18865,6 +18871,7 @@ async function loadAdminDashData() {
   allEmps.forEach(emp => {
     const b = getBukaValue(emp);
     if (!b) return;
+    if (!isHakensakiBuka(b)) return; // 本社等は派遣先分析対象外
     if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0 };
     byBuka[b].total++;
     if (isResigned(emp)) { byBuka[b].retired++; totalRetired++; }
@@ -19021,7 +19028,9 @@ async function loadAnalyticsData() {
   const overall = months.map(() => ({ nyusha: 0, taisha: 0 }));
   const byBuka = {};
   allEmps.forEach(emp => {
-    const buka = getBukaValue(emp) || '(未設定)';
+    const bukaRaw = getBukaValue(emp);
+    if (bukaRaw && !isHakensakiBuka(bukaRaw)) return; // 本社等は派遣先分析対象外
+    const buka = bukaRaw || '(未設定)';
     if (!byBuka[buka]) byBuka[buka] = months.map(() => ({ nyusha: 0, taisha: 0 }));
     // 入社
     const n = _parseYM(emp[F.nyushaDate]);
