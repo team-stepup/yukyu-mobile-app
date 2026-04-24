@@ -19774,36 +19774,35 @@ async function listSetupCreate() {
       r = await fetch(SP_SITE_URL + '/_api/web/lists', { method: 'POST', headers: _lsHdrs(digest), body: JSON.stringify(body) });
       if (!r.ok) { _lsLog('✗ リスト作成失敗: ' + r.status + ' ' + (await r.text()).substring(0, 200), 'err'); return; }
       _lsLog('✓ リスト作成完了', 'ok');
-    } else {
-      _lsLog('↻ リスト既存、カラム追加のみ実行', 'warn');
-    }
 
-    // カラム追加
-    _lsLog('カラム追加 (' + LIST_SETUP_FIELDS.length + '個)...', 'info');
-    for (const f of LIST_SETUP_FIELDS) {
-      const body = { __metadata: { type: 'SP.Field' }, Title: f.title, FieldTypeKind: f.kind };
-      try {
-        r = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/fields",
-          { method: 'POST', headers: _lsHdrs(digest), body: JSON.stringify(body) });
-        if (r.ok) {
-          _lsLog('  ✓ ' + f.title, 'ok');
-        } else {
-          const t = await r.text();
-          if (t.indexOf('already exists') >= 0 || t.toLowerCase().indexOf('dupli') >= 0) {
-            _lsLog('  ↻ ' + f.title + ' (既存)', 'warn');
+      // 新規作成時のみカラム追加
+      _lsLog('カラム追加 (' + LIST_SETUP_FIELDS.length + '個)...', 'info');
+      for (const f of LIST_SETUP_FIELDS) {
+        const body = { __metadata: { type: 'SP.Field' }, Title: f.title, FieldTypeKind: f.kind };
+        try {
+          r = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/fields",
+            { method: 'POST', headers: _lsHdrs(digest), body: JSON.stringify(body) });
+          if (r.ok) {
+            _lsLog('  ✓ ' + f.title, 'ok');
           } else {
-            _lsLog('  ✗ ' + f.title + ': ' + t.substring(0, 150), 'err');
+            const t = await r.text();
+            if (t.indexOf('already exists') >= 0 || t.toLowerCase().indexOf('dupli') >= 0) {
+              _lsLog('  ↻ ' + f.title + ' (既存)', 'warn');
+            } else {
+              _lsLog('  ✗ ' + f.title + ': ' + t.substring(0, 150), 'err');
+            }
           }
+        } catch (e) {
+          _lsLog('  ✗ ' + f.title + ': ' + e.message, 'err');
         }
-      } catch (e) {
-        _lsLog('  ✗ ' + f.title + ': ' + e.message, 'err');
+        await new Promise(r => setTimeout(r, 400));
       }
-      await new Promise(r => setTimeout(r, 400));
+    } else {
+      _lsLog('↻ リスト既存 (カラム追加はスキップ、マッピングのみ取得)', 'warn');
     }
 
     // マッピング取得 (InternalName と EntityPropertyName の両方)
     _lsLog('内部名マッピング取得...', 'info');
-    await new Promise(r => setTimeout(r, 2000));
     r = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=Title,InternalName,EntityPropertyName,StaticName&$top=100",
       { headers: _lsHdrsRead() });
     const fieldsData = (await r.json()).d.results;
