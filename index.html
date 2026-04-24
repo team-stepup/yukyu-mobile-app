@@ -19801,25 +19801,32 @@ async function listSetupCreate() {
       await new Promise(r => setTimeout(r, 400));
     }
 
-    // マッピング取得
+    // マッピング取得 (InternalName と EntityPropertyName の両方)
     _lsLog('内部名マッピング取得...', 'info');
     await new Promise(r => setTimeout(r, 2000));
-    r = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=Title,EntityPropertyName&$top=100",
+    r = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=Title,InternalName,EntityPropertyName,StaticName&$top=100",
       { headers: _lsHdrsRead() });
     const fieldsData = (await r.json()).d.results;
     const nameMap = {};
+    const odataMap = {};
     for (const f of fieldsData) {
       if (LIST_SETUP_FIELDS.some(ff => ff.title === f.Title)) {
-        nameMap[f.Title] = f.EntityPropertyName;
+        nameMap[f.Title] = f.InternalName;
+        odataMap[f.Title] = f.EntityPropertyName;
       }
     }
     r = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')?$select=ListItemEntityTypeFullName,Id", { headers: _lsHdrsRead() });
     const info = (await r.json()).d;
-    _listSetupInfo = { nameMap, entityType: info.ListItemEntityTypeFullName, listGuid: info.Id, digest };
+    _listSetupInfo = { nameMap, odataMap, entityType: info.ListItemEntityTypeFullName, listGuid: info.Id, digest };
 
     _lsLog('✓ EntityType: ' + info.ListItemEntityTypeFullName, 'info');
     _lsLog('✓ ListGUID: ' + info.Id, 'info');
+    _lsLog('--- InternalName (POST body用) ---', 'info');
     for (const [k, v] of Object.entries(nameMap)) {
+      _lsLog('  ' + k + ' → ' + v, 'info');
+    }
+    _lsLog('--- EntityPropertyName (参考) ---', 'info');
+    for (const [k, v] of Object.entries(odataMap)) {
       _lsLog('  ' + k + ' → ' + v, 'info');
     }
     _lsLog('=== Step 1 完了: 次は Step 2 データ投入 ===', 'ok');
@@ -19891,7 +19898,8 @@ async function listSetupUpload() {
 
     const { nameMap, entityType, digest } = _listSetupInfo;
     const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
-    const K = (t) => (nameMap[t] || '').replace(/^OData_/, '');
+    // InternalName を直接使用 (OData_ ストリップ不要)
+    const K = (t) => nameMap[t] || '';
 
     const t0 = Date.now();
     let success = 0, fail = 0, skip = 0;
