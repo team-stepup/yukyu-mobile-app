@@ -19756,7 +19756,7 @@ async function listSetupUpload() {
 
   try {
     const file = fileInput.files[0];
-    _lsLog('=== Step 2: データ投入 ===', 'info');
+    _lsLog('=== Step 2: データ投入 (低速モード) ===', 'info');
     _lsLog('ファイル: ' + file.name + ' (' + file.size + ' bytes)', 'info');
     const text = await file.text();
     const lines = text.trim().split(/\r?\n/);
@@ -19769,26 +19769,52 @@ async function listSetupUpload() {
     });
     _lsLog('データ行: ' + rows.length, 'info');
 
+    // 既存分をスキップするため、現在のTitle一覧を先に取得
+    _lsLog('既存アイテム確認中...', 'info');
+    const existingTitles = new Set();
+    let skipUrl = SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/items?$select=Title&$top=5000";
+    while (skipUrl) {
+      const r = await fetch(skipUrl, { headers: _lsHdrsRead() });
+      if (!r.ok) break;
+      const d = (await r.json()).d;
+      for (const it of (d.results || [])) {
+        if (it.Title) existingTitles.add(String(it.Title));
+      }
+      skipUrl = d.__next || null;
+      if (skipUrl) await new Promise(x => setTimeout(x, 500));
+    }
+    _lsLog('既存: ' + existingTitles.size + '件 (スキップ対象)', 'info');
+
     const { nameMap, entityType, digest } = _listSetupInfo;
     const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    const K = (t) => (nameMap[t] || '').replace(/^OData_/, '');
 
     const t0 = Date.now();
-    let success = 0, fail = 0;
+    let success = 0, fail = 0, skip = 0;
     const failMsgs = [];
     const progressEl = document.getElementById('listSetupProgress');
 
-    // 並列アップロード (concurrency=6)
+    // 低速モード: 並列2, 各リクエスト間300ms
+    const DELAY_MS = 300;
+    const CONCURRENCY = 2;
     const queue = rows.map((r, i) => ({ r, i }));
-    const worker = async () => {
+
+    const worker = async (wid) => {
       while (queue.length > 0) {
         const item = queue.shift();
         if (!item) break;
         const { r: row, i } = item;
-        // POST body ではOData_プレフィックスを外した内部名を使う
-        const K = (t) => (nameMap[t] || '').replace(/^OData_/, '');
+        const title = row['Title'] || (row['社員番号'] + '-' + row['月']);
+
+        // 既存はスキップ
+        if (existingTitles.has(title)) {
+          skip++;
+          continue;
+        }
+
         const body = {
           __metadata: { type: entityType },
-          Title: row['Title'] || (row['社員番号'] + '-' + row['月']),
+          Title: title,
         };
         body[K('社員番号')]   = num(row['社員番号']);
         body[K('月')]         = num(row['月']);
@@ -19801,34 +19827,49 @@ async function listSetupUpload() {
         body[K('実出勤率')]   = num(row['実出勤率']);
         body[K('更新日')]     = row['更新日'] || new Date().toISOString();
 
-        try {
-          const resp = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/items",
-            { method: 'POST', headers: _lsHdrs(digest), body: JSON.stringify(body) });
-          if (resp.ok) {
-            success++;
-          } else {
-            fail++;
-            if (failMsgs.length < 5) {
-              const t = await resp.text();
-              failMsgs.push('row' + i + ': ' + t.substring(0, 150));
+        let attempt = 0;
+        while (attempt < 3) {
+          try {
+            const resp = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/items",
+              { method: 'POST', headers: _lsHdrs(digest), body: JSON.stringify(body) });
+            if (resp.ok) {
+              success++;
+              break;
+            } else if (resp.status === 429 || resp.status === 503) {
+              const waitMs = Math.min(60000, 2000 * Math.pow(2, attempt));
+              _lsLog('スロットル検知 (status ' + resp.status + ') → ' + (waitMs/1000) + '秒待機', 'warn');
+              await new Promise(x => setTimeout(x, waitMs));
+              attempt++;
+              continue;
+            } else {
+              fail++;
+              if (failMsgs.length < 5) {
+                const t = await resp.text();
+                failMsgs.push('row' + i + ' (' + resp.status + '): ' + t.substring(0, 150));
+              }
+              break;
             }
+          } catch (ex) {
+            fail++;
+            if (failMsgs.length < 5) failMsgs.push('row' + i + ' 例外: ' + ex.message);
+            break;
           }
-        } catch (ex) {
-          fail++;
-          if (failMsgs.length < 5) failMsgs.push('row' + i + ' 例外: ' + ex.message);
         }
-        const done = success + fail;
-        if (done % 50 === 0 || done === rows.length) {
+        await new Promise(x => setTimeout(x, DELAY_MS));
+
+        const done = success + fail + skip;
+        if (done % 20 === 0 || done === rows.length) {
           const pct = Math.round(100 * done / rows.length);
-          progressEl.innerHTML = '<b>' + done + '/' + rows.length + '</b> (' + pct + '%) 成功 ' + success + ' / 失敗 ' + fail;
+          progressEl.innerHTML = '<b>' + done + '/' + rows.length + '</b> (' + pct + '%) ✓' + success + ' ✗' + fail + ' ↻' + skip;
         }
       }
     };
 
-    await Promise.all(Array.from({ length: 6 }, worker));
+    await Promise.all(Array.from({ length: CONCURRENCY }, (_, i) => worker(i)));
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     _lsLog('=== 完了 ===', 'ok');
     _lsLog('成功: ' + success, 'ok');
+    if (skip > 0) _lsLog('スキップ(既存): ' + skip, 'warn');
     if (fail > 0) _lsLog('失敗: ' + fail, 'err');
     _lsLog('所要: ' + elapsed + '秒', 'info');
     if (failMsgs.length > 0) {
