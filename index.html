@@ -19784,20 +19784,22 @@ async function listSetupUpload() {
         const item = queue.shift();
         if (!item) break;
         const { r: row, i } = item;
+        // POST body ではOData_プレフィックスを外した内部名を使う
+        const K = (t) => (nameMap[t] || '').replace(/^OData_/, '');
         const body = {
           __metadata: { type: entityType },
           Title: row['Title'] || (row['社員番号'] + '-' + row['月']),
         };
-        body[nameMap['社員番号']]   = num(row['社員番号']);
-        body[nameMap['月']]         = num(row['月']);
-        body[nameMap['氏名']]       = row['氏名'] || '';
-        body[nameMap['派遣先']]     = row['派遣先'] || '';
-        body[nameMap['要出勤日']]   = num(row['要出勤日']);
-        body[nameMap['出勤日']]     = num(row['出勤日']);
-        body[nameMap['有給日']]     = num(row['有給日']);
-        body[nameMap['付与要件率']] = num(row['付与要件率']);
-        body[nameMap['実出勤率']]   = num(row['実出勤率']);
-        body[nameMap['更新日']]     = row['更新日'] || new Date().toISOString();
+        body[K('社員番号')]   = num(row['社員番号']);
+        body[K('月')]         = num(row['月']);
+        body[K('氏名')]       = row['氏名'] || '';
+        body[K('派遣先')]     = row['派遣先'] || '';
+        body[K('要出勤日')]   = num(row['要出勤日']);
+        body[K('出勤日')]     = num(row['出勤日']);
+        body[K('有給日')]     = num(row['有給日']);
+        body[K('付与要件率')] = num(row['付与要件率']);
+        body[K('実出勤率')]   = num(row['実出勤率']);
+        body[K('更新日')]     = row['更新日'] || new Date().toISOString();
 
         try {
           const resp = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/items",
