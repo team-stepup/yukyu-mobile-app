@@ -23214,25 +23214,21 @@ async function submitRepairAdd() {
     var token = await getToken();
     if (!token) throw new Error('認証エラー');
 
-    // List30 情報取得 (EntityType)
     var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List30')";
-    var hdrsRead = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
-    var infoResp = await fetch(listApi + "?$select=Id,ListItemEntityTypeFullName", { headers: hdrsRead });
-    if (!infoResp.ok) throw new Error('List30情報取得失敗: ' + infoResp.status);
-    var info = await infoResp.json();
-    var entityType = info.d.ListItemEntityTypeFullName;
 
-    // X-RequestDigest 取得
+    // X-RequestDigest 取得 (verbose で取得・どちらの形式でも返ってくる)
     var digestResp = await fetch(SP_SITE_URL + '/_api/contextinfo', {
-      method: 'POST', headers: hdrsRead
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
     if (!digestResp.ok) throw new Error('Digest取得失敗: ' + digestResp.status);
     var digestJson = await digestResp.json();
-    var digest = digestJson.d.GetContextWebInformation.FormDigestValue;
+    var digest = (digestJson.d && digestJson.d.GetContextWebInformation && digestJson.d.GetContextWebInformation.FormDigestValue)
+                 || digestJson.FormDigestValue;
+    if (!digest) throw new Error('Digest空');
 
-    // POST body (InternalName を使用。OData_ プレフィックスは外す)
+    // POST body (modern: nometadata なので __metadata 不要、InternalName 直接)
     var body = {
-      '__metadata': { type: entityType },
       Title: no1,
       _x004e_O2: no2,
       _x4fee__x7406__x3001__x30c9__x30: kbn,
@@ -23247,12 +23243,13 @@ async function submitRepairAdd() {
 
     console.log('[RepairAdd] POST body:', body);
 
+    // モダン SharePoint REST: odata=nometadata で投げると型スキーマ問題を回避できる
     var postResp = await fetch(listApi + "/items", {
       method: 'POST',
       headers: {
         'Authorization': 'Bearer ' + token,
-        'Accept': 'application/json;odata=verbose',
-        'Content-Type': 'application/json;odata=verbose',
+        'Accept': 'application/json;odata=nometadata',
+        'Content-Type': 'application/json;odata=nometadata',
         'X-RequestDigest': digest
       },
       body: JSON.stringify(body)
