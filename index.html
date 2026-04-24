@@ -4599,6 +4599,21 @@ select.sankyu-edit-input {
     <div id="vehicleDetailBody"></div>
   </div>
 
+  <!-- Screen: 修理履歴 (車両別, List30) -->
+  <div class="screen" id="repairHistoryScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('vehicleDetailScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;flex:1;">📋 修理履歴</h2>
+      <span id="repairHistoryCount" style="font-size:12px;font-weight:700;color:#fff;background:var(--primary);padding:3px 10px;border-radius:12px;"></span>
+    </div>
+    <div style="background:linear-gradient(135deg,var(--primary),#7b8fe8);color:#fff;padding:14px;border-radius:12px;margin-bottom:10px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.08);">
+      <div style="font-size:10px;opacity:0.8;letter-spacing:1px;">対象車両</div>
+      <div id="repairHistoryHeader" style="font-size:20px;font-weight:800;letter-spacing:1px;margin-top:2px;"></div>
+      <button onclick="openRepairRecordInSharePoint()" style="margin-top:10px;padding:6px 14px;background:rgba(255,255,255,0.22);color:#fff;border:1px solid rgba(255,255,255,0.4);border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">🔗 SharePointで開く</button>
+    </div>
+    <div id="repairHistoryBody"></div>
+  </div>
+
   <!-- Screen: 点検記録 -->
   <div class="screen" id="tenkenListScreen">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -5721,7 +5736,7 @@ function switchScreen(screenId, skipHistory) {
   document.getElementById(screenId).classList.add('active');
   window.scrollTo(0, 0);
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -22848,7 +22863,7 @@ function openVehicleDetail(idx) {
   html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">✏️ 編集</button>';
   html += '<button id="vehicleFolderBtn" onclick="openVehicleFolderByNo1(\'' + escHtml(displayNumber) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📁 フォルダー</button>';
   html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">🔧 点検記録</button>';
-  html += '<button onclick="openRepairRecordForVehicle(\'' + escHtml(displayNumber) + '\',\'' + escHtml(String(no2 || '')) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📋 修理履歴</button>';
+  html += '<button onclick="openRepairHistoryScreen(\'' + escHtml(displayNumber) + '\',\'' + escHtml(String(no2 || '')) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📋 修理履歴</button>';
   html += '</div>';
   html += '</div>';
 
@@ -22941,6 +22956,136 @@ function openRepairRecordForVehicle(displayNumber, no2) {
   }
   var url = params.length ? base + '?' + params.join('&') : base;
   window.open(url, '_blank');
+}
+
+// 修理履歴をアプリ内画面で表示 (List30 を取得→車両に絞り込み→カード描画)
+async function openRepairHistoryScreen(displayNumber, no2) {
+  window._currentRepairVehicle = { displayNumber: displayNumber || '', no2: no2 || '' };
+  var headerEl = document.getElementById('repairHistoryHeader');
+  var countEl = document.getElementById('repairHistoryCount');
+  var bodyEl = document.getElementById('repairHistoryBody');
+  headerEl.textContent = displayNumber + (no2 ? '  (NO2: ' + no2 + ')' : '');
+  countEl.textContent = '';
+  bodyEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);font-size:13px;">📋 読み込み中...</div>';
+  switchScreen('repairHistoryScreen');
+
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List30')";
+    var resp = await fetch(listApi + "/items?$top=2000", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) throw new Error('List30取得失敗: ' + resp.status);
+    var data = await resp.json();
+    var items = data.d.results || [];
+
+    // クライアント側フィルタ: NO2 が優先マッチ（最も識別力が高い）。
+    // NO2 が空なら Title (NO1) で絞る。両方マッチの項目を優先。
+    var dn = String(displayNumber || '').trim();
+    var no2Str = String(no2 || '').trim();
+    var normalize = function(s) { return String(s || '').replace(/\s+/g, ' ').trim(); };
+    var filtered;
+    if (no2Str) {
+      filtered = items.filter(function(it) {
+        return normalize(it.OData__x004e_O2) === no2Str;
+      });
+    } else if (dn) {
+      filtered = items.filter(function(it) {
+        return normalize(it.Title) === normalize(dn);
+      });
+    } else {
+      filtered = [];
+    }
+
+    // 実施日 降順ソート (OData__x5b9f__x65bd__x65e5_)
+    filtered.sort(function(a, b) {
+      var da = a.OData__x5b9f__x65bd__x65e5_ || '';
+      var db = b.OData__x5b9f__x65bd__x65e5_ || '';
+      return da < db ? 1 : da > db ? -1 : 0;
+    });
+
+    renderRepairHistory(filtered, items.length);
+  } catch (e) {
+    console.error('Repair history error:', e);
+    bodyEl.innerHTML = '<div style="background:#fee;border:1px solid #fcc;border-radius:10px;padding:16px;color:#c62828;font-size:13px;">⚠️ エラー: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function renderRepairHistory(items, totalCount) {
+  var bodyEl = document.getElementById('repairHistoryBody');
+  var countEl = document.getElementById('repairHistoryCount');
+  countEl.textContent = items.length + '件';
+
+  if (items.length === 0) {
+    bodyEl.innerHTML = '<div style="background:#fff;border-radius:12px;padding:30px;text-align:center;color:var(--text-light);border:1px solid var(--border);">' +
+      '<div style="font-size:36px;margin-bottom:6px;">📭</div>' +
+      '<div style="font-size:13px;font-weight:600;">この車両の修理履歴はありません</div>' +
+      '<div style="font-size:11px;margin-top:6px;opacity:0.7;">（List30 全件: ' + totalCount + '件）</div>' +
+      '</div>';
+    return;
+  }
+
+  var kbnColor = function(kbn) {
+    if (!kbn) return '#888';
+    if (kbn.indexOf('修理') >= 0) return '#c62828';
+    if (kbn.indexOf('点検') >= 0 || kbn.indexOf('検査') >= 0) return '#1565c0';
+    if (kbn.indexOf('ドライバー') >= 0) return '#2e7d32';
+    if (kbn.indexOf('廃車') >= 0) return '#424242';
+    return '#7b1fa2';
+  };
+
+  var html = '';
+  items.forEach(function(item) {
+    var dateStr = '-';
+    var d = item.OData__x5b9f__x65bd__x65e5_ ? new Date(item.OData__x5b9f__x65bd__x65e5_) : null;
+    if (d && !isNaN(d)) dateStr = d.toLocaleDateString('ja-JP');
+
+    var kbn = item.OData__x4fee__x7406__x3001__x30c9__x30 || '';
+    var shousai = item.OData__x8a73__x7d30_ || '';
+    var kingaku = item.OData__x91d1__x984d_ || '';
+    var mileage = item.OData__x8d70__x884c__x8ddd__x96e2_ || '';
+    var driver = item.Driver || '';
+    var color = kbnColor(kbn);
+
+    html += '<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:8px;border:1px solid var(--border);box-shadow:0 1px 2px rgba(0,0,0,0.04);">';
+    // 1段目: 区分バッジ + 実施日
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:' + (shousai ? '8px' : '0') + ';">';
+    if (kbn) {
+      html += '<span style="background:' + color + ';color:#fff;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;">' + escHtml(kbn) + '</span>';
+    } else {
+      html += '<span style="color:#aaa;font-size:11px;">(区分なし)</span>';
+    }
+    html += '<span style="font-weight:700;font-size:14px;color:var(--primary);">' + dateStr + '</span>';
+    html += '</div>';
+    // 2段目: 詳細
+    if (shousai) {
+      html += '<div style="font-size:13px;line-height:1.55;color:#333;white-space:pre-wrap;padding:6px 0;">' + escHtml(shousai) + '</div>';
+    }
+    // 3段目: ドライバー / 走行距離 / 金額 (あるものだけ)
+    var meta = [];
+    if (driver) meta.push('<span>🧑 ' + escHtml(driver) + '</span>');
+    if (mileage) {
+      var m = Number(mileage);
+      meta.push('<span>🚗 ' + (isNaN(m) ? escHtml(mileage) : m.toLocaleString() + ' km') + '</span>');
+    }
+    if (kingaku) {
+      var kg = String(kingaku).replace(/\n+/g, ' ');
+      meta.push('<span>💴 ' + escHtml(kg) + '</span>');
+    }
+    if (meta.length) {
+      html += '<div style="font-size:11px;color:#666;display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px dashed #eee;">' + meta.join('') + '</div>';
+    }
+    html += '</div>';
+  });
+
+  bodyEl.innerHTML = html;
+}
+
+// 修理履歴画面のヘッダーから SharePoint を開く
+function openRepairRecordInSharePoint() {
+  var v = window._currentRepairVehicle || {};
+  openRepairRecordForVehicle(v.displayNumber, v.no2);
 }
 
 // 指定ナンバーの点検記録から最新の走行距離(と日付)を取得
