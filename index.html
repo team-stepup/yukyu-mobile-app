@@ -23227,24 +23227,33 @@ async function submitRepairAdd() {
                  || digestJson.FormDigestValue;
     if (!digest) throw new Error('Digest空');
 
-    // POST body (modern: nometadata なので __metadata 不要、InternalName 直接)
-    var body = {
-      Title: no1,
-      _x004e_O2: no2,
-      _x4fee__x7406__x3001__x30c9__x30: kbn,
-      _x5b9f__x65bd__x65e5_: dateStr + 'T00:00:00Z'
+    // AddValidateUpdateItemUsingPath 方式 (モダンリストでも確実に動く公式エンドポイント)
+    // formValues に FieldName (InternalName) + FieldValue(文字列) を並べる
+    var formValues = [
+      { FieldName: 'Title', FieldValue: no1 },
+      { FieldName: '_x004e_O2', FieldValue: no2 },
+      { FieldName: '_x4fee__x7406__x3001__x30c9__x30', FieldValue: kbn },
+      { FieldName: '_x5b9f__x65bd__x65e5_', FieldValue: dateStr }
+    ];
+    if (detail) formValues.push({ FieldName: '_x8a73__x7d30_', FieldValue: detail });
+    if (kingaku) formValues.push({ FieldName: '_x91d1__x984d_', FieldValue: kingaku });
+    if (mileage) formValues.push({ FieldName: '_x8d70__x884c__x8ddd__x96e2_', FieldValue: mileage });
+    if (driver) formValues.push({ FieldName: 'Driver', FieldValue: driver });
+    if (syamei) formValues.push({ FieldName: 'syamei_x0020_', FieldValue: syamei });
+    if (color) formValues.push({ FieldName: 'color', FieldValue: color });
+
+    var createPayload = {
+      listItemCreateInfo: {
+        FolderPath: { DecodedUrl: '/sites/PowerApps/Lists/List30' },
+        UnderlyingObjectType: 0
+      },
+      formValues: formValues,
+      bNewDocumentUpdate: false
     };
-    if (detail) body._x8a73__x7d30_ = detail;
-    if (kingaku) body._x91d1__x984d_ = kingaku;
-    if (mileage) body._x8d70__x884c__x8ddd__x96e2_ = mileage;
-    if (driver) body.Driver = driver;
-    if (syamei) body.syamei_x0020_ = syamei;
-    if (color) body.color = color;
 
-    console.log('[RepairAdd] POST body:', body);
+    console.log('[RepairAdd] POST payload:', createPayload);
 
-    // モダン SharePoint REST: odata=nometadata で投げると型スキーマ問題を回避できる
-    var postResp = await fetch(listApi + "/items", {
+    var postResp = await fetch(listApi + "/AddValidateUpdateItemUsingPath", {
       method: 'POST',
       headers: {
         'Authorization': 'Bearer ' + token,
@@ -23252,13 +23261,24 @@ async function submitRepairAdd() {
         'Content-Type': 'application/json;odata=nometadata',
         'X-RequestDigest': digest
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(createPayload)
     });
 
     if (!postResp.ok) {
       var errText = await postResp.text();
-      console.error('[RepairAdd] POST error:', errText);
+      console.error('[RepairAdd] POST HTTP error:', errText);
       throw new Error('登録失敗 (' + postResp.status + '): ' + errText.substring(0, 300));
+    }
+
+    // AddValidateUpdateItemUsingPath はフィールド単位のエラーを返すので確認
+    var result = await postResp.json();
+    console.log('[RepairAdd] POST result:', result);
+    var resultArr = result.value || (result.d && result.d.AddValidateUpdateItemUsingPath && result.d.AddValidateUpdateItemUsingPath.results) || [];
+    var fieldErrors = resultArr.filter(function(r){ return r.HasException || r.ErrorMessage; });
+    if (fieldErrors.length) {
+      console.error('[RepairAdd] フィールドエラー:', fieldErrors);
+      var msg = fieldErrors.map(function(e){ return e.FieldName + ': ' + (e.ErrorMessage || 'エラー'); }).join('\n');
+      throw new Error('フィールド検証エラー:\n' + msg);
     }
 
     hideSpinner();
