@@ -22980,39 +22980,57 @@ async function openRepairHistoryScreen(displayNumber, no2) {
     var data = await resp.json();
     var items = data.d.results || [];
 
-    // クライアント側フィルタ: NO2 が優先マッチ（最も識別力が高い）。
-    // NO2 が空なら Title (NO1) で絞る。両方マッチの項目を優先。
-    var dn = String(displayNumber || '').trim();
-    var no2Str = String(no2 || '').trim();
-    var normalize = function(s) { return String(s || '').replace(/\s+/g, ' ').trim(); };
-    var filtered;
-    if (no2Str) {
-      filtered = items.filter(function(it) {
-        return normalize(it.OData__x004e_O2) === no2Str;
-      });
-    } else if (dn) {
-      filtered = items.filter(function(it) {
-        return normalize(it.Title) === normalize(dn);
-      });
-    } else {
-      filtered = [];
+    // 全角/半角空白の正規化
+    var normalize = function(s) {
+      return String(s == null ? '' : s).replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+    var dn = normalize(displayNumber);
+    var no2Str = normalize(no2);
+
+    // デバッグログ
+    console.log('[RepairHist] 検索:', { displayNumber: dn, no2: no2Str });
+    console.log('[RepairHist] List30 全件:', items.length);
+    if (items.length > 0) {
+      console.log('[RepairHist] サンプル Title(NO1):', items.slice(0,5).map(function(i){return i.Title;}));
+      console.log('[RepairHist] サンプル NO2:', items.slice(0,5).map(function(i){return i.OData__x004e_O2;}));
     }
 
-    // 実施日 降順ソート (OData__x5b9f__x65bd__x65e5_)
+    // マッチ戦略（強い順）:
+    //   level=3: NO2 完全一致
+    //   level=2: NO1(Title) 完全一致
+    //   level=1: NO1(Title) 部分一致 (displayNumber ⊆ Title or Title ⊆ displayNumber)
+    var matched = [];
+    items.forEach(function(it) {
+      var t = normalize(it.Title);
+      var n2 = normalize(it.OData__x004e_O2);
+      var level = 0;
+      if (no2Str && n2 === no2Str) level = 3;
+      else if (dn && t === dn) level = 2;
+      else if (dn && t && (t.indexOf(dn) >= 0 || dn.indexOf(t) >= 0)) level = 1;
+      if (level > 0) matched.push({ item: it, level: level });
+    });
+
+    // 最高 level だけを採用（NO2マッチがあればそれ優先、なければNO1完全一致、それもなければ部分一致）
+    var topLevel = matched.length ? matched.reduce(function(m, x){ return x.level > m ? x.level : m; }, 0) : 0;
+    var filtered = matched.filter(function(m){ return m.level === topLevel; }).map(function(m){ return m.item; });
+
+    console.log('[RepairHist] マッチ: level=' + topLevel + ' 件数=' + filtered.length);
+
+    // 実施日 降順ソート
     filtered.sort(function(a, b) {
       var da = a.OData__x5b9f__x65bd__x65e5_ || '';
       var db = b.OData__x5b9f__x65bd__x65e5_ || '';
       return da < db ? 1 : da > db ? -1 : 0;
     });
 
-    renderRepairHistory(filtered, items.length);
+    renderRepairHistory(filtered, items.length, topLevel);
   } catch (e) {
     console.error('Repair history error:', e);
     bodyEl.innerHTML = '<div style="background:#fee;border:1px solid #fcc;border-radius:10px;padding:16px;color:#c62828;font-size:13px;">⚠️ エラー: ' + escHtml(e.message) + '</div>';
   }
 }
 
-function renderRepairHistory(items, totalCount) {
+function renderRepairHistory(items, totalCount, matchLevel) {
   var bodyEl = document.getElementById('repairHistoryBody');
   var countEl = document.getElementById('repairHistoryCount');
   countEl.textContent = items.length + '件';
@@ -23026,6 +23044,12 @@ function renderRepairHistory(items, totalCount) {
     return;
   }
 
+  // マッチ品質が部分一致の場合は注意バナー
+  var banner = '';
+  if (matchLevel === 1) {
+    banner = '<div style="background:#fff8e1;border:1px solid #ffca28;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:11px;color:#795548;">⚠️ 部分一致で検索しています（NO2 が空、NO1 も完全一致しないため）</div>';
+  }
+
   var kbnColor = function(kbn) {
     if (!kbn) return '#888';
     if (kbn.indexOf('修理') >= 0) return '#c62828';
@@ -23035,7 +23059,7 @@ function renderRepairHistory(items, totalCount) {
     return '#7b1fa2';
   };
 
-  var html = '';
+  var html = banner;
   items.forEach(function(item) {
     var dateStr = '-';
     var d = item.OData__x5b9f__x65bd__x65e5_ ? new Date(item.OData__x5b9f__x65bd__x65e5_) : null;
