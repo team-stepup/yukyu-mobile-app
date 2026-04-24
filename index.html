@@ -4455,6 +4455,11 @@ select.sankyu-edit-input {
           <span style="flex:1;font-weight:600;">出勤率月次 リスト管理</span>
           <span style="color:#bbb;font-size:14px;">›</span>
         </button>
+        <button type="button" onclick="exportEmployeeBackup()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">📥</span>
+          <span style="flex:1;font-weight:600;">社員データ バックアップ (CSV)</span>
+          <span style="color:#bbb;font-size:14px;">↓</span>
+        </button>
       </div>
     </div>
   </div>
@@ -19591,6 +19596,105 @@ function toggleAdminSection() {
   try {
     localStorage.setItem('adminSectionCollapsed', sec.classList.contains('collapsed') ? '1' : '0');
   } catch (e) {}
+}
+
+// ============================================================
+// 社員データ バックアップ (CSV ダウンロード, 役員専用)
+// ============================================================
+async function exportEmployeeBackup() {
+  if (!accessToken) { showToast('ログインしてください', 'error'); return; }
+  if (!isAdminUser()) { showToast('役員権限が必要です', 'error'); return; }
+
+  const confirmMsg = '社員データを CSV ファイルでダウンロードします。\n続行しますか？';
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    showSpinner();
+    showToast('社員データ取得中...', 'info');
+
+    const token = await getToken();
+    if (!token) { hideSpinner(); showToast('認証失敗', 'error'); return; }
+
+    // フィールド情報 (Hiddenでない全カラム)
+    const fieldUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/fields?$filter=Hidden eq false&$select=InternalName,EntityPropertyName,Title,TypeAsString&$top=300";
+    const fieldResp = await fetch(fieldUrl, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!fieldResp.ok) throw new Error('フィールド取得失敗: ' + fieldResp.status);
+    const fieldJson = await fieldResp.json();
+    const SKIP_SYS = new Set([
+      'ContentType','ContentTypeId','Attachments','Edit','DocIcon','LinkTitleNoMenu',
+      'LinkTitle','LinkTitle2','SelectTitle','Order','GUID','WorkflowVersion',
+      'ItemChildCount','FolderChildCount','ComplianceAssetId','FileSystemObjectType',
+      '_UIVersionString','ServerRedirectedEmbedUri','ServerRedirectedEmbedUrl',
+      'AppAuthor','AppEditor','_ComplianceTag','_ComplianceFlags',
+      '_ComplianceTagWrittenTime','_ComplianceTagUserId','AccessPolicy','_ExpirationDate',
+      '_IsRecord','_CopySource','_HasCopyDestinations','_ModerationComments',
+      'ParentVersionString','ParentLeafName','_Level','_IsCurrentVersion',
+      '_ShortcutUrl','_ShortcutSiteId','_ShortcutWebId','_ShortcutUniqueId',
+      'MetaInfo','owshiddenversion','InstanceID','ProgID','ScopeId','PrincipalCount',
+      'NoExecute','OriginatorId','_CheckinComment','UniqueId','HTML_x0020_File_x0020_Type',
+      '_EditMenuTableStart','_EditMenuTableStart2','_EditMenuTableEnd'
+    ]);
+    const fields = (fieldJson.d.results || []).filter(f => {
+      if (!f.Title || !f.InternalName) return false;
+      if (SKIP_SYS.has(f.InternalName)) return false;
+      return true;
+    });
+    console.log('[Backup] 出力対象フィールド数:', fields.length);
+
+    // 全アイテム取得
+    const items = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+    console.log('[Backup] 取得件数:', items.length);
+
+    // CSV 組み立て
+    const esc = v => {
+      if (v == null) return '';
+      let s;
+      if (typeof v === 'object') {
+        s = v.Title || v.LookupValue || v.Url || v.Description || '';
+        if (!s && Array.isArray(v.results)) s = v.results.join('; ');
+        if (!s) s = JSON.stringify(v);
+      } else {
+        s = String(v);
+      }
+      if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {
+        s = '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    };
+
+    const headerLine = fields.map(f => esc(f.Title)).join(',');
+    const dataLines = items.map(item =>
+      fields.map(f => {
+        const key = f.EntityPropertyName || f.InternalName;
+        return esc(item[key]);
+      }).join(',')
+    );
+    const csv = [headerLine, ...dataLines].join('\r\n');
+
+    // BOM 付きでダウンロード (Excelで文字化け防止)
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dt = new Date();
+    const p2 = n => String(n).padStart(2, '0');
+    const ts = dt.getFullYear() + p2(dt.getMonth() + 1) + p2(dt.getDate())
+             + '_' + p2(dt.getHours()) + p2(dt.getMinutes());
+    a.download = '社員データ_backup_' + ts + '.csv';
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    hideSpinner();
+    showToast('✓ CSV ダウンロード完了 (' + items.length + '件)', 'success');
+  } catch (e) {
+    hideSpinner();
+    console.error('[Backup] error:', e);
+    showToast('バックアップ失敗: ' + e.message, 'error');
+  }
 }
 
 // ============================================================
