@@ -19947,15 +19947,23 @@ async function listSetupUpload() {
               continue;
             } else {
               fail++;
-              if (failMsgs.length < 5) {
+              if (fail <= 3) {
                 const t = await resp.text();
+                _lsLog('✗ row' + i + ' 失敗 (' + resp.status + '):', 'err');
+                _lsLog('  body送信: ' + JSON.stringify(body).substring(0, 400), 'warn');
+                _lsLog('  応答: ' + t.substring(0, 500), 'err');
                 failMsgs.push('row' + i + ' (' + resp.status + '): ' + t.substring(0, 150));
+                if (fail === 1) {
+                  _lsLog('=== 最初の失敗で処理中断 (残りはキャンセル) ===', 'warn');
+                  _lsLog('上記エラーと body送信内容をコピーして教えてください', 'warn');
+                  queue.length = 0;
+                }
               }
               break;
             }
           } catch (ex) {
             fail++;
-            if (failMsgs.length < 5) failMsgs.push('row' + i + ' 例外: ' + ex.message);
+            if (fail <= 3) _lsLog('✗ row' + i + ' 例外: ' + ex.message, 'err');
             break;
           }
         }
