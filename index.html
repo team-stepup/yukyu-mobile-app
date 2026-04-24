@@ -19898,8 +19898,14 @@ async function listSetupUpload() {
 
     const { nameMap, entityType, digest } = _listSetupInfo;
     const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
-    // InternalName を直接使用 (OData_ ストリップ不要)
-    const K = (t) => nameMap[t] || '';
+
+    // リストのフォルダパス取得 (AddValidateUpdateItemUsingPath 用)
+    _lsLog('リストパス取得...', 'info');
+    const pathResp = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/RootFolder?$select=ServerRelativeUrl",
+      { headers: _lsHdrsRead() });
+    if (!pathResp.ok) { _lsLog('パス取得失敗', 'err'); return; }
+    const listFolderPath = (await pathResp.json()).d.ServerRelativeUrl;
+    _lsLog('リストパス: ' + listFolderPath, 'info');
 
     const t0 = Date.now();
     let success = 0, fail = 0, skip = 0;
@@ -19924,29 +19930,54 @@ async function listSetupUpload() {
           continue;
         }
 
+        // AddValidateUpdateItemUsingPath 用 formValues (表示名ベース)
         const body = {
-          __metadata: { type: entityType },
-          Title: title,
+          listItemCreateInfo: {
+            FolderPath: { DecodedUrl: listFolderPath },
+            UnderlyingObjectType: 0
+          },
+          formValues: [
+            { FieldName: 'Title',     FieldValue: title },
+            { FieldName: '社員番号',   FieldValue: String(num(row['社員番号'])) },
+            { FieldName: '月',         FieldValue: String(num(row['月'])) },
+            { FieldName: '氏名',       FieldValue: row['氏名'] || '' },
+            { FieldName: '派遣先',     FieldValue: row['派遣先'] || '' },
+            { FieldName: '要出勤日',   FieldValue: String(num(row['要出勤日'])) },
+            { FieldName: '出勤日',     FieldValue: String(num(row['出勤日'])) },
+            { FieldName: '有給日',     FieldValue: String(num(row['有給日'])) },
+            { FieldName: '付与要件率', FieldValue: String(num(row['付与要件率'])) },
+            { FieldName: '実出勤率',   FieldValue: String(num(row['実出勤率'])) },
+            { FieldName: '更新日',     FieldValue: row['更新日'] || new Date().toISOString() },
+          ],
+          bNewDocumentUpdate: false
         };
-        body[K('社員番号')]   = num(row['社員番号']);
-        body[K('月')]         = num(row['月']);
-        body[K('氏名')]       = row['氏名'] || '';
-        body[K('派遣先')]     = row['派遣先'] || '';
-        body[K('要出勤日')]   = num(row['要出勤日']);
-        body[K('出勤日')]     = num(row['出勤日']);
-        body[K('有給日')]     = num(row['有給日']);
-        body[K('付与要件率')] = num(row['付与要件率']);
-        body[K('実出勤率')]   = num(row['実出勤率']);
-        body[K('更新日')]     = row['更新日'] || new Date().toISOString();
+        const apiUrl = SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/AddValidateUpdateItemUsingPath";
 
         let attempt = 0;
         while (attempt < 3) {
           try {
-            const resp = await fetch(SP_SITE_URL + "/_api/web/lists/getbytitle('" + LIST_SETUP_NAME + "')/items",
+            const resp = await fetch(apiUrl,
               { method: 'POST', headers: _lsHdrs(digest), body: JSON.stringify(body) });
             if (resp.ok) {
-              success++;
-              break;
+              const data = await resp.json();
+              const results = (data.d && data.d.AddValidateUpdateItemUsingPath && data.d.AddValidateUpdateItemUsingPath.results) || [];
+              const errs = results.filter(x => x.HasException);
+              if (errs.length === 0) {
+                success++;
+                break;
+              } else {
+                fail++;
+                if (fail <= 3) {
+                  _lsLog('✗ row' + i + ' フィールド検証エラー:', 'err');
+                  errs.forEach(e => _lsLog('  ' + e.FieldName + ': ' + (e.ErrorMessage || '(詳細なし)'), 'err'));
+                  failMsgs.push('row' + i + ': ' + errs.map(e => e.FieldName + '=' + (e.ErrorMessage || '?')).join(' / '));
+                  if (fail === 1) {
+                    _lsLog('=== 最初の失敗で処理中断 ===', 'warn');
+                    queue.length = 0;
+                  }
+                }
+                break;
+              }
             } else if (resp.status === 429 || resp.status === 503) {
               const waitMs = Math.min(60000, 2000 * Math.pow(2, attempt));
               _lsLog('スロットル検知 (status ' + resp.status + ') → ' + (waitMs/1000) + '秒待機', 'warn');
@@ -19957,13 +19988,12 @@ async function listSetupUpload() {
               fail++;
               if (fail <= 3) {
                 const t = await resp.text();
-                _lsLog('✗ row' + i + ' 失敗 (' + resp.status + '):', 'err');
-                _lsLog('  body送信: ' + JSON.stringify(body).substring(0, 400), 'warn');
+                _lsLog('✗ row' + i + ' HTTP失敗 (' + resp.status + '):', 'err');
                 _lsLog('  応答: ' + t.substring(0, 500), 'err');
+                _lsLog('  body: ' + JSON.stringify(body).substring(0, 400), 'warn');
                 failMsgs.push('row' + i + ' (' + resp.status + '): ' + t.substring(0, 150));
                 if (fail === 1) {
-                  _lsLog('=== 最初の失敗で処理中断 (残りはキャンセル) ===', 'warn');
-                  _lsLog('上記エラーと body送信内容をコピーして教えてください', 'warn');
+                  _lsLog('=== 最初の失敗で処理中断 ===', 'warn');
                   queue.length = 0;
                 }
               }
