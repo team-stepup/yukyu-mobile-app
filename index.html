@@ -22848,6 +22848,7 @@ async function loadVehicleList() {
     // Debug: show field mapping in console
     var fNumber = findProp('ナンバー') || findProp('number') || 'Title';
     var fNo1 = findProp('NO1') || findProp('No1') || findProp('NO_x0031_');
+    var fNo2 = findProp('NO2') || findProp('No2') || findProp('NO_x0032_');
     var fCarType = findProp('車種') || findProp('車名');
     var fDriver = findProp('ドライバー') || findProp('運転');
     var fHakensaki = findProp('送迎') || findProp('Pick') || findProp('派遣');
@@ -22859,7 +22860,7 @@ async function loadVehicleList() {
     var fUsage = findProp('Usage') || findProp('使用');
     var fAffiliation = findProp('Affiliation') || findProp('所属') || findProp('affiliation');
 
-    console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fNo1:fNo1, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage, fAffiliation:fAffiliation}));
+    console.log('Vehicle field map:', JSON.stringify({fNumber:fNumber, fNo1:fNo1, fNo2:fNo2, fCarType:fCarType, fDriver:fDriver, fHakensaki:fHakensaki, fSyaken:fSyaken, fColor:fColor, fUsage:fUsage, fAffiliation:fAffiliation}));
 
     // Usage固定フィルター: 使用(default), 未使用, 会社, 全て
     var usageCounts = { '使用': 0, '未使用': 0, '会社': 0 };
@@ -22898,7 +22899,7 @@ async function loadVehicleList() {
     pickupSel.innerHTML = pickupHtml;
 
     // Store field mapping globally
-    window._vf = { number: fNumber, no1: fNo1, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
+    window._vf = { number: fNumber, no1: fNo1, no2: fNo2, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
     window._vehicleUsageFilter = '使用';
     window._vehiclePickupFilter = 'all';
 
@@ -23039,6 +23040,7 @@ function openVehicleDetail(idx) {
 
   var number = getVal(vf.number) || item['Title'] || '';
   var no1 = getVal(vf.no1);
+  var no2 = getVal(vf.no2);
   var displayNumber = number + (no1 ? '  ' + no1 : '');
 
   var fCapacity = findPropByTitle('乗車') || findPropByTitle('定員') || findPropByTitle('Capacity');
@@ -23104,16 +23106,18 @@ function openVehicleDetail(idx) {
   html += '<div style="' + S + 'background:var(--primary);color:#fff;text-align:center;padding:14px 14px 10px;">';
   html += '<div style="font-size:10px;opacity:0.8;">車両管理台帳</div>';
   html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;margin-bottom:10px;">' + escHtml(displayNumber) + '</div>';
-  html += '<div style="display:flex;gap:6px;justify-content:center;">';
-  html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">✏️ 編集</button>';
-  html += '<button id="vehicleFolderBtn" onclick="openVehicleFolderByNo1(\'' + escHtml(displayNumber) + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📁 フォルダー</button>';
-  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;max-width:120px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">🔧 点検記録</button>';
+  html += '<div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">';
+  html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">✏️ 編集</button>';
+  html += '<button id="vehicleFolderBtn" onclick="openVehicleFolderByNo1(\'' + escHtml(displayNumber) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📁 フォルダー</button>';
+  html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">🔧 点検記録</button>';
+  html += '<button onclick="openRepairRecordForVehicle(\'' + escHtml(displayNumber) + '\',\'' + escHtml(String(no2 || '')) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📋 修理履歴</button>';
   html += '</div>';
   html += '</div>';
 
   // 車両情報
   html += '<div style="' + S + '">';
   html += '<div style="' + H + 'background:#1565c0;">車両情報</div>';
+  html += row('NO2', no2);
   html += row('車種', getVal(vf.carType));
   html += row('色', getVal(vf.color));
   html += row('乗車定員', getVal(fCapacity));
@@ -23182,6 +23186,22 @@ function openTenkenForVehicle(number) {
   document.getElementById('tenkenSearchInput').value = number;
   switchScreen('tenkenListScreen');
   searchTenken();
+}
+
+// 修理履歴 (List30) を ナンバー(NO1) + NO2 のフィルター付きで開く
+function openRepairRecordForVehicle(displayNumber, no2) {
+  var base = 'https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/List30/Allitemsg.aspx';
+  var params = [];
+  if (displayNumber) {
+    params.push('FilterField1=NO1');
+    params.push('FilterValue1=' + encodeURIComponent(displayNumber));
+  }
+  if (no2) {
+    params.push('FilterField2=NO2');
+    params.push('FilterValue2=' + encodeURIComponent(no2));
+  }
+  var url = params.length ? base + '?' + params.join('&') : base;
+  window.open(url, '_blank');
 }
 
 // 指定ナンバーの点検記録から最新の走行距離(と日付)を取得
