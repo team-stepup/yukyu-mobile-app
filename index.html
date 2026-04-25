@@ -12366,8 +12366,8 @@ function renderSankyuList() {
 
   if (countLabel) countLabel.textContent = '(' + filtered.length + ' / ' + _sankyuItems.length + '名)';
 
-  // 並べ替え: 「次の申請日」が新しい(=日付が大きい)順。ヒント無しは末尾
-  //   各人の hint を1回だけ計算してキャッシュ (renderSankyuList 内で再利用)
+  // 並べ替え: 「次の申請日」昇順（古い日付＝申請遅れが上、未来は今日に近い順）
+  //   ヒント無しは末尾。各人の hint を1回だけ計算してキャッシュ (renderSankyuList 内で再利用)
   var _hintCache = {};
   filtered.forEach(function(it) {
     _hintCache[it.Id] = _sankyuGetNextSubmitHint(it);
@@ -12378,9 +12378,9 @@ function renderSankyuList() {
     if (!ha && !hb) return 0;
     if (!ha) return 1;
     if (!hb) return -1;
-    // 文字列比較で十分 ("YYYY/MM/DD" 形式) → 降順
-    if (ha.date < hb.date) return 1;
-    if (ha.date > hb.date) return -1;
+    // 文字列比較で十分 ("YYYY/MM/DD" 形式) → 昇順 (古い=過去 が上)
+    if (ha.date < hb.date) return -1;
+    if (ha.date > hb.date) return 1;
     return 0;
   });
   window._sankyuHintCache = _hintCache;
