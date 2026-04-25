@@ -1010,6 +1010,78 @@ body {
 }
 .sankyu-card-meta b { color: #888; font-weight: 600; }
 
+/* 一覧カード: 次申請日ヒント */
+.sankyu-card-next-hint {
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+  border-left: 3px solid #1976d2;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #0d47a1;
+  line-height: 1.5;
+}
+.sankyu-card-next-hint b { color: #0d47a1; font-weight: 700; font-size: 12px; }
+.sankyu-card-next-hint .next-hint-from { color: #5c6bc0; font-size: 10px; margin-left: 4px; }
+
+/* 詳細画面: 名前 sticky ヘッダー */
+.sankyu-sticky-name {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: linear-gradient(135deg, #f06292 0%, #d81b60 100%);
+  color: #fff;
+  padding: 9px 14px;
+  margin: 0 -10px 10px;
+  border-radius: 0 0 14px 14px;
+  box-shadow: 0 3px 10px rgba(216, 27, 96, 0.30);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  backdrop-filter: blur(8px);
+}
+.sankyu-sticky-name .ssn-flower { font-size: 16px; }
+.sankyu-sticky-name .ssn-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.5px; }
+.sankyu-sticky-name .ssn-no { font-size: 11px; opacity: 0.85; background: rgba(255,255,255,0.22); padding: 2px 8px; border-radius: 999px; }
+
+/* 詳細画面: 過去の申請済カード折りたたみ */
+.sankyu-old-cards-fold {
+  background: #fafafd;
+  border: 1px dashed #d4d4dc;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.sankyu-old-cards-fold > summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: #666;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.sankyu-old-cards-fold > summary::-webkit-details-marker { display: none; }
+.sankyu-old-cards-fold > summary::before {
+  content: '▶';
+  font-size: 9px;
+  color: #aaa;
+  transition: transform 0.2s;
+}
+.sankyu-old-cards-fold[open] > summary::before { transform: rotate(90deg); }
+.sankyu-old-cards-fold > summary:hover { background: #f0f0f5; }
+.sankyu-old-cards-fold[open] {
+  background: #fff;
+  border-style: solid;
+  padding: 0 8px 8px;
+}
+.sankyu-old-cards-fold[open] > summary { margin-bottom: 4px; }
+
 /* 詳細画面 */
 .sankyu-detail-header {
   background: linear-gradient(135deg, #f06292 0%, #d81b60 100%);
@@ -4421,7 +4493,7 @@ select.sankyu-edit-input {
           <span id="hakenMultiBtnText">派遣先を選択...</span>
           <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#bbb;font-size:11px;pointer-events:none;">▼</span>
         </button>
-        <div id="hakenMultiPanel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:100;max-height:340px;overflow-y:auto;padding:6px;"></div>
+        <div id="hakenMultiPanel" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;box-shadow:0 -8px 24px rgba(0,0,0,0.12);z-index:100;max-height:340px;overflow-y:auto;padding:6px;"></div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:8px;">
         <label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px;color:var(--text-light);">
@@ -5277,11 +5349,11 @@ async function onLoginSuccess(resp) {
     const token = await acquireToken();
     if (!token) { showToast('トークン取得に失敗しました', 'error'); return; }
   }
-  // 許可ユーザーでなければここで遮断（将来は社員番号所持者も許可予定）
+  // 許可ユーザーでなければ静かにログアウト（エラー画面なし）
   if (!isAllowedUser()) {
     accessToken = null;
     hideSpinner();
-    showAccessDeniedOverlay(getLoggedInEmail());
+    try { if (msalInstance) msalInstance.logoutRedirect(); } catch(e) {}
     return;
   }
   document.getElementById('authBtn').textContent = 'logout';
@@ -5303,10 +5375,10 @@ async function acquireToken() {
   if (accounts.length === 0) return null;
   try {
     const resp = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0] });
-    // 許可ユーザーでなければ遮断（リロード等で再入する経路）
+    // 許可ユーザーでなければ静かにログアウト（エラー画面なし）
     if (!isAllowedUser()) {
       accessToken = null;
-      showAccessDeniedOverlay(getLoggedInEmail());
+      try { if (msalInstance) msalInstance.logoutRedirect(); } catch(e) {}
       return null;
     }
     accessToken = resp.accessToken;
@@ -12359,6 +12431,11 @@ function renderSankyuList() {
         });
         html += '</div>';
       }
+      // 次申請日ヒント (最上位の未申請カードの 期間終了日+1)
+      var nextHint = _sankyuGetNextSubmitHint(it);
+      if (nextHint) {
+        html += '<div class="sankyu-card-next-hint">📝 次申請日: <b>' + escHtml(nextHint.date) + '</b><span class="next-hint-from">（' + escHtml(nextHint.fromTitle) + ' 終了の翌日）</span></div>';
+      }
     }
 
     html += '</div>';
@@ -12452,6 +12529,61 @@ function _sankyuGetOverdueItems(item) {
     }
   });
   return overdueList;
+}
+
+// 一覧カード用: 最上位の未申請カードの 期間終了日(or main日付) + 1日 を返す
+// 戻り値: { date: 'YYYY/MM/DD', fromTitle: 'カードタイトル' } | null
+function _sankyuGetNextSubmitHint(item) {
+  if (!_sankyuFieldsMeta) return null;
+  var meta = _sankyuFieldsMeta;
+  var allFields = [];
+  Object.keys(meta).forEach(function(k) {
+    var f = meta[k];
+    var cat = classifySankyuField(f.title);
+    if (['sango','ikukyu','choki','fukki'].indexOf(cat) < 0) return;
+    allFields.push({
+      title: f.title || f.internalName,
+      raw: item[f.dataKey],
+      type: f.type,
+      meta: f,
+      origCat: cat
+    });
+  });
+  var cards = _sankyuBuildCards(allFields);
+  // 詳細画面と同じソート: 日付昇順
+  cards.sort(function(a, b) {
+    var da = _sankyuCardSortDate(a);
+    var db = _sankyuCardSortDate(b);
+    if (da === null && db === null) return 0;
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return da - db;
+  });
+  // 最上位の未申請カード (submitted フィールド有 & 値空)
+  for (var i = 0; i < cards.length; i++) {
+    var c = cards[i];
+    if (!c.submitted) continue;
+    if (!_sankyuIsEmptyDateRaw(c.submitted.raw)) continue;
+    // このカードの基準日を取得 (period.end > main > period.start)
+    var baseRaw = null;
+    if (c.type === 'period') {
+      if (c.end && !_sankyuIsEmptyDateRaw(c.end.raw)) baseRaw = c.end.raw;
+      else if (c.start && !_sankyuIsEmptyDateRaw(c.start.raw)) baseRaw = c.start.raw;
+    } else if (c.main && !_sankyuIsEmptyDateRaw(c.main.raw)) {
+      baseRaw = c.main.raw;
+    }
+    if (!baseRaw) continue;
+    try {
+      var d = new Date(baseRaw);
+      if (isNaN(d)) continue;
+      d.setDate(d.getDate() + 1);
+      var y = d.getFullYear();
+      var m = ('0' + (d.getMonth() + 1)).slice(-2);
+      var dd = ('0' + d.getDate()).slice(-2);
+      return { date: y + '/' + m + '/' + dd, fromTitle: c.title || '' };
+    } catch (_) { continue; }
+  }
+  return null;
 }
 
 function setSankyuFilter(key) {
@@ -14653,6 +14785,14 @@ function renderSankyuDetail(item) {
   var birthText = birthEmpty ? '—' : formatDate(birthRaw);
 
   var html = '';
+  // Sticky 名前ヘッダー (スクロールしても誰のページか分かる) — 新規以外で表示
+  if (!isNew && name) {
+    html += '<div class="sankyu-sticky-name">';
+    html +=   '<span class="ssn-flower">🌸</span>';
+    html +=   '<span class="ssn-name">' + escHtml(name) + '</span>';
+    if (no) html += '<span class="ssn-no">No.' + escHtml(no) + '</span>';
+    html += '</div>';
+  }
   // 戻る + 編集ボタン
   html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">';
   html +=   '<button class="back-btn" onclick="switchScreen(\'sankyuScreen\')">←</button>';
@@ -14894,9 +15034,27 @@ function renderSankyuDetail(item) {
     // 本体 (閉じていても DOM に含めて CSS で hide)
     html += '<div class="sankyu-section-body">';
     if (useCards) {
-      _builtCards.forEach(function(c) {
-        html += renderSankyuAppCard(c, isEdit);
+      // 最後の「申請済」カードのインデックスを探す → それより前の済カードは折りたたみ
+      var lastSubIdx = -1;
+      _builtCards.forEach(function(c, i) {
+        if (c.submitted && !_sankyuIsEmptyDateRaw(c.submitted.raw)) lastSubIdx = i;
       });
+      // 編集モードでは折りたたまない / 古い済カードが2件以上ある時のみ折りたたむ
+      if (!isEdit && lastSubIdx >= 2) {
+        html += '<details class="sankyu-old-cards-fold">';
+        html +=   '<summary>過去の申請済 ' + lastSubIdx + '件 (タップで展開)</summary>';
+        for (var _i = 0; _i < lastSubIdx; _i++) {
+          html += renderSankyuAppCard(_builtCards[_i], isEdit);
+        }
+        html += '</details>';
+        for (var _j = lastSubIdx; _j < _builtCards.length; _j++) {
+          html += renderSankyuAppCard(_builtCards[_j], isEdit);
+        }
+      } else {
+        _builtCards.forEach(function(c) {
+          html += renderSankyuAppCard(c, isEdit);
+        });
+      }
     } else {
       sec.fields.forEach(function(f) {
         if (isEdit) {
@@ -19392,12 +19550,13 @@ function buildHakenMultiPanel() {
   visible.forEach(b => {
     const c = _hakenEmpByBuka[b];
     const checked = hakenMultiSelected.indexOf(b) >= 0 ? 'checked' : '';
+    const displayName = stripBukaPrefix(b);  // "052:和興..." → "和興..."
     const countBadge = includeRetired
       ? '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">在職' + c.active + ' / 退職' + c.retired + '</span>'
       : '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">在職' + c.active + '名</span>';
     html += '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;">' +
       '<input type="checkbox" value="' + escHtml(b) + '" ' + checked + ' onchange="onHakenMultiToggle(this)" style="accent-color:var(--primary);">' +
-      '<span style="flex:1;font-size:13px;">' + escHtml(b) + '</span>' +
+      '<span style="flex:1;font-size:13px;">' + escHtml(displayName) + '</span>' +
       countBadge +
       '</label>';
   });
@@ -19439,18 +19598,25 @@ function selectAllHakenMulti() {
   buildHakenMultiPanel();
 }
 
+// 派遣先名から先頭の "数字:" or "数字：" プレフィックスを除去
+function stripBukaPrefix(s) {
+  if (s == null) return '';
+  return String(s).replace(/^\s*\d+\s*[:：]\s*/, '');
+}
+
 function updateHakenMultiBtnText() {
   const el = document.getElementById('hakenMultiBtnText');
   const btn = document.getElementById('hakenMultiBtn');
   if (!el || !btn) return;
+  const display = hakenMultiSelected.map(stripBukaPrefix);
   if (hakenMultiSelected.length === 0) {
     el.textContent = '派遣先を選択...';
     btn.style.color = '#888';
   } else if (hakenMultiSelected.length <= 2) {
-    el.textContent = hakenMultiSelected.join(', ');
+    el.textContent = display.join(', ');
     btn.style.color = '#222';
   } else {
-    el.textContent = hakenMultiSelected.slice(0, 2).join(', ') + ' 他' + (hakenMultiSelected.length - 2) + '件';
+    el.textContent = display.slice(0, 2).join(', ') + ' 他' + (hakenMultiSelected.length - 2) + '件';
     btn.style.color = '#222';
   }
 }
@@ -22681,9 +22847,11 @@ async function loadVehicleList() {
     });
     filterDiv.innerHTML = filterHtml;
 
-    // 送迎先ドロップダウン
+    // 送迎先ドロップダウン (使用区分=使用 の車両のみ集計)
     var pickupSet = {};
     items.forEach(function(item) {
+      var u = fUsage ? (item[fUsage] || '') : '';
+      if (u !== '使用') return;
       var p = fHakensaki ? (item[fHakensaki] || '') : '';
       if (p) pickupSet[p] = (pickupSet[p] || 0) + 1;
     });
