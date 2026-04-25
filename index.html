@@ -12366,21 +12366,24 @@ function renderSankyuList() {
 
   if (countLabel) countLabel.textContent = '(' + filtered.length + ' / ' + _sankyuItems.length + '名)';
 
-  // 並べ替え:
-  //  1) 休業中 (sango/ikuji) を上、休業終了 (owari) を下
-  //  2) 休業中グループ内: 産前産後 → 育児休業 の順
-  //  3) 同じグループ内: 出産予定日 昇順 (近い順、未設定は末尾)
-  var _catRank = { sango: 0, ikuji: 1, owari: 2 };
-  filtered.sort(function(a, b) {
-    var ca = sankyuItemCategory(a, kStatus, kBirth, kYotei);
-    var cb = sankyuItemCategory(b, kStatus, kBirth, kYotei);
-    var ra = _catRank[ca] != null ? _catRank[ca] : 9;
-    var rb = _catRank[cb] != null ? _catRank[cb] : 9;
-    if (ra !== rb) return ra - rb;
-    var da = a[kYotei] ? new Date(a[kYotei]).getTime() : Infinity;
-    var db = b[kYotei] ? new Date(b[kYotei]).getTime() : Infinity;
-    return da - db;
+  // 並べ替え: 「次の申請日」が新しい(=日付が大きい)順。ヒント無しは末尾
+  //   各人の hint を1回だけ計算してキャッシュ (renderSankyuList 内で再利用)
+  var _hintCache = {};
+  filtered.forEach(function(it) {
+    _hintCache[it.Id] = _sankyuGetNextSubmitHint(it);
   });
+  filtered.sort(function(a, b) {
+    var ha = _hintCache[a.Id];
+    var hb = _hintCache[b.Id];
+    if (!ha && !hb) return 0;
+    if (!ha) return 1;
+    if (!hb) return -1;
+    // 文字列比較で十分 ("YYYY/MM/DD" 形式) → 降順
+    if (ha.date < hb.date) return 1;
+    if (ha.date > hb.date) return -1;
+    return 0;
+  });
+  window._sankyuHintCache = _hintCache;
 
   if (filtered.length === 0) {
     body.innerHTML =
@@ -12432,7 +12435,7 @@ function renderSankyuList() {
         html += '</div>';
       }
       // 次申請日ヒント (最上位の未申請カードの 期間終了日+1)
-      var nextHint = _sankyuGetNextSubmitHint(it);
+      var nextHint = (window._sankyuHintCache && window._sankyuHintCache[it.Id]) || _sankyuGetNextSubmitHint(it);
       if (nextHint) {
         html += '<div class="sankyu-card-next-hint">📝 次申請日: <b>' + escHtml(nextHint.date) + '</b><span class="next-hint-from">（' + escHtml(nextHint.fromTitle) + ' 終了の翌日）</span></div>';
       }
@@ -19598,10 +19601,14 @@ function selectAllHakenMulti() {
   buildHakenMultiPanel();
 }
 
-// 派遣先名から先頭の "数字:" or "数字：" プレフィックスを除去
+// 派遣先名から先頭の "数字:" or "数字-数字:" プレフィックスを除去
+//   例: "052:和興..." → "和興..." / "002-1:㈱ﾕｰｼﾝ..." → "㈱ﾕｰｼﾝ..."
+// + 半角カナ「ﾕｰｼﾝ」を全角「ユーシン」に正規化
 function stripBukaPrefix(s) {
   if (s == null) return '';
-  return String(s).replace(/^\s*\d+\s*[:：]\s*/, '');
+  var t = String(s).replace(/^\s*\d+(?:[-－]\d+)?\s*[:：]\s*/, '');
+  t = t.replace(/ﾕｰｼﾝ/g, 'ユーシン');
+  return t;
 }
 
 function updateHakenMultiBtnText() {
