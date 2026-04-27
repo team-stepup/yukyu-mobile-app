@@ -995,10 +995,14 @@ body {
   color: #222;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 切れずに全表示 (折り返しOK、長文字は下のクラスで縮小) */
+  word-break: break-word;
+  line-height: 1.25;
 }
+/* 長い名前は文字サイズを動的に縮小 (氏名入力に空白あり等の長名対策) */
+.sankyu-card-name.medium { font-size: 13px; letter-spacing: -0.2px; }
+.sankyu-card-name.small  { font-size: 12px; letter-spacing: -0.3px; }
+.sankyu-card-name.tiny   { font-size: 11px; letter-spacing: -0.4px; line-height: 1.2; }
 .sankyu-card-status {
   font-size: 10px;
   font-weight: 700;
@@ -12443,7 +12447,11 @@ function renderSankyuList() {
     var kSexL = sankyuKeyByTitle('性別（親）', true) || sankyuKeyByTitle('性別（親）') || sankyuKeyByTitle('性別', true) || sankyuKeyByTitle('性別');
     var sexValL = kSexL ? String(it[kSexL] || '') : '';
     var isMaleL = /男|male|パパ|父/i.test(sexValL);
-                html += '<span class="sankyu-card-name">' + escHtml(name || '(氏名なし)') + (isMaleL ? ' <span class="sankyu-papa-badge-sm">パパ</span>' : '') + '</span>';
+                // 長い氏名は文字サイズ縮小 (空白含む長さ。例: "クリスティアーノ ロナウド" → tiny)
+                var _nm = name || '(氏名なし)';
+                var _nmLen = _nm.length;
+                var _nmCls = _nmLen > 18 ? ' tiny' : _nmLen > 14 ? ' small' : _nmLen > 11 ? ' medium' : '';
+                html += '<span class="sankyu-card-name' + _nmCls + '">' + escHtml(_nm) + (isMaleL ? ' <span class="sankyu-papa-badge-sm">パパ</span>' : '') + '</span>';
     if (status) html += '<span class="sankyu-card-status s-' + cat + '">' + escHtml(status) + '</span>';
     html +=   '</div>';
     html +=   '<div class="sankyu-card-meta">';
