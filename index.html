@@ -27990,8 +27990,9 @@ async function updateHakenSankyuCount() {
     var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
     var kBirth  = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
     var kYotei  = sankyuKeyByTitle('出産予定日');
-    // 休業終了 (owari) は除外してカウント
-    var count = 0;
+    // ユニーク社員番号でカウント（同一社員の複数レコードを1名扱いに）
+    // 全員(69) - 産休育休(N) = 実働者数 を算出するための「派遣先で管理対象の産休育休経験者」人数
+    var bangoCounted = {};
     var matchedRows = [];
     var unmatchedRows = [];
     _sankyuItems.forEach(function(it) {
@@ -28002,13 +28003,14 @@ async function updateHakenSankyuCount() {
       var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
       var entry = '社員番号=' + bStr + ' 氏名=' + nmVal + ' カテゴリ=' + cat + ' 派遣先列=' + hkVal;
       if (bStr && bangoSet[bStr]) {
-        if (cat !== 'owari') count++;
+        bangoCounted[bStr] = 1;
         matchedRows.push(entry);
       } else {
         unmatchedRows.push(entry);
       }
     });
-    console.log('[HakenSankyuCount] bangoSet=' + Object.keys(bangoSet).length + ' sankyu=' + _sankyuItems.length + ' match-active=' + count + ' (休業終了除外)');
+    var count = Object.keys(bangoCounted).length;
+    console.log('[HakenSankyuCount] bangoSet=' + Object.keys(bangoSet).length + ' sankyu=' + _sankyuItems.length + ' match-records=' + matchedRows.length + ' unique-people=' + count);
     console.log('[HakenSankyuCount] === マッチした (' + matchedRows.length + '件) ===');
     matchedRows.forEach(function(r) { console.log('  ✓', r); });
     console.log('[HakenSankyuCount] === マッチしなかった (' + unmatchedRows.length + '件) ===');
