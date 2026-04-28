@@ -23428,8 +23428,6 @@ function openVehicleDetail(idx) {
   html += '<span style="font-weight:700;font-size:14px;color:' + nenColor + ';">' + nenYoteiStr + '</span></div>';
   if (nenDaysLeft !== null && nenDaysLeft < 0) html += '<div style="text-align:right;font-size:11px;color:#c62828;font-weight:600;">' + Math.abs(nenDaysLeft) + '日経過</div>';
   else if (nenDaysLeft !== null && nenDaysLeft <= 30) html += '<div style="text-align:right;font-size:11px;color:#f57c00;font-weight:600;">残り ' + nenDaysLeft + '日</div>';
-  // 直近1年点検実施日（List30から非同期取得して埋め込む）
-  html += '<div id="vehicleLatest1NenTenkenRow" style="' + R + 'border:none;"><span style="' + L + '">直近1年点検実施日</span><span style="color:#bbb;font-size:12px;">読み込み中...</span></div>';
   html += '</div>';
 
   // 自動車保険（英語フィールド→日本語表示）
@@ -23463,19 +23461,6 @@ function openVehicleDetail(idx) {
     }
     var displayVal = mileageStr + (dateStr ? '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(' + dateStr + ')</span>' : '');
     slot.outerHTML = '<div style="' + R + '"><span style="' + L + '">走行距離</span><span style="font-weight:600;text-align:right;">' + displayVal + '</span></div>';
-  });
-
-  // List30 から直近の1年点検レコードを取得して埋め込む
-  fetchLatest1NenTenken(no1, number).then(function(latest) {
-    var slot = document.getElementById('vehicleLatest1NenTenkenRow');
-    if (!slot) return;
-    if (!latest || !latest.date) {
-      slot.innerHTML = '<span style="' + L + '">直近1年点検実施日</span><span style="color:#bbb;font-size:12px;">記録なし</span>';
-      return;
-    }
-    var d = new Date(latest.date);
-    var dateStr = isNaN(d) ? String(latest.date).substring(0,10) : d.toLocaleDateString('ja-JP');
-    slot.innerHTML = '<span style="' + L + '">直近1年点検実施日</span><span style="font-weight:700;font-size:14px;color:#2e7d32;">' + dateStr + '</span>';
   });
 }
 
@@ -23797,48 +23782,6 @@ async function submitRepairAdd() {
 }
 
 // 指定ナンバーの点検記録から最新の走行距離(と日付)を取得
-// List30(修理履歴)から該当車両の最新「1年点検」レコードを取得
-async function fetchLatest1NenTenken(no1, no2) {
-  if (!no1 && !no2) return null;
-  try {
-    var token = await getToken();
-    if (!token) return null;
-    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List30')";
-    var fJissi = 'OData__x5b9f__x65bd__x65e5_';   // 実施日
-    var fKubun = 'OData__x4fee__x7406__x3001__x30c9__x30'; // 区分（修理/1年点検/...）
-    var fNo2   = 'OData__x004e_O2';               // NO2 (4桁数字)
-    var url = listApi + "/items?$top=2000&$select=Title," + fNo2 + "," + fJissi + "," + fKubun;
-    var resp = await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
-    });
-    if (!resp.ok) return null;
-    var data = await resp.json();
-    var items = data.d.results || [];
-    var normalize = function(s) { return String(s == null ? '' : s).replace(/　/g, ' ').replace(/\s+/g, ' ').trim(); };
-    var dn = normalize(no1);
-    var no2Str = normalize(no2);
-    var matched = items.filter(function(it) {
-      var k = normalize(it[fKubun]);
-      if (k.indexOf('1年点検') < 0) return false;
-      var t = normalize(it.Title);
-      var n2 = normalize(it[fNo2]);
-      if (no2Str && n2 === no2Str) return true;
-      if (dn && t === dn) return true;
-      return false;
-    });
-    if (matched.length === 0) return null;
-    matched.sort(function(a, b) {
-      var da = a[fJissi] || '';
-      var db = b[fJissi] || '';
-      return da < db ? 1 : da > db ? -1 : 0;
-    });
-    return { date: matched[0][fJissi] };
-  } catch(e) {
-    console.warn('fetchLatest1NenTenken error:', e);
-    return null;
-  }
-}
-
 async function fetchLatestTenkenMileage(number) {
   if (!number) return null;
   try {
