@@ -27985,15 +27985,30 @@ async function updateHakenSankyuCount() {
       if (b !== null && b !== undefined && b !== '') bangoSet[String(b).trim()] = 1;
     });
     var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+    var kHakensaki = sankyuKeyByTitle('派遣先') || 'Title';
+    var kShimei = sankyuKeyByTitle('氏名') || sankyuKeyByTitle('社員氏名');
     // この派遣先に紐づく List52 全レコード数（休業終了も含む。産休育休一覧の「全て」タブと一致）
     var count = 0;
+    var matchedRows = [];
+    var unmatchedRows = [];
     _sankyuItems.forEach(function(it) {
       var b = it[kSyainNo];
-      if (b === null || b === undefined || b === '') return;
-      if (!bangoSet[String(b).trim()]) return;
-      count++;
+      var bStr = (b === null || b === undefined || b === '') ? '' : String(b).trim();
+      var hkVal = String(it[kHakensaki] || '').trim();
+      var nmVal = kShimei ? String(it[kShimei] || '').trim() : '';
+      var entry = '社員番号=' + bStr + ' 氏名=' + nmVal + ' 派遣先列=' + hkVal;
+      if (bStr && bangoSet[bStr]) {
+        count++;
+        matchedRows.push(entry);
+      } else {
+        unmatchedRows.push(entry);
+      }
     });
     console.log('[HakenSankyuCount] bangoSet=' + Object.keys(bangoSet).length + ' sankyu=' + _sankyuItems.length + ' match=' + count);
+    console.log('[HakenSankyuCount] === マッチした (' + matchedRows.length + '件) ===');
+    matchedRows.forEach(function(r) { console.log('  ✓', r); });
+    console.log('[HakenSankyuCount] === マッチしなかった (' + unmatchedRows.length + '件) ===');
+    unmatchedRows.forEach(function(r) { console.log('  ✗', r); });
     var el2 = document.getElementById('hakenSankyuCount');
     if (el2) el2.textContent = String(count);
   } catch (e) {
