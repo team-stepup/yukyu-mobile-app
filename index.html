@@ -4594,9 +4594,6 @@ select.sankyu-edit-input {
     <!-- 最低賃金チェック＋10〜11月リマインダーバナー -->
     <div id="minWageBanner" style="display:none;"></div>
 
-    <!-- データ不整合チェック (法的整合性アラート) -->
-    <div id="dataIntegrityBanner" style="display:none;"></div>
-
     <div class="home-search-card">
       <div class="home-section-head">
         <div class="home-section-icon search">🔍</div>
@@ -7499,120 +7496,6 @@ function categoryHasAlert(emp, keyMap, category) {
 }
 
 // Open expiry alert list — shows all employees with deadlines within 60 days
-// 法的整合性チェック: 1名分の不整合をリストアップ
-//   A. 社保喪失日 < 退社日(有給後優先)  → 社保喪失処理が早すぎる/退社日が誤り
-//   B. 雇用喪失日 < 退社日                → 雇用保険喪失が早すぎる
-//   C. 派遣先退社日 > 有給使用後退社日   → 有給後の方が前は順序逆
-//   D. 入社日 >= 退社日                   → 入社後すぐ退社の不正データ
-function _checkEmpIntegrity(emp, keyMap) {
-  if (!emp) return [];
-  function d(v) { if (!v) return null; var x = new Date(v); return isNaN(x) ? null : x; }
-  function fd(v) { if (!v) return ''; var x = new Date(v); if (isNaN(x)) return String(v); return x.getFullYear() + '/' + String(x.getMonth()+1).padStart(2,'0') + '/' + String(x.getDate()).padStart(2,'0'); }
-
-  var hakenT = emp[F.hakenTaisha];
-  var yukyuT = emp[F.yukyuTaisha];
-  var nyusha = emp[F.nyushaDate];
-  var shahoS = (keyMap && keyMap['shahoSoushitsu']) ? emp[keyMap['shahoSoushitsu']] : null;
-  var koyouS = (keyMap && keyMap['koyouSoushitsu']) ? emp[keyMap['koyouSoushitsu']] : null;
-
-  var dh = d(hakenT), dy = d(yukyuT), dn = d(nyusha);
-  var dShaho = d(shahoS), dKoyou = d(koyouS);
-  var dT = dy || dh;
-  var dTLabel = dy ? '有給使用後退社日' : '派遣先退社日';
-  var dTStr = dy ? fd(yukyuT) : fd(hakenT);
-
-  var issues = [];
-
-  if (dShaho && dT && dShaho < dT) {
-    issues.push({ severity: 'high', message: '社保喪失日 ' + fd(shahoS) + ' が ' + dTLabel + ' ' + dTStr + ' より前' });
-  }
-  if (dKoyou && dT && dKoyou < dT) {
-    issues.push({ severity: 'high', message: '雇用喪失日 ' + fd(koyouS) + ' が ' + dTLabel + ' ' + dTStr + ' より前' });
-  }
-  if (dh && dy && dh > dy) {
-    issues.push({ severity: 'mid', message: '派遣先退社日 ' + fd(hakenT) + ' が 有給使用後退社日 ' + fd(yukyuT) + ' より後' });
-  }
-  if (dn && dT && dn >= dT) {
-    issues.push({ severity: 'high', message: '入社日 ' + fd(nyusha) + ' が 退社日 ' + dTStr + ' 以降' });
-  }
-
-  return issues;
-}
-
-// データ不整合バナー描画
-function renderIntegrityBanner(items) {
-  var el = document.getElementById('dataIntegrityBanner');
-  if (!el) return;
-  if (!items || items.length === 0) {
-    el.style.display = 'none';
-    el.innerHTML = '';
-    window._integrityIssuesCache = [];
-    return;
-  }
-  var totalIssues = 0;
-  items.forEach(function(it) { totalIssues += it.issues.length; });
-  el.style.display = 'block';
-  el.innerHTML =
-    '<div onclick="openIntegrityOverlay()" style="display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:12px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:1.5px solid #ff9800;border-radius:14px;cursor:pointer;box-shadow:0 2px 8px rgba(255,152,0,0.18);">' +
-      '<div style="font-size:24px;flex-shrink:0;">⚠️</div>' +
-      '<div style="flex:1;min-width:0;">' +
-        '<div style="font-weight:800;color:#bf360c;font-size:13px;">データ不整合 ' + items.length + '名 (' + totalIssues + '件)</div>' +
-        '<div style="font-size:11px;color:#e65100;margin-top:2px;line-height:1.3;">タップで一覧表示・各社員の詳細へ移動</div>' +
-      '</div>' +
-      '<div style="color:#bf360c;font-size:18px;font-weight:700;flex-shrink:0;">›</div>' +
-    '</div>';
-  window._integrityIssuesCache = items;
-}
-
-// 不整合一覧オーバーレイ
-function openIntegrityOverlay() {
-  var items = window._integrityIssuesCache || [];
-  if (items.length === 0) return;
-  var existing = document.getElementById('integrityOverlay');
-  if (existing) existing.remove();
-  var totalIssues = 0;
-  items.forEach(function(it) { totalIssues += it.issues.length; });
-  var rowsHtml = items.map(function(it) {
-    var emp = it.emp;
-    var name = emp.Title || '';
-    var no = emp[F.syainNo] || '';
-    var haken = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
-    var msgs = it.issues.map(function(iss) {
-      var color = iss.severity === 'high' ? '#c62828' : '#e65100';
-      var bg = iss.severity === 'high' ? '#ffebee' : '#fff3e0';
-      return '<div style="font-size:11px;color:' + color + ';margin-top:4px;padding:5px 8px;background:' + bg + ';border-left:3px solid ' + color + ';border-radius:4px;line-height:1.5;">' + escHtml(iss.message) + '</div>';
-    }).join('');
-    var safeEmp = JSON.stringify(emp).replace(/'/g, '&#39;');
-    return '<div onclick=\'document.getElementById("integrityOverlay").remove();selectEmployee(' + safeEmp + ')\' style="padding:12px 14px;border-bottom:1px solid #f0f0f5;cursor:pointer;background:#fff;">' +
-      '<div style="display:flex;align-items:center;gap:6px;">' +
-        '<div style="font-weight:700;font-size:14px;color:var(--text);">' + escHtml(name) + '</div>' +
-        '<div style="font-size:11px;color:#888;">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>' +
-      '</div>' +
-      msgs +
-    '</div>';
-  }).join('');
-  var ov = document.createElement('div');
-  ov.id = 'integrityOverlay';
-  ov.className = 'confirm-overlay';
-  ov.innerHTML =
-    '<div style="background:#fff;border-radius:14px;max-width:94vw;width:540px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">' +
-      '<div style="padding:14px 16px;background:linear-gradient(135deg,#ff9800,#e65100);color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
-        '<div style="font-size:22px;">⚠️</div>' +
-        '<div style="flex:1;min-width:0;">' +
-          '<div style="font-size:11px;opacity:0.85;">データ不整合 (法的整合性チェック)</div>' +
-          '<div style="font-size:15px;font-weight:800;">' + items.length + '名 / ' + totalIssues + '件</div>' +
-        '</div>' +
-        '<button onclick="document.getElementById(\'integrityOverlay\').remove()" style="background:rgba(255,255,255,0.22);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0;">×</button>' +
-      '</div>' +
-      '<div style="padding:6px 14px 4px;background:#fafafa;font-size:10px;color:#777;border-bottom:1px solid #eee;flex-shrink:0;line-height:1.4;">' +
-        '社保/雇用喪失日 vs 退社日、派遣先退社日 vs 有給使用後退社日、入社日 vs 退社日 を法的観点でチェック。タップで社員詳細へ。' +
-      '</div>' +
-      '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + rowsHtml + '</div>' +
-    '</div>';
-  document.body.appendChild(ov);
-  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
-}
-
 // Home badge counts (前払い・入退・期限注意)
 async function loadHomeBadges() {
   // 最低賃金チェックとリマインダーバナー (APIコール不要なので先に描画)
@@ -7699,25 +7582,6 @@ async function loadHomeBadges() {
   // 期限注意バッジ
   var keyMap = meta && Object.keys(meta).length > 0 ? buildFieldKeyMap(meta) : {};
 
-  // データ不整合チェック (法的整合性アラート) — 退社後6ヶ月以上経過は「過去」として除外
-  try {
-    var integrityList = [];
-    var integrityCutoff = new Date();
-    integrityCutoff.setMonth(integrityCutoff.getMonth() - 6);
-    allEmps.forEach(function(emp) {
-      if (!emp || !emp.Title) return;
-      var retireRaw = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
-      if (retireRaw) {
-        var rd = new Date(retireRaw);
-        if (!isNaN(rd) && rd < integrityCutoff) return;  // 6ヶ月超 過去は非表示
-      }
-      var issues = _checkEmpIntegrity(emp, keyMap);
-      if (issues.length > 0) integrityList.push({ emp: emp, issues: issues });
-    });
-    renderIntegrityBanner(integrityList);
-  } catch (e) {
-    console.warn('Data integrity check error:', e);
-  }
 
   var expiryCount = 0;
   allEmps.forEach(function(emp) {
