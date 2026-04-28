@@ -6995,6 +6995,13 @@ const PROFILE_CATEGORIES = [
       { key: 'shahoNamaeFurigana', label: '社保名前フリガナ' },
       { key: 'kisoNenkinNo', label: '基礎年金番号' },
       { key: 'shahoHyojunHoushu', label: '社保標準報酬月額' },
+      // 扶養情報 (shahoHuyou='あり' の場合のみ表示)
+      { key: 'shahoHuyou', label: '扶養', showOnlyIfHasFuyou: true },
+      { key: 'shahoHuyouBaai', label: '扶養がある場合', showOnlyIfHasFuyou: true },
+      { key: 'shahoTsuzukigara', label: '扶養者続柄', showOnlyIfHasFuyou: true },
+      { key: 'shahoFurigana', label: '扶養者フリガナ', showOnlyIfHasFuyou: true },
+      { key: 'shahoZairyuCard', label: '扶養者在留カード', showOnlyIfHasFuyou: true },
+      { key: 'shahoMyNumber', label: '扶養者マイナンバー', showOnlyIfHasFuyou: true },
       { key: 'koyouNo', label: '雇用：被保険者番号' },
       { key: 'koyouShutoku', label: '雇用：資格取得日', format: 'date' },
       { key: 'koyouName', label: '雇用保険名前' },
@@ -15945,6 +15952,12 @@ async function loadEmployeeProfile() {
     cat.fields.forEach(field => {
       // 退社者のみ表示するフィールド（退職理由・次回採用など）
       if (field.showOnlyResigned && !isResignedEmp) return;
+      // 扶養関連フィールドは shahoHuyou='あり' の場合のみ表示
+      if (field.showOnlyIfHasFuyou) {
+        const huyouKey = keyMap['shahoHuyou'];
+        const huyouVal = huyouKey ? String(emp[huyouKey] || '') : '';
+        if (huyouVal.indexOf('あり') < 0) return;
+      }
       // Handle computed fields (prefixed with _calc)
       if (field.format === 'calcAge') {
         const bdKey = keyMap['birthday'];
