@@ -27687,35 +27687,36 @@ function renderHakenList(hakensaki, employees) {
 }
 
 // 派遣先社員一覧の「🌸 産休育休 (N)」バッジを更新
+// 社員番号でマッチング: 選択中の派遣先に所属する社員 ∩ 産休育休中(休業終了除く)
 async function updateHakenSankyuCount() {
   var el = document.getElementById('hakenSankyuCount');
   if (!el) return;
   try {
-    // 産休育休データ未取得なら取得
     if (!_sankyuItems) {
       var results = await Promise.all([fetchSankyuFields(), fetchSankyuItems()]);
       _sankyuFieldsMeta = results[0];
       _sankyuItems = results[1] || [];
     }
-    var hakenName = '';
-    if (hakenMultiSelected && hakenMultiSelected.length > 0) {
-      hakenName = stripBukaPrefix(hakenMultiSelected[0]);
-    }
+    // 選択中の派遣先に属する社員番号セット（hakenEmployeesCache は openHakenList で設定済み）
+    var bangoSet = {};
+    (hakenEmployeesCache || []).forEach(function(emp) {
+      var b = emp[F.syainNo];
+      if (b !== null && b !== undefined && b !== '') bangoSet[String(b).trim()] = 1;
+    });
     var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
     var kBirth  = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
     var kYotei  = sankyuKeyByTitle('出産予定日');
-    var kHakensaki = sankyuKeyByTitle('派遣先') || 'Title';
-    var q = hakenName.toLowerCase();
+    var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
     var count = 0;
     _sankyuItems.forEach(function(it) {
       var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
       if (cat === 'owari') return;  // 休業終了は除外
-      if (q) {
-        var hk = String(it[kHakensaki] || '').toLowerCase();
-        if (hk.indexOf(q) < 0) return;
-      }
+      var b = it[kSyainNo];
+      if (b === null || b === undefined || b === '') return;
+      if (!bangoSet[String(b).trim()]) return;
       count++;
     });
+    console.log('[HakenSankyuCount] bangoSet=' + Object.keys(bangoSet).length + ' sankyu=' + _sankyuItems.length + ' match=' + count);
     var el2 = document.getElementById('hakenSankyuCount');
     if (el2) el2.textContent = String(count);
   } catch (e) {
