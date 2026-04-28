@@ -20148,37 +20148,50 @@ async function _loadCurrentSankyuCounts(allEmps) {
       fetchSankyuFields().catch(() => null),
       fetchSankyuItems().catch(() => [])
     ]);
-    if (!fields || !items || items.length === 0) return { total: 0, byBuka: {} };
+    if (!fields || !items || items.length === 0) return { total: 0, byBuka: {}, totalOwari: 0, owariByBuka: {} };
     const kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
     const kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
     const kYotei = sankyuKeyByTitle('出産予定日');
     const kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
-    const empByNo = {};
-    allEmps.forEach(e => {
-      const no = e[F.syainNo];
-      if (no !== null && no !== undefined && no !== '') empByNo[String(no)] = e;
-    });
-    const byBuka = {};
-    const seen = {};
-    let total = 0;
-    items.forEach(item => {
-      const cat = sankyuItemCategory(item, kStatus, kBirth, kYotei);
-      if (cat === 'owari') return;
-      const no = item[kSyainNo];
+
+    // 社員番号 → カテゴリ集合 を構築
+    const bangoToCats = {};
+    items.forEach(it => {
+      const no = it[kSyainNo];
       if (no === null || no === undefined || no === '') return;
-      const noStr = String(no);
-      if (seen[noStr]) return; // 同一社員の重複行を防止
-      seen[noStr] = true;
-      const emp = empByNo[noStr];
-      const buka = emp ? getBukaValue(emp) : '';
-      if (!buka || !isHakensakiBuka(buka)) return;
-      byBuka[buka] = (byBuka[buka] || 0) + 1;
-      total++;
+      const noStr = String(no).trim();
+      const cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
+      if (!bangoToCats[noStr]) bangoToCats[noStr] = {};
+      if (cat === 'owari') bangoToCats[noStr].hasOwari = true;
+      else bangoToCats[noStr].hasActive = true;
     });
-    return { total: total, byBuka: byBuka };
+
+    // 社員データを走査し、active/owari を部課ごとに集計（在職者のみ対象）
+    const byBuka = {};
+    const owariByBuka = {};
+    let total = 0;
+    let totalOwari = 0;
+    allEmps.forEach(emp => {
+      if (isResigned(emp)) return;
+      const buka = getBukaValue(emp);
+      if (!buka || !isHakensakiBuka(buka)) return;
+      const no = emp[F.syainNo];
+      const noStr = (no !== null && no !== undefined) ? String(no).trim() : '';
+      if (!noStr) return;
+      const cats = bangoToCats[noStr];
+      if (!cats) return;
+      if (cats.hasActive) {
+        byBuka[buka] = (byBuka[buka] || 0) + 1;
+        total++;
+      } else if (cats.hasOwari) {
+        owariByBuka[buka] = (owariByBuka[buka] || 0) + 1;
+        totalOwari++;
+      }
+    });
+    return { total: total, byBuka: byBuka, totalOwari: totalOwari, owariByBuka: owariByBuka };
   } catch (e) {
     console.warn('_loadCurrentSankyuCounts error:', e);
-    return { total: 0, byBuka: {} };
+    return { total: 0, byBuka: {}, totalOwari: 0, owariByBuka: {} };
   }
 }
 
@@ -20523,17 +20536,26 @@ async function loadAdminDashData() {
     const b = getBukaValue(emp);
     if (!b) return;
     if (!isHakensakiBuka(b)) return; // 本社等は派遣先分析対象外
-    if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0, sankyu: 0 };
+    if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0, sankyu: 0, sankyuOwari: 0, jitsudou: 0 };
     byBuka[b].total++;
     if (isResigned(emp)) { byBuka[b].retired++; totalRetired++; }
     else { byBuka[b].active++; totalActive++; }
   });
-  // 産休育休中の人数を派遣先別に付加
+  // 産休育休中(active)・休業終了(owari) の人数を派遣先別に付加
   const sankyuCounts = await _loadCurrentSankyuCounts(allEmps);
   Object.keys(sankyuCounts.byBuka).forEach(b => {
     if (byBuka[b]) byBuka[b].sankyu = sankyuCounts.byBuka[b];
   });
-  _adminDashCache = { byBuka: byBuka, totalActive: totalActive, totalRetired: totalRetired, totalSankyu: sankyuCounts.total };
+  Object.keys(sankyuCounts.owariByBuka).forEach(b => {
+    if (byBuka[b]) byBuka[b].sankyuOwari = sankyuCounts.owariByBuka[b];
+  });
+  // 実働 = 在職 - 産休育休active - 休業終了
+  Object.keys(byBuka).forEach(b => {
+    const c = byBuka[b];
+    c.jitsudou = c.active - (c.sankyu || 0) - (c.sankyuOwari || 0);
+  });
+  const totalJitsudou = totalActive - sankyuCounts.total - sankyuCounts.totalOwari;
+  _adminDashCache = { byBuka: byBuka, totalActive: totalActive, totalRetired: totalRetired, totalSankyu: sankyuCounts.total, totalSankyuOwari: sankyuCounts.totalOwari, totalJitsudou: totalJitsudou };
 }
 
 async function refreshAdminDashboard() {
@@ -20570,22 +20592,33 @@ function renderAdminDashboard() {
   const totalActive = _adminDashCache.totalActive;
   const totalRetired = _adminDashCache.totalRetired;
   const totalSankyu = _adminDashCache.totalSankyu || 0;
+  const totalSankyuOwari = _adminDashCache.totalSankyuOwari || 0;
+  const totalJitsudou = (typeof _adminDashCache.totalJitsudou === 'number') ? _adminDashCache.totalJitsudou : (totalActive - totalSankyu - totalSankyuOwari);
 
   const entries = Object.keys(byBuka).map(b => ({
-    name: b, active: byBuka[b].active, retired: byBuka[b].retired, total: byBuka[b].total, sankyu: byBuka[b].sankyu || 0
+    name: b,
+    active: byBuka[b].active,
+    retired: byBuka[b].retired,
+    total: byBuka[b].total,
+    sankyu: byBuka[b].sankyu || 0,
+    sankyuOwari: byBuka[b].sankyuOwari || 0,
+    jitsudou: (typeof byBuka[b].jitsudou === 'number') ? byBuka[b].jitsudou : (byBuka[b].active - (byBuka[b].sankyu || 0) - (byBuka[b].sankyuOwari || 0))
   }));
-  const visible = includeRetired ? entries : entries.filter(e => e.active > 0);
+  const visible = includeRetired ? entries : entries.filter(e => e.jitsudou > 0 || e.active > 0);
 
   if (_adminDashSort === 'count') {
-    visible.sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name, 'ja'));
+    visible.sort((a, b) => (b.jitsudou - a.jitsudou) || a.name.localeCompare(b.name, 'ja'));
   } else {
     visible.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   }
 
   let summaryHtml = '<div style="display:flex;gap:18px;flex-wrap:wrap;">' +
     '<div><div style="font-size:10px;color:#888;">派遣先数</div><div style="font-size:22px;font-weight:800;color:var(--primary);">' + visible.length + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">件</span></div></div>' +
-    '<div><div style="font-size:10px;color:#888;">在職者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + totalActive + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">実働者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + totalJitsudou + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
     '<div><div style="font-size:10px;color:#888;">🌸 産休育休中</div><div style="font-size:22px;font-weight:800;color:#d81b60;">' + totalSankyu + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+  if (totalSankyuOwari > 0) {
+    summaryHtml += '<div><div style="font-size:10px;color:#888;">休業終了</div><div style="font-size:22px;font-weight:800;color:#7e57c2;">' + totalSankyuOwari + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+  }
   if (includeRetired) {
     summaryHtml += '<div><div style="font-size:10px;color:#888;">退職者 合計</div><div style="font-size:22px;font-weight:800;color:#c62828;">' + totalRetired + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   }
@@ -20597,22 +20630,25 @@ function renderAdminDashboard() {
     return;
   }
 
-  const maxActive = Math.max(1, ...visible.map(e => e.active));
+  const maxJitsudou = Math.max(1, ...visible.map(e => e.jitsudou));
   let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
   visible.forEach(e => {
-    const barPct = Math.round((e.active / maxActive) * 100);
+    const barPct = Math.round((e.jitsudou / maxJitsudou) * 100);
     const retiredNote = (includeRetired && e.retired > 0)
       ? '<span style="font-size:10px;color:#c62828;margin-left:6px;font-weight:600;">退職 ' + e.retired + '</span>'
       : '';
     const sankyuBadge = e.sankyu > 0
       ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:1px 6px;background:#fce4ec;border:1px solid #f8bbd0;border-radius:8px;font-size:10px;font-weight:700;color:#d81b60;">🌸 ' + e.sankyu + '</span>'
       : '';
+    const owariBadge = e.sankyuOwari > 0
+      ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:4px;padding:1px 6px;background:#ede7f6;border:1px solid #d1c4e9;border-radius:8px;font-size:10px;font-weight:700;color:#7e57c2;">終 ' + e.sankyuOwari + '</span>'
+      : '';
     const nameEsc = escHtml(e.name);
     const nameArg = nameEsc.replace(/'/g, "\\'");
     html += '<div onclick="openHakenListFromAdmin(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
-      '<span style="font-size:14px;font-weight:700;color:var(--primary);display:inline-flex;align-items:center;flex-wrap:wrap;">' + nameEsc + sankyuBadge + '</span>' +
-      '<span><span style="font-size:18px;font-weight:800;color:#2e7d32;">' + e.active + '</span><span style="font-size:11px;font-weight:500;color:#888;margin-left:2px;">名</span>' + retiredNote + '</span>' +
+      '<span style="font-size:14px;font-weight:700;color:var(--primary);display:inline-flex;align-items:center;flex-wrap:wrap;">' + nameEsc + sankyuBadge + owariBadge + '</span>' +
+      '<span><span style="font-size:18px;font-weight:800;color:#2e7d32;">' + e.jitsudou + '</span><span style="font-size:11px;font-weight:500;color:#888;margin-left:2px;">名</span>' + retiredNote + '</span>' +
       '</div>' +
       '<div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden;">' +
       '<div style="height:100%;width:' + barPct + '%;background:linear-gradient(90deg,#66bb6a,#2e7d32);border-radius:3px;"></div>' +
