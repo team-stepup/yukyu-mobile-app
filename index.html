@@ -20087,15 +20087,57 @@ async function populateHakenDropdown() {
     const select = document.getElementById('hakenSelect');
     await resolveBukaKey();
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+
+    // 産休育休データを取得 (社員番号→カテゴリ集合 マップを構築)
+    if (!_sankyuItems) {
+      try {
+        const srs = await Promise.all([fetchSankyuFields(), fetchSankyuItems()]);
+        _sankyuFieldsMeta = srs[0];
+        _sankyuItems = srs[1] || [];
+      } catch (_) { /* ignore - sankyu不要なら active のみで動作 */ }
+    }
+    const bangoToCats = {};  // { '70110': { hasActive: true, hasOwari: true } }
+    if (_sankyuItems && _sankyuItems.length > 0) {
+      const kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+      const kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+      const kBirth  = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+      const kYotei  = sankyuKeyByTitle('出産予定日');
+      _sankyuItems.forEach(it => {
+        const sb = it[kSyainNo];
+        if (sb === null || sb === undefined || sb === '') return;
+        const sbStr = String(sb).trim();
+        const cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
+        if (!bangoToCats[sbStr]) bangoToCats[sbStr] = {};
+        if (cat === 'owari') bangoToCats[sbStr].hasOwari = true;
+        else bangoToCats[sbStr].hasActive = true;
+      });
+    }
+
     _hakenEmpByBuka = {};
     allEmps.forEach(emp => {
       const b = getBukaValue(emp);
       if (!b) return;
-      if (!_hakenEmpByBuka[b]) _hakenEmpByBuka[b] = { active: 0, retired: 0, total: 0 };
+      if (!_hakenEmpByBuka[b]) _hakenEmpByBuka[b] = { active: 0, retired: 0, total: 0, sankyuActive: 0, sankyuOwari: 0, jitsudou: 0 };
       _hakenEmpByBuka[b].total++;
-      if (isResigned(emp)) _hakenEmpByBuka[b].retired++;
-      else _hakenEmpByBuka[b].active++;
+      if (isResigned(emp)) {
+        _hakenEmpByBuka[b].retired++;
+      } else {
+        _hakenEmpByBuka[b].active++;
+        // 産休育休判定 (active優先: アサトの様な両方持つ人は active 扱い)
+        const sn = emp[F.syainNo];
+        const snStr = (sn !== null && sn !== undefined) ? String(sn).trim() : '';
+        if (snStr && bangoToCats[snStr]) {
+          if (bangoToCats[snStr].hasActive) _hakenEmpByBuka[b].sankyuActive++;
+          else if (bangoToCats[snStr].hasOwari) _hakenEmpByBuka[b].sankyuOwari++;
+        }
+      }
     });
+    // 実働数 = 在職 - 産休育休(active) - 休業終了
+    Object.keys(_hakenEmpByBuka).forEach(b => {
+      const c = _hakenEmpByBuka[b];
+      c.jitsudou = c.active - c.sankyuActive - c.sankyuOwari;
+    });
+
     const sorted = Object.keys(_hakenEmpByBuka).sort();
     select.innerHTML = '<option value="">派遣先(部課)を選択...</option>';
     sorted.forEach(b => {
@@ -20137,9 +20179,11 @@ function buildHakenMultiPanel() {
     const c = _hakenEmpByBuka[b];
     const checked = hakenMultiSelected.indexOf(b) >= 0 ? 'checked' : '';
     const displayName = stripBukaPrefix(b);  // "052:和興..." → "和興..."
+    // 実働数 (jitsudou) = 在職 - 産休育休active - 休業終了
+    const jitsudou = (typeof c.jitsudou === 'number') ? c.jitsudou : c.active;
     const countBadge = includeRetired
-      ? '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">在職' + c.active + ' / 退職' + c.retired + '</span>'
-      : '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">在職' + c.active + '名</span>';
+      ? '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">実働' + jitsudou + ' / 退職' + c.retired + '</span>'
+      : '<span style="font-size:10px;color:var(--text-light);white-space:nowrap;">実働' + jitsudou + '名</span>';
     html += '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;">' +
       '<input type="checkbox" value="' + escHtml(b) + '" ' + checked + ' onchange="onHakenMultiToggle(this)" style="accent-color:var(--primary);">' +
       '<span style="flex:1;font-size:13px;">' + escHtml(displayName) + '</span>' +
