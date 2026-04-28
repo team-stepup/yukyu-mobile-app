@@ -27987,7 +27987,10 @@ async function updateHakenSankyuCount() {
     var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
     var kHakensaki = sankyuKeyByTitle('派遣先') || 'Title';
     var kShimei = sankyuKeyByTitle('氏名') || sankyuKeyByTitle('社員氏名');
-    // この派遣先に紐づく List52 全レコード数（休業終了も含む。産休育休一覧の「全て」タブと一致）
+    var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+    var kBirth  = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+    var kYotei  = sankyuKeyByTitle('出産予定日');
+    // 休業終了 (owari) は除外してカウント
     var count = 0;
     var matchedRows = [];
     var unmatchedRows = [];
@@ -27996,15 +27999,16 @@ async function updateHakenSankyuCount() {
       var bStr = (b === null || b === undefined || b === '') ? '' : String(b).trim();
       var hkVal = String(it[kHakensaki] || '').trim();
       var nmVal = kShimei ? String(it[kShimei] || '').trim() : '';
-      var entry = '社員番号=' + bStr + ' 氏名=' + nmVal + ' 派遣先列=' + hkVal;
+      var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
+      var entry = '社員番号=' + bStr + ' 氏名=' + nmVal + ' カテゴリ=' + cat + ' 派遣先列=' + hkVal;
       if (bStr && bangoSet[bStr]) {
-        count++;
+        if (cat !== 'owari') count++;
         matchedRows.push(entry);
       } else {
         unmatchedRows.push(entry);
       }
     });
-    console.log('[HakenSankyuCount] bangoSet=' + Object.keys(bangoSet).length + ' sankyu=' + _sankyuItems.length + ' match=' + count);
+    console.log('[HakenSankyuCount] bangoSet=' + Object.keys(bangoSet).length + ' sankyu=' + _sankyuItems.length + ' match-active=' + count + ' (休業終了除外)');
     console.log('[HakenSankyuCount] === マッチした (' + matchedRows.length + '件) ===');
     matchedRows.forEach(function(r) { console.log('  ✓', r); });
     console.log('[HakenSankyuCount] === マッチしなかった (' + unmatchedRows.length + '件) ===');
