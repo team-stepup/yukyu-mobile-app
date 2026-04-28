@@ -342,6 +342,8 @@ body {
 .haken-table tr:nth-child(even) { background: #fafafe; }
 .haken-dl-btn { background: #388e3c; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .haken-dl-btn:active { background: #2e7d32; }
+.haken-sankyu-btn { background: linear-gradient(135deg,#ec407a,#d81b60); color:#fff; border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(216,27,96,0.25); }
+.haken-sankyu-btn:active { background: linear-gradient(135deg,#d81b60,#c2185b); }
 /* Edit mode styles */
 .edit-btn { background:none; border:1px solid var(--primary-light); color:var(--primary); border-radius:6px; padding:2px 10px; font-size:11px; cursor:pointer; font-weight:600; display:none; }
 .edit-btn:active { background:#e8e8f5; }
@@ -27286,6 +27288,24 @@ function getHakenDisplayTitle(bukaList) {
   return bukaList.slice(0, 2).join(' / ') + ' 他' + (bukaList.length - 2) + '件';
 }
 
+// 派遣先社員一覧 → 産休育休一覧 (派遣先名で検索プリフィル)
+async function openSankyuFromHaken() {
+  var name = '';
+  if (hakenMultiSelected && hakenMultiSelected.length > 0) {
+    name = stripBukaPrefix(hakenMultiSelected[0]);
+  }
+  switchScreen('sankyuScreen');
+  var input = document.getElementById('sankyuSearchInput');
+  if (input) input.value = name;
+  if (!_sankyuItems) {
+    var body = document.getElementById('sankyuListBody');
+    if (body) body.innerHTML = '<div class="sankyu-empty"><div class="sankyu-empty-icon">🌸</div><div style="font-size:13px;">読み込み中…</div></div>';
+    await loadSankyuList();
+  } else {
+    renderSankyuList();
+  }
+}
+
 async function openHakenList() {
   if (!hakenMultiSelected || hakenMultiSelected.length === 0) {
     showToast('派遣先(部課)を選択してください', 'error');
@@ -27343,7 +27363,8 @@ function renderHakenList(hakensaki, employees) {
     '<button class="haken-filter-btn" data-filter="sougei" onclick="applyHakenFilter(\'sougei\',this)">🚐 送迎 (' + countSougei + ')</button>' +
     '<button class="haken-filter-btn" data-filter="other" onclick="applyHakenFilter(\'other\',this)">🚗 送迎以外 (' + countOther + ')</button>' +
     '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
-    '<button class="haken-dl-btn" onclick="downloadHakenExcel()" style="margin-left:auto;">📥 Excel</button>' +
+    '<button class="haken-sankyu-btn" onclick="openSankyuFromHaken()" style="margin-left:auto;">🌸 産休育休</button>' +
+    '<button class="haken-dl-btn" onclick="downloadHakenExcel()">📥 Excel</button>' +
     '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
 
   renderHakenTable(employees, body);
