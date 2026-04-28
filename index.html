@@ -2457,6 +2457,8 @@ select.sankyu-edit-input {
 .nyutai-empty { text-align:center; padding:20px; color:var(--text-light); font-size:13px; }
 .nyutai-range-btn { background:#f0f0f0; border:1px solid var(--border); border-radius:16px; padding:4px 14px; font-size:12px; font-weight:600; color:var(--text-light); cursor:pointer; transition:all 0.15s; }
 .nyutai-range-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+.nyutai-asti-btn { background: linear-gradient(135deg,#ff7043,#e64a19); color:#fff; border:none; border-radius:14px; padding:10px 18px; font-size:13px; font-weight:700; cursor:pointer; box-shadow:0 3px 10px rgba(230,74,25,0.32); transition:transform 0.1s, box-shadow 0.2s; }
+.nyutai-asti-btn:active { transform: scale(0.97); box-shadow:0 1px 4px rgba(230,74,25,0.25); }
 .nyutai-analysis-panel { border:1px solid var(--border); border-radius:12px; background:#fff; }
 .nyutai-analysis-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; font-size:14px; font-weight:700; color:var(--primary); cursor:pointer; }
 .nyutai-analysis-header:active { background:#f8f8ff; }
@@ -4993,6 +4995,9 @@ select.sankyu-edit-input {
       <button class="nyutai-range-btn" data-range="24" onclick="setNyutaiRange(24)" style="margin-left:6px;">2</button>
       <button class="nyutai-range-btn" data-range="36" onclick="setNyutaiRange(36)">3</button>
       <span style="font-size:11px;color:var(--text-light);">年</span>
+    </div>
+    <div style="display:flex;justify-content:center;padding:0 4px 8px;">
+      <button class="nyutai-asti-btn" onclick="openAstiNyutaiOverlay()">🏭 ASTI 入退社 (浜松・都田・掛川)</button>
     </div>
     <div id="nyutaiSummary" style="display:flex;gap:6px;padding:0 4px 8px;flex-wrap:wrap;justify-content:center;"></div>
     <div id="nyutaiAnalysisWrap" style="display:none;">
@@ -21016,6 +21021,131 @@ function calcTenure(startDateStr, endDateStr) {
   if (years > 0) return years + '年';
   if (months > 0) return months + 'ヶ月';
   return '1ヶ月未満';
+}
+
+// ASTI (浜松/都田/掛川) 入退社オーバーレイ
+async function openAstiNyutaiOverlay() {
+  // 入退連絡ページの選択期間を流用
+  const startTotal = nyutaiYear * 12 + nyutaiMonth - (nyutaiRange - 1);
+  const startY = Math.floor(startTotal / 12);
+  const startM = ((startTotal % 12) + 12) % 12;
+  const mStart = new Date(startY, startM, 1);
+  const mEnd = new Date(nyutaiYear, nyutaiMonth + 1, 0, 23, 59, 59);
+
+  showSpinner();
+  try {
+    const [allEmps, fieldsMeta] = await Promise.all([
+      spGetAll(LIST_EMPLOYEES_GUID, ''),
+      fetchEmployeeFields().catch(function() { return {}; })
+    ]);
+    const km = (fieldsMeta && Object.keys(fieldsMeta).length > 0) ? buildFieldKeyMap(fieldsMeta) : {};
+
+    // ASTI 部課: 077:掛川, 078:都田, 114:浜松
+    const astiPrefixRegex = /^(077|078|114):/;
+    const astiEmps = allEmps.filter(emp => {
+      const buka = getBukaValue(emp);
+      return buka && astiPrefixRegex.test(buka);
+    });
+
+    const inRange = (v) => {
+      if (!v) return false;
+      const d = new Date(v);
+      return !isNaN(d) && d >= mStart && d <= mEnd;
+    };
+
+    const nyusha = astiEmps.filter(emp => inRange(emp[F.nyushaDate]))
+      .sort((a, b) => new Date(a[F.nyushaDate]) - new Date(b[F.nyushaDate]));
+    const taisha = astiEmps.filter(emp => inRange(emp[F.hakenTaisha]))
+      .sort((a, b) => new Date(a[F.hakenTaisha]) - new Date(b[F.hakenTaisha]));
+
+    renderAstiNyutaiOverlay(nyusha, taisha, mStart, mEnd, km);
+  } catch (e) {
+    console.error('ASTI nyutai overlay error:', e);
+    showToast('読み込みエラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function renderAstiNyutaiOverlay(nyusha, taisha, mStart, mEnd, km) {
+  function fmtMd(v) {
+    if (!v) return '';
+    const d = new Date(v);
+    if (isNaN(d)) return String(v);
+    return (d.getMonth() + 1) + '/' + d.getDate();
+  }
+  function getSoshiki(emp) {
+    const k = km && km['soshikiTani'];
+    return k ? (emp[k] || '') : '';
+  }
+
+  // 期間ラベル
+  const sameMonth = mStart.getFullYear() === mEnd.getFullYear() && mStart.getMonth() === mEnd.getMonth();
+  const periodLabel = sameMonth
+    ? mStart.getFullYear() + '年' + (mStart.getMonth() + 1) + '月'
+    : mStart.getFullYear() + '/' + (mStart.getMonth() + 1) + ' 〜 ' + mEnd.getFullYear() + '/' + (mEnd.getMonth() + 1);
+
+  function rowHtml(emp, type) {
+    const dateRaw = type === 'nyusha' ? emp[F.nyushaDate] : emp[F.hakenTaisha];
+    const sn = emp[F.syainNo] || '';
+    const name = emp.Title || '';
+    const buka = stripBukaPrefix(getBukaValue(emp) || '');
+    const soshiki = getSoshiki(emp);
+    const dateColor = type === 'nyusha' ? '#2e7d32' : '#c62828';
+    const dateBg = type === 'nyusha' ? '#e8f5e9' : '#ffebee';
+    const safeEmp = JSON.stringify(emp).replace(/'/g, '&#39;');
+    return '<div onclick=\'document.getElementById("astiNyutaiOverlay").remove();selectEmployee(' + safeEmp + ')\' style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid #f0f0f5;background:#fff;cursor:pointer;">' +
+      '<span style="display:inline-flex;align-items:center;justify-content:center;min-width:48px;height:30px;padding:0 8px;background:' + dateBg + ';color:' + dateColor + ';border-radius:8px;font-size:13px;font-weight:800;flex-shrink:0;">' + escHtml(fmtMd(dateRaw)) + '</span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+          '<span style="font-size:14px;font-weight:700;color:var(--text);">' + escHtml(name) + '</span>' +
+          '<span style="font-size:10px;color:#666;background:#eef0f8;padding:1px 7px;border-radius:8px;font-weight:700;">№' + escHtml(String(sn)) + '</span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text-light);margin-top:3px;line-height:1.4;">' +
+          '🏭 ' + escHtml(buka) + (soshiki ? ' / ' + escHtml(soshiki) : '') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  const nyushaRows = nyusha.length === 0
+    ? '<div style="padding:18px;text-align:center;color:var(--text-light);font-size:12px;background:#fff;">該当者なし</div>'
+    : nyusha.map(emp => rowHtml(emp, 'nyusha')).join('');
+  const taishaRows = taisha.length === 0
+    ? '<div style="padding:18px;text-align:center;color:var(--text-light);font-size:12px;background:#fff;">該当者なし</div>'
+    : taisha.map(emp => rowHtml(emp, 'taisha')).join('');
+
+  const existing = document.getElementById('astiNyutaiOverlay');
+  if (existing) existing.remove();
+
+  const ov = document.createElement('div');
+  ov.id = 'astiNyutaiOverlay';
+  ov.className = 'confirm-overlay';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:94vw;width:560px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">' +
+      '<div style="padding:14px 16px;background:linear-gradient(135deg,#ff7043,#e64a19);color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+        '<div style="font-size:22px;">🏭</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:11px;opacity:0.9;">ASTI 入退社 (浜松・都田・掛川)</div>' +
+          '<div style="font-size:15px;font-weight:800;">' + escHtml(periodLabel) + '</div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'astiNyutaiOverlay\').remove()" style="background:rgba(255,255,255,0.22);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0;">×</button>' +
+      '</div>' +
+      '<div style="padding:6px 14px 4px;background:#fafafa;font-size:10px;color:#777;border-bottom:1px solid #eee;flex-shrink:0;">' +
+        '入社日 / 派遣先退社日 が選択期間内の社員を表示。タップで社員詳細へ移動。' +
+      '</div>' +
+      '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' +
+        '<div style="padding:8px 14px 6px;background:#e8f5e9;font-size:12px;font-weight:800;color:#2e7d32;border-bottom:2px solid #66bb6a;">🌱 入社 ' + nyusha.length + '名</div>' +
+        nyushaRows +
+        '<div style="padding:10px 14px 6px;background:#ffebee;font-size:12px;font-weight:800;color:#c62828;border-top:6px solid #fafafa;border-bottom:2px solid #ef5350;margin-top:4px;">🏁 退社 (派遣先退社日) ' + taisha.length + '名</div>' +
+        taishaRows +
+      '</div>' +
+      '<div style="padding:8px 14px;background:#f5f5f5;border-top:1px solid #e0e0e0;font-size:10px;color:#777;text-align:center;flex-shrink:0;">' +
+        '計 ' + (nyusha.length + taisha.length) + ' 件 (入社 ' + nyusha.length + ' / 退社 ' + taisha.length + ')' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
 }
 
 async function loadNyutaiScreen() {
