@@ -10053,9 +10053,210 @@ function openEmpDetailFromSoumuList(idx) {
   var list = window._koyouDlList || [];
   if (!list[idx]) return;
   var emp = list[idx];
+  // 社保加入の場合は List9 アイテムなので、社員番号で実 emp を引く
+  if (window._koyouDlMode === 'shaho-kanyuu') {
+    var SF = _soumuShahoInFields || {};
+    var bango = SF.bango ? (emp[SF.bango] || '') : '';
+    if (_soumuAllEmps && F.syainNo && bango) {
+      for (var i = 0; i < _soumuAllEmps.length; i++) {
+        if (String(_soumuAllEmps[i][F.syainNo]) === String(bango)) { emp = _soumuAllEmps[i]; break; }
+      }
+    }
+  }
   var ov = document.getElementById('soumuListOverlay');
   if (ov) ov.remove();
   if (typeof selectEmployee === 'function') selectEmployee(emp);
+}
+
+// 総務系オーバーレイ → エクセル項目プレビュー (mode: koyou-kanyuu/koyou-soushitsu/shaho-kanyuu/shaho-soushitsu)
+function openExcelPreviewFromSoumuList(idx) {
+  var mode = window._koyouDlMode || 'koyou-kanyuu';
+  var list = window._koyouDlList || [];
+  if (!list[idx]) return;
+  var record = list[idx];
+
+  var km = _soumuKeyMap || {};
+  function get(emp, k) { var key = km[k]; return (key && emp && emp[key] !== null && emp[key] !== undefined) ? emp[key] : ''; }
+  function fmtDate(v) { if (!v) return ''; var d = new Date(v); if (isNaN(d.getTime())) return String(v); return d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0'); }
+  function toWareki(v) {
+    if (!v) return ''; var d = new Date(v); if (isNaN(d.getTime())) return String(v);
+    var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate(); var gengo, gy;
+    if (y > 2019 || (y === 2019 && (m > 5 || (m === 5 && day >= 1)))) { gengo = '令和'; gy = y - 2018; }
+    else if (y > 1989 || (y === 1989 && (m > 1 || (m === 1 && day >= 8)))) { gengo = '平成'; gy = y - 1988; }
+    else if (y > 1926 || (y === 1926 && (m > 12 || (m === 12 && day >= 25)))) { gengo = '昭和'; gy = y - 1925; }
+    else if (y > 1912 || (y === 1912 && (m > 7 || (m === 7 && day >= 30)))) { gengo = '大正'; gy = y - 1911; }
+    else { gengo = '明治'; gy = y - 1867; }
+    return gengo + (gy === 1 ? '元' : gy) + '年' + m + '月' + day + '日';
+  }
+  function shutokuKubun(emp) { var v = String(get(emp, 'zaiyokuSyubetu') || ''); if (v.indexOf('新規') >= 0 && v.indexOf('在職') >= 0) return '1'; if (v.indexOf('再入') >= 0 && v.indexOf('在職') >= 0) return '2'; return 'エラー'; }
+  function sexCode(emp) { var v = String(get(emp, 'sex') || '').trim(); if (v.indexOf('男') >= 0) return '1'; if (v.indexOf('女') >= 0) return '2'; return ''; }
+  function wageThousand(emp) { var raw = String(get(emp, 'kyuyoTaikei') || '').replace(/[,\s]/g, ''); var hourly = parseFloat(raw); if (!hourly || isNaN(hourly)) return ''; return String(Math.round(hourly * 8 * 19 / 1000)); }
+  function wageFormula(emp) { var raw = String(get(emp, 'kyuyoTaikei') || '').replace(/[,\s]/g, ''); var hourly = parseFloat(raw); if (hourly && !isNaN(hourly)) return Math.round(hourly * 19) + ' × 定時間'; return '時給×19×定時間'; }
+  function soushitsuReason(emp) { var v = String(get(emp, 'taisyokuRiyuu') || '').trim(); if (!v) return 'エラー'; if (v.indexOf('自己都合') >= 0) return '3'; return '2'; }
+
+  // mode に応じて emp と pairs を構築
+  var emp = null, bango = '', name = '', headerColor = '#1e88e5', headerLabel = '雇用保険 加入', headerIcon = '📋';
+  var pairs = [];
+
+  if (mode === 'shaho-kanyuu') {
+    var SF = _soumuShahoInFields || {};
+    bango = SF.bango ? (record[SF.bango] || '') : '';
+    name = (SF.name && record[SF.name]) || record.Title || '';
+    if (_soumuAllEmps && F.syainNo && bango) {
+      for (var i = 0; i < _soumuAllEmps.length; i++) {
+        if (String(_soumuAllEmps[i][F.syainNo]) === String(bango)) { emp = _soumuAllEmps[i]; break; }
+      }
+    }
+    headerColor = '#e53935'; headerLabel = '社会保険 加入'; headerIcon = '🏥';
+    var kanyuubiStr = SF.kanyuubi ? fmtDate(record[SF.kanyuubi]) : '';
+    var addr = String(get(emp, 'address') || '');
+    var addrKana = (typeof toKatakana === 'function') ? toKatakana(addr) : addr;
+    pairs = [
+      ['社員番号', String(bango || '')],
+      ['氏名', String(name || '')],
+      ['被保険者氏名（口座名義）', String(get(emp, 'bankMeigi') || '')],
+      ['生年月日（和暦）', toWareki(get(emp, 'birthday'))],
+      ['電話番号', String(get(emp, 'keitai') || '')],
+      ['種別', sexCode(emp)],
+      ['取得区分', '1'],
+      ['個人番号（社員フォルダ）', '📂 社員フォルダ'],
+      ['資格取得年月日', kanyuubiStr || fmtDate(get(emp, 'shahoKanyuubi'))],
+      ['被扶養者の有無', '選択して'],
+      ['報酬月額', wageFormula(emp)],
+      ['郵便番号', String(get(emp, 'yubin') || '')],
+      ['被保険者住所', addr],
+      ['住所（カナ）', addrKana],
+      ['資格確認書発行要否', '1発行が必要']
+    ];
+  } else {
+    emp = record;
+    bango = emp[F.syainNo] || '';
+    name = emp.Title || '';
+    if (mode === 'koyou-kanyuu') {
+      headerColor = '#1e88e5'; headerLabel = '雇用保険 加入'; headerIcon = '📋';
+      var nyushaStr = fmtDate(emp[F.nyushaDate]);
+      pairs = [
+        ['社員番号', String(emp[F.syainNo] || '')],
+        ['氏名', String(emp.Title || '')],
+        ['派遣先', (typeof getHakensaki === 'function' ? (getHakensaki(emp) || '') : '')],
+        ['Koyou Name', String(get(emp, 'koyouName') || '')],
+        ['雇用保険被保険者番号', String(get(emp, 'koyouNo') || '')],
+        ['取得区分', shutokuKubun(emp)],
+        ['性別', sexCode(emp)],
+        ['生年月日（和暦）', toWareki(get(emp, 'birthday'))],
+        ['郵便番号', String(get(emp, 'yubin') || '')],
+        ['住所', String(get(emp, 'address') || '')],
+        ['電話番号', String(get(emp, 'keitai') || '')],
+        ['資格取得年月日', nyushaStr],
+        ['被保険者となったことの原因', '2'],
+        ['賃金（支払の態様）', '4'],
+        ['賃金月額（千円）', wageThousand(emp)],
+        ['雇用形態', '2 (派遣)'],
+        ['職種', '08'],
+        ['就職経路', '4'],
+        ['1週間の所定労働時間', '派遣先定時間×5'],
+        ['期間の定め', '有'],
+        ['契約期間', nyushaStr + ' ～ (雇用契約書を確認)'],
+        ['更新の有無', '有'],
+        ['あて先', '総務部'],
+        ['被保険者氏名（ローマ字）', String(get(emp, 'tokki1') || '')],
+        ['国籍', String(get(emp, 'nationality') || '')],
+        ['在留資格', String(get(emp, 'zairyuShikaku') || '')],
+        ['在留期間', fmtDate(get(emp, 'zairyuKigen'))],
+        ['資格外活動許可の有無', '無'],
+        ['在留カード番号', String(get(emp, 'zairyuBikou') || '')],
+        ['派遣・請負就労区分', '該当']
+      ];
+    } else if (mode === 'koyou-soushitsu') {
+      headerColor = '#fb8c00'; headerLabel = '雇用保険 喪失'; headerIcon = '📤';
+      var nyushaStr2 = fmtDate(emp[F.nyushaDate]);
+      var taishaStr = fmtDate(emp[F.yukyuTaisha]) || fmtDate(emp[F.hakenTaisha]);
+      pairs = [
+        ['社員番号', String(emp[F.syainNo] || '')],
+        ['氏名', String(emp.Title || '')],
+        ['雇用保険被保険者番号', String(get(emp, 'koyouNo') || '')],
+        ['雇用保険名前', String(get(emp, 'koyouName') || '')],
+        ['性別', sexCode(emp)],
+        ['生年月日（和暦）', toWareki(get(emp, 'birthday'))],
+        ['郵便番号', String(get(emp, 'yubin') || '')],
+        ['住所', String(get(emp, 'address') || '')],
+        ['電話番号', String(get(emp, 'keitai') || '')],
+        ['資格取得年月日', nyushaStr2],
+        ['離職等年月日', taishaStr],
+        ['喪失原因', soushitsuReason(emp)],
+        ['離職票交付希望', '無'],
+        ['補充採用の有無', '無'],
+        ['1週間の所定労働時間', '派遣先定時間×5'],
+        ['あて先', '総務部'],
+        ['被保険者でなくなった原因', String(get(emp, 'taisyokuRiyuu') || '')],
+        ['被保険者氏名（ローマ字）', String(get(emp, 'tokki1') || '')],
+        ['国籍', String(get(emp, 'nationality') || '')],
+        ['在留資格', String(get(emp, 'zairyuShikaku') || '')],
+        ['在留期間', fmtDate(get(emp, 'zairyuKigen'))],
+        ['資格外活動許可の有無', '無'],
+        ['在留カード番号', String(get(emp, 'zairyuBikou') || '')],
+        ['派遣・請負就労区分', '該当']
+      ];
+    } else if (mode === 'shaho-soushitsu') {
+      headerColor = '#c62828'; headerLabel = '社会保険 喪失'; headerIcon = '🏥';
+      var shahoSoushitsuStr = fmtDate(get(emp, 'shahoSoushitsu'));
+      var taishaStr2 = fmtDate(emp[F.yukyuTaisha]) || fmtDate(emp[F.hakenTaisha]);
+      pairs = [
+        ['社員番号', String(emp[F.syainNo] || '')],
+        ['氏名', String(emp.Title || '')],
+        ['整理番号', String(get(emp, 'seiriNo') || '')],
+        ['被保険者氏名（社員ファイル）', String(emp.Title || '')],
+        ['生年月日（和暦）', toWareki(get(emp, 'birthday'))],
+        ['郵便番号', String(get(emp, 'yubin') || '')],
+        ['住所', String(get(emp, 'address') || '')],
+        ['電話番号', String(get(emp, 'keitai') || '')],
+        ['個人番号（社員フォルダ）', '📂 社員フォルダ'],
+        ['喪失年月日', shahoSoushitsuStr],
+        ['喪失原因', '4'],
+        ['退職年月日', taishaStr2],
+        ['資格確認書回収', '枚数を入力して']
+      ];
+    }
+  }
+
+  // 行HTML 構築
+  var rowsHtml = pairs.map(function(p, i) {
+    var label = p[0], val = p[1];
+    var isEmpty = (val === null || val === undefined || val === '');
+    var bg = (i % 2 === 0) ? '#fff' : '#f9f9fc';
+    return '<div style="display:flex;gap:10px;padding:8px 14px;background:' + bg + ';border-bottom:1px solid #f0f0f5;font-size:12px;align-items:flex-start;">' +
+      '<div style="color:var(--text-light);min-width:130px;flex-shrink:0;font-weight:600;">' + escHtml(label) + '</div>' +
+      '<div style="flex:1;min-width:0;color:' + (isEmpty ? '#bbb' : 'var(--text)') + ';word-break:break-all;">' + (isEmpty ? '—' : escHtml(String(val))) + '</div>' +
+      '</div>';
+  }).join('');
+
+  // モーダル生成
+  var existing = document.getElementById('excelPreviewOverlay');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'excelPreviewOverlay';
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '10001';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:94vw;width:520px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">' +
+      '<div style="padding:14px 16px;background:' + headerColor + ';color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+        '<div style="font-size:22px;">' + headerIcon + '</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:11px;opacity:0.85;">' + escHtml(headerLabel) + ' / Excel項目</div>' +
+          '<div style="font-size:15px;font-weight:800;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(name) + ' <span style="font-size:11px;opacity:0.85;font-weight:600;">(No.' + escHtml(String(bango)) + ')</span></div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'excelPreviewOverlay\').remove()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0;">×</button>' +
+      '</div>' +
+      '<div style="padding:6px 14px 4px;background:#fafafa;font-size:10px;color:#777;border-bottom:1px solid #eee;flex-shrink:0;">' +
+        'エクセルでダウンロードする項目をそのまま表示しています。空欄(—)はExcelでも空欄になります。' +
+      '</div>' +
+      '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + rowsHtml + '</div>' +
+      '<div style="padding:8px 14px;background:#f5f5f5;border-top:1px solid #e0e0e0;font-size:10px;color:#777;text-align:center;flex-shrink:0;">' +
+        '計 ' + pairs.length + ' 項目' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
 }
 
 function openKoyouKanyuuDownloadList() {
@@ -10107,6 +10308,7 @@ function renderKoyouKanyuuDownloadOverlay(list) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (nyusha) itemsHtml += '<div style="font-size:11px;color:#1976d2;margin-top:1px;">入社日: ' + escHtml(nyusha) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openExcelPreviewFromSoumuList(' + i + ')" title="Excel項目を確認" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#26a69a,#00796b);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(0,121,107,0.3);cursor:pointer;">📊</button>';
       itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
@@ -10142,6 +10344,7 @@ function renderKoyouKanyuuDownloadOverlay(list) {
   document.body.appendChild(ov);
   // ダウンロード時に参照するため保持
   window._koyouDlList = list;
+  window._koyouDlMode = 'koyou-kanyuu';
   // チェックボックス変更でカウント更新
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
     cb.addEventListener('change', koyouDlUpdateCount);
@@ -10393,6 +10596,7 @@ function renderKoyouSoushitsuDownloadOverlay(list) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (taishaStr) itemsHtml += '<div style="font-size:11px;color:#c62828;margin-top:1px;">退社日: ' + escHtml(taishaStr) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openExcelPreviewFromSoumuList(' + i + ')" title="Excel項目を確認" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#26a69a,#00796b);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(0,121,107,0.3);cursor:pointer;">📊</button>';
       itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
@@ -10427,6 +10631,7 @@ function renderKoyouSoushitsuDownloadOverlay(list) {
     '</div>';
   document.body.appendChild(ov);
   window._koyouDlList = list;
+  window._koyouDlMode = 'koyou-soushitsu';
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
     cb.addEventListener('change', koyouDlUpdateCount);
   });
@@ -10637,6 +10842,7 @@ function renderShahoKanyuuDownloadOverlay(items) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(bango)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (kStr) itemsHtml += '<div style="font-size:11px;color:#2e7d32;margin-top:1px;">加入日: ' + escHtml(kStr) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openExcelPreviewFromSoumuList(' + i + ')" title="Excel項目を確認" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#26a69a,#00796b);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(0,121,107,0.3);cursor:pointer;">📊</button>';
       itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
@@ -10671,6 +10877,7 @@ function renderShahoKanyuuDownloadOverlay(items) {
     '</div>';
   document.body.appendChild(ov);
   window._koyouDlList = items;
+  window._koyouDlMode = 'shaho-kanyuu';
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
     cb.addEventListener('change', koyouDlUpdateCount);
   });
@@ -10893,6 +11100,7 @@ function renderShahoSoushitsuDownloadOverlay(list) {
       itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(no)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
       if (taishaStr) itemsHtml += '<div style="font-size:11px;color:#c62828;margin-top:1px;">退社日: ' + escHtml(taishaStr) + '</div>';
       itemsHtml +=   '</div>';
+      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openExcelPreviewFromSoumuList(' + i + ')" title="Excel項目を確認" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#26a69a,#00796b);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(0,121,107,0.3);cursor:pointer;">📊</button>';
       itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
       if (folderUrl) {
         itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
@@ -10927,6 +11135,7 @@ function renderShahoSoushitsuDownloadOverlay(list) {
     '</div>';
   document.body.appendChild(ov);
   window._koyouDlList = list;
+  window._koyouDlMode = 'shaho-soushitsu';
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
     cb.addEventListener('change', koyouDlUpdateCount);
   });
