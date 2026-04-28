@@ -23188,14 +23188,22 @@ function applyVehicleFilter() {
     return true;
   });
 
-  // 車検満了日が近い順にソート（日付なしは末尾）
+  // 「直近の点検日」(1年点検 if future, else 車検) が近い順にソート
+  var _todayMs = new Date(); _todayMs.setHours(0,0,0,0); _todayMs = _todayMs.getTime();
+  function _vehicleNextInspMs(s) {
+    if (!s) return Infinity;
+    var d = new Date(s);
+    if (isNaN(d)) return Infinity;
+    var nen = new Date(d); nen.setFullYear(nen.getFullYear() - 1);
+    return nen.getTime() >= _todayMs ? nen.getTime() : d.getTime();
+  }
   filtered.sort(function(a, b) {
     var da = vf.syaken ? (a[vf.syaken] || '') : '';
     var db = vf.syaken ? (b[vf.syaken] || '') : '';
     if (!da && !db) return 0;
     if (!da) return 1;
     if (!db) return -1;
-    return da < db ? -1 : da > db ? 1 : 0;
+    return _vehicleNextInspMs(da) - _vehicleNextInspMs(db);
   });
 
   document.getElementById('vehicleListCount').textContent = filtered.length + '台';
@@ -23221,9 +23229,29 @@ function renderVehicleCards(items) {
     var usage = vf.usage ? (item[vf.usage] || '') : '';
 
     var syakenDate = syaken ? new Date(syaken) : null;
-    var syakenStr = syakenDate && !isNaN(syakenDate) ? syakenDate.toLocaleDateString('ja-JP') : '';
-    var daysLeft = syakenDate ? Math.ceil((syakenDate - today) / 86400000) : 999;
-    var syakenColor = daysLeft <= 30 ? '#c62828' : daysLeft <= 90 ? '#f57c00' : 'var(--text-light)';
+    // 「直近の点検日」を判定: 1年点検(車検-1年) が未来なら 1年点検 / さもなくば 車検
+    var todayDate0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    var displayType = 'syaken', displayDate = syakenDate;
+    if (syakenDate && !isNaN(syakenDate)) {
+      var nenDate = new Date(syakenDate);
+      nenDate.setFullYear(nenDate.getFullYear() - 1);
+      if (nenDate >= todayDate0) { displayType = 'nen'; displayDate = nenDate; }
+    }
+    var displayStr = displayDate && !isNaN(displayDate) ? displayDate.toLocaleDateString('ja-JP') : '';
+    var daysLeft = displayDate && !isNaN(displayDate) ? Math.ceil((displayDate - todayDate0) / 86400000) : 999;
+    // チップの色定義（車検=赤系/1年点検=青系で見分け）
+    var chipBg, chipFg, chipBorder, chipIcon, chipLabel;
+    if (displayType === 'syaken') {
+      chipIcon = '🔧'; chipLabel = '車検';
+      if (daysLeft <= 30) { chipBg = '#ffebee'; chipFg = '#c62828'; chipBorder = '#ef9a9a'; }
+      else if (daysLeft <= 90) { chipBg = '#fff3e0'; chipFg = '#e65100'; chipBorder = '#ffcc80'; }
+      else { chipBg = '#fafafa'; chipFg = '#757575'; chipBorder = '#e0e0e0'; }
+    } else {
+      chipIcon = '🛠️'; chipLabel = '1年点検';
+      if (daysLeft <= 30) { chipBg = '#e3f2fd'; chipFg = '#1565c0'; chipBorder = '#90caf9'; }
+      else if (daysLeft <= 90) { chipBg = '#e1f5fe'; chipFg = '#0277bd'; chipBorder = '#81d4fa'; }
+      else { chipBg = '#e0f7fa'; chipFg = '#00838f'; chipBorder = '#80deea'; }
+    }
 
     html += '<div style="background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--border);cursor:pointer;" onclick="openVehicleDetail(' + origIdx + ')">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
@@ -23234,9 +23262,13 @@ function renderVehicleCards(items) {
     html += '<div>🧑 ' + escHtml(driver) + '</div>';
     html += '<div>' + escHtml(hakensaki) + '</div>';
     html += '</div>';
-    if (syakenStr) {
-      html += '<div style="margin-top:4px;font-size:11px;color:' + syakenColor + ';">車検: ' + syakenStr;
-      if (daysLeft <= 90) html += ' <strong>(' + daysLeft + '日)</strong>';
+    if (displayStr) {
+      html += '<div style="margin-top:6px;">';
+      html += '<span style="display:inline-flex;align-items:center;gap:5px;background:' + chipBg + ';color:' + chipFg + ';padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid ' + chipBorder + ';">';
+      html += chipIcon + ' ' + chipLabel + ': ' + displayStr;
+      if (daysLeft <= 0) html += ' <strong>(期限切れ)</strong>';
+      else if (daysLeft <= 90) html += ' <strong>(' + daysLeft + '日)</strong>';
+      html += '</span>';
       html += '</div>';
     }
     html += '</div>';
