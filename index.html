@@ -342,7 +342,7 @@ body {
 .haken-table tr:nth-child(even) { background: #fafafe; }
 .haken-dl-btn { background: #388e3c; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .haken-dl-btn:active { background: #2e7d32; }
-.haken-sankyu-btn { background: linear-gradient(135deg,#ec407a,#d81b60); color:#fff; border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(216,27,96,0.25); }
+.haken-sankyu-btn { background: linear-gradient(135deg,#ec407a,#d81b60); color:#fff; border:1px solid #d81b60; border-radius:16px; padding:6px 12px; font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(216,27,96,0.2); }
 .haken-sankyu-btn:active { background: linear-gradient(135deg,#d81b60,#c2185b); }
 /* Edit mode styles */
 .edit-btn { background:none; border:1px solid var(--primary-light); color:var(--primary); border-radius:6px; padding:2px 10px; font-size:11px; cursor:pointer; font-weight:600; display:none; }
@@ -27642,14 +27642,55 @@ function renderHakenList(hakensaki, employees) {
 
   filterDiv.innerHTML =
     '<button class="haken-filter-btn active" data-filter="all" onclick="applyHakenFilter(\'all\',this)">全員 (' + employees.length + ')</button>' +
+    '<button class="haken-sankyu-btn" id="hakenSankyuBtn" onclick="openSankyuFromHaken()">🌸 産休育休 (<span id="hakenSankyuCount">…</span>)</button>' +
     '<button class="haken-filter-btn" data-filter="sougei" onclick="applyHakenFilter(\'sougei\',this)">🚐 送迎 (' + countSougei + ')</button>' +
     '<button class="haken-filter-btn" data-filter="other" onclick="applyHakenFilter(\'other\',this)">🚗 送迎以外 (' + countOther + ')</button>' +
     '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
-    '<button class="haken-sankyu-btn" onclick="openSankyuFromHaken()" style="margin-left:auto;">🌸 産休育休</button>' +
-    '<button class="haken-dl-btn" onclick="downloadHakenExcel()">📥 Excel</button>' +
+    '<button class="haken-dl-btn" onclick="downloadHakenExcel()" style="margin-left:auto;">📥 Excel</button>' +
     '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
 
   renderHakenTable(employees, body);
+  // 産休育休バッジを非同期更新（List52取得が必要な場合あり）
+  updateHakenSankyuCount();
+}
+
+// 派遣先社員一覧の「🌸 産休育休 (N)」バッジを更新
+async function updateHakenSankyuCount() {
+  var el = document.getElementById('hakenSankyuCount');
+  if (!el) return;
+  try {
+    // 産休育休データ未取得なら取得
+    if (!_sankyuItems) {
+      var results = await Promise.all([fetchSankyuFields(), fetchSankyuItems()]);
+      _sankyuFieldsMeta = results[0];
+      _sankyuItems = results[1] || [];
+    }
+    var hakenName = '';
+    if (hakenMultiSelected && hakenMultiSelected.length > 0) {
+      hakenName = stripBukaPrefix(hakenMultiSelected[0]);
+    }
+    var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+    var kBirth  = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+    var kYotei  = sankyuKeyByTitle('出産予定日');
+    var kHakensaki = sankyuKeyByTitle('派遣先') || 'Title';
+    var q = hakenName.toLowerCase();
+    var count = 0;
+    _sankyuItems.forEach(function(it) {
+      var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
+      if (cat === 'owari') return;  // 休業終了は除外
+      if (q) {
+        var hk = String(it[kHakensaki] || '').toLowerCase();
+        if (hk.indexOf(q) < 0) return;
+      }
+      count++;
+    });
+    var el2 = document.getElementById('hakenSankyuCount');
+    if (el2) el2.textContent = String(count);
+  } catch (e) {
+    console.warn('updateHakenSankyuCount error:', e);
+    var el3 = document.getElementById('hakenSankyuCount');
+    if (el3) el3.textContent = '?';
+  }
 }
 
 function applyHakenFilter(filter, btn) {
