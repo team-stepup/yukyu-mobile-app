@@ -27992,7 +27992,8 @@ async function updateHakenSankyuCount() {
     var kBirth  = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
     var kYotei  = sankyuKeyByTitle('出産予定日');
     // ユニーク社員番号でカウント（同一社員の複数レコードを1名扱いに）
-    // 全員(69) - 産休育休(N) = 実働者数 を算出するための「派遣先で管理対象の産休育休経験者」人数
+    // 休業終了 (owari) は除外: active(産前産後 + 育児休業中) のみが「産休育休中」としてカウント対象
+    // バッジカウント＝実働者から除外する人数 を一致させる
     var bangoCounted = {};
     var matchedRows = [];
     var unmatchedRows = [];
@@ -28004,7 +28005,7 @@ async function updateHakenSankyuCount() {
       var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
       var entry = '社員番号=' + bStr + ' 氏名=' + nmVal + ' カテゴリ=' + cat + ' 派遣先列=' + hkVal;
       if (bStr && bangoSet[bStr]) {
-        bangoCounted[bStr] = 1;
+        if (cat !== 'owari') bangoCounted[bStr] = 1;  // 休業終了は除外
         matchedRows.push(entry);
       } else {
         unmatchedRows.push(entry);
