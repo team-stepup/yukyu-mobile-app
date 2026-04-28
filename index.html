@@ -6148,6 +6148,8 @@ async function searchEmployee() {
   }
 
   showSpinner();
+  let isRomajiSearch = false;
+  let romajiODataKey = null;
   try {
     let filter;
     const dateQ = parseDateQuery(query);
@@ -6169,6 +6171,25 @@ async function searchEmployee() {
     } else if (/^\d+$/.test(query)) {
       // Number only → search by employee number
       filter = "$filter=" + F.syainNo + " eq " + query + "&$top=10";
+    } else if (/^[a-zA-Z][a-zA-Z\s'.\-]*$/.test(query)) {
+      // ローマ字検索 (特記事項１ = 在留カードのローマ字氏名 を含む)
+      isRomajiSearch = true;
+      try { await fetchEmployeeFields(); } catch (_) {}
+      var tokki1Internal = null;
+      if (employeeFieldsCache) {
+        for (var fk in employeeFieldsCache) {
+          if (employeeFieldsCache[fk] && employeeFieldsCache[fk].title === '特記事項１') { tokki1Internal = fk; break; }
+        }
+      }
+      var qUpper = query.toUpperCase().replace(/'/g, "''");
+      var qOrig = query.replace(/'/g, "''");
+      if (tokki1Internal) {
+        romajiODataKey = tokki1Internal.startsWith('_') ? 'OData_' + tokki1Internal : tokki1Internal;
+        filter = "$filter=substringof('" + qUpper + "'," + romajiODataKey + ") or substringof('" + qOrig + "',Title)&$top=30";
+      } else {
+        // フィールド未解決時は Title のみ
+        filter = "$filter=substringof('" + qOrig + "',Title)&$top=30";
+      }
     } else {
       // Text → ひらがな/カタカナ/原文 のすべてで Title を部分一致検索
       var qOrig = query.replace(/'/g, "''");
@@ -6215,6 +6236,14 @@ async function searchEmployee() {
       const nameEsc = escHtml(emp.Title || '');
       const empJson = JSON.stringify(emp).replace(/'/g, "&#39;");
       const tenureHtml = tenure ? ' <span style="color:' + (resigned ? '#888' : '#2e7d32') + ';font-weight:700;">(' + escHtml(tenure) + ')</span>' : '';
+      // ローマ字検索時は特記事項１(在留カードローマ字氏名)を表示
+      let romajiChipHtml = '';
+      if (isRomajiSearch && romajiODataKey) {
+        const rj = emp[romajiODataKey] || '';
+        if (rj) {
+          romajiChipHtml = '<div style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:1px solid #ffcc80;border-radius:8px;padding:2px 9px;font-size:11px;font-weight:700;color:#e65100;margin-bottom:6px;letter-spacing:0.5px;">📋 ' + escHtml(rj) + '</div>';
+        }
+      }
       return `
         <div class="card card-clickable" style="position:relative;padding-right:28px;${resignedStyle}" onclick='selectEmployee(${empJson})'>
           <span style="position:absolute;top:14px;right:12px;color:var(--primary);font-size:22px;line-height:1;">&#8250;</span>
@@ -6223,6 +6252,7 @@ async function searchEmployee() {
             ${resigned ? '<span class="resigned-badge">退社</span>' : ''}
             <span style="display:inline-flex;align-items:center;padding:2px 9px;background:#eef0f8;border-radius:10px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.3px;">№ ${escHtml(String(syainNo))}</span>
           </div>
+          ${romajiChipHtml}
           ${hakensaki ? '<div style="display:inline-flex;align-items:center;gap:4px;background:rgba(98,100,167,0.1);border:1px solid rgba(98,100,167,0.2);border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600;color:var(--primary);margin-bottom:6px;">🏭 ' + escHtml(hakensaki) + '</div>' : ''}
           <div style="display:flex;gap:4px 14px;font-size:12px;color:var(--text-light);flex-wrap:wrap;align-items:center;line-height:1.5;">
             <span>📅 入社 ${formatDate(nyushaRaw)}${tenureHtml}</span>
@@ -7669,11 +7699,18 @@ async function loadHomeBadges() {
   // 期限注意バッジ
   var keyMap = meta && Object.keys(meta).length > 0 ? buildFieldKeyMap(meta) : {};
 
-  // データ不整合チェック (法的整合性アラート)
+  // データ不整合チェック (法的整合性アラート) — 退社後6ヶ月以上経過は「過去」として除外
   try {
     var integrityList = [];
+    var integrityCutoff = new Date();
+    integrityCutoff.setMonth(integrityCutoff.getMonth() - 6);
     allEmps.forEach(function(emp) {
       if (!emp || !emp.Title) return;
+      var retireRaw = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+      if (retireRaw) {
+        var rd = new Date(retireRaw);
+        if (!isNaN(rd) && rd < integrityCutoff) return;  // 6ヶ月超 過去は非表示
+      }
       var issues = _checkEmpIntegrity(emp, keyMap);
       if (issues.length > 0) integrityList.push({ emp: emp, issues: issues });
     });
