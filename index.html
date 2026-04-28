@@ -4791,6 +4791,7 @@ select.sankyu-edit-input {
     <div class="sankyu-search-wrap">
       <input type="text" id="sankyuSearchInput" placeholder="氏名・社員番号・派遣先で検索" oninput="renderSankyuList()">
     </div>
+    <div id="sankyuBangoFilterBanner" style="display:none;"></div>
     <div class="sankyu-chips" id="sankyuChips"></div>
     <div id="sankyuListBody"></div>
   </div>
@@ -12269,6 +12270,7 @@ var SANKYU_LIST_PATH = '/sites/PowerApps/Lists/List52';
 var _sankyuFieldsMeta = null;     // { internalName: { title, type, entityPropertyName, choices } }
 var _sankyuItems = null;          // raw items from List52
 var _sankyuCurrentFilter = 'all'; // all | sango | ikuji | kyugyo | owari
+var _sankyuBangoFilter = null;    // { bangoSet: {bango: 1}, label: '派遣先名' } or null（派遣先一覧経由の絞り込み）
 var _sankyuEditMode = false;      // true なら詳細画面が編集モード
 var _sankyuCurrentItem = null;    // 現在表示中の item
 var _sankyuNewMode = false;       // true なら新規追加モード (POST)
@@ -12505,6 +12507,8 @@ function sankyuKeyByTitle(query, exact) {
 }
 
 function openSankyuScreen() {
+  // メニュー経由は派遣先絞り込みをクリアして全件表示
+  _sankyuBangoFilter = null;
   switchScreen('sankyuScreen');
   var body = document.getElementById('sankyuListBody');
   if (body && (!_sankyuItems || _sankyuItems.length === 0)) {
@@ -12558,9 +12562,37 @@ function renderSankyuList() {
   var kYotei = sankyuKeyByTitle('出産予定日');
   var kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
 
-  // チップ集計 (item 単位のカテゴリで kyugyo→sango/ikuji へ振り分け)
-  var counts = { all: _sankyuItems.length, sango: 0, ikuji: 0, owari: 0 };
-  _sankyuItems.forEach(function(it) {
+  // 外部フィルタ（派遣先絞り込み）を適用 → pool
+  var pool = _sankyuItems;
+  if (_sankyuBangoFilter && _sankyuBangoFilter.bangoSet) {
+    var bs = _sankyuBangoFilter.bangoSet;
+    pool = _sankyuItems.filter(function(it) {
+      var b = it[kSyainNo];
+      if (b === null || b === undefined || b === '') return false;
+      return !!bs[String(b).trim()];
+    });
+  }
+
+  // 派遣先絞り込みバナー
+  var bannerEl = document.getElementById('sankyuBangoFilterBanner');
+  if (bannerEl) {
+    if (_sankyuBangoFilter) {
+      bannerEl.style.display = 'block';
+      bannerEl.innerHTML =
+        '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:linear-gradient(135deg,#f3e5f5,#e1bee7);color:#4a148c;border-radius:10px;margin-bottom:8px;font-size:12px;font-weight:600;border:1px solid #ce93d8;">' +
+          '<span style="font-size:14px;">🏭</span>' +
+          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">派遣先「' + escHtml(_sankyuBangoFilter.label || '') + '」で絞り込み中 (' + pool.length + '名)</span>' +
+          '<button onclick="clearSankyuBangoFilter()" style="background:rgba(255,255,255,0.7);border:none;width:24px;height:24px;border-radius:50%;font-size:14px;cursor:pointer;color:#4a148c;font-weight:700;line-height:1;flex-shrink:0;">×</button>' +
+        '</div>';
+    } else {
+      bannerEl.style.display = 'none';
+      bannerEl.innerHTML = '';
+    }
+  }
+
+  // チップ集計 (pool ベース)
+  var counts = { all: pool.length, sango: 0, ikuji: 0, owari: 0 };
+  pool.forEach(function(it) {
     var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
     counts[cat] = (counts[cat] || 0) + 1;
   });
@@ -12586,8 +12618,8 @@ function renderSankyuList() {
   var qEl = document.getElementById('sankyuSearchInput');
   if (qEl) q = (qEl.value || '').trim().toLowerCase();
 
-  // フィルタ
-  var filtered = _sankyuItems.filter(function(it) {
+  // フィルタ (pool ベース)
+  var filtered = pool.filter(function(it) {
     var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
     if (_sankyuCurrentFilter !== 'all' && _sankyuCurrentFilter !== cat) return false;
     if (q) {
@@ -12599,7 +12631,7 @@ function renderSankyuList() {
     return true;
   });
 
-  if (countLabel) countLabel.textContent = '(' + filtered.length + ' / ' + _sankyuItems.length + '名)';
+  if (countLabel) countLabel.textContent = '(' + filtered.length + ' / ' + pool.length + '名)';
 
   // 並べ替え:
   //  1) 休業終了 (owari) は必ず末尾
@@ -27545,15 +27577,24 @@ function getHakenDisplayTitle(bukaList) {
   return bukaList.slice(0, 2).join(' / ') + ' 他' + (bukaList.length - 2) + '件';
 }
 
-// 派遣先社員一覧 → 産休育休一覧 (派遣先名で検索プリフィル)
+// 派遣先社員一覧 → 産休育休一覧 (社員番号セットで絞り込み)
 async function openSankyuFromHaken() {
-  var name = '';
+  // 派遣先の社員番号セットを構築
+  var bangoSet = {};
+  (hakenEmployeesCache || []).forEach(function(emp) {
+    var b = emp[F.syainNo];
+    if (b !== null && b !== undefined && b !== '') bangoSet[String(b).trim()] = 1;
+  });
+  var label = '';
   if (hakenMultiSelected && hakenMultiSelected.length > 0) {
-    name = stripBukaPrefix(hakenMultiSelected[0]);
+    label = stripBukaPrefix(hakenMultiSelected[0]);
+    if (hakenMultiSelected.length > 1) label += ' 他' + (hakenMultiSelected.length - 1) + '件';
   }
-  switchScreen('sankyuScreen');
+  _sankyuBangoFilter = { bangoSet: bangoSet, label: label };
+  _sankyuCurrentFilter = 'all';
   var input = document.getElementById('sankyuSearchInput');
-  if (input) input.value = name;
+  if (input) input.value = '';
+  switchScreen('sankyuScreen');
   if (!_sankyuItems) {
     var body = document.getElementById('sankyuListBody');
     if (body) body.innerHTML = '<div class="sankyu-empty"><div class="sankyu-empty-icon">🌸</div><div style="font-size:13px;">読み込み中…</div></div>';
@@ -27561,6 +27602,12 @@ async function openSankyuFromHaken() {
   } else {
     renderSankyuList();
   }
+}
+
+// 派遣先絞り込みを解除
+function clearSankyuBangoFilter() {
+  _sankyuBangoFilter = null;
+  renderSankyuList();
 }
 
 async function openHakenList() {
