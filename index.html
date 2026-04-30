@@ -24738,7 +24738,20 @@ function _renderRepairPdfPreview() {
   if (!body) return;
   var records = _repairPdfRecords || [];
   if (records.length === 0) {
-    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);font-size:13px;">レコードを抽出できませんでした。<br>PDFのフォーマットが対応外の可能性があります。</div>';
+    var rawText = window._repairPdfRawText || '';
+    body.innerHTML =
+      '<div style="text-align:center;padding:20px 14px;color:#c62828;font-size:13px;font-weight:700;">' +
+        '⚠ レコードを自動抽出できませんでした<br>' +
+        '<span style="font-size:11px;color:#888;font-weight:400;">下の抽出テキストを確認し、車両ごとに 📋 修理履歴 ＞ ＋新規 で手動登録してください。</span>' +
+      '</div>' +
+      '<div style="background:#fafafa;border:1px solid #ddd;border-radius:8px;padding:8px 10px;margin-top:10px;">' +
+        '<div style="font-size:11px;font-weight:700;color:#555;margin-bottom:6px;">📄 PDF抽出テキスト (デバッグ用):</div>' +
+        '<textarea readonly style="width:100%;height:240px;font-family:monospace;font-size:11px;border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff;resize:vertical;">' + escHtml(rawText) + '</textarea>' +
+        '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">' +
+          '<button onclick="navigator.clipboard.writeText(window._repairPdfRawText||\'\').then(()=>showToast(\'コピーしました\',\'success\'))" style="padding:6px 12px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">📋 全文コピー</button>' +
+          '<button onclick="document.getElementById(\'repairPdfBulkOverlay\').remove();openRepairPdfBulk();" style="padding:6px 12px;background:#757575;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">🔄 別のPDFで再試行</button>' +
+        '</div>' +
+      '</div>';
     return;
   }
   var html = '<div style="background:#fff3e0;border-left:3px solid #ef6c00;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#e65100;line-height:1.5;">' +
