@@ -19461,17 +19461,24 @@ async function saveEditField(catId, fieldKey) {
     body[internalName] = newVal;
     await spPatchEmployee(emp.Id, body);
     showToast('✓ 保存しました', 'success');
-    // 更新後の社員レコードを再取得して再描画
+    // 更新後の社員レコードを再取得して画面全体を再描画
     const updated = await fetchFullEmployee(emp[F.syainNo]);
     if (updated) {
       currentEmployee = updated;
-      // 開いていたアコーディオン状態を保持
+      // 開いていたアコーディオン状態とスクロール位置を保持
       const openIds = Array.from(document.querySelectorAll('.accordion-section.open')).map(function(el){ return el.id; });
+      const scrollY = window.scrollY;
+      // 上部カード(detailHeader) も含めて全体を再描画
+      await loadLeaveDetails();
+      // プロフィール content の DOM が確実に存在するよう loadEmployeeProfile を明示的に await
       await loadEmployeeProfile();
+      // アコーディオン状態を復元
       openIds.forEach(function(id) {
         const el = document.getElementById(id);
         if (el) el.classList.add('open');
       });
+      // スクロール位置を復元
+      window.scrollTo({ top: scrollY, behavior: 'instant' });
     }
   } catch (e) {
     console.error('Save field error:', e);
@@ -19599,8 +19606,20 @@ async function saveEditSection(catId) {
 
     showToast('保存しました', 'success');
     _editDropdownCache = {}; // 次回編集時に最新値を再取得
-    // Re-render profile
+    // 開いていたアコーディオン状態とスクロール位置を保持
+    const _openIds = Array.from(document.querySelectorAll('.accordion-section.open')).map(function(el){ return el.id; });
+    const _scrollY = window.scrollY;
+    // 上部カード(detailHeader) も含めて全体を再描画
+    await loadLeaveDetails();
+    // プロフィール content の DOM が確実に存在するよう loadEmployeeProfile を明示的に await
     await loadEmployeeProfile();
+    // アコーディオン状態を復元
+    _openIds.forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('open');
+    });
+    // スクロール位置を復元
+    window.scrollTo({ top: _scrollY, behavior: 'instant' });
 
     // 社保加入予定から開いていた場合、社保加入申請詳細を続けて開く
     if (_shahoYoteiOpenedItemId) {
