@@ -24676,7 +24676,32 @@ async function _onRepairPdfFileSelected(input) {
   try {
     await _loadPdfJsLib();
     var text = await _extractPdfText(f);
-    console.log('[RepairPdfBulk] 抽出テキスト:\n' + text);
+    console.log('[RepairPdfBulk] 抽出テキスト(整形後):\n' + text);
+    if (!text || !text.trim()) {
+      var rawJoin = await _extractPdfTextRaw(f);
+      console.log('[RepairPdfBulk] 抽出テキスト(raw fallback):\n' + rawJoin);
+      text = rawJoin;
+    }
+    window._repairPdfRawText = text || '';
+    if (!text || !text.trim()) {
+      if (body) body.innerHTML =
+        '<div style="text-align:center;padding:24px 14px;">' +
+          '<div style="font-size:42px;margin-bottom:10px;">🖼️</div>' +
+          '<div style="font-size:14px;font-weight:800;color:#c62828;margin-bottom:8px;">PDFからテキストを抽出できませんでした</div>' +
+          '<div style="font-size:12px;color:#666;line-height:1.7;text-align:left;background:#fff8e1;border-left:3px solid #f57c00;padding:10px 12px;border-radius:6px;">' +
+            '<strong>原因の可能性:</strong><br>' +
+            '① PDFが <strong>スキャン画像</strong> でテキスト層が無い<br>' +
+            '② PDFのフォントが特殊で抽出不可<br>' +
+            '③ PDFが暗号化されている<br><br>' +
+            '<strong>対処:</strong><br>' +
+            '• 元のPDFを <strong>テキスト形式で再生成</strong> してもらう<br>' +
+            '• 画像PDFの場合は <strong>OCR</strong> でテキスト化してから再アップロード<br>' +
+            '• または車両ごとに 📋 修理履歴 ＞ ＋新規 で手動登録' +
+          '</div>' +
+          '<button onclick="document.getElementById(\'repairPdfBulkOverlay\').remove();openRepairPdfBulk();" style="margin-top:12px;padding:8px 20px;background:#757575;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">🔄 別のPDFで再試行</button>' +
+        '</div>';
+      return;
+    }
     var records = _parseRepairPdfText(text);
     console.log('[RepairPdfBulk] 解析結果:', records);
     if (!_repairPdfVehicles) _repairPdfVehicles = await _loadVehiclesForRepairMatching();
@@ -24687,6 +24712,21 @@ async function _onRepairPdfFileSelected(input) {
     console.error('[RepairPdfBulk] error:', e);
     if (body) body.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;font-size:13px;">⚠ PDF読込失敗: ' + escHtml(e.message) + '</div>';
   }
+}
+
+// フォールバック: ソートなしで items を順番通りに連結
+async function _extractPdfTextRaw(file) {
+  var buf = await file.arrayBuffer();
+  var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  var allText = '';
+  for (var p = 1; p <= pdf.numPages; p++) {
+    var page = await pdf.getPage(p);
+    var content = await page.getTextContent();
+    var items = (content.items || []);
+    var pageText = items.map(function(it) { return it.str || ''; }).join(' ').replace(/\s+/g, ' ').trim();
+    if (pageText) allText += pageText + '\n\n';
+  }
+  return allText;
 }
 
 async function _loadVehiclesForRepairMatching() {
