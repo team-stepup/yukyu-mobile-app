@@ -4822,6 +4822,7 @@ select.sankyu-edit-input {
       <button onclick="switchScreen('vehicleDetailScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;flex:1;">📋 修理履歴</h2>
       <span id="repairHistoryCount" style="font-size:12px;font-weight:700;color:#fff;background:var(--primary);padding:3px 10px;border-radius:12px;"></span>
+      <button onclick="openRepairPdfBulk()" style="padding:6px 10px;border-radius:8px;background:linear-gradient(135deg,#e65100,#ef6c00);color:#fff;border:none;font-weight:700;font-size:11px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15);">📥 PDF</button>
       <button onclick="showRepairAddForm()" style="padding:6px 12px;border-radius:8px;background:linear-gradient(135deg,#2e7d32,#43a047);color:#fff;border:none;font-weight:700;font-size:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15);">＋ 新規</button>
     </div>
     <div style="background:linear-gradient(135deg,var(--primary),#7b8fe8);color:#fff;padding:14px;border-radius:12px;margin-bottom:10px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.08);">
@@ -24411,6 +24412,407 @@ async function submitRepairAdd() {
     hideSpinner();
     console.error('Repair add error:', e);
     showToast('登録失敗: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// 修理履歴 PDF 一括登録 機能
+// 任意の業者の請求書PDFから、伝票単位で List30 にレコードを登録する。
+// PDF.js でテキスト抽出 → 日付/車両plate/小計 を heuristic 解析 →
+// 車両List(_vehicleData) と NO1/NO2 で照合 → プレビューで編集 → bulk POST
+// ============================================================
+var _repairPdfRecords = [];
+var _repairPdfVehicles = null;
+
+async function openRepairPdfBulk() {
+  var existing = document.getElementById('repairPdfBulkOverlay');
+  if (existing) existing.remove();
+  _repairPdfRecords = [];
+  var ov = document.createElement('div');
+  ov.id = 'repairPdfBulkOverlay';
+  ov.className = 'confirm-overlay';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:96vw;width:680px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">' +
+      '<div style="padding:14px 16px;background:linear-gradient(135deg,#ef6c00,#e65100);color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+        '<div style="font-size:22px;">📥</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:11px;opacity:0.9;">修理履歴 PDF 一括登録</div>' +
+          '<div style="font-size:15px;font-weight:800;">請求書PDFから自動登録</div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'repairPdfBulkOverlay\').remove()" style="background:rgba(255,255,255,0.22);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:20px;cursor:pointer;line-height:1;">×</button>' +
+      '</div>' +
+      '<div id="repairPdfBulkBody" style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;padding:14px;">' +
+        '<div style="text-align:center;padding:24px 14px;">' +
+          '<div style="font-size:48px;margin-bottom:10px;">📄</div>' +
+          '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px;">PDFファイルを選択</div>' +
+          '<div style="font-size:11px;color:var(--text-light);margin-bottom:14px;line-height:1.5;">請求書・整備票などのPDFをアップロードすると、<br>各伝票を自動解析してプレビュー表示します。</div>' +
+          '<label style="display:inline-block;padding:12px 24px;background:linear-gradient(135deg,#ef6c00,#e65100);color:#fff;border-radius:10px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(230,81,0,0.3);">' +
+            '📂 PDF を選択' +
+            '<input type="file" accept="application/pdf,.pdf" style="display:none;" onchange="_onRepairPdfFileSelected(this)">' +
+          '</label>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+}
+
+async function _loadPdfJsLib() {
+  if (window.pdfjsLib) return;
+  return new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+    s.onload = function() {
+      try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js'; } catch(_) {}
+      resolve();
+    };
+    s.onerror = function() { reject(new Error('PDF.js ライブラリ読込失敗')); };
+    document.head.appendChild(s);
+  });
+}
+
+async function _extractPdfText(file) {
+  var buf = await file.arrayBuffer();
+  var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  var allText = '';
+  for (var i = 1; i <= pdf.numPages; i++) {
+    var page = await pdf.getPage(i);
+    var content = await page.getTextContent();
+    var items = (content.items || []).filter(function(it) { return it.str && it.str.trim(); });
+    var lastY = null;
+    var lineText = '';
+    for (var k = 0; k < items.length; k++) {
+      var it = items[k];
+      var y = Math.round(it.transform[5]);
+      if (lastY === null) {
+        lineText = it.str;
+      } else if (Math.abs(y - lastY) > 3) {
+        // 行が変わった
+        allText += lineText.trim() + '\n';
+        lineText = it.str;
+      } else {
+        lineText += ' ' + it.str;
+      }
+      lastY = y;
+    }
+    if (lineText.trim()) allText += lineText.trim() + '\n';
+    allText += '\n';
+  }
+  return allText;
+}
+
+// 任意の業者PDFテキストから 修理履歴レコードを抽出
+function _parseRepairPdfText(text) {
+  var lines = text.split(/\r?\n/).map(function(s) { return s.trim(); }).filter(Boolean);
+  var dateRe = /(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/;
+  var plateRe = /([一-龥ァ-ヶー]{2,4})\s*(\d{2,3})\s*([ぁ-ゖ])\s*(\d{1,4})/;
+  var subtotalRe = /(?:小計|【税抜.*?】|合計|総額|総合計)\s*[:：]?\s*([\d,]+)/;
+  var taxRe = /^[外内]?消費税|^【消費税|^税額/;
+
+  var records = [];
+  var current = null;
+  function commit() {
+    if (current && (current.plate || current.description.length > 0)) {
+      current.descriptionStr = current.description
+        .filter(function(s) { return s && !/^外消費税|^内消費税|^消費税|^税額|^小計|^合計|^総額|^【.*】|^入金額|^PAGE/.test(s); })
+        .join('\n');
+      records.push(current);
+    }
+    current = null;
+  }
+  function newRecord(dateStr) {
+    return {
+      date: dateStr, plate: '', no2: '', vehicleName: '',
+      description: [], descriptionStr: '', amount: '', matched: null
+    };
+  }
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var dm = line.match(dateRe);
+    if (dm && /^\d{4}/.test(line.replace(/^\s+/, ''))) {
+      commit();
+      var y = dm[1];
+      var m = String(dm[2]).padStart(2, '0');
+      var d = String(dm[3]).padStart(2, '0');
+      current = newRecord(y + '-' + m + '-' + d);
+      var rest = line.replace(dateRe, '').replace(/^\s*\d+\s*/, '').trim();
+      if (rest) line = rest; else continue;
+    }
+    if (!current) continue;
+    var pm = line.match(plateRe);
+    if (pm && !current.plate) {
+      current.plate = pm[1] + pm[2] + pm[3] + pm[4];
+      current.no2 = pm[4];
+      var before = line.substring(0, line.indexOf(pm[0])).trim();
+      if (before) current.vehicleName = before;
+      continue;
+    }
+    var sm = line.match(subtotalRe);
+    if (sm) {
+      current.amount = sm[1].replace(/,/g, '');
+      continue;
+    }
+    if (taxRe.test(line)) continue;
+    if (line) current.description.push(line);
+  }
+  commit();
+  return records.filter(function(r) { return r.plate || r.descriptionStr; });
+}
+
+async function _onRepairPdfFileSelected(input) {
+  var f = input && input.files && input.files[0];
+  if (!f) return;
+  var body = document.getElementById('repairPdfBulkBody');
+  if (body) body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);font-size:13px;">📄 PDF を解析中...</div>';
+  try {
+    await _loadPdfJsLib();
+    var text = await _extractPdfText(f);
+    console.log('[RepairPdfBulk] 抽出テキスト:\n' + text);
+    var records = _parseRepairPdfText(text);
+    console.log('[RepairPdfBulk] 解析結果:', records);
+    if (!_repairPdfVehicles) _repairPdfVehicles = await _loadVehiclesForRepairMatching();
+    records.forEach(function(r) { _matchVehicleForRepairRecord(r); });
+    _repairPdfRecords = records;
+    _renderRepairPdfPreview();
+  } catch (e) {
+    console.error('[RepairPdfBulk] error:', e);
+    if (body) body.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;font-size:13px;">⚠ PDF読込失敗: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function _loadVehiclesForRepairMatching() {
+  if (typeof _vehicleData !== 'undefined' && Array.isArray(_vehicleData) && _vehicleData.length > 0 && window._vf) {
+    return _vehicleData.map(function(v) {
+      return {
+        no1: (window._vf.no1 ? (v[window._vf.no1] || '') : '') || (v[window._vf.number] || v.Title || ''),
+        no2: (window._vf.no2 ? (v[window._vf.no2] || '') : '') || (v[window._vf.number] || ''),
+        title: v.Title || '',
+        raw: v
+      };
+    });
+  }
+  try {
+    var token = await getToken();
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')";
+    var resp = await fetch(listApi + "/items?$top=500&$select=Title,OData__x004e_O2,Driver", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) return [];
+    var data = await resp.json();
+    var items = data.d.results || [];
+    return items.map(function(v) {
+      return { no1: v.Title || '', no2: v['OData__x004e_O2'] || '', title: v.Title || '', raw: v };
+    });
+  } catch(e) {
+    console.warn('vehicle load for repair matching failed:', e);
+    return [];
+  }
+}
+
+function _matchVehicleForRepairRecord(rec) {
+  if (!_repairPdfVehicles || _repairPdfVehicles.length === 0) return;
+  var plate = (rec.plate || '').replace(/\s+/g, '');
+  var no2 = (rec.no2 || '').trim();
+  for (var i = 0; i < _repairPdfVehicles.length; i++) {
+    var v = _repairPdfVehicles[i];
+    var vno1 = String(v.no1 || '').replace(/\s+/g, '');
+    if (plate && vno1 && (vno1 === plate || vno1.indexOf(plate) >= 0 || plate.indexOf(vno1) >= 0)) {
+      rec.matched = { no1: v.no1, no2: v.no2, level: 'NO1' };
+      return;
+    }
+  }
+  if (no2 && no2.length >= 3) {
+    for (var j = 0; j < _repairPdfVehicles.length; j++) {
+      var vv = _repairPdfVehicles[j];
+      if (String(vv.no2 || '').trim() === no2) {
+        rec.matched = { no1: vv.no1, no2: vv.no2, level: 'NO2' };
+        return;
+      }
+    }
+  }
+  rec.matched = null;
+}
+
+function _guessKbnFromDetail(detail) {
+  var s = String(detail || '');
+  if (/車検/.test(s)) return '検査';
+  if (/1年点検|12ヶ月点検|定期点検/.test(s)) return '1年点検';
+  if (/廃車/.test(s)) return '廃車';
+  if (/ドライバー|運転者/.test(s)) return 'ドライバー変更';
+  return '修理';
+}
+
+function _renderRepairPdfPreview() {
+  var body = document.getElementById('repairPdfBulkBody');
+  if (!body) return;
+  var records = _repairPdfRecords || [];
+  if (records.length === 0) {
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);font-size:13px;">レコードを抽出できませんでした。<br>PDFのフォーマットが対応外の可能性があります。</div>';
+    return;
+  }
+  var html = '<div style="background:#fff3e0;border-left:3px solid #ef6c00;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#e65100;line-height:1.5;">' +
+    '<strong>' + records.length + '件抽出</strong> しました。各行の内容を確認・編集してください。' +
+    '車両がマッチしない行は<strong>「車両を選択」</strong>から手動で紐付けるか、チェックを外してスキップ。' +
+    '</div>';
+  records.forEach(function(r, idx) {
+    if (!r.kbn) r.kbn = _guessKbnFromDetail(r.descriptionStr);
+    if (!r.checked && r.checked !== false) r.checked = true;
+    var matchHtml;
+    if (r.matched) {
+      matchHtml = '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✓ マッチ ' + r.matched.level + ': ' + escHtml(r.matched.no1 || r.matched.no2) + '</span>';
+    } else {
+      matchHtml = '<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">⚠ マッチなし</span>' +
+        '<button onclick="_pickVehicleForRepairRecord(' + idx + ')" style="margin-left:6px;padding:3px 10px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">🔍 車両を選択</button>';
+    }
+    html += '<div class="repair-pdf-row" style="background:#fff;border:1.5px solid #e0e0e8;border-radius:10px;padding:10px 12px;margin-bottom:10px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">' +
+      '<input type="checkbox" data-idx="' + idx + '" class="repair-pdf-chk" ' + (r.checked ? 'checked' : '') + ' onchange="_repairPdfRecords[' + idx + '].checked=this.checked;" style="transform:scale(1.2);">' +
+      '<input type="date" value="' + escHtml(r.date || '') + '" onchange="_repairPdfRecords[' + idx + '].date=this.value" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;">' +
+      '<select onchange="_repairPdfRecords[' + idx + '].kbn=this.value" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;background:#fff;">' +
+        ['修理','1年点検','検査','ドライバー変更','廃車'].map(function(o) {
+          return '<option value="' + o + '"' + (r.kbn === o ? ' selected' : '') + '>' + o + '</option>';
+        }).join('') +
+      '</select>' +
+      matchHtml +
+    '</div>';
+    html += '<div style="display:grid;grid-template-columns:60px 1fr;gap:4px 8px;font-size:11px;align-items:center;">' +
+      '<label style="color:#888;">NO1</label>' +
+      '<input type="text" value="' + escHtml(r.matched ? r.matched.no1 : (r.plate || '')) + '" onchange="_repairPdfRecords[' + idx + '].plate=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
+      '<label style="color:#888;">NO2</label>' +
+      '<input type="text" value="' + escHtml(r.matched ? (r.matched.no2 || '') : (r.no2 || '')) + '" onchange="_repairPdfRecords[' + idx + '].no2=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
+      '<label style="color:#888;">金額</label>' +
+      '<input type="text" value="' + escHtml(r.amount || '') + '" onchange="_repairPdfRecords[' + idx + '].amount=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
+      '<label style="color:#888;align-self:start;padding-top:4px;">詳細</label>' +
+      '<textarea rows="2" onchange="_repairPdfRecords[' + idx + '].descriptionStr=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;resize:vertical;font-family:inherit;">' + escHtml(r.descriptionStr || '') + '</textarea>' +
+    '</div>';
+    html += '</div>';
+  });
+  html += '<div style="position:sticky;bottom:0;background:linear-gradient(to bottom,rgba(255,255,255,0.5) 0,#fff 30%);padding:10px 0 4px;margin-top:10px;">' +
+    '<button onclick="submitRepairBulkImport()" style="width:100%;padding:14px;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 3px 10px rgba(46,125,50,0.3);">📥 選択中の項目を List30 に登録</button>' +
+  '</div>';
+  body.innerHTML = html;
+}
+
+function _pickVehicleForRepairRecord(recIdx) {
+  var existing = document.getElementById('repairPdfVehiclePicker');
+  if (existing) existing.remove();
+  var vehicles = _repairPdfVehicles || [];
+  var ov = document.createElement('div');
+  ov.id = 'repairPdfVehiclePicker';
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '10005';
+  var listHtml = vehicles.slice(0, 200).map(function(v) {
+    var safe = (v.no1 + '|' + v.no2).replace(/'/g, '\\\'');
+    return '<div onclick="_chooseRepairVehicle(' + recIdx + ',\'' + safe + '\')" style="padding:8px 12px;border-bottom:1px solid #f0f0f5;cursor:pointer;font-size:13px;">' +
+      '<span style="font-weight:700;">' + escHtml(v.no1 || '(no NO1)') + '</span>' +
+      (v.no2 ? '<span style="margin-left:8px;font-size:11px;color:#888;">NO2: ' + escHtml(String(v.no2)) + '</span>' : '') +
+      '</div>';
+  }).join('');
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:94vw;width:480px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">' +
+      '<div style="padding:12px 14px;background:#1976d2;color:#fff;display:flex;align-items:center;gap:8px;">' +
+        '<div style="font-size:14px;font-weight:800;flex:1;">🚗 車両を選択</div>' +
+        '<button onclick="document.getElementById(\'repairPdfVehiclePicker\').remove()" style="background:rgba(255,255,255,0.22);border:none;width:28px;height:28px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;">×</button>' +
+      '</div>' +
+      '<input type="text" placeholder="🔍 NO1・NO2 で絞り込み" oninput="_filterRepairVehiclePicker(this.value,' + recIdx + ')" style="margin:8px 12px;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;">' +
+      '<div id="repairVehiclePickerList" style="overflow-y:auto;flex:1;">' + listHtml + '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+}
+
+function _filterRepairVehiclePicker(query, recIdx) {
+  var q = (query || '').toLowerCase().trim();
+  var vehicles = _repairPdfVehicles || [];
+  var filtered = q ? vehicles.filter(function(v) {
+    return (String(v.no1 || '').toLowerCase().indexOf(q) >= 0) || (String(v.no2 || '').toLowerCase().indexOf(q) >= 0);
+  }) : vehicles;
+  var list = document.getElementById('repairVehiclePickerList');
+  if (!list) return;
+  list.innerHTML = filtered.slice(0, 200).map(function(v) {
+    var safe = (v.no1 + '|' + v.no2).replace(/'/g, '\\\'');
+    return '<div onclick="_chooseRepairVehicle(' + recIdx + ',\'' + safe + '\')" style="padding:8px 12px;border-bottom:1px solid #f0f0f5;cursor:pointer;font-size:13px;">' +
+      '<span style="font-weight:700;">' + escHtml(v.no1 || '(no NO1)') + '</span>' +
+      (v.no2 ? '<span style="margin-left:8px;font-size:11px;color:#888;">NO2: ' + escHtml(String(v.no2)) + '</span>' : '') +
+      '</div>';
+  }).join('') || '<div style="text-align:center;padding:20px;color:var(--text-light);font-size:12px;">該当なし</div>';
+}
+
+function _chooseRepairVehicle(recIdx, key) {
+  var rec = _repairPdfRecords[recIdx];
+  if (!rec) return;
+  var parts = String(key || '').split('|');
+  rec.matched = { no1: parts[0] || '', no2: parts[1] || '', level: '手動' };
+  rec.plate = rec.matched.no1;
+  rec.no2 = rec.matched.no2;
+  var picker = document.getElementById('repairPdfVehiclePicker');
+  if (picker) picker.remove();
+  _renderRepairPdfPreview();
+}
+
+async function submitRepairBulkImport() {
+  var records = (_repairPdfRecords || []).filter(function(r) { return r.checked && (r.matched || r.plate); });
+  if (records.length === 0) { showToast('登録対象がありません（チェックと車両マッチを確認）', 'warn'); return; }
+
+  showSpinner();
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List30')";
+    var digestResp = await fetch(SP_SITE_URL + '/_api/contextinfo', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!digestResp.ok) throw new Error('Digest取得失敗');
+    var digestJson = await digestResp.json();
+    var digest = (digestJson.d && digestJson.d.GetContextWebInformation && digestJson.d.GetContextWebInformation.FormDigestValue) || digestJson.FormDigestValue;
+
+    var ok = 0, fail = 0;
+    for (var i = 0; i < records.length; i++) {
+      var r = records[i];
+      var no1 = (r.matched && r.matched.no1) || r.plate || '';
+      var no2 = (r.matched && r.matched.no2) || r.no2 || '';
+      var formValues = [
+        { FieldName: 'Title', FieldValue: no1 },
+        { FieldName: '_x004e_O2', FieldValue: no2 },
+        { FieldName: '_x4fee__x7406__x3001__x30c9__x30', FieldValue: r.kbn || '修理' },
+        { FieldName: '_x5b9f__x65bd__x65e5_', FieldValue: r.date || '' }
+      ];
+      if (r.descriptionStr) formValues.push({ FieldName: '_x8a73__x7d30_', FieldValue: r.descriptionStr });
+      if (r.amount) formValues.push({ FieldName: '_x91d1__x984d_', FieldValue: String(r.amount).replace(/,/g, '') });
+      try {
+        var postResp = await fetch(listApi + '/AddValidateUpdateItemUsingPath', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Accept': 'application/json;odata=nometadata',
+            'Content-Type': 'application/json;odata=nometadata',
+            'X-RequestDigest': digest
+          },
+          body: JSON.stringify({
+            listItemCreateInfo: { FolderPath: { DecodedUrl: '/sites/PowerApps/Lists/List30' }, UnderlyingObjectType: 0 },
+            formValues: formValues,
+            bNewDocumentUpdate: false
+          })
+        });
+        if (!postResp.ok) { fail++; continue; }
+        var result = await postResp.json();
+        var arr = result.value || [];
+        var hasErr = arr.filter(function(x) { return x.HasException || x.ErrorMessage; }).length > 0;
+        if (hasErr) { fail++; console.warn('field error', r, arr); } else { ok++; }
+      } catch (e) {
+        fail++;
+        console.warn('repair bulk record failed', r, e);
+      }
+      await new Promise(function(res) { setTimeout(res, 200); });
+    }
+    hideSpinner();
+    showToast('登録完了: ' + ok + '件成功 / ' + fail + '件失敗', fail === 0 ? 'success' : 'warn');
+    var ov = document.getElementById('repairPdfBulkOverlay');
+    if (ov) ov.remove();
+    var v = window._currentRepairVehicle || {};
+    if (v.displayNumber) openRepairHistoryScreen(v.displayNumber, v.no2);
+  } catch (e) {
+    hideSpinner();
+    showToast('一括登録エラー: ' + e.message, 'error');
   }
 }
 
