@@ -24543,18 +24543,41 @@ function _parseRepairPdfText(text) {
 // 請求書のヘッダー/フッターのノイズ行を判定
 function _isInvoiceNoise(L) {
   if (!L) return true;
+  // 全角スペースを含む両端トリム
+  L = L.replace(/^[\s　]+|[\s　]+$/g, '');
+  if (!L) return true;
+  // ヘッダー系キーワード
   if (/^[外内]?消費税|^【消費税|^税額|^小計|^合計|^総額|^総合計|^【.*】|^入金額|^御買上額|^今回|^PAGE|^P\.|^ページ/.test(L)) return true;
+  if (/御買上額|今回御買/.test(L)) return true;
+  // ページ X/Y
   if (/^\d+\s*\/\s*\d+$/.test(L)) return true;
+  // 電話・FAX
   if (/^TEL|^FAX|^電話|^〒/.test(L)) return true;
-  if (/^登録番号/.test(L)) return true;
+  if (/TEL[\s:：]*\d.*FAX/.test(L)) return true;
+  if (/\bFAX[\s:：]*\d/i.test(L) && /\bTEL[\s:：]*\d/i.test(L)) return true;
+  // 登録番号
+  if (/^登録番号|登録番号\s*T\d/.test(L)) return true;
+  // 「○○ 様」(送り先)
   if (/様\s*$/.test(L)) return true;
-  if (/^\d{3}-\d{4}/.test(L)) return true;
+  // 郵便番号始まり
+  if (/^\d{3}-?\d{4}/.test(L)) return true;
+  // 住所 (都道府県+市区町村)
   if (/(都|道|府|県)/.test(L) && /(市|区|町|村|郡)/.test(L)) return true;
+  // 業者名 (リスタ/リスタート/株式会社/有限会社など)
   if (/^リスタ|^株式会社|^（株）|^㈱|^有限会社|^（有）|^㈲|^合同会社|^合資会社/.test(L)) return true;
+  // リスタート派生 (OCRで「リスタ ト」と分離されるケースも先頭マッチで拾う)
+  if (/^リスタ\s*[ートｰ]/.test(L)) return true;
+  // 数字のみ（伝票番号など）
   if (/^\d+$/.test(L)) return true;
+  // 数字+空白+カンマのみ
   if (/^[\d\s,]+$/.test(L)) return true;
-  if (/^[°゜・ー\-—―‐-―ー]+$/.test(L)) return true;
+  // 7桁以上の数字（伝票番号 0xxxxxxx）
+  if (/^0\d{6,}$/.test(L)) return true;
+  // 装飾文字のみ
+  if (/^[°゜・ー\-—―‐\s]+$/.test(L)) return true;
+  // 1文字以下
   if (L.length <= 1) return true;
+  // 2文字以下で日本語を含まない
   if (L.length <= 2 && !/[一-鿿぀-ゟ゠-ヿ]/.test(L)) return true;
   return false;
 }
@@ -24570,6 +24593,7 @@ function _parseRepairByIndex(text) {
 
   var dates = [];
   var vehicles = [];
+  var kilos = [];
   lines.forEach(function(line, idx) {
     var dm = line.match(dateRe);
     if (dm && /^\s*\d{4}/.test(line)) {
@@ -24586,11 +24610,33 @@ function _parseRepairByIndex(text) {
         plate: pm[1] + pm[2] + pm[3] + pm[4],
         no2: pm[4],
         vehicleName: line.substring(0, line.indexOf(pm[0])).trim(),
-        mileage: km ? km[1] : ''
+        mileage: km ? km[1].replace(/,/g, '') : ''
       });
+    }
+    // plate と別行に「キロ数」が出るケース（OCR列出力でよくある）
+    var kmAll = line.match(kiloRe);
+    if (kmAll) {
+      kilos.push({ idx: idx, value: kmAll[1].replace(/,/g, '') });
     }
   });
   if (dates.length === 0) return [];
+
+  // plate 行で mileage 取得できなかった車両に、Nth-to-Nth で キロ数 を割り当て
+  // (列出力でplate群と キロ数群が別カラムに並ぶケース対応)
+  var unfilled = vehicles.filter(function(v) { return !v.mileage; });
+  if (unfilled.length > 0 && kilos.length >= unfilled.length) {
+    // すべての vehicle に対して Nth キロ数を仮割り当て(plate 行で既に取れたものは保持)
+    var ki = 0;
+    for (var vi = 0; vi < vehicles.length; vi++) {
+      if (vehicles[vi].mileage) continue;
+      // 既に plate 行で拾われた kilo はスキップしたい
+      while (ki < kilos.length && Math.abs(kilos[ki].idx - (vehicles[vi].idx || -999)) === 0) ki++;
+      if (ki < kilos.length) {
+        vehicles[vi].mileage = kilos[ki].value;
+        ki++;
+      }
+    }
+  }
 
   // 小計(=金額)抽出: 「外消費税×11≒小計」のパターンを利用
   // 消費税10% → 税込合計 = 税額 × 11
@@ -24727,20 +24773,28 @@ function _parseRepairStrict(text) {
   var plateRe = /([一-龥ァ-ヶー]{2,4})\s*(\d{2,3})\s*([ぁ-ゖ])\s*(\d{1,4})/;
   var subtotalRe = /(?:小計|【税抜.*?】|合計|総額|総合計)\s*[:：]?\s*([\d,]+)/;
   var taxRe = /^[外内]?消費税|^【消費税|^税額/;
+  var kiloRe = /キロ数\s*([\d,]+)/;
 
   var records = [];
   var current = null;
   function commit() {
     if (current && (current.plate || current.description.length > 0)) {
       current.descriptionStr = current.description
-        .filter(function(s) { return s && !/^外消費税|^内消費税|^消費税|^税額|^小計|^合計|^総額|^【.*】|^入金額|^PAGE/.test(s); })
+        .filter(function(s) {
+          if (!s) return false;
+          if (_isInvoiceNoise(s)) return false;
+          if (plateRe.test(s)) return false;
+          if (kiloRe.test(s)) return false;
+          if (/^[\d,]+$/.test(s)) return false;
+          return true;
+        })
         .join('\n');
       records.push(current);
     }
     current = null;
   }
   function newRecord(dateStr) {
-    return { date: dateStr, plate: '', no2: '', vehicleName: '', description: [], descriptionStr: '', amount: '', matched: null };
+    return { date: dateStr, plate: '', no2: '', vehicleName: '', description: [], descriptionStr: '', amount: '', mileage: '', matched: null };
   }
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
@@ -24761,11 +24815,22 @@ function _parseRepairStrict(text) {
       current.no2 = pm[4];
       var before = line.substring(0, line.indexOf(pm[0])).trim();
       if (before) current.vehicleName = before;
+      // plate 行に「キロ数〜」が併記されている場合も同時に抽出
+      var kim0 = line.match(kiloRe);
+      if (kim0 && !current.mileage) current.mileage = kim0[1].replace(/,/g, '');
+      continue;
+    }
+    // キロ数(plateと別行のとき) → mileage に格納し description には含めない
+    var kim = line.match(kiloRe);
+    if (kim) {
+      if (current && !current.mileage) current.mileage = kim[1].replace(/,/g, '');
       continue;
     }
     var sm = line.match(subtotalRe);
     if (sm) { current.amount = sm[1].replace(/,/g, ''); continue; }
     if (taxRe.test(line)) continue;
+    // 請求書ヘッダー/フッターのノイズはここでも切り捨て
+    if (_isInvoiceNoise(line)) continue;
     if (line) current.description.push(line);
   }
   commit();
