@@ -24949,23 +24949,54 @@ function _matchVehicleForRepairRecord(rec) {
   if (!_repairPdfVehicles || _repairPdfVehicles.length === 0) return;
   var plate = (rec.plate || '').replace(/\s+/g, '');
   var no2 = (rec.no2 || '').trim();
-  for (var i = 0; i < _repairPdfVehicles.length; i++) {
-    var v = _repairPdfVehicles[i];
-    var vno1 = String(v.no1 || '').replace(/\s+/g, '');
-    if (plate && vno1 && (vno1 === plate || vno1.indexOf(plate) >= 0 || plate.indexOf(vno1) >= 0)) {
-      rec.matched = { no1: v.no1, no2: v.no2, level: 'NO1' };
-      return;
-    }
-  }
-  if (no2 && no2.length >= 3) {
-    for (var j = 0; j < _repairPdfVehicles.length; j++) {
-      var vv = _repairPdfVehicles[j];
-      if (String(vv.no2 || '').trim() === no2) {
-        rec.matched = { no1: vv.no1, no2: vv.no2, level: 'NO2' };
+
+  // Level 1: 完全一致 (NO1全体 = plate AND NO2 = no2)
+  if (plate && no2) {
+    for (var i = 0; i < _repairPdfVehicles.length; i++) {
+      var v = _repairPdfVehicles[i];
+      var vno1 = String(v.no1 || '').replace(/\s+/g, '');
+      if (vno1 === plate && String(v.no2 || '').trim() === no2) {
+        rec.matched = { no1: v.no1, no2: v.no2, level: '完全一致' };
         return;
       }
     }
   }
+
+  // Level 2: NO1 プレフィックス + NO2 が両方一致
+  if (plate && no2) {
+    for (var i = 0; i < _repairPdfVehicles.length; i++) {
+      var v = _repairPdfVehicles[i];
+      var vno1 = String(v.no1 || '').replace(/\s+/g, '');
+      var vno2 = String(v.no2 || '').trim();
+      if (vno1 && vno2 && (plate.indexOf(vno1) === 0 || plate === vno1 + no2) && vno2 === no2) {
+        rec.matched = { no1: v.no1, no2: v.no2, level: 'NO1+NO2' };
+        return;
+      }
+    }
+  }
+
+  // Level 3: NO2 単独一致 (NO2 は車両ごとに一意 ID なので信頼度高)
+  if (no2) {
+    for (var i = 0; i < _repairPdfVehicles.length; i++) {
+      var v = _repairPdfVehicles[i];
+      if (String(v.no2 || '').trim() === no2) {
+        rec.matched = { no1: v.no1, no2: v.no2, level: 'NO2' };
+        return;
+      }
+    }
+  }
+
+  // Level 4: NO1 完全一致のみ (NO2 が無い場合の fallback)
+  for (var i = 0; i < _repairPdfVehicles.length; i++) {
+    var v = _repairPdfVehicles[i];
+    var vno1 = String(v.no1 || '').replace(/\s+/g, '');
+    if (plate && vno1 && vno1 === plate) {
+      rec.matched = { no1: v.no1, no2: v.no2, level: 'NO1完全' };
+      return;
+    }
+  }
+
+  // 部分一致は曖昧マッチを生むので意図的にスキップ
   rec.matched = null;
 }
 
