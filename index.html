@@ -24501,9 +24501,17 @@ async function _extractPdfText(file) {
 }
 
 // 任意の業者PDFテキストから 修理履歴レコードを抽出
+// 戦略1: 行頭に日付がある形式 (請求書定型)
+// 戦略2: 日付がテキスト内のどこかに出る形式 (フリーフォーマット)
 function _parseRepairPdfText(text) {
+  var records = _parseRepairStrict(text);
+  if (records.length === 0) records = _parseRepairLenient(text);
+  return records;
+}
+
+function _parseRepairStrict(text) {
   var lines = text.split(/\r?\n/).map(function(s) { return s.trim(); }).filter(Boolean);
-  var dateRe = /(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/;
+  var dateRe = /(\d{4})[\/\-年\.](\d{1,2})[\/\-月\.](\d{1,2})日?/;
   var plateRe = /([一-龥ァ-ヶー]{2,4})\s*(\d{2,3})\s*([ぁ-ゖ])\s*(\d{1,4})/;
   var subtotalRe = /(?:小計|【税抜.*?】|合計|総額|総合計)\s*[:：]?\s*([\d,]+)/;
   var taxRe = /^[外内]?消費税|^【消費税|^税額/;
@@ -24520,10 +24528,7 @@ function _parseRepairPdfText(text) {
     current = null;
   }
   function newRecord(dateStr) {
-    return {
-      date: dateStr, plate: '', no2: '', vehicleName: '',
-      description: [], descriptionStr: '', amount: '', matched: null
-    };
+    return { date: dateStr, plate: '', no2: '', vehicleName: '', description: [], descriptionStr: '', amount: '', matched: null };
   }
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
@@ -24547,15 +24552,60 @@ function _parseRepairPdfText(text) {
       continue;
     }
     var sm = line.match(subtotalRe);
-    if (sm) {
-      current.amount = sm[1].replace(/,/g, '');
-      continue;
-    }
+    if (sm) { current.amount = sm[1].replace(/,/g, ''); continue; }
     if (taxRe.test(line)) continue;
     if (line) current.description.push(line);
   }
   commit();
   return records.filter(function(r) { return r.plate || r.descriptionStr; });
+}
+
+// テキスト全体を日付で分割し、各セクションから plate / 小計 / 詳細を取り出す
+function _parseRepairLenient(text) {
+  var records = [];
+  var dateRe = /(\d{4})[\/\-年\.](\d{1,2})[\/\-月\.](\d{1,2})日?/g;
+  var plateRe = /([一-龥ァ-ヶー]{2,4})\s*(\d{2,3})\s*([ぁ-ゖ])\s*(\d{1,4})/;
+  var subtotalRe = /(?:小計|【税抜.*?】|合計|総額|総合計)\s*[:：]?\s*([\d,]+)/;
+  var matches = [];
+  var m;
+  while ((m = dateRe.exec(text)) !== null) {
+    matches.push({ index: m.index, len: m[0].length, y: m[1], mo: m[2], d: m[3] });
+  }
+  if (matches.length === 0) return [];
+  for (var i = 0; i < matches.length; i++) {
+    var start = matches[i].index + matches[i].len;
+    var end = (i + 1 < matches.length) ? matches[i + 1].index : text.length;
+    var section = text.substring(start, end);
+    if (!section.trim()) continue;
+    var rec = {
+      date: matches[i].y + '-' + String(matches[i].mo).padStart(2, '0') + '-' + String(matches[i].d).padStart(2, '0'),
+      plate: '', no2: '', vehicleName: '',
+      description: [], descriptionStr: '', amount: '', matched: null
+    };
+    var pm = section.match(plateRe);
+    if (pm) {
+      rec.plate = pm[1] + pm[2] + pm[3] + pm[4];
+      rec.no2 = pm[4];
+    }
+    var sm = section.match(subtotalRe);
+    if (sm) rec.amount = sm[1].replace(/,/g, '');
+    var sectionLines = section.split(/\r?\n/).map(function(s) { return s.trim(); }).filter(Boolean);
+    rec.description = sectionLines.filter(function(s) {
+      if (/^外消費税|^内消費税|^消費税|^税額|^小計|^合計|^総額|^【.*】|^入金額|^PAGE|^\d+\s*\/\s*\d+$/.test(s)) return false;
+      if (subtotalRe.test(s)) return false;
+      if (pm && s.indexOf(pm[0]) >= 0) {
+        var before = s.substring(0, s.indexOf(pm[0])).trim();
+        if (before && !rec.vehicleName) rec.vehicleName = before;
+        return false;
+      }
+      if (/^キロ数\s*\d+/.test(s)) return false;
+      if (/^[\d,]+$/.test(s)) return false;
+      return true;
+    });
+    rec.descriptionStr = rec.description.slice(0, 8).join('\n');
+    if (rec.plate || rec.descriptionStr) records.push(rec);
+  }
+  return records;
 }
 
 // ドラッグ&ドロップ サポート
