@@ -7137,8 +7137,16 @@ async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
     const data = await resp.json();
     const versions = (data.d && data.d.results) || [];
     if (versions.length > 0) {
-      console.log('[UpdateHist] sample version keys:', Object.keys(versions[0]).slice(0, 40));
-      console.log('[UpdateHist] sample Editor:', versions[0].Editor, 'EditorId:', versions[0].EditorId);
+      const v0 = versions[0];
+      console.log('[UpdateHist] all keys:', Object.keys(v0));
+      console.log('[UpdateHist] Editor object JSON:', JSON.stringify(v0.Editor));
+      console.log('[UpdateHist] Editor keys:', v0.Editor ? Object.keys(v0.Editor) : 'null');
+      // ユーザー系っぽいキーをすべて出力
+      Object.keys(v0).forEach(function(k) {
+        if (/Editor|Author|User|By|作成|更新|登録/i.test(k)) {
+          console.log('[UpdateHist] user-related key', k, '=', v0[k]);
+        }
+      });
     }
     const result = [];
     for (var i = 0; i < versions.length - 1 && result.length < maxRecords; i++) {
@@ -7162,14 +7170,21 @@ async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
         }
       }
       if (changes.length === 0) continue;
-      // Editor 名を抽出（expand 済みの Editor.Title を最優先）
+      // Editor 名を抽出（複数の経路を試す）
       let editorName = '';
       let editorId = null;
-      if (newer.Editor && typeof newer.Editor === 'object') {
-        if (newer.Editor.Title) editorName = newer.Editor.Title;
-        if (newer.Editor.Id) editorId = newer.Editor.Id;
+      const ed = newer.Editor;
+      if (ed && typeof ed === 'object') {
+        // expand 済みなら Title / LookupValue 系で名前が取れる
+        editorName = ed.Title || ed.LookupValue || ed.DisplayName || ed.Name || '';
+        editorId = ed.Id || ed.LookupId || null;
+      } else if (typeof ed === 'string') {
+        // たまに 'i:0#.f|membership|...' 形式の string が返る場合がある
+        editorName = ed;
       }
+      // 並行して EditorId / EditorStringId / Modified_x0020_By なども試す
       if (!editorId && newer.EditorId) editorId = newer.EditorId;
+      if (!editorName && newer.Modified_x0020_By) editorName = String(newer.Modified_x0020_By).split('|').pop();
       result.push({
         modified: newer.Modified || newer.Created,
         editor: editorName,
