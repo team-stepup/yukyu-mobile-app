@@ -3308,6 +3308,14 @@ select.sankyu-edit-input {
   font-weight: 700;
   color: var(--text);
 }
+.profile-header .profile-romaji-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a1a1a;
+  letter-spacing: 0.5px;
+  margin: -2px 0 6px 2px;
+  font-family: -apple-system, "Segoe UI", "Roboto", system-ui, sans-serif;
+}
 .profile-header .profile-badge {
   font-size: 10px;
   padding: 2px 8px;
@@ -6719,6 +6727,21 @@ async function loadLeaveDetails() {
   var sfBtnB64 = syainFileUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ url: syainFileUrl, no: empNoStr, name: empNameStr })))) : '';
   var empBtnB64 = btoa(unescape(encodeURIComponent(JSON.stringify({ no: empNoStr, name: empNameStr }))));
 
+  // ローマ字氏名 (在留カード氏名 = 特記事項１)
+  var _romajiName = '';
+  try {
+    if (!employeeFieldsCache) await fetchEmployeeFields();
+    if (employeeFieldsCache) {
+      for (var _fk in employeeFieldsCache) {
+        if (employeeFieldsCache[_fk] && employeeFieldsCache[_fk].title === '特記事項１') {
+          var _odataKey = _fk.indexOf('_') === 0 ? 'OData_' + _fk : _fk;
+          _romajiName = String(emp[_odataKey] || '').trim();
+          break;
+        }
+      }
+    }
+  } catch (_e) { _romajiName = ''; }
+
   // Header (shared between all tabs)
   document.getElementById('detailHeader').innerHTML = `
     <div class="profile-header">
@@ -6726,6 +6749,7 @@ async function loadLeaveDetails() {
         <span class="profile-name">${escHtml(emp.Title || '')}</span>
         ${tsukinValH ? '<span class="profile-badge" style="background:#f0f0ff;color:var(--primary);">' + tsukinIcon + ' ' + escHtml(tsukinValH) + '</span>' : '<span class="profile-badge" style="background:#ffebee;color:var(--danger);">通勤方法未登録</span>'}
       </div>
+      ${_romajiName ? '<div class="profile-romaji-name">' + escHtml(_romajiName) + '</div>' : ''}
       <div class="profile-class-row" id="profileClassRow">
         ${_buildProfBadges(_entryType, _exitType, _isFuture)}
       </div>
