@@ -7114,6 +7114,49 @@ var _UPDATE_HIST_SKIP_KEYS = {
   'OData__CommentCount': 1, 'OData__CommentFlags': 1, 'OData__LikeCount': 1
 };
 
+// バージョンAPI の二重エンコードされたキーを通常の InternalName に戻す
+// 例: "OData__x005f_x63a1_x005f__x005f_x7528_x005f__x005f_x7a2e_x005f__x005f_x5225_x005f_"
+//   → strip "OData_" → "_x005f_x63a1_x005f__x005f_x7528_x005f__x005f_x5225_x005f_"
+//   → replace "_x005f_" with "_" → "_x63a1__x7528__x7a2e__x5225_" (= 採用種別の内部名)
+function _decodeVersionKey(key) {
+  if (!key) return key;
+  let s = key.replace(/^OData_/, '');
+  // /_x005f_/g → '_' で各下線エンコードを元に戻す
+  s = s.replace(/_x005f_/g, '_');
+  return s;
+}
+
+// fieldsMeta 内から複数の経路で title を引く
+function _lookupFieldLabel(key, fieldsMeta) {
+  if (!fieldsMeta) return null;
+  // 1. 直接キー
+  if (fieldsMeta[key]) return fieldsMeta[key];
+  // 2. OData_ 剥離
+  const noOData = key.replace(/^OData_/, '');
+  if (fieldsMeta[noOData]) return fieldsMeta[noOData];
+  // 3. 二重エンコードを解いた internal name
+  const decoded = _decodeVersionKey(key);
+  if (fieldsMeta[decoded]) return fieldsMeta[decoded];
+  // 4. OData_ 付き decoded
+  if (fieldsMeta['OData_' + decoded]) return fieldsMeta['OData_' + decoded];
+  return null;
+}
+
+// SharePointの内部名 _xNNNN_ 形式を実際の文字に変換
+// 例: "_x63a1__x7528__x7a2e__x5225_" → "採用種別"
+function _decodeInternalNameToText(s) {
+  if (!s) return s;
+  // OData_ プレフィックスと二重エンコードを先に解く
+  let t = s.replace(/^OData_/, '').replace(/_x005f_/g, '_');
+  // _xNNNN_ → 該当文字
+  t = t.replace(/_x([0-9a-fA-F]{4})_/g, function(_m, hex) {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+  // 残った先頭/末尾の _ を削除
+  t = t.replace(/^_+|_+$/g, '');
+  return t || s;
+}
+
 // 直近 N 件 (デフォルト3件) の変更内容を抽出
 async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
   if (!itemId) return [];
@@ -7160,12 +7203,15 @@ async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
         if (typeof newV === 'object' && newV !== null) continue;
         const oldV = older[key];
         if (String(newV == null ? '' : newV) !== String(oldV == null ? '' : oldV)) {
-          let label = key;
+          let label = '';
           let type = '';
-          if (fieldsMeta && fieldsMeta[key]) {
-            label = fieldsMeta[key].title || key;
-            type = fieldsMeta[key].type || '';
+          const meta = _lookupFieldLabel(key, fieldsMeta);
+          if (meta) {
+            label = meta.title || '';
+            type = meta.type || '';
           }
+          // メタが無い場合 _xNNNN_ を直接文字に変換してフォールバック
+          if (!label) label = _decodeInternalNameToText(key) || key;
           changes.push({ key: key, label: label, oldVal: oldV, newVal: newV, fieldType: type });
         }
       }
