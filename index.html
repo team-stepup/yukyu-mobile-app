@@ -21078,12 +21078,51 @@ function renderAstiNyutaiOverlay(nyusha, taisha, mStart, mEnd, km) {
     const k = km && km['soshikiTani'];
     return k ? (emp[k] || '') : '';
   }
+  // 組織単位文字列から短縮コード(N3, P1, S5 1F等のラテン部分)を抽出
+  function shortSoshiki(full) {
+    if (!full) return '(未設定)';
+    const normalized = String(full).replace(/　/g, ' ').trim();
+    const tokens = normalized.split(/\s+/);
+    const latins = tokens.filter(t => /^[A-Za-z0-9・\-]+$/.test(t));
+    if (latins.length > 0) return latins.join(' ');
+    return normalized;
+  }
 
   // 期間ラベル
   const sameMonth = mStart.getFullYear() === mEnd.getFullYear() && mStart.getMonth() === mEnd.getMonth();
   const periodLabel = sameMonth
     ? mStart.getFullYear() + '年' + (mStart.getMonth() + 1) + '月'
     : mStart.getFullYear() + '/' + (mStart.getMonth() + 1) + ' 〜 ' + mEnd.getFullYear() + '/' + (mEnd.getMonth() + 1);
+
+  // 組織単位別 集計
+  const soshikiCounts = {};
+  function addCount(emp, kind) {
+    const full = getSoshiki(emp) || '(未設定)';
+    if (!soshikiCounts[full]) soshikiCounts[full] = { in: 0, out: 0, full: full, short: shortSoshiki(full) };
+    if (kind === 'in') soshikiCounts[full].in++;
+    else soshikiCounts[full].out++;
+  }
+  nyusha.forEach(emp => addCount(emp, 'in'));
+  taisha.forEach(emp => addCount(emp, 'out'));
+  const soshikiKeys = Object.keys(soshikiCounts).sort((a, b) => soshikiCounts[a].short.localeCompare(soshikiCounts[b].short, 'ja'));
+
+  const soshikiChipsHtml = soshikiKeys.length === 0 ? '' :
+    '<div style="padding:8px 14px 10px;background:#f8f9fc;border-bottom:1px solid #eee;flex-shrink:0;">' +
+      '<div style="font-size:11px;font-weight:700;color:#555;margin-bottom:6px;display:flex;align-items:center;gap:4px;">' +
+        '<span>📊 組織単位別 集計</span>' +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
+        soshikiKeys.map(k => {
+          const c = soshikiCounts[k];
+          const inSpan  = c.in  > 0 ? '<span style="color:#2e7d32;font-weight:800;">🌱' + c.in + '</span>'  : '<span style="color:#bbb;font-weight:600;">🌱0</span>';
+          const outSpan = c.out > 0 ? '<span style="color:#c62828;font-weight:800;">🏁' + c.out + '</span>' : '<span style="color:#bbb;font-weight:600;">🏁0</span>';
+          return '<div title="' + escHtml(c.full) + '" style="background:#fff;border:1px solid #e0e0e8;border-radius:10px;padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">' +
+            '<span style="font-weight:800;color:var(--text);">' + escHtml(c.short) + '</span>' +
+            inSpan + outSpan +
+          '</div>';
+        }).join('') +
+      '</div>' +
+    '</div>';
 
   function rowHtml(emp, type) {
     const dateRaw = type === 'nyusha' ? emp[F.nyushaDate] : emp[F.hakenTaisha];
@@ -21134,6 +21173,7 @@ function renderAstiNyutaiOverlay(nyusha, taisha, mStart, mEnd, km) {
       '<div style="padding:6px 14px 4px;background:#fafafa;font-size:10px;color:#777;border-bottom:1px solid #eee;flex-shrink:0;">' +
         '入社日 / 派遣先退社日 が選択期間内の社員を表示。タップで社員詳細へ移動。' +
       '</div>' +
+      soshikiChipsHtml +
       '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' +
         '<div style="padding:8px 14px 6px;background:#e8f5e9;font-size:12px;font-weight:800;color:#2e7d32;border-bottom:2px solid #66bb6a;">🌱 入社 ' + nyusha.length + '名</div>' +
         nyushaRows +
