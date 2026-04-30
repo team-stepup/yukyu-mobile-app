@@ -24547,6 +24547,7 @@ function _parseRepairByIndex(text) {
   var lines = text.split(/\r?\n/).map(function(s) { return s.trim(); }).filter(Boolean);
   var dateRe = /(\d{4})[\/\-年\.](\d{1,2})[\/\-月\.](\d{1,2})/;
   var plateRe = /([一-龥ァ-ヶー]{2,4})\s*(\d{2,3})\s*([ぁ-ゖ])\s*(\d{1,4})/;
+  var kiloRe = /キロ数\s*(\d+)/;
 
   var dates = [];
   var vehicles = [];
@@ -24560,15 +24561,42 @@ function _parseRepairByIndex(text) {
     }
     var pm = line.match(plateRe);
     if (pm) {
+      var km = line.match(kiloRe);
       vehicles.push({
         idx: idx,
         plate: pm[1] + pm[2] + pm[3] + pm[4],
         no2: pm[4],
-        vehicleName: line.substring(0, line.indexOf(pm[0])).trim()
+        vehicleName: line.substring(0, line.indexOf(pm[0])).trim(),
+        mileage: km ? km[1] : ''
       });
     }
   });
   if (dates.length === 0) return [];
+
+  // 小計(=金額)抽出: 「外消費税×11≒小計」のパターンを利用
+  // 消費税10% → 税込合計 = 税額 × 11
+  var subtotals = [];
+  var numRe = /(\d{1,3}(?:,\d{3})+|\d{4,})/g;
+  var nums = [];
+  var nm;
+  while ((nm = numRe.exec(text)) !== null) {
+    nums.push({ pos: nm.index, value: parseInt(nm[1].replace(/,/g, ''), 10), raw: nm[1] });
+  }
+  for (var ni = 0; ni < nums.length - 1; ni++) {
+    var taxV = nums[ni].value;
+    var subV = nums[ni + 1].value;
+    if (taxV >= 100 && taxV <= 99999 && Math.abs(subV - taxV * 11) <= 5) {
+      subtotals.push({ pos: nums[ni + 1].pos, value: subV });
+    }
+  }
+  var inlineSubRe = /小計\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{4,})/g;
+  var im;
+  while ((im = inlineSubRe.exec(text)) !== null) {
+    var iv = parseInt(im[1].replace(/,/g, ''), 10);
+    var dup = subtotals.some(function(s) { return Math.abs(s.pos - im.index) < 80 || s.value === iv; });
+    if (!dup) subtotals.push({ pos: im.index, value: iv });
+  }
+  subtotals.sort(function(a, b) { return a.pos - b.pos; });
 
   // 詳細抽出: 各日付の後 ~ 次の日付前までで、ノイズを除外したテキストを集める
   var records = [];
@@ -24576,12 +24604,16 @@ function _parseRepairByIndex(text) {
     var rec = {
       date: dates[i].date,
       plate: '', no2: '', vehicleName: '',
-      description: [], descriptionStr: '', amount: '', matched: null
+      description: [], descriptionStr: '', amount: '', mileage: '', matched: null
     };
     if (i < vehicles.length) {
       rec.plate = vehicles[i].plate;
       rec.no2 = vehicles[i].no2;
       rec.vehicleName = vehicles[i].vehicleName;
+      rec.mileage = vehicles[i].mileage || '';
+    }
+    if (i < subtotals.length) {
+      rec.amount = String(subtotals[i].value);
     }
     var startIdx = dates[i].idx + 1;
     var endIdx = (i + 1 < dates.length) ? dates[i + 1].idx : lines.length;
@@ -24594,7 +24626,7 @@ function _parseRepairByIndex(text) {
       if (/^外消費税|^内消費税|^消費税|^税額|^小計|^合計|^総額|^総合計|^【.*】|^入金額|^PAGE|^\d+\s*\/\s*\d+$/.test(L)) continue;
       if (/^[\d,\s]+$/.test(L)) continue;
       desc.push(L);
-      if (desc.length >= 8) break;
+      if (desc.length >= 10) break;
     }
     rec.description = desc;
     rec.descriptionStr = desc.join('\n');
@@ -24924,15 +24956,17 @@ function _renderRepairPdfPreview() {
       '</select>' +
       matchHtml +
     '</div>';
-    html += '<div style="display:grid;grid-template-columns:60px 1fr;gap:4px 8px;font-size:11px;align-items:center;">' +
+    html += '<div style="display:grid;grid-template-columns:64px 1fr;gap:4px 8px;font-size:11px;align-items:center;">' +
       '<label style="color:#888;">NO1</label>' +
       '<input type="text" value="' + escHtml(r.matched ? r.matched.no1 : (r.plate || '')) + '" onchange="_repairPdfRecords[' + idx + '].plate=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
       '<label style="color:#888;">NO2</label>' +
       '<input type="text" value="' + escHtml(r.matched ? (r.matched.no2 || '') : (r.no2 || '')) + '" onchange="_repairPdfRecords[' + idx + '].no2=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
       '<label style="color:#888;">金額</label>' +
-      '<input type="text" value="' + escHtml(r.amount || '') + '" onchange="_repairPdfRecords[' + idx + '].amount=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
+      '<input type="text" value="' + escHtml(r.amount || '') + '" onchange="_repairPdfRecords[' + idx + '].amount=this.value" placeholder="例: 27500" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
+      '<label style="color:#888;">走行距離</label>' +
+      '<input type="text" value="' + escHtml(r.mileage || '') + '" onchange="_repairPdfRecords[' + idx + '].mileage=this.value" placeholder="例: 252868" inputmode="numeric" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;">' +
       '<label style="color:#888;align-self:start;padding-top:4px;">詳細</label>' +
-      '<textarea rows="2" onchange="_repairPdfRecords[' + idx + '].descriptionStr=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;resize:vertical;font-family:inherit;">' + escHtml(r.descriptionStr || '') + '</textarea>' +
+      '<textarea rows="3" onchange="_repairPdfRecords[' + idx + '].descriptionStr=this.value" style="padding:4px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;resize:vertical;font-family:inherit;line-height:1.5;">' + escHtml(r.descriptionStr || '') + '</textarea>' +
     '</div>';
     html += '</div>';
   });
@@ -25028,6 +25062,7 @@ async function submitRepairBulkImport() {
       ];
       if (r.descriptionStr) formValues.push({ FieldName: '_x8a73__x7d30_', FieldValue: r.descriptionStr });
       if (r.amount) formValues.push({ FieldName: '_x91d1__x984d_', FieldValue: String(r.amount).replace(/,/g, '') });
+      if (r.mileage) formValues.push({ FieldName: '_x8d70__x884c__x8ddd__x96e2_', FieldValue: String(r.mileage).replace(/,/g, '') });
       try {
         var postResp = await fetch(listApi + '/AddValidateUpdateItemUsingPath', {
           method: 'POST',
