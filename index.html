@@ -6312,10 +6312,10 @@ function classifyExitEmp(emp, sameBangoRecs) {
   const yd = emp[F.yukyuTaisha];
   const hd = emp[F.hakenTaisha];
   if (!yd && !hd) return null; // 退社情報なし
+  // ① 採用種別が「移動」を含むなら 移動退社確定 (yd 設定済みでも適用)
+  if (syubetuKindGlobal(emp[F.zaiyokuSyubetu]) === 'transfer-in') return 'transfer-out';
   if (yd) return 'retire';
   // yd なし、hd あり → 移動退社の可能性
-  // ① 現在レコードの採用種別が「移動」含む → 移動退社確定
-  if (syubetuKindGlobal(emp[F.zaiyokuSyubetu]) === 'transfer-in') return 'transfer-out';
   // ② 同一社員番号の後続レコード判定 (従来ロジック)
   if (hd && sameBangoRecs && sameBangoRecs.length > 0) {
     const hdDate = new Date(hd);
@@ -21488,15 +21488,16 @@ async function loadNyutaiScreen() {
     }
 
     // 退社タイプ判定: retire（完全退社）/ transfer-out（移動退社）
-    // 優先: 現在レコードの採用種別が「移動」→ 移動退社
+    // 優先: 現在レコードの採用種別が「移動」→ 移動退社（yd の有無に関わらず）
     //      後続レコード(同一番号)が「移動在職中」種別 → 移動退社
     function classifyExit(emp) {
+      // ① 採用種別が「移動」を含むなら 移動退社確定 (yd 設定済みでも適用)
+      // 例: 70494 フェルナンデス アンネ (zaiyokuSyubetu="移動退社..." & yd 設定済み)
+      if (syubetuKind(emp[F.zaiyokuSyubetu]) === 'transfer-in') return 'transfer-out';
       const yd = emp[F.yukyuTaisha];
       if (yd) return 'retire'; // 有給退社日あり = 完全退社
       const hd = emp[F.hakenTaisha];
       if (!hd) return 'retire';
-      // ① 現在レコードの採用種別で判定 (70494 フェルナンデス アンネのケース)
-      if (syubetuKind(emp[F.zaiyokuSyubetu]) === 'transfer-in') return 'transfer-out';
       // ② 同一社員番号の後続レコードから判定
       const sn = emp[F.syainNo];
       if (!sn) return 'retire';
