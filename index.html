@@ -21431,6 +21431,7 @@ async function loadNyutaiScreen() {
       var isEmpty = !val || !val.trim();
       var color, bg;
       if (isEmpty) { color = '#aaa'; bg = '#f5f5f5'; }
+      else if (v === '移動' || v.indexOf('移動') >= 0) { color = '#7e57c2'; bg = '#ede7f6'; }  // 移動退社用 紫系
       else if (v.indexOf('✓') >= 0) { color = '#2e7d32'; bg = '#e8f5e9'; }
       else if (v.indexOf('→') >= 0) { color = '#ef6c00'; bg = '#fff3e0'; }
       else { color = '#1565c0'; bg = '#e3f2fd'; }
@@ -21761,10 +21762,15 @@ async function loadNyutaiScreen() {
           const xBd = exitBadge(xType, isPlan);
           const xCardCls = exitCardClass(xType, isPlan);
           // 退社カード: 総務・雇用 + 総務-社保 + 離職票 + 離職票渡し方
-          const sKoyouT = getSoumuVal(emp, 'soumuKoyou');
-          const sShahoT = getSoumuVal(emp, 'soumuShaho');
+          let sKoyouT = getSoumuVal(emp, 'soumuKoyou');
+          let sShahoT = getSoumuVal(emp, 'soumuShaho');
           const sRisho = getSoumuVal(emp, 'rishokuhyou');
           const sRishoW = getSoumuVal(emp, 'rishokuWatashi');
+          // 移動退社かつ 雇用・社保 両方が取得完了 → 表示を「移動」に置換 (紫バッジで強調)
+          if (xType === 'transfer-out' && sKoyouT.indexOf('完了') >= 0 && sShahoT.indexOf('完了') >= 0) {
+            sKoyouT = '移動';
+            sShahoT = '移動';
+          }
           let soumuHtmlT = '';
           soumuHtmlT += soumuBadge('雇用', sKoyouT);
           soumuHtmlT += soumuBadge('社保', sShahoT);
