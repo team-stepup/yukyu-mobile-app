@@ -24540,6 +24540,25 @@ function _parseRepairPdfText(text) {
   return r3;
 }
 
+// 請求書のヘッダー/フッターのノイズ行を判定
+function _isInvoiceNoise(L) {
+  if (!L) return true;
+  if (/^[外内]?消費税|^【消費税|^税額|^小計|^合計|^総額|^総合計|^【.*】|^入金額|^御買上額|^今回|^PAGE|^P\.|^ページ/.test(L)) return true;
+  if (/^\d+\s*\/\s*\d+$/.test(L)) return true;
+  if (/^TEL|^FAX|^電話|^〒/.test(L)) return true;
+  if (/^登録番号/.test(L)) return true;
+  if (/様\s*$/.test(L)) return true;
+  if (/^\d{3}-\d{4}/.test(L)) return true;
+  if (/(都|道|府|県)/.test(L) && /(市|区|町|村|郡)/.test(L)) return true;
+  if (/^リスタ|^株式会社|^（株）|^㈱|^有限会社|^（有）|^㈲|^合同会社|^合資会社/.test(L)) return true;
+  if (/^\d+$/.test(L)) return true;
+  if (/^[\d\s,]+$/.test(L)) return true;
+  if (/^[°゜・ー\-—―‐-―ー]+$/.test(L)) return true;
+  if (L.length <= 1) return true;
+  if (L.length <= 2 && !/[一-鿿぀-ゟ゠-ヿ]/.test(L)) return true;
+  return false;
+}
+
 // 戦略2: 日付と車両plateを順序ベースで対応付ける
 // PDFが列ごとに出力された場合 (OCR後によくある)、日付・plateそれぞれ
 // 順番にN個ずつ並んでいるので、N番目同士をペアリングする
@@ -24623,8 +24642,7 @@ function _parseRepairByIndex(text) {
       if (!L) continue;
       if (dateRe.test(L) && /^\s*\d{4}/.test(L)) break;
       if (plateRe.test(L)) continue;
-      if (/^外消費税|^内消費税|^消費税|^税額|^小計|^合計|^総額|^総合計|^【.*】|^入金額|^PAGE|^\d+\s*\/\s*\d+$/.test(L)) continue;
-      if (/^[\d,\s]+$/.test(L)) continue;
+      if (_isInvoiceNoise(L)) continue;
       desc.push(L);
       if (desc.length >= 10) break;
     }
