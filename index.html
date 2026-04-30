@@ -4783,9 +4783,10 @@ select.sankyu-edit-input {
 
   <!-- Screen: 車両一覧 -->
   <div class="screen" id="vehicleListScreen">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">🚗 車両一覧</h2>
-      <span id="vehicleListCount" style="font-size:13px;font-weight:600;color:var(--primary);margin-left:auto;background:var(--bg);padding:2px 10px;border-radius:12px;"></span>
+      <button onclick="openRepairPdfBulk()" style="margin-left:auto;padding:6px 12px;border-radius:8px;background:linear-gradient(135deg,#ef6c00,#e65100);color:#fff;border:none;font-weight:700;font-size:11px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;">📥 修理・交換 PDF</button>
+      <span id="vehicleListCount" style="font-size:13px;font-weight:600;color:var(--primary);background:var(--bg);padding:2px 10px;border-radius:12px;"></span>
     </div>
 
     <!-- 交通安全教育 ショートカット -->
@@ -24442,14 +24443,13 @@ async function openRepairPdfBulk() {
         '<button onclick="document.getElementById(\'repairPdfBulkOverlay\').remove()" style="background:rgba(255,255,255,0.22);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:20px;cursor:pointer;line-height:1;">×</button>' +
       '</div>' +
       '<div id="repairPdfBulkBody" style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;padding:14px;">' +
-        '<div style="text-align:center;padding:24px 14px;">' +
-          '<div style="font-size:48px;margin-bottom:10px;">📄</div>' +
-          '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px;">PDFファイルを選択</div>' +
-          '<div style="font-size:11px;color:var(--text-light);margin-bottom:14px;line-height:1.5;">請求書・整備票などのPDFをアップロードすると、<br>各伝票を自動解析してプレビュー表示します。</div>' +
-          '<label style="display:inline-block;padding:12px 24px;background:linear-gradient(135deg,#ef6c00,#e65100);color:#fff;border-radius:10px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(230,81,0,0.3);">' +
-            '📂 PDF を選択' +
-            '<input type="file" accept="application/pdf,.pdf" style="display:none;" onchange="_onRepairPdfFileSelected(this)">' +
-          '</label>' +
+        '<div id="repairPdfDropZone" ondragover="_onRepairPdfDragOver(event)" ondragleave="_onRepairPdfDragLeave(event)" ondrop="_onRepairPdfDrop(event)" onclick="this.querySelector(\'input[type=file]\').click()" style="border:2.5px dashed #ef6c00;border-radius:14px;padding:32px 16px;text-align:center;background:#fff8f3;cursor:pointer;transition:all 0.15s;">' +
+          '<div style="font-size:54px;margin-bottom:10px;line-height:1;">📄</div>' +
+          '<div style="font-size:15px;font-weight:800;color:#bf360c;margin-bottom:6px;">PDFをここにドラッグ＆ドロップ</div>' +
+          '<div style="font-size:11px;color:#888;margin-bottom:14px;">または タップしてファイル選択</div>' +
+          '<div style="display:inline-block;padding:8px 18px;background:linear-gradient(135deg,#ef6c00,#e65100);color:#fff;border-radius:10px;font-weight:700;font-size:12px;box-shadow:0 2px 6px rgba(230,81,0,0.3);">📂 PDF を選択</div>' +
+          '<input type="file" accept="application/pdf,.pdf" style="display:none;" onchange="_onRepairPdfFileSelected(this)">' +
+          '<div style="margin-top:14px;font-size:10px;color:#888;line-height:1.5;">請求書・整備票などのPDFをアップロードすると、各伝票を自動解析してプレビュー表示します。</div>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -24556,6 +24556,48 @@ function _parseRepairPdfText(text) {
   }
   commit();
   return records.filter(function(r) { return r.plate || r.descriptionStr; });
+}
+
+// ドラッグ&ドロップ サポート
+function _onRepairPdfDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  var z = document.getElementById('repairPdfDropZone');
+  if (z) {
+    z.style.background = '#ffe0b2';
+    z.style.borderColor = '#bf360c';
+    z.style.transform = 'scale(1.01)';
+  }
+}
+function _onRepairPdfDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  var z = document.getElementById('repairPdfDropZone');
+  if (z) {
+    z.style.background = '#fff8f3';
+    z.style.borderColor = '#ef6c00';
+    z.style.transform = '';
+  }
+}
+function _onRepairPdfDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  var z = document.getElementById('repairPdfDropZone');
+  if (z) {
+    z.style.background = '#fff8f3';
+    z.style.borderColor = '#ef6c00';
+    z.style.transform = '';
+  }
+  var files = e.dataTransfer && e.dataTransfer.files;
+  if (!files || files.length === 0) return;
+  var f = files[0];
+  if (!/pdf/i.test(f.type) && !/\.pdf$/i.test(f.name)) {
+    showToast('PDFファイルを選択してください', 'error');
+    return;
+  }
+  // 既存のハンドラに dataTransfer.files を直接渡す
+  _onRepairPdfFileSelected({ files: files });
 }
 
 async function _onRepairPdfFileSelected(input) {
