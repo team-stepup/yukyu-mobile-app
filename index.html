@@ -7428,15 +7428,23 @@ const PROFILE_CATEGORIES = [
   },
   {
     id: 'work', label: '勤務情報', icon: '🏢',
+    groups: [
+      { key: 'haken',  label: '配属情報',     icon: '🏭', color: '#3949ab', bg: 'linear-gradient(135deg,#e8eaf6,#c5cae9)' },
+      { key: 'duty',   label: '業務・給与',   icon: '💴', color: '#d84315', bg: 'linear-gradient(135deg,#fbe9e7,#ffccbc)' },
+      { key: 'commute',label: '通勤',         icon: '🚃', color: '#0288d1', bg: 'linear-gradient(135deg,#e1f5fe,#b3e5fc)' }
+    ],
     fields: [
-      { key: 'hakensaki', label: '派遣先' },
-      { key: 'soshikiTani', label: '組織単位' },
-      { key: 'trexId', label: 'T-REX ID' },
-      { key: 'syokusyu', label: '職種' },
-      { key: 'seikyu', label: '請求単価', format: 'currency' },
-      { key: 'kyuyoTaikei', label: '給与体系', format: 'currency' },
-      { key: 'tsukinTeate', label: '通勤手当', format: 'currency' },
-      { key: 'tsukinHouhou', label: '通勤方法' },
+      // ── 🏭 配属情報 ──
+      { key: 'hakensaki', label: '派遣先', group: 'haken' },
+      { key: 'soshikiTani', label: '組織単位', group: 'haken' },
+      { key: 'trexId', label: 'T-REX ID', group: 'haken' },
+      // ── 💴 業務・給与 ──
+      { key: 'syokusyu', label: '職種', group: 'duty' },
+      { key: 'seikyu', label: '請求単価', format: 'currency', group: 'duty' },
+      { key: 'kyuyoTaikei', label: '給与体系', format: 'currency', group: 'duty' },
+      // ── 🚃 通勤 ──
+      { key: 'tsukinTeate', label: '通勤手当', format: 'currency', group: 'commute' },
+      { key: 'tsukinHouhou', label: '通勤方法', group: 'commute' },
     ]
   },
   {
@@ -7482,11 +7490,17 @@ const PROFILE_CATEGORIES = [
   },
   {
     id: 'license', label: '免許', icon: '🪪',
+    groups: [
+      { key: 'lic',    label: '免許情報', icon: '🪪', color: '#37474f', bg: 'linear-gradient(135deg,#eceff1,#cfd8dc)' },
+      { key: 'licdate',label: '取得・期限', icon: '📅', color: '#c2185b', bg: 'linear-gradient(135deg,#fce4ec,#f8bbd0)' }
+    ],
     fields: [
-      { key: 'licenseType', label: '種類', format: 'badge' },
-      { key: 'licenseNo', label: '免許証番号' },
-      { key: 'licenseGetDate', label: '取得年月日', format: 'date' },
-      { key: 'licenseExpiry', label: '有効期限', format: 'dateExpiry' },
+      // ── 🪪 免許情報 ──
+      { key: 'licenseType', label: '種類', format: 'badge', group: 'lic' },
+      { key: 'licenseNo', label: '免許証番号', group: 'lic' },
+      // ── 📅 取得・期限 ──
+      { key: 'licenseGetDate', label: '取得年月日', format: 'date', group: 'licdate' },
+      { key: 'licenseExpiry', label: '有効期限', format: 'dateExpiry', group: 'licdate' },
     ]
   },
   {
@@ -16839,16 +16853,17 @@ async function loadEmployeeProfile() {
         rows.push({ group: field.group, fkey: field.key, format: field.format, label: field.label, value: '<span style="color:#bbb;">—</span>' });
         return;
       }
-      // Car-required sections: show empty fields as 未登録
+      // Car-required sections: show empty fields as 未登録 (警告)
+      // 各行の ✏️ ボタンで編集できるので、ここではクリックハンドラ不要
       if (isEmpty && forceShowAll) {
         hasData = true;
-        rows.push({ group: field.group, fkey: field.key, format: field.format, label: field.label, value: '<span onclick="startEditSection(\'' + cat.id + '\')" style="cursor:pointer;color:var(--danger);font-size:11px;padding:2px 8px;border-radius:6px;background:#fff3e0;border:1px dashed #ef6c00;display:inline-block;">未登録 ✏️</span>' });
+        rows.push({ group: field.group, fkey: field.key, format: field.format, label: field.label, value: '<span style="color:var(--danger);font-size:11px;padding:2px 8px;border-radius:6px;background:#fff3e0;border:1px dashed #ef6c00;display:inline-block;font-weight:700;">未登録</span>' });
         return;
       }
-      // 空欄でも全項目表示: タップで編集モード起動
+      // 空欄: 各行の ✏️ ボタンで追加できるので、ここではただの — を表示
       if (isEmpty) {
         hasData = true;
-        rows.push({ group: field.group, fkey: field.key, format: field.format, label: field.label, value: '<span onclick="startEditSection(\'' + cat.id + '\')" style="cursor:pointer;color:#888;padding:2px 8px;border-radius:6px;background:#f5f5f5;border:1px dashed #ccc;display:inline-block;font-size:12px;">— <span style="color:#1976d2;font-size:10px;font-weight:700;">✏️ 追加</span></span>' });
+        rows.push({ group: field.group, fkey: field.key, format: field.format, label: field.label, value: '<span style="color:#bbb;">—</span>' });
         return;
       }
       hasData = true;
