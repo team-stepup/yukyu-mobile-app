@@ -6738,6 +6738,74 @@ async function loadLeaveDetails() {
       }
     } catch (e) { console.warn('soumu status chips failed:', e); }
   })();
+
+  // 産休育休チップ (List52 にレコードがあれば表示、クリックで詳細画面へ)
+  (async function() {
+    try {
+      var snStr = String(emp[F.syainNo] || '').trim();
+      if (!snStr) return;
+      if (!_sankyuItems) {
+        var srs = await Promise.all([
+          fetchSankyuFields().catch(function() { return null; }),
+          fetchSankyuItems().catch(function() { return []; })
+        ]);
+        if (srs[0]) _sankyuFieldsMeta = srs[0];
+        _sankyuItems = srs[1] || [];
+      }
+      if (!_sankyuItems || _sankyuItems.length === 0) return;
+      var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+      var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+      var kBirth  = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+      var kYotei  = sankyuKeyByTitle('出産予定日');
+      var matches = _sankyuItems.filter(function(it) {
+        var b = it[kSyainNo];
+        return b !== null && b !== undefined && String(b).trim() === snStr;
+      });
+      if (matches.length === 0) return;
+      function sortByDateDesc(arr) {
+        return arr.slice().sort(function(a, b) {
+          var da = new Date(a[kYotei] || a[kBirth] || 0);
+          var db = new Date(b[kYotei] || b[kBirth] || 0);
+          return db - da;
+        });
+      }
+      var active = matches.filter(function(it) {
+        return sankyuItemCategory(it, kStatus, kBirth, kYotei) !== 'owari';
+      });
+      var pickedItem, pickedCat;
+      if (active.length > 0) {
+        pickedItem = sortByDateDesc(active)[0];
+        pickedCat = sankyuItemCategory(pickedItem, kStatus, kBirth, kYotei);
+      } else {
+        pickedItem = sortByDateDesc(matches)[0];
+        pickedCat = 'owari';
+      }
+      var catLabel, icon, bg, color, border;
+      if (pickedCat === 'sango') {
+        catLabel = '産前産後'; icon = '🤰';
+        bg = 'linear-gradient(135deg,#fce4ec,#f8bbd0)';
+        color = '#c2185b'; border = '#f48fb1';
+      } else if (pickedCat === 'ikuji') {
+        catLabel = '育児休業中'; icon = '👶';
+        bg = 'linear-gradient(135deg,#e1f5fe,#b3e5fc)';
+        color = '#01579b'; border = '#81d4fa';
+      } else {
+        catLabel = '休業終了'; icon = '✓';
+        bg = '#ede7f6'; color = '#5e35b2'; border = '#d1c4e9';
+      }
+      var multi = matches.length > 1 ? '<span style="font-size:9px;opacity:0.7;margin-left:3px;">×' + matches.length + '</span>' : '';
+      var chipHtml = '<span class="profile-status-chip" onclick="openSankyuFromProfileChip(' + pickedItem.Id + ')" style="cursor:pointer;background:' + bg + ';color:' + color + ';border:1px solid ' + border + ';">' +
+        '<span class="psc-lbl">産休育休</span>' +
+        '<span class="psc-val">' + icon + ' ' + catLabel + multi + '</span>' +
+      '</span>';
+      var row = document.getElementById('profileStatusRow');
+      if (row) {
+        row.insertAdjacentHTML('beforeend', chipHtml);
+        row.style.display = 'flex';
+      }
+    } catch (e) { console.warn('sankyu chip failed:', e); }
+  })();
+
   // 退社者の退社理由表示（非同期でメタ取得して反映）
   if (resigned) {
     (async function() {
@@ -13054,6 +13122,21 @@ function openSankyuDetail(itemId) {
   _sankyuPickedEmp = null;
   switchScreen('sankyuDetailScreen');
   renderSankyuDetail(item);
+}
+
+// 社員詳細の産休育休チップから呼ばれる: List52 を必要に応じてロードしてから詳細画面を開く
+async function openSankyuFromProfileChip(itemId) {
+  try {
+    if (!_sankyuItems || _sankyuItems.length === 0) {
+      var srs = await Promise.all([fetchSankyuFields(), fetchSankyuItems()]);
+      if (srs[0]) _sankyuFieldsMeta = srs[0];
+      _sankyuItems = srs[1] || [];
+    }
+    openSankyuDetail(itemId);
+  } catch (e) {
+    console.warn('openSankyuFromProfileChip error:', e);
+    showToast('産休育休データ取得失敗: ' + (e.message || e), 'error');
+  }
 }
 
 // 新規追加モードで詳細画面を開く
