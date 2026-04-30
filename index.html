@@ -3214,6 +3214,81 @@ select.sankyu-edit-input {
 .back-btn:active { background: rgba(255,255,255,0.35); }
 .back-btn svg { width: 18px; height: 18px; }
 
+/* スクロール時に上部に出るスティッキー社員サマリーバー */
+.detail-sticky-bar {
+  position: sticky;
+  top: var(--header-height);
+  z-index: 90;
+  background: linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(243,229,245,0.96) 100%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(123,31,162,0.18);
+  padding: 7px 12px 7px 12px;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 3px 10px rgba(94,53,177,0.08);
+  margin: 0 -12px;  /* screen の左右パディングを打ち消す */
+}
+.detail-sticky-bar.visible {
+  display: flex;
+  animation: ssbFadeIn 0.22s ease-out;
+}
+@keyframes ssbFadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.detail-sticky-bar .ssb-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7e57c2, #4527a0);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(69,39,160,0.3);
+}
+.detail-sticky-bar .ssb-info {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+.detail-sticky-bar .ssb-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #311b92;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.2px;
+}
+.detail-sticky-bar .ssb-sub {
+  font-size: 10px;
+  color: #5e35b1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 6px;
+}
+.detail-sticky-bar .ssb-no {
+  display: inline-block;
+  font-size: 10px;
+  color: #6a1b9a;
+  background: rgba(186,104,200,0.18);
+  padding: 1px 8px;
+  border-radius: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+.detail-sticky-bar .ssb-sep {
+  color: #b39ddb;
+  flex-shrink: 0;
+}
+
 /* Profile Header (案C) */
 .profile-header {
   background: #fff;
@@ -5065,6 +5140,7 @@ select.sankyu-edit-input {
 
   <!-- Screen 2: Leave Details / 前払い -->
   <div class="screen" id="detailScreen">
+    <div id="detailStickyBar" class="detail-sticky-bar"></div>
     <div id="detailHeader"></div>
     <div class="top-tabs" id="topTabs" style="display:none;">
       <button class="top-tab" onclick="switchTopTab('yukyu')"><span class="tab-label">有給管理</span><span class="tab-stat" id="tabStatYukyu"></span></button>
@@ -6676,6 +6752,43 @@ async function loadLeaveDetails() {
       </div>
     </div>
   `;
+
+  // ── スクロール用 スティッキー サマリーバー ──
+  (function setupDetailStickyBar() {
+    const bar = document.getElementById('detailStickyBar');
+    if (!bar) return;
+    const empName2 = emp.Title || '';
+    const empNo2 = emp[F.syainNo] || '';
+    const haken2 = hakensaki || '';
+    // アバター: 氏名の最初の1文字
+    const initial = empName2.trim().charAt(0) || '?';
+    bar.innerHTML =
+      '<div class="ssb-avatar">' + escHtml(initial) + '</div>' +
+      '<div class="ssb-info">' +
+        '<span class="ssb-name">' + escHtml(empName2) + '</span>' +
+        '<span class="ssb-sub">' +
+          (haken2 ? '🏭 ' + escHtml(haken2) : '<span style="color:#aaa;">派遣先未設定</span>') +
+        '</span>' +
+      '</div>' +
+      '<span class="ssb-no">No.' + escHtml(empNo2) + '</span>';
+    bar.classList.remove('visible');
+    // 既存の Observer を切断
+    if (window._detailStickyObserver) {
+      try { window._detailStickyObserver.disconnect(); } catch(e) {}
+    }
+    // .profile-header が画面外(ヘッダー上)に行ったら表示
+    const profHdr = document.querySelector('#detailHeader .profile-header');
+    if (profHdr && 'IntersectionObserver' in window) {
+      const headerH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-height'), 10) || 56;
+      window._detailStickyObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) bar.classList.remove('visible');
+          else bar.classList.add('visible');
+        });
+      }, { threshold: 0, rootMargin: '-' + (headerH + 4) + 'px 0px 0px 0px' });
+      window._detailStickyObserver.observe(profHdr);
+    }
+  })();
 
   // 履歴ベース判定を非同期で適用（採用種別が空のケースで分類を精緻化）
   (async function() {
