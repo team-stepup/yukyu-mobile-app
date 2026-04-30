@@ -10027,7 +10027,8 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 離職票: zaisyoku="退社" AND rishokuhyou="必要" AND soumuRishoku="不要"
+  // 離職票: zaisyoku="退社" AND rishokuhyou="必要" AND soumuRishoku="不要"or空欄
+  // (空欄 = 未処理 として扱う。「→申請中」「✓取得完了」は除外)
   var rishokuhyouCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odRishokuhyou = _soumuKeyMap['rishokuhyou'];
@@ -10038,7 +10039,8 @@ function renderSoumuDashboard() {
       if (!emp.Title) return;
       if (empZaisyoku(emp) !== '退社') return;
       if (String(emp[odRishokuhyou] || '').trim() !== '必要') return;
-      if (String(emp[odRishoku] || '').trim() !== '不要') return;
+      var srVal = String(emp[odRishoku] || '').trim();
+      if (srVal !== '不要' && srVal !== '') return;
       count++;
     });
     return count;
@@ -10260,7 +10262,7 @@ function openSoumuFilterList(filterKey) {
       openShahoSoushitsuDownloadList();
       return;
     case 'rishokuhyou':
-      // zaisyoku="退社" AND rishokuhyou="必要" AND soumuRishoku="不要"
+      // zaisyoku="退社" AND rishokuhyou="必要" AND soumuRishoku="不要"or空欄(未処理)
       (function() {
         var odRishokuhyou = _soumuKeyMap['rishokuhyou'];
         var odRishoku = _soumuKeyMap['soumuRishoku'];
@@ -10271,7 +10273,8 @@ function openSoumuFilterList(filterKey) {
           var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
           if (zVal !== '退社') return false;
           if (String(emp[odRishokuhyou] || '').trim() !== '必要') return false;
-          if (String(emp[odRishoku] || '').trim() !== '不要') return false;
+          var srVal = String(emp[odRishoku] || '').trim();
+          if (srVal !== '不要' && srVal !== '') return false;
           return true;
         });
         openSoumuListOverlay('離職票', filteredList, odRishoku, { field: F.yukyuTaisha, fallback: F.hakenTaisha, label: '退社日' });
