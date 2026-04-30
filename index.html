@@ -7499,31 +7499,35 @@ const PROFILE_CATEGORIES = [
   {
     id: 'insurance', label: '社会保険・雇用', icon: '🛡',
     fields: [
-      { key: 'shahoKanyuubi', label: '社保加入日', format: 'date' },
-      { key: 'kenpoHihokensha', label: '健保：被保険者' },
-      { key: 'kenpoShutoku', label: '健保：資格取得日', format: 'date' },
-      { key: 'seiriNo', label: '整理番号' },
-      { key: 'shahoNamae', label: '社保名前' },
-      { key: 'shahoNamaeFurigana', label: '社保名前フリガナ' },
-      { key: 'kisoNenkinNo', label: '基礎年金番号' },
-      { key: 'shahoHyojunHoushu', label: '社保標準報酬月額' },
+      // ── 👔 雇用保険 ──
+      { key: 'koyouNo', label: '雇用：被保険者番号', group: 'koyou' },
+      { key: 'koyouShutoku', label: '雇用：資格取得日', format: 'date', group: 'koyou' },
+      { key: 'koyouName', label: '雇用保険名前', group: 'koyou' },
+      { key: 'koyouSoushitsu', label: '雇用保険喪失日', format: 'date', group: 'koyou' },
+      // ── 🏥 社会保険 ──
+      { key: 'shahoKanyuubi', label: '社保加入日', format: 'date', group: 'shaho' },
+      { key: 'kenpoHihokensha', label: '健保：被保険者', group: 'shaho' },
+      { key: 'kenpoShutoku', label: '健保：資格取得日', format: 'date', group: 'shaho' },
+      { key: 'seiriNo', label: '整理番号', group: 'shaho' },
+      { key: 'shahoNamae', label: '社保名前', group: 'shaho' },
+      { key: 'shahoNamaeFurigana', label: '社保名前フリガナ', group: 'shaho' },
+      { key: 'kisoNenkinNo', label: '基礎年金番号', group: 'shaho' },
+      { key: 'shahoHyojunHoushu', label: '社保標準報酬月額', group: 'shaho' },
+      { key: 'shahoSoushitsu', label: '社保喪失日', format: 'date', group: 'shaho' },
       // 扶養情報 (shahoHuyou='あり' の場合のみ表示)
-      { key: 'shahoHuyou', label: '扶養', showOnlyIfHasFuyou: true },
-      { key: 'shahoHuyouBaai', label: '扶養がある場合', showOnlyIfHasFuyou: true },
-      { key: 'shahoTsuzukigara', label: '扶養者続柄', showOnlyIfHasFuyou: true },
-      { key: 'shahoFurigana', label: '扶養者フリガナ', showOnlyIfHasFuyou: true },
-      { key: 'shahoZairyuCard', label: '扶養者在留カード', showOnlyIfHasFuyou: true },
-      { key: 'shahoMyNumber', label: '扶養者マイナンバー', showOnlyIfHasFuyou: true },
-      { key: 'koyouNo', label: '雇用：被保険者番号' },
-      { key: 'koyouShutoku', label: '雇用：資格取得日', format: 'date' },
-      { key: 'koyouName', label: '雇用保険名前' },
-      { key: 'shahoSoushitsu', label: '社保喪失日', format: 'date' },
-      { key: 'koyouSoushitsu', label: '雇用保険喪失日', format: 'date' },
-      { key: 'soumuKoyou', label: '総務・雇用', format: 'badge' },
-      { key: 'soumuShaho', label: '総務-社保', format: 'badge' },
-      { key: 'soumuRishoku', label: '総務-離職票', format: 'badge' },
-      { key: 'rishokuhyou', label: '離職票', format: 'badge' },
-      { key: 'rishokuWatashi', label: '離職票渡し方', format: 'badge' },
+      { key: 'shahoHuyou', label: '扶養', showOnlyIfHasFuyou: true, group: 'shaho' },
+      { key: 'shahoHuyouBaai', label: '扶養がある場合', showOnlyIfHasFuyou: true, group: 'shaho' },
+      { key: 'shahoTsuzukigara', label: '扶養者続柄', showOnlyIfHasFuyou: true, group: 'shaho' },
+      { key: 'shahoFurigana', label: '扶養者フリガナ', showOnlyIfHasFuyou: true, group: 'shaho' },
+      { key: 'shahoZairyuCard', label: '扶養者在留カード', showOnlyIfHasFuyou: true, group: 'shaho' },
+      { key: 'shahoMyNumber', label: '扶養者マイナンバー', showOnlyIfHasFuyou: true, group: 'shaho' },
+      // ── 📋 総務処理 ──
+      { key: 'soumuKoyou', label: '総務・雇用', format: 'badge', group: 'soumu' },
+      { key: 'soumuShaho', label: '総務-社保', format: 'badge', group: 'soumu' },
+      // ── 📄 離職票 ──
+      { key: 'soumuRishoku', label: '総務-離職票', format: 'badge', group: 'rishoku' },
+      { key: 'rishokuhyou', label: '離職票', format: 'badge', group: 'rishoku' },
+      { key: 'rishokuWatashi', label: '離職票渡し方', format: 'badge', group: 'rishoku' },
     ]
   },
 ];
@@ -16752,7 +16756,7 @@ async function loadEmployeeProfile() {
           let age = now.getFullYear() - bd.getFullYear();
           if (now.getMonth() < bd.getMonth() || (now.getMonth() === bd.getMonth() && now.getDate() < bd.getDate())) age--;
           hasData = true;
-          rows.push({ label: field.label, value: age + '歳' });
+          rows.push({ group: field.group, label: field.label, value: age + '歳' });
         }
         return;
       }
@@ -16781,7 +16785,7 @@ async function loadEmployeeProfile() {
         }
         if (parts.length > 0) {
           hasData = true;
-          rows.push({ label: field.label, value: parts.join('<br>') });
+          rows.push({ group: field.group, label: field.label, value: parts.join('<br>') });
         }
         return;
       }
@@ -16796,38 +16800,38 @@ async function loadEmployeeProfile() {
       // 退社者向けフィールド: 空でも表示
       if (isEmpty && isResignedAlways) {
         hasData = true;
-        rows.push({ label: field.label, value: '<span style="color:#bbb;">—</span>' });
+        rows.push({ group: field.group, label: field.label, value: '<span style="color:#bbb;">—</span>' });
         return;
       }
       // 通勤方法: always show, even if empty
       if (field.key === 'tsukinHouhou') {
         hasData = true;
-        rows.push({ label: field.label, value: isEmpty ? '<span style="color:#ccc;">未登録</span>' : escHtml(String(val)) });
+        rows.push({ group: field.group, label: field.label, value: isEmpty ? '<span style="color:#ccc;">未登録</span>' : escHtml(String(val)) });
         return;
       }
       // insurance セクション指定フィールド: 空でも常に表示
       if (isEmpty && isInsuranceAlways) {
         hasData = true;
-        rows.push({ label: field.label, value: '<span style="color:#bbb;">—</span>' });
+        rows.push({ group: field.group, label: field.label, value: '<span style="color:#bbb;">—</span>' });
         return;
       }
       // Car-required sections: show empty fields as 未登録
       if (isEmpty && forceShowAll) {
         hasData = true;
-        rows.push({ label: field.label, value: '<span onclick="startEditSection(\'' + cat.id + '\')" style="cursor:pointer;color:var(--danger);font-size:11px;padding:2px 8px;border-radius:6px;background:#fff3e0;border:1px dashed #ef6c00;display:inline-block;">未登録 ✏️</span>' });
+        rows.push({ group: field.group, label: field.label, value: '<span onclick="startEditSection(\'' + cat.id + '\')" style="cursor:pointer;color:var(--danger);font-size:11px;padding:2px 8px;border-radius:6px;background:#fff3e0;border:1px dashed #ef6c00;display:inline-block;">未登録 ✏️</span>' });
         return;
       }
       // 空欄でも全項目表示: タップで編集モード起動
       if (isEmpty) {
         hasData = true;
-        rows.push({ label: field.label, value: '<span onclick="startEditSection(\'' + cat.id + '\')" style="cursor:pointer;color:#888;padding:2px 8px;border-radius:6px;background:#f5f5f5;border:1px dashed #ccc;display:inline-block;font-size:12px;">— <span style="color:#1976d2;font-size:10px;font-weight:700;">✏️ 追加</span></span>' });
+        rows.push({ group: field.group, label: field.label, value: '<span onclick="startEditSection(\'' + cat.id + '\')" style="cursor:pointer;color:#888;padding:2px 8px;border-radius:6px;background:#f5f5f5;border:1px dashed #ccc;display:inline-block;font-size:12px;">— <span style="color:#1976d2;font-size:10px;font-weight:700;">✏️ 追加</span></span>' });
         return;
       }
       hasData = true;
       // Special: 派遣先 uses getHakensaki() for clean display
       if (field.key === 'hakensaki') {
         const clean = getHakensaki(emp);
-        if (clean) rows.push({ label: field.label, value: escHtml(clean) });
+        if (clean) rows.push({ group: field.group, label: field.label, value: escHtml(clean) });
         return;
       }
       // Special: 社員ファイル → 見やすいビューアで開く
@@ -16840,6 +16844,7 @@ async function loadEmployeeProfile() {
           var sfJson = JSON.stringify({ url: sfUrl, no: sfEmpNo, name: sfEmpName });
           var sfB64 = btoa(unescape(encodeURIComponent(sfJson)));
           rows.push({
+            group: field.group,
             label: field.label,
             value: '<button class="syain-file-btn" onclick="openSyainFolderFromPayload(\'' + sfB64 + '\')">📂 社員ファイルを開く</button>'
           });
@@ -16847,7 +16852,7 @@ async function loadEmployeeProfile() {
         return;
       }
       const formatted = formatProfileValue(val, field.format);
-      if (formatted) rows.push({ label: field.label, value: formatted });
+      if (formatted) rows.push({ group: field.group, label: field.label, value: formatted });
     });
 
     // Skip empty sections (especially 在留・車両)
@@ -16865,9 +16870,36 @@ async function loadEmployeeProfile() {
     html += '<div class="accordion-body">';
     // View mode table
     html += '<div id="view_' + cat.id + '"><table class="acc-table">';
-    rows.forEach(r => {
-      html += '<tr><th>' + r.label + '</th><td>' + r.value + '</td></tr>';
-    });
+    if (cat.id === 'insurance') {
+      // ── insurance はグループ別に分類して表示 ──
+      const groupCfg = [
+        { key: 'koyou',   label: '雇用保険',   icon: '👔', color: '#1565c0', bg: 'linear-gradient(135deg,#e3f2fd,#bbdefb)' },
+        { key: 'shaho',   label: '社会保険',   icon: '🏥', color: '#2e7d32', bg: 'linear-gradient(135deg,#e8f5e9,#c8e6c9)' },
+        { key: 'soumu',   label: '総務処理',   icon: '📋', color: '#6d4c41', bg: 'linear-gradient(135deg,#efebe9,#d7ccc8)' },
+        { key: 'rishoku', label: '離職票',     icon: '📄', color: '#c62828', bg: 'linear-gradient(135deg,#ffebee,#ffcdd2)' }
+      ];
+      groupCfg.forEach(function(g) {
+        const grpRows = rows.filter(function(r) { return r.group === g.key; });
+        if (grpRows.length === 0) return;
+        // グループヘッダー (色帯)
+        html += '<tr><td colspan="2" style="background:' + g.bg + ';color:' + g.color + ';font-weight:800;font-size:12px;padding:6px 10px;border-top:2px solid ' + g.color + ';letter-spacing:0.5px;">' +
+                g.icon + ' ' + g.label + '</td></tr>';
+        grpRows.forEach(function(r) {
+          html += '<tr style="border-left:3px solid ' + g.color + ';">' +
+                  '<th style="border-left:3px solid ' + g.color + ';color:' + g.color + ';font-weight:600;">' + r.label + '</th>' +
+                  '<td>' + r.value + '</td></tr>';
+        });
+      });
+      // group が無い行 (フォールバック)
+      const ungrouped = rows.filter(function(r) { return !r.group; });
+      ungrouped.forEach(function(r) {
+        html += '<tr><th>' + r.label + '</th><td>' + r.value + '</td></tr>';
+      });
+    } else {
+      rows.forEach(r => {
+        html += '<tr><th>' + r.label + '</th><td>' + r.value + '</td></tr>';
+      });
+    }
     html += '</table></div>';
     // Edit mode (hidden initially)
     html += '<div id="edit_' + cat.id + '" style="display:none;"></div>';
