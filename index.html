@@ -21023,6 +21023,79 @@ function calcTenure(startDateStr, endDateStr) {
   return '1ヶ月未満';
 }
 
+// ASTI 組織単位チップのクリック → 詳細パネル開閉
+function toggleAstiSoshikiDetail(shortKey) {
+  const data = window._astiOverlayData;
+  if (!data || !data.groupMap || !data.groupMap[shortKey]) return;
+  const detail = document.getElementById('astiSoshikiDetail');
+  if (!detail) return;
+  const FF = data.F;
+  const g = data.groupMap[shortKey];
+
+  // 同じチップ再タップ → 閉じる
+  if (detail.dataset.key === shortKey && detail.style.display !== 'none') {
+    detail.style.display = 'none';
+    detail.innerHTML = '';
+    detail.dataset.key = '';
+    document.querySelectorAll('#astiNyutaiOverlay .asti-soshiki-chip').forEach(function(c) {
+      c.style.background = '#fff';
+      c.style.borderColor = '#e0e0e8';
+    });
+    return;
+  }
+
+  detail.dataset.key = shortKey;
+  detail.style.display = 'block';
+
+  function fmt(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    if (isNaN(d)) return String(v);
+    return (d.getMonth() + 1) + '/' + d.getDate();
+  }
+  function row(emp, kind) {
+    var sn = emp[FF.syainNo] || '';
+    var name = emp.Title || '';
+    var date = (kind === 'in') ? emp[FF.nyushaDate] : emp[FF.hakenTaisha];
+    var dateLabel = (kind === 'in') ? '入社' : '退社';
+    var color = (kind === 'in') ? '#2e7d32' : '#c62828';
+    var bg = (kind === 'in') ? '#e8f5e9' : '#ffebee';
+    var icon = (kind === 'in') ? '🌱' : '🏁';
+    var safeEmp = JSON.stringify(emp).replace(/'/g, '&#39;');
+    return '<div onclick=\'document.getElementById("astiNyutaiOverlay").remove();selectEmployee(' + safeEmp + ')\' style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f5f5f8;font-size:12px;cursor:pointer;">' +
+      '<span style="color:' + color + ';font-size:14px;flex-shrink:0;">' + icon + '</span>' +
+      '<span style="font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(name) + '</span>' +
+      '<span style="font-size:10px;color:#666;background:#eef0f8;padding:1px 6px;border-radius:6px;font-weight:700;flex-shrink:0;">№' + escHtml(String(sn)) + '</span>' +
+      '<span style="font-size:10px;font-weight:800;color:#555;background:#f5f5f9;padding:2px 7px;border-radius:6px;flex-shrink:0;">' + escHtml(shortKey) + '</span>' +
+      '<span style="font-size:11px;font-weight:800;color:' + color + ';background:' + bg + ';padding:2px 7px;border-radius:6px;flex-shrink:0;">' + dateLabel + ' ' + escHtml(fmt(date)) + '</span>' +
+    '</div>';
+  }
+
+  var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;font-weight:800;color:var(--primary);">' +
+    '<span>📋 ' + escHtml(shortKey) + '</span>' +
+    '<span style="font-weight:600;color:var(--text-light);font-size:11px;">入社 ' + g.in.length + ' / 退社 ' + g.out.length + ' 名</span>' +
+    '<button onclick="event.stopPropagation();toggleAstiSoshikiDetail(\'' + shortKey.replace(/'/g, "\\'") + '\')" style="margin-left:auto;background:none;border:none;font-size:16px;color:#999;cursor:pointer;line-height:1;padding:0 4px;">×</button>' +
+    '</div>';
+  if (g.in.length === 0 && g.out.length === 0) {
+    html += '<div style="text-align:center;padding:8px;color:var(--text-light);font-size:12px;">該当者なし</div>';
+  } else {
+    html += g.in.map(function(emp) { return row(emp, 'in'); }).join('');
+    html += g.out.map(function(emp) { return row(emp, 'out'); }).join('');
+  }
+  detail.innerHTML = html;
+
+  // チップのアクティブ表示
+  document.querySelectorAll('#astiNyutaiOverlay .asti-soshiki-chip').forEach(function(c) {
+    if (c.dataset.key === shortKey) {
+      c.style.background = '#e8eaf6';
+      c.style.borderColor = 'var(--primary)';
+    } else {
+      c.style.background = '#fff';
+      c.style.borderColor = '#e0e0e8';
+    }
+  });
+}
+
 // ASTI (浜松/都田/掛川) 入退社オーバーレイ
 async function openAstiNyutaiOverlay() {
   // 入退連絡ページの選択期間を流用
@@ -21078,14 +21151,22 @@ function renderAstiNyutaiOverlay(nyusha, taisha, mStart, mEnd, km) {
     const k = km && km['soshikiTani'];
     return k ? (emp[k] || '') : '';
   }
-  // 組織単位文字列から短縮コード(N3, P1, S5 1F等のラテン部分)を抽出
+  // 組織単位文字列から短縮コード(N3, P1, S5等)を抽出
+  // 例: "センサ生産課（P1）(078-1)" → "P1"  /  "生産5課 S5 1F" → "S5"
+  // (S5 1F と S5 2F が同じ "S5" グループになるよう、最初のラテン文字始まりトークンのみ採用)
   function shortSoshiki(full) {
     if (!full) return '(未設定)';
-    const normalized = String(full).replace(/　/g, ' ').trim();
-    const tokens = normalized.split(/\s+/);
-    const latins = tokens.filter(t => /^[A-Za-z0-9・\-]+$/.test(t));
-    if (latins.length > 0) return latins.join(' ');
-    return normalized;
+    const s = String(full).replace(/　/g, ' ').trim();
+    if (!s) return '(未設定)';
+    // 1. 括弧内のラテン文字始まりコード（（P1）等）を最優先
+    const parenMatch = s.match(/[（(]\s*([A-Za-z][A-Za-z0-9・\-]*)\s*[)）]/);
+    if (parenMatch) return parenMatch[1];
+    // 2. スペース区切りで「最初の」ラテン文字始まりトークン
+    const tokens = s.split(/\s+/);
+    for (let i = 0; i < tokens.length; i++) {
+      if (/^[A-Za-z][A-Za-z0-9・\-]*$/.test(tokens[i])) return tokens[i];
+    }
+    return s;
   }
 
   // 期間ラベル
@@ -21094,34 +21175,43 @@ function renderAstiNyutaiOverlay(nyusha, taisha, mStart, mEnd, km) {
     ? mStart.getFullYear() + '年' + (mStart.getMonth() + 1) + '月'
     : mStart.getFullYear() + '/' + (mStart.getMonth() + 1) + ' 〜 ' + mEnd.getFullYear() + '/' + (mEnd.getMonth() + 1);
 
-  // 組織単位別 集計
-  const soshikiCounts = {};
-  function addCount(emp, kind) {
+  // 組織単位別 集計 (短縮コードでグループ化: "S5 1F" と "S5 2F" は "S5" で集約)
+  const groupMap = {};  // shortKey -> { in: [emp...], out: [emp...], fulls: Set, short }
+  function addToGroup(emp, kind) {
     const full = getSoshiki(emp) || '(未設定)';
-    if (!soshikiCounts[full]) soshikiCounts[full] = { in: 0, out: 0, full: full, short: shortSoshiki(full) };
-    if (kind === 'in') soshikiCounts[full].in++;
-    else soshikiCounts[full].out++;
+    const sh = shortSoshiki(full);
+    if (!groupMap[sh]) groupMap[sh] = { in: [], out: [], fulls: {}, short: sh };
+    groupMap[sh][kind].push(emp);
+    groupMap[sh].fulls[full] = true;
   }
-  nyusha.forEach(emp => addCount(emp, 'in'));
-  taisha.forEach(emp => addCount(emp, 'out'));
-  const soshikiKeys = Object.keys(soshikiCounts).sort((a, b) => soshikiCounts[a].short.localeCompare(soshikiCounts[b].short, 'ja'));
+  nyusha.forEach(emp => addToGroup(emp, 'in'));
+  taisha.forEach(emp => addToGroup(emp, 'out'));
+  const groupKeys = Object.keys(groupMap).sort((a, b) => a.localeCompare(b, 'ja'));
 
-  const soshikiChipsHtml = soshikiKeys.length === 0 ? '' :
+  // クリック処理用にグローバル保存
+  window._astiOverlayData = { groupMap: groupMap, F: F };
+
+  const soshikiChipsHtml = groupKeys.length === 0 ? '' :
     '<div style="padding:8px 14px 10px;background:#f8f9fc;border-bottom:1px solid #eee;flex-shrink:0;">' +
       '<div style="font-size:11px;font-weight:700;color:#555;margin-bottom:6px;display:flex;align-items:center;gap:4px;">' +
         '<span>📊 組織単位別 集計</span>' +
+        '<span style="font-size:10px;font-weight:500;color:var(--text-light);">(タップで詳細)</span>' +
       '</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
-        soshikiKeys.map(k => {
-          const c = soshikiCounts[k];
-          const inSpan  = c.in  > 0 ? '<span style="color:#2e7d32;font-weight:800;">🌱' + c.in + '</span>'  : '<span style="color:#bbb;font-weight:600;">🌱0</span>';
-          const outSpan = c.out > 0 ? '<span style="color:#c62828;font-weight:800;">🏁' + c.out + '</span>' : '<span style="color:#bbb;font-weight:600;">🏁0</span>';
-          return '<div title="' + escHtml(c.full) + '" style="background:#fff;border:1px solid #e0e0e8;border-radius:10px;padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">' +
-            '<span style="font-weight:800;color:var(--text);">' + escHtml(c.short) + '</span>' +
+        groupKeys.map(sh => {
+          const g = groupMap[sh];
+          const fullList = Object.keys(g.fulls).join(' / ');
+          const inN = g.in.length, outN = g.out.length;
+          const inSpan  = inN  > 0 ? '<span style="color:#2e7d32;font-weight:800;">🌱' + inN + '</span>'  : '<span style="color:#bbb;font-weight:600;">🌱0</span>';
+          const outSpan = outN > 0 ? '<span style="color:#c62828;font-weight:800;">🏁' + outN + '</span>' : '<span style="color:#bbb;font-weight:600;">🏁0</span>';
+          const safeKey = sh.replace(/'/g, "\\'");
+          return '<div class="asti-soshiki-chip" data-key="' + escHtml(sh) + '" onclick="toggleAstiSoshikiDetail(\'' + safeKey + '\')" title="' + escHtml(fullList) + '" style="background:#fff;border:1.5px solid #e0e0e8;border-radius:10px;padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 1px 2px rgba(0,0,0,0.04);cursor:pointer;transition:all 0.15s;">' +
+            '<span style="font-weight:800;color:var(--text);">' + escHtml(sh) + '</span>' +
             inSpan + outSpan +
           '</div>';
         }).join('') +
       '</div>' +
+      '<div id="astiSoshikiDetail" style="display:none;margin-top:8px;background:#fff;border:1px solid #e0e0e8;border-radius:10px;padding:8px 12px;"></div>' +
     '</div>';
 
   function rowHtml(emp, type) {
