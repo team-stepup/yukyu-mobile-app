@@ -24474,10 +24474,15 @@ async function _extractPdfText(file) {
   var buf = await file.arrayBuffer();
   var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
   var allText = '';
+  // 診断情報をグローバルに保持（失敗時に画面表示）
+  window._repairPdfDiag = { numPages: pdf.numPages, pages: [], fileSize: file.size, fileName: file.name };
   for (var p = 1; p <= pdf.numPages; p++) {
     var page = await pdf.getPage(p);
     var content = await page.getTextContent();
-    var items = (content.items || []).filter(function(it) { return it.str && it.str.trim(); });
+    var rawItems = content.items || [];
+    var items = rawItems.filter(function(it) { return it.str && it.str.trim(); });
+    var sample = rawItems.slice(0, 5).map(function(it) { return JSON.stringify(it.str || ''); }).join(' / ');
+    window._repairPdfDiag.pages.push({ pageNum: p, rawCount: rawItems.length, filteredCount: items.length, sample: sample });
     if (items.length === 0) continue;
 
     // Y座標で降順ソート (PDFの座標系は下が0, 上に行くほど大きい → top-to-bottomは降順)
@@ -24684,6 +24689,15 @@ async function _onRepairPdfFileSelected(input) {
     }
     window._repairPdfRawText = text || '';
     if (!text || !text.trim()) {
+      var diag = window._repairPdfDiag || { pages: [], numPages: 0 };
+      var diagHtml = '<div style="background:#f5f5f5;border:1px solid #ccc;border-radius:6px;padding:8px 10px;margin-top:10px;font-family:monospace;font-size:10px;color:#333;text-align:left;line-height:1.6;">' +
+        '<div style="font-weight:700;margin-bottom:4px;color:#555;">🔬 診断情報:</div>' +
+        'ファイル: ' + escHtml(diag.fileName || '?') + ' (' + Math.round((diag.fileSize || 0) / 1024) + 'KB)<br>' +
+        'ページ数: ' + diag.numPages + '<br>';
+      diag.pages.forEach(function(pg) {
+        diagHtml += 'P' + pg.pageNum + ' rawItems=' + pg.rawCount + ' filtered=' + pg.filteredCount + ' sample=[' + escHtml(pg.sample || '') + ']<br>';
+      });
+      diagHtml += '</div>';
       if (body) body.innerHTML =
         '<div style="text-align:center;padding:24px 14px;">' +
           '<div style="font-size:42px;margin-bottom:10px;">🖼️</div>' +
@@ -24691,13 +24705,15 @@ async function _onRepairPdfFileSelected(input) {
           '<div style="font-size:12px;color:#666;line-height:1.7;text-align:left;background:#fff8e1;border-left:3px solid #f57c00;padding:10px 12px;border-radius:6px;">' +
             '<strong>原因の可能性:</strong><br>' +
             '① PDFが <strong>スキャン画像</strong> でテキスト層が無い<br>' +
-            '② PDFのフォントが特殊で抽出不可<br>' +
-            '③ PDFが暗号化されている<br><br>' +
+            '② OCR後でも <strong>テキスト層が埋め込まれていない</strong> (画像のみ保存)<br>' +
+            '③ PDFのフォントが特殊で抽出不可<br>' +
+            '④ PDFが暗号化されている<br><br>' +
             '<strong>対処:</strong><br>' +
             '• 元のPDFを <strong>テキスト形式で再生成</strong> してもらう<br>' +
-            '• 画像PDFの場合は <strong>OCR</strong> でテキスト化してから再アップロード<br>' +
-            '• または車両ごとに 📋 修理履歴 ＞ ＋新規 で手動登録' +
+            '• OCRするときに <strong>「検索可能なPDF」</strong> として保存<br>' +
+            '• Adobe Acrobat の場合: <strong>「PDFのテキスト認識」→「英語＋日本語」</strong>を選んで実行' +
           '</div>' +
+          diagHtml +
           '<button onclick="document.getElementById(\'repairPdfBulkOverlay\').remove();openRepairPdfBulk();" style="margin-top:12px;padding:8px 20px;background:#757575;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">🔄 別のPDFで再試行</button>' +
         '</div>';
       return;
