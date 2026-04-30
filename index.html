@@ -16859,25 +16859,31 @@ async function loadEmployeeProfile() {
     html += '</div></div>';
   });
 
-  // 📝 更新履歴 (placeholder - 後で renderEmployeeUpdateHistory が埋める)
-  html += '<div class="accordion-section" id="acc_updates">';
-  html +=   '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
-  html +=     '<span class="acc-icon">📝</span>';
-  html +=     '<span>更新履歴</span>';
-  html +=     '<span id="updateHistoryCount" style="margin-left:auto;margin-right:6px;background:#f0f0f0;color:#999;font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;">…</span>';
-  html +=     '<span class="acc-arrow">&#9654;</span>';
-  html +=   '</div>';
-  html +=   '<div class="accordion-body"><div id="updateHistoryBody">';
-  html +=     '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:14px 8px;">読み込み中...</div>';
-  html +=   '</div></div>';
-  html += '</div>';
+  // 📝 更新履歴 (役員のみ表示) - placeholder
+  const _isAdmin = (typeof isAdminUser === 'function') ? isAdminUser() : false;
+  if (_isAdmin) {
+    html += '<div class="accordion-section" id="acc_updates">';
+    html +=   '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+    html +=     '<span class="acc-icon">📝</span>';
+    html +=     '<span>更新履歴</span>';
+    html +=     '<span style="margin-left:6px;background:linear-gradient(135deg,#fff9e6,#fff3d4);color:#a07a00;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;border:1px solid #f0c040;">役員専用</span>';
+    html +=     '<span id="updateHistoryCount" style="margin-left:auto;margin-right:6px;background:#f0f0f0;color:#999;font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;">…</span>';
+    html +=     '<span class="acc-arrow">&#9654;</span>';
+    html +=   '</div>';
+    html +=   '<div class="accordion-body"><div id="updateHistoryBody">';
+    html +=     '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:14px 8px;">読み込み中...</div>';
+    html +=   '</div></div>';
+    html += '</div>';
+  }
 
   container.innerHTML = html;
 
-  // 更新履歴を非同期で取得・描画
-  const _empId = emp.Id || emp.ID;
-  if (_empId) {
-    renderEmployeeUpdateHistory(_empId, fieldsMeta);
+  // 更新履歴を非同期で取得・描画 (役員のみ)
+  if (_isAdmin) {
+    const _empId = emp.Id || emp.ID;
+    if (_empId) {
+      renderEmployeeUpdateHistory(_empId, fieldsMeta);
+    }
   }
 }
 
