@@ -7102,6 +7102,7 @@ async function fetchFullEmployee(syainNo) {
 // バージョン比較で除外するシステムフィールド
 var _UPDATE_HIST_SKIP_KEYS = {
   '__metadata': 1, 'OData__UIVersionString': 1, '_UIVersionString': 1,
+  'UIVersionString': 1, 'UIVersion': 1, 'owshiddenversion': 1,
   'Modified': 1, 'Created': 1,
   'Editor': 1, 'EditorId': 1, 'EditorStringId': 1,
   'Author': 1, 'AuthorId': 1, 'AuthorStringId': 1,
@@ -7111,7 +7112,9 @@ var _UPDATE_HIST_SKIP_KEYS = {
   'OData__CopySource': 1, 'OData__HasCopyDestinations': 1,
   'FileSystemObjectType': 1, 'ServerRedirectedEmbedUri': 1, 'ServerRedirectedEmbedUrl': 1,
   'ContentTypeId': 1, 'AppEditorId': 1, 'AppAuthorId': 1, 'Attachments': 1,
-  'OData__CommentCount': 1, 'OData__CommentFlags': 1, 'OData__LikeCount': 1
+  'OData__CommentCount': 1, 'OData__CommentFlags': 1, 'OData__LikeCount': 1,
+  'CheckoutUserId': 1, 'WorkflowVersion': 1, 'WorkflowInstanceID': 1,
+  'odata.editLink': 1, 'odata.id': 1, 'odata.type': 1
 };
 
 // バージョンAPI の二重エンコードされたキーを通常の InternalName に戻す
@@ -7211,7 +7214,11 @@ async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
             type = meta.type || '';
           }
           // メタが無い場合 _xNNNN_ を直接文字に変換してフォールバック
-          if (!label) label = _decodeInternalNameToText(key) || key;
+          if (!label) {
+            const fb = _decodeInternalNameToText(key);
+            label = fb || key;
+            console.log('[UpdateHist] no meta — key:', key, '→ decoded:', _decodeVersionKey(key), '→ label:', label);
+          }
           changes.push({ key: key, label: label, oldVal: oldV, newVal: newV, fieldType: type });
         }
       }
