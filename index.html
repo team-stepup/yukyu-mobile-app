@@ -7099,7 +7099,7 @@ async function fetchFullEmployee(syainNo) {
 // 更新履歴（SharePoint バージョン履歴 を比較）
 // ============================================================
 
-// バージョン比較で除外するシステムフィールド
+// バージョン比較で除外するシステムフィールド (完全一致用)
 var _UPDATE_HIST_SKIP_KEYS = {
   '__metadata': 1, 'OData__UIVersionString': 1, '_UIVersionString': 1,
   'UIVersionString': 1, 'UIVersion': 1, 'owshiddenversion': 1,
@@ -7116,6 +7116,21 @@ var _UPDATE_HIST_SKIP_KEYS = {
   'CheckoutUserId': 1, 'WorkflowVersion': 1, 'WorkflowInstanceID': 1,
   'odata.editLink': 1, 'odata.id': 1, 'odata.type': 1
 };
+
+// パターンマッチで除外する SP 内部フィールド (完全一致漏れの保険)
+function _isHistorySystemField(key) {
+  if (!key) return true;
+  if (_UPDATE_HIST_SKIP_KEYS[key]) return true;
+  // バージョン管理用フィールド (UIVersion, UIVersionString, IsCurrentVersion 等)
+  if (/^(UIVersion|UIVersionString|owshiddenversion|IsCurrent|VersionLabel|VersionId)/i.test(key)) return true;
+  // OData_ プレフィックス付きの内部 UIVersion 系
+  if (/^OData__?_?(UIVersion|Level|ModerationStatus|ModerationComments|CommentCount|CommentFlags|LikeCount|CopySource|HasCopyDestinations|CheckinComment)/i.test(key)) return true;
+  // 内部の odata.xxx
+  if (/^odata\./i.test(key)) return true;
+  // _UIVersionString や _ModerationStatus のような単純な内部名
+  if (/^_(UIVersion|UIVersionString|ModerationStatus|ModerationComments)/i.test(key)) return true;
+  return false;
+}
 
 // バージョンAPI の二重エンコードされたキーを通常の InternalName に戻す
 // 例: "OData__x005f_x63a1_x005f__x005f_x7528_x005f__x005f_x7a2e_x005f__x005f_x5225_x005f_"
@@ -7200,7 +7215,7 @@ async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
       const older = versions[i + 1];
       const changes = [];
       for (const key in newer) {
-        if (_UPDATE_HIST_SKIP_KEYS[key]) continue;
+        if (_isHistorySystemField(key)) continue;
         const newV = newer[key];
         // オブジェクト値 (lookup, person, deferred) はスキップ
         if (typeof newV === 'object' && newV !== null) continue;
