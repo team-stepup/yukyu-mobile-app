@@ -7121,15 +7121,25 @@ async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
   try {
     const token = await getToken();
     if (!token) return [];
-    // /versions は新しい順で返る
-    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")/versions?$top=" + (maxRecords + 1);
-    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    // /versions は新しい順で返る (Editor を expand して Title を直接取得)
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")/versions?$top=" + (maxRecords + 1) + "&$expand=Editor&$select=*,Editor/Title,Editor/Id";
+    let resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    // $expand=Editor が拒否される場合は plain なURLでフォールバック
     if (!resp.ok) {
-      console.warn('Version fetch failed:', resp.status);
-      return [];
+      console.warn('Version fetch (expand) failed:', resp.status, '— retrying without expand');
+      const fallbackUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")/versions?$top=" + (maxRecords + 1);
+      resp = await fetch(fallbackUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+      if (!resp.ok) {
+        console.warn('Version fetch failed:', resp.status);
+        return [];
+      }
     }
     const data = await resp.json();
     const versions = (data.d && data.d.results) || [];
+    if (versions.length > 0) {
+      console.log('[UpdateHist] sample version keys:', Object.keys(versions[0]).slice(0, 40));
+      console.log('[UpdateHist] sample Editor:', versions[0].Editor, 'EditorId:', versions[0].EditorId);
+    }
     const result = [];
     for (var i = 0; i < versions.length - 1 && result.length < maxRecords; i++) {
       const newer = versions[i];
@@ -7152,13 +7162,18 @@ async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
         }
       }
       if (changes.length === 0) continue;
-      // Editor 名（expand していないので EditorId を保持して後で解決）
+      // Editor 名を抽出（expand 済みの Editor.Title を最優先）
       let editorName = '';
-      if (newer.Editor && typeof newer.Editor === 'object' && newer.Editor.Title) editorName = newer.Editor.Title;
+      let editorId = null;
+      if (newer.Editor && typeof newer.Editor === 'object') {
+        if (newer.Editor.Title) editorName = newer.Editor.Title;
+        if (newer.Editor.Id) editorId = newer.Editor.Id;
+      }
+      if (!editorId && newer.EditorId) editorId = newer.EditorId;
       result.push({
         modified: newer.Modified || newer.Created,
         editor: editorName,
-        editorId: newer.EditorId,
+        editorId: editorId,
         changes: changes
       });
     }
