@@ -24474,28 +24474,46 @@ async function _extractPdfText(file) {
   var buf = await file.arrayBuffer();
   var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
   var allText = '';
-  for (var i = 1; i <= pdf.numPages; i++) {
-    var page = await pdf.getPage(i);
+  for (var p = 1; p <= pdf.numPages; p++) {
+    var page = await pdf.getPage(p);
     var content = await page.getTextContent();
     var items = (content.items || []).filter(function(it) { return it.str && it.str.trim(); });
-    var lastY = null;
-    var lineText = '';
+    if (items.length === 0) continue;
+
+    // Y座標で降順ソート (PDFの座標系は下が0, 上に行くほど大きい → top-to-bottomは降順)
+    items.sort(function(a, b) {
+      var dy = b.transform[5] - a.transform[5];
+      if (Math.abs(dy) > 2) return dy;
+      return a.transform[4] - b.transform[4];  // 同じY なら X 昇順
+    });
+
+    // Y座標が近いものを同一行としてグループ化（許容誤差 3pt）
+    var lines = [];
+    var currentLine = null;
+    var currentY = null;
+    var TOL = 3;
     for (var k = 0; k < items.length; k++) {
       var it = items[k];
-      var y = Math.round(it.transform[5]);
-      if (lastY === null) {
-        lineText = it.str;
-      } else if (Math.abs(y - lastY) > 3) {
-        // 行が変わった
-        allText += lineText.trim() + '\n';
-        lineText = it.str;
+      var y = it.transform[5];
+      var x = it.transform[4];
+      if (currentY === null || Math.abs(y - currentY) <= TOL) {
+        if (currentLine === null) currentLine = [];
+        currentLine.push({ x: x, str: it.str });
+        if (currentY === null) currentY = y;
       } else {
-        lineText += ' ' + it.str;
+        // 行確定
+        currentLine.sort(function(a, b) { return a.x - b.x; });
+        lines.push(currentLine.map(function(t) { return t.str; }).join(' ').replace(/\s+/g, ' ').trim());
+        currentLine = [{ x: x, str: it.str }];
+        currentY = y;
       }
-      lastY = y;
     }
-    if (lineText.trim()) allText += lineText.trim() + '\n';
-    allText += '\n';
+    if (currentLine && currentLine.length > 0) {
+      currentLine.sort(function(a, b) { return a.x - b.x; });
+      lines.push(currentLine.map(function(t) { return t.str; }).join(' ').replace(/\s+/g, ' ').trim());
+    }
+
+    allText += lines.filter(Boolean).join('\n') + '\n\n';
   }
   return allText;
 }
