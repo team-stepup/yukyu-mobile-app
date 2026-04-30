@@ -7095,6 +7095,184 @@ async function fetchFullEmployee(syainNo) {
   }
 }
 
+// ============================================================
+// 更新履歴（SharePoint バージョン履歴 を比較）
+// ============================================================
+
+// バージョン比較で除外するシステムフィールド
+var _UPDATE_HIST_SKIP_KEYS = {
+  '__metadata': 1, 'OData__UIVersionString': 1, '_UIVersionString': 1,
+  'Modified': 1, 'Created': 1,
+  'Editor': 1, 'EditorId': 1, 'EditorStringId': 1,
+  'Author': 1, 'AuthorId': 1, 'AuthorStringId': 1,
+  'ID': 1, 'Id': 1, 'GUID': 1,
+  'OData__Level': 1, 'OData__ModerationStatus': 1, 'OData__ModerationComments': 1,
+  'IsCurrentVersion': 1, 'VersionLabel': 1, 'VersionId': 1,
+  'OData__CopySource': 1, 'OData__HasCopyDestinations': 1,
+  'FileSystemObjectType': 1, 'ServerRedirectedEmbedUri': 1, 'ServerRedirectedEmbedUrl': 1,
+  'ContentTypeId': 1, 'AppEditorId': 1, 'AppAuthorId': 1, 'Attachments': 1,
+  'OData__CommentCount': 1, 'OData__CommentFlags': 1, 'OData__LikeCount': 1
+};
+
+// 直近 N 件 (デフォルト3件) の変更内容を抽出
+async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
+  if (!itemId) return [];
+  maxRecords = maxRecords || 3;
+  try {
+    const token = await getToken();
+    if (!token) return [];
+    // /versions は新しい順で返る
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")/versions?$top=" + (maxRecords + 1);
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) {
+      console.warn('Version fetch failed:', resp.status);
+      return [];
+    }
+    const data = await resp.json();
+    const versions = (data.d && data.d.results) || [];
+    const result = [];
+    for (var i = 0; i < versions.length - 1 && result.length < maxRecords; i++) {
+      const newer = versions[i];
+      const older = versions[i + 1];
+      const changes = [];
+      for (const key in newer) {
+        if (_UPDATE_HIST_SKIP_KEYS[key]) continue;
+        const newV = newer[key];
+        // オブジェクト値 (lookup, person, deferred) はスキップ
+        if (typeof newV === 'object' && newV !== null) continue;
+        const oldV = older[key];
+        if (String(newV == null ? '' : newV) !== String(oldV == null ? '' : oldV)) {
+          let label = key;
+          let type = '';
+          if (fieldsMeta && fieldsMeta[key]) {
+            label = fieldsMeta[key].title || key;
+            type = fieldsMeta[key].type || '';
+          }
+          changes.push({ key: key, label: label, oldVal: oldV, newVal: newV, fieldType: type });
+        }
+      }
+      if (changes.length === 0) continue;
+      // Editor 名（expand していないので EditorId を保持して後で解決）
+      let editorName = '';
+      if (newer.Editor && typeof newer.Editor === 'object' && newer.Editor.Title) editorName = newer.Editor.Title;
+      result.push({
+        modified: newer.Modified || newer.Created,
+        editor: editorName,
+        editorId: newer.EditorId,
+        changes: changes
+      });
+    }
+    return result;
+  } catch (e) {
+    console.warn('Update history fetch error:', e);
+    return [];
+  }
+}
+
+// バージョン値を表示用に整形
+function formatVersionVal(v, type) {
+  if (v == null || v === '') return '';
+  const s = String(v);
+  if (type === 'DateTime' && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const Y = d.getFullYear();
+      const M = String(d.getMonth() + 1).padStart(2, '0');
+      const D = String(d.getDate()).padStart(2, '0');
+      const hms = s.indexOf('T') >= 0 ? s.substring(s.indexOf('T') + 1, s.indexOf('T') + 9) : '';
+      if (hms && hms !== '00:00:00') {
+        return Y + '/' + M + '/' + D + ' ' + hms.substring(0, 5);
+      }
+      return Y + '/' + M + '/' + D;
+    }
+  }
+  if (type === 'Boolean') return (v === true || v === 'true' || v === 1) ? 'はい' : 'いいえ';
+  return s;
+}
+
+// SharePoint UserId → Title の解決 (キャッシュ付き)
+var _spUserNameCache = {};
+async function resolveSpUserNamesByIds(ids) {
+  const result = {};
+  if (!ids || ids.length === 0) return result;
+  const need = [];
+  ids.forEach(function(id) {
+    if (!id) return;
+    if (_spUserNameCache[id]) result[id] = _spUserNameCache[id];
+    else need.push(id);
+  });
+  if (need.length === 0) return result;
+  try {
+    const token = await getToken();
+    if (!token) return result;
+    for (let i = 0; i < need.length; i++) {
+      const id = need[i];
+      try {
+        const url = SP_SITE_URL + "/_api/web/getuserbyid(" + id + ")?$select=Title";
+        const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.d && data.d.Title) {
+            _spUserNameCache[id] = data.d.Title;
+            result[id] = data.d.Title;
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+  return result;
+}
+
+// 更新履歴セクションを placeholder に描画 (loadEmployeeProfile 後に非同期で呼ぶ)
+async function renderEmployeeUpdateHistory(itemId, fieldsMeta) {
+  const body = document.getElementById('updateHistoryBody');
+  const cnt = document.getElementById('updateHistoryCount');
+  if (!body) return;
+  const history = await fetchEmployeeUpdateHistory(itemId, fieldsMeta, 3);
+  if (history.length === 0) {
+    body.innerHTML = '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:14px 8px;">更新履歴がありません</div>';
+    if (cnt) { cnt.textContent = '0件'; cnt.style.background = '#f0f0f0'; cnt.style.color = '#999'; }
+    return;
+  }
+  // Editor 名を ID から解決
+  const needIds = history.filter(function(h) { return !h.editor && h.editorId; }).map(function(h) { return h.editorId; });
+  if (needIds.length > 0) {
+    const nameMap = await resolveSpUserNamesByIds(needIds);
+    history.forEach(function(h) {
+      if (!h.editor && h.editorId && nameMap[h.editorId]) h.editor = nameMap[h.editorId];
+    });
+  }
+  let html = '';
+  history.forEach(function(h) {
+    const dt = h.modified ? new Date(h.modified) : null;
+    const dtStr = dt && !isNaN(dt.getTime()) ? (
+      dt.getFullYear() + '/' + String(dt.getMonth() + 1).padStart(2, '0') + '/' + String(dt.getDate()).padStart(2, '0') + ' ' +
+      String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0')
+    ) : '—';
+    html += '<div style="background:#f8fafe;border-left:3px solid #1976d2;border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
+    html += '<div style="display:flex;align-items:center;gap:10px;font-size:12px;margin-bottom:8px;flex-wrap:wrap;">';
+    html += '<span style="font-weight:700;color:#1565c0;">🕒 ' + escHtml(dtStr) + '</span>';
+    if (h.editor) html += '<span style="color:var(--text-light);">👤 ' + escHtml(h.editor) + '</span>';
+    html += '<span style="margin-left:auto;background:#e3f2fd;color:#1565c0;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;">' + h.changes.length + '項目</span>';
+    html += '</div>';
+    h.changes.forEach(function(c) {
+      const oldStr = formatVersionVal(c.oldVal, c.fieldType);
+      const newStr = formatVersionVal(c.newVal, c.fieldType);
+      html += '<div style="font-size:12px;line-height:1.6;padding:5px 0;border-top:1px dashed #e0e0e8;">';
+      html += '<div style="font-weight:700;color:#444;margin-bottom:3px;">' + escHtml(c.label) + '</div>';
+      html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+      html += '<span style="background:#fff3e0;color:#e65100;padding:2px 7px;border-radius:5px;text-decoration:line-through;">' + (oldStr ? escHtml(oldStr) : '<span style="color:#999;text-decoration:none;">空欄</span>') + '</span>';
+      html += '<span style="color:#999;font-weight:700;">→</span>';
+      html += '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:5px;font-weight:700;">' + (newStr ? escHtml(newStr) : '<span style="color:#999;font-weight:400;">空欄</span>') + '</span>';
+      html += '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  body.innerHTML = html;
+  if (cnt) { cnt.textContent = history.length + '件'; cnt.style.background = '#e3f2fd'; cnt.style.color = '#1565c0'; }
+}
+
 // Calculate 前払い合計 for current period
 async function calcMaebariTotal(syainNo) {
   try {
@@ -16598,7 +16776,26 @@ async function loadEmployeeProfile() {
     html += '</div></div>';
   });
 
+  // 📝 更新履歴 (placeholder - 後で renderEmployeeUpdateHistory が埋める)
+  html += '<div class="accordion-section" id="acc_updates">';
+  html +=   '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+  html +=     '<span class="acc-icon">📝</span>';
+  html +=     '<span>更新履歴</span>';
+  html +=     '<span id="updateHistoryCount" style="margin-left:auto;margin-right:6px;background:#f0f0f0;color:#999;font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;">…</span>';
+  html +=     '<span class="acc-arrow">&#9654;</span>';
+  html +=   '</div>';
+  html +=   '<div class="accordion-body"><div id="updateHistoryBody">';
+  html +=     '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:14px 8px;">読み込み中...</div>';
+  html +=   '</div></div>';
+  html += '</div>';
+
   container.innerHTML = html;
+
+  // 更新履歴を非同期で取得・描画
+  const _empId = emp.Id || emp.ID;
+  if (_empId) {
+    renderEmployeeUpdateHistory(_empId, fieldsMeta);
+  }
 }
 
 // ============================================================
