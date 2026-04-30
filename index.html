@@ -4567,8 +4567,9 @@ select.sankyu-edit-input {
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
         <span class="ql-text">車両管理</span>
-        <span id="vehicleBadgeUse" class="ql-badge" style="background:#1565c0;display:none;top:4px;right:4px;"></span>
-        <span id="vehicleBadgeSyaken" class="ql-badge" style="background:#c62828;display:none;top:4px;right:32px;"></span>
+        <span id="vehicleBadgeUse" class="ql-badge" title="使用中" style="background:#1565c0;display:none;top:4px;right:4px;"></span>
+        <span id="vehicleBadgeSyaken" class="ql-badge" title="車検 1ヶ月以内" style="background:#c62828;display:none;top:32px;right:4px;"></span>
+        <span id="vehicleBadgeNenTenken" class="ql-badge" title="1年点検 1ヶ月以内" style="background:#f57c00;display:none;top:60px;right:4px;"></span>
       </button>
       <button class="quick-link-btn" onclick="openShiryouScreen()">
         <span class="ql-icon">📂</span>
@@ -7682,7 +7683,7 @@ async function loadHomeBadges() {
     else { eBadge.style.display = 'none'; }
   }
 
-  // 車両バッジ（使用中台数＋車検1ヵ月以内または期限切れ台数）
+  // 車両バッジ（使用中台数＋車検1ヵ月以内＋1年点検1ヵ月以内、縦並び）
   if (vehicleResult) {
     var vBU = document.getElementById('vehicleBadgeUse');
     if (vBU) {
@@ -7693,6 +7694,11 @@ async function loadHomeBadges() {
     if (vBS) {
       if (vehicleResult.syaken > 0) { vBS.textContent = vehicleResult.syaken; vBS.style.display = 'inline-block'; }
       else { vBS.style.display = 'none'; }
+    }
+    var vBN = document.getElementById('vehicleBadgeNenTenken');
+    if (vBN) {
+      if (vehicleResult.nenTenken > 0) { vBN.textContent = vehicleResult.nenTenken; vBN.style.display = 'inline-block'; }
+      else { vBN.style.display = 'none'; }
     }
   }
 
@@ -7781,23 +7787,29 @@ async function loadVehicleBadgeData() {
 
   var syakenCount = 0;
   var useCount = 0;
+  var nenTenkenCount = 0;
   var today = new Date();
   today.setHours(0, 0, 0, 0);
   var todayTs = today.getTime();
   viItems.forEach(function(v) {
     var isUse = uf ? ((v[uf] || '') === '使用') : true;
     if (isUse && uf) useCount++;
-    // 車検1ヵ月以内は「使用」中かつ 0 <= 残り日数 <= 30
+    // 車検と1年点検は「使用」中かつ 0 <= 残り日数 <= 30
     if (isUse && sf && v[sf]) {
       var sd = new Date(v[sf]);
       if (!isNaN(sd)) {
         sd.setHours(0, 0, 0, 0);
         var diffDays = Math.round((sd.getTime() - todayTs) / 86400000);
         if (diffDays >= 0 && diffDays <= 30) syakenCount++;
+        // 1年点検 = 車検満了日 - 1年
+        var nd = new Date(sd);
+        nd.setFullYear(nd.getFullYear() - 1);
+        var diffNen = Math.round((nd.getTime() - todayTs) / 86400000);
+        if (diffNen >= 0 && diffNen <= 30) nenTenkenCount++;
       }
     }
   });
-  return { use: useCount, syaken: syakenCount };
+  return { use: useCount, syaken: syakenCount, nenTenken: nenTenkenCount };
 }
 
 // ============================================================
