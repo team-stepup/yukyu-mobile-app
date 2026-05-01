@@ -112,8 +112,10 @@ body {
 .home-btn:active { background: rgba(255,255,255,0.35); }
 .home-btn svg { width: 18px; height: 18px; }
 
-/* Teams 未読ボタン(ヘッダー内) */
+/* Teams 未読ボタン(ヘッダー内) — ユーザー要望で非表示
+   関連 JS (updateTeamsBadge / openTeamsActivity) は将来再表示時のため保持 */
 .teams-btn {
+  display: none !important;
   position: relative;
   background: rgba(255,255,255,0.15);
   border: 1px solid rgba(255,255,255,0.3);
@@ -122,7 +124,6 @@ body {
   height: 32px;
   border-radius: 6px;
   cursor: pointer;
-  display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
@@ -3237,6 +3238,28 @@ select.sankyu-edit-input {
   font-weight: 700;
 }
 .detail-sticky-bar .ssb-icon { font-size: 22px; flex-shrink: 0; line-height: 1; }
+/* 性別アイコン: 男=青 / 女=赤 (色付き円形バッジ) */
+.detail-sticky-bar .ssb-icon.male,
+.detail-sticky-bar .ssb-icon.female {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+  border: 2px solid rgba(255,255,255,0.45);
+  letter-spacing: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+}
+.detail-sticky-bar .ssb-icon.male {
+  background: linear-gradient(135deg, #2196f3, #0d47a1);   /* 青 */
+}
+.detail-sticky-bar .ssb-icon.female {
+  background: linear-gradient(135deg, #ef5350, #c62828);   /* 赤 */
+}
 .detail-sticky-bar .ssb-info-stack {
   flex: 1;
   min-width: 0;
@@ -6833,6 +6856,22 @@ async function loadLeaveDetails() {
     }
   } catch (_e) { _romajiName = ''; }
 
+  // 性別判定 (男/女) — スティッキーバーのアイコン色用
+  var _sexClass = '';   // 'male' / 'female' / '' (不明)
+  try {
+    if (employeeFieldsCache) {
+      for (var _sk in employeeFieldsCache) {
+        if (employeeFieldsCache[_sk] && employeeFieldsCache[_sk].title === '性別') {
+          var _sko = _sk.indexOf('_') === 0 ? 'OData_' + _sk : _sk;
+          var _sv = String(emp[_sko] || '').trim();
+          if (_sv.indexOf('男') >= 0) _sexClass = 'male';
+          else if (_sv.indexOf('女') >= 0) _sexClass = 'female';
+          break;
+        }
+      }
+    }
+  } catch (_e) {}
+
   // Header (shared between all tabs)
   document.getElementById('detailHeader').innerHTML = `
     <div class="profile-header">
@@ -6853,10 +6892,7 @@ async function loadLeaveDetails() {
         ${_retRaw ? '<div class="profile-date-chip ' + (_isFuture ? 'chip-plan' : 'chip-retire') + '"><span class="pdc-lbl">' + (_isFuture ? '退社予定' : '退社日') + '</span><span class="pdc-val">' + escHtml(_retireStr) + '</span></div>' : ''}
       </div>
       <div id="profileStatusRow" class="profile-status-row" style="display:none;"></div>
-      <div class="profile-meta">
-        <span>社番: ${emp[F.syainNo] || ''}</span>
-        ${hakensaki ? '<span>派遣先: ' + escHtml(hakensaki) + '</span>' : ''}
-      </div>
+      <!-- 社番/派遣先 はスティッキーバーに常時表示されるため、このカード内では省略 -->
       <div id="detailRetireReason" style="display:none;"></div>
       <div class="profile-quick-actions">
         ${syainFileUrl ? `<button class="profile-quick-btn pq-folder" onclick="openSyainFolderFromPayload('${sfBtnB64}')"><span class="pq-icon">📂</span><span class="pq-label">社員ファイル</span></button>` : ''}
@@ -6876,8 +6912,12 @@ async function loadLeaveDetails() {
     const empName2 = emp.Title || '';
     const empNo2 = emp[F.syainNo] || '';
     const haken2 = hakensaki || '';
+    var _iconHtml;
+    if (_sexClass === 'male') _iconHtml = '<span class="ssb-icon male" title="男性">男</span>';
+    else if (_sexClass === 'female') _iconHtml = '<span class="ssb-icon female" title="女性">女</span>';
+    else _iconHtml = '<span class="ssb-icon">👤</span>';
     bar.innerHTML =
-      '<span class="ssb-icon">👤</span>' +
+      _iconHtml +
       '<div class="ssb-info-stack">' +
         '<span class="ssb-name">' + escHtml(empName2) + '</span>' +
         '<span class="ssb-meta">' +
