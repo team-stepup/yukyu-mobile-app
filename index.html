@@ -20172,9 +20172,20 @@ async function runOcr(docId, idx) {
     await worker.terminate();
 
     if (data.text && data.text.trim()) {
-      resultDiv.innerHTML = '<div style="font-size:11px;color:var(--text-light);margin-bottom:2px;">' + (idx + 1) + '枚目の抽出結果:</div>' +
-        '<div class="doc-ocr-text">' + escHtml(data.text.trim()) + '</div>' +
-        '<button class="doc-ocr-btn" style="margin-top:4px;" onclick="copyOcrText(\'' + docId + '\')">📋 コピー</button>';
+      const textEsc = escHtml(data.text.trim());
+      let html = '<div style="font-size:11px;color:var(--text-light);margin-bottom:2px;">' + (idx + 1) + '枚目の抽出結果:</div>' +
+        '<div class="doc-ocr-text">' + textEsc + '</div>' +
+        '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">' +
+          '<button class="doc-ocr-btn" onclick="copyOcrText(\'' + docId + '\')">📋 コピー</button>';
+      // 在留カード or 免許証 なら自動入力ボタンも出す
+      if (docId === 'zairyu' || docId === 'license') {
+        // 抽出済みテキストを window に保持 (autoFill 関数が読む)
+        window._lastOcrText = window._lastOcrText || {};
+        window._lastOcrText[docId] = data.text;
+        html += '<button class="doc-ocr-btn" style="background:#2e7d32;" onclick="autoFillFromOcr(\'' + docId + '\')">🤖 フォームに自動入力</button>';
+      }
+      html += '</div>';
+      resultDiv.innerHTML = html;
     } else {
       resultDiv.innerHTML = '<div class="doc-ocr-progress">テキストを検出できませんでした</div>';
     }
@@ -20182,6 +20193,166 @@ async function runOcr(docId, idx) {
     console.error('OCR error:', e);
     resultDiv.innerHTML = '<div class="doc-ocr-progress" style="color:var(--danger);">OCRエラー: ' + escHtml(e.message) + '</div>';
   }
+}
+
+// ── 在留カード OCR テキスト → フィールド抽出 ──
+function parseZairyuCardText(text) {
+  const result = {};
+  const t = text || '';
+
+  // ローマ字氏名 (NAME ラベル直後の大文字英字行 or 連続大文字英字行)
+  let nameMatch = t.match(/NAME[:\s]+([A-Z][A-Z\s,'.\-]+[A-Z])/i);
+  if (!nameMatch) {
+    // フォールバック: 連続する大文字英字 (5文字以上、空白許容)
+    const lines = t.split(/\r?\n/);
+    for (const line of lines) {
+      const m = line.match(/^\s*([A-Z][A-Z\s,'.\-]{5,}[A-Z])\s*$/);
+      if (m) { nameMatch = m; break; }
+    }
+  }
+  if (nameMatch) result.tokki1 = nameMatch[1].replace(/\s+/g, ' ').trim();
+
+  // 生年月日 (DATE OF BIRTH: yyyy MM dd or yyyy/MM/dd)
+  let bdMatch = t.match(/DATE\s+OF\s+BIRTH[^\d]{0,30}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/i);
+  if (!bdMatch) bdMatch = t.match(/生年月日[^\d]{0,10}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/);
+  if (bdMatch) {
+    result.birthday = bdMatch[1] + '-' + bdMatch[2].padStart(2, '0') + '-' + bdMatch[3].padStart(2, '0');
+  }
+
+  // 性別 (SEX MALE/FEMALE)
+  const sexMatch = t.match(/SEX[:\s]+([MF])/i) || t.match(/(MALE|FEMALE)/i) || t.match(/性別[:\s]+([男女])/);
+  if (sexMatch) {
+    const s = sexMatch[1].toUpperCase();
+    if (s === 'F' || s === 'FEMALE' || s === '女') result.sex = '女';
+    else if (s === 'M' || s === 'MALE' || s === '男') result.sex = '男';
+  }
+
+  // 国籍 (NATIONALITY/REGION)
+  const natMatch = t.match(/NATIONALITY[\/\s]?REGION[:\s]+([A-Z][A-Z\s\(\)]+?)(?=\n|[a-z]|\d)/i)
+    || t.match(/NATIONALITY[:\s]+([A-Z][A-Z\s\(\)]+?)(?=\n|[a-z]|\d)/i);
+  if (natMatch) result.nationality = natMatch[1].replace(/\s+/g, ' ').trim();
+
+  // 在留資格 (STATUS / 在留資格)
+  let statusMatch = t.match(/STATUS[:\s]+([A-Z][A-Z\s\(\)\/]+?)(?=\n|\d|PERIOD|DATE)/i);
+  if (!statusMatch) statusMatch = t.match(/在留資格[:\s]*([^\n\r]{2,40})/);
+  if (statusMatch) result.zairyuShikaku = statusMatch[1].replace(/\s+/g, ' ').trim();
+
+  // 在留期限 (DATE OF EXPIRATION / PERIOD OF STAY)
+  let expMatch = t.match(/(?:DATE\s+OF\s+EXPIRATION|PERIOD\s+OF\s+STAY)[^\d]{0,30}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/i);
+  if (!expMatch) expMatch = t.match(/在留期間[^\d]{0,10}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/);
+  if (expMatch) {
+    const date = expMatch[1] + '-' + expMatch[2].padStart(2, '0') + '-' + expMatch[3].padStart(2, '0');
+    result.zairyuKigen = date;
+    result.zairyuKigenCard = date;  // カード上の在留期限も同じ
+  }
+
+  // 在留カード番号 (AB12345678CD パターン)
+  const numMatch = t.match(/\b([A-Z]{2}\d{8}[A-Z]{2})\b/);
+  if (numMatch) {
+    result.zairyuBikou = '在留カード番号: ' + numMatch[1];
+  }
+
+  return result;
+}
+
+// ── 免許証 OCR テキスト → 生年月日/性別 (性別は記載なし。生年月日のみ) ──
+function parseLicenseText(text) {
+  const result = {};
+  const t = text || '';
+
+  // 和暦の生年月日: 昭和60年4月15日生 (元年は「元」)
+  const eraMatch = t.match(/(明治|大正|昭和|平成|令和)\s*([元\d]{1,2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (eraMatch) {
+    const era = eraMatch[1];
+    const eraYStr = eraMatch[2];
+    const eraY = (eraYStr === '元') ? 1 : parseInt(eraYStr);
+    const m = parseInt(eraMatch[3]);
+    const d = parseInt(eraMatch[4]);
+    let y = 0;
+    if (era === '昭和') y = 1925 + eraY;
+    else if (era === '平成') y = 1988 + eraY;
+    else if (era === '令和') y = 2018 + eraY;
+    else if (era === '大正') y = 1911 + eraY;
+    else if (era === '明治') y = 1867 + eraY;
+    if (y > 1900) {
+      result.birthday = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    }
+  } else {
+    // 西暦
+    const ymd = t.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+    if (ymd) result.birthday = ymd[1] + '-' + ymd[2].padStart(2, '0') + '-' + ymd[3].padStart(2, '0');
+  }
+
+  return result;
+}
+
+// 抽出した値を addField_* 入力欄に流し込む
+async function autoFillFromOcr(docId) {
+  const text = (window._lastOcrText || {})[docId];
+  if (!text) { showToast('OCR テキストがありません', 'error'); return; }
+  const parsed = (docId === 'zairyu') ? parseZairyuCardText(text) : parseLicenseText(text);
+  const keys = Object.keys(parsed);
+  if (keys.length === 0) {
+    showToast('抽出可能な項目が見つかりませんでした', 'error');
+    return;
+  }
+  // 適用前に確認ダイアログ表示
+  const labelMap = {
+    tokki1: 'ローマ字氏名',
+    birthday: '生年月日',
+    sex: '性別',
+    nationality: '本(国)籍',
+    zairyuShikaku: '在留資格',
+    zairyuKigen: '在留期限',
+    zairyuKigenCard: '在留期限(カード)',
+    zairyuBikou: '在留カード番号 (備考)'
+  };
+  let preview = '<table style="font-size:12px;width:100%;border-collapse:collapse;">';
+  keys.forEach(function(k) {
+    preview += '<tr><th style="text-align:left;padding:4px 8px;color:#555;border-bottom:1px solid #eee;">' + escHtml(labelMap[k] || k) + '</th>' +
+      '<td style="padding:4px 8px;font-weight:700;color:#1976d2;border-bottom:1px solid #eee;">' + escHtml(String(parsed[k])) + '</td></tr>';
+  });
+  preview += '</table>';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.style.zIndex = '99999';
+  overlay.innerHTML = '<div class="confirm-box" style="max-width:420px;">' +
+    '<div class="confirm-title">🤖 自動入力プレビュー</div>' +
+    '<div class="confirm-msg" style="text-align:left;">以下の項目をフォームに反映します。' +
+    '<br><span style="font-size:11px;color:#888;">既に入力済みの項目は上書きされます</span></div>' +
+    '<div style="margin:8px 0;">' + preview + '</div>' +
+    '<div class="confirm-btns">' +
+      '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">キャンセル</button>' +
+      '<button class="btn-ok" id="autoFillOkBtn">適用する</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  document.getElementById('autoFillOkBtn').onclick = function() {
+    let applied = 0;
+    Object.keys(parsed).forEach(function(k) {
+      const inp = document.getElementById('addField_' + k);
+      if (!inp) return;
+      // select の場合: 値が選択肢にあれば設定、無ければ追加
+      if (inp.tagName === 'SELECT') {
+        const v = parsed[k];
+        let found = false;
+        Array.from(inp.options).forEach(o => { if (o.value === v) found = true; });
+        if (!found) {
+          const opt = document.createElement('option');
+          opt.value = v; opt.text = v;
+          inp.appendChild(opt);
+        }
+        inp.value = v;
+      } else {
+        inp.value = parsed[k];
+      }
+      applied++;
+    });
+    overlay.remove();
+    showToast('🤖 ' + applied + '項目を自動入力しました', 'success');
+  };
 }
 
 function copyOcrText(docId) {
