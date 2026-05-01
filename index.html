@@ -3353,7 +3353,7 @@ select.sankyu-edit-input {
   font-weight: 500;
   color: #1a1a1a;
   letter-spacing: 0.5px;
-  margin: -2px 0 6px 2px;
+  margin: 0 0 8px 2px;
   font-family: -apple-system, "Segoe UI", "Roboto", system-ui, sans-serif;
 }
 .profile-header .profile-badge {
@@ -6873,15 +6873,14 @@ async function loadLeaveDetails() {
   } catch (_e) {}
 
   // Header (shared between all tabs)
+  // 氏名はスティッキーバーに常時表示しているため、カード内では省略。
+  // 通勤方法バッジは class-row に統合。ローマ字氏名のみ残す(在留カード氏名の参照用)。
   document.getElementById('detailHeader').innerHTML = `
     <div class="profile-header">
-      <div class="profile-name-row">
-        <span class="profile-name">${escHtml(emp.Title || '')}</span>
-        ${tsukinValH ? '<span class="profile-badge" style="background:#f0f0ff;color:var(--primary);">' + tsukinIcon + ' ' + escHtml(tsukinValH) + '</span>' : '<span class="profile-badge" style="background:#ffebee;color:var(--danger);">通勤方法未登録</span>'}
-      </div>
       ${_romajiName ? '<div class="profile-romaji-name">' + escHtml(_romajiName) + '</div>' : ''}
       <div class="profile-class-row" id="profileClassRow">
         ${_buildProfBadges(_entryType, _exitType, _isFuture)}
+        ${tsukinValH ? '<span class="profile-badge" style="background:#f0f0ff;color:var(--primary);margin-left:4px;">' + tsukinIcon + ' ' + escHtml(tsukinValH) + '</span>' : '<span class="profile-badge" style="background:#ffebee;color:var(--danger);margin-left:4px;">通勤方法未登録</span>'}
       </div>
       <div class="profile-dates-row">
         ${_sameNyushaKisan
@@ -7663,7 +7662,7 @@ const PROFILE_CATEGORIES = [
     fields: [
       // ── 👤 個人情報 ──
       { key: 'sex', label: '性別', group: 'profile' },
-      { key: 'birthday', label: '生年月日', format: 'date', group: 'profile' },
+      { key: 'birthday', label: '生年月日', format: 'dateW', group: 'profile' },
       { key: '_calcAge', label: '年齢', format: 'calcAge', group: 'profile' },
       // ── 📞 連絡先 ──
       { key: 'keitai', label: '携帯電話', format: 'tel', group: 'contact' },
@@ -7975,11 +7974,51 @@ function buildFieldKeyMap(fieldsMeta) {
 }
 
 // Format a field value for display
+// 西暦日付 → 和暦表記 (例: 1985-04-15 → 昭和60年4月15日)
+function toWarekiText(dateInput) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  let era, eraY;
+  // 令和: 2019/5/1〜
+  if (y > 2019 || (y === 2019 && (m > 5 || (m === 5 && day >= 1)))) {
+    era = '令和'; eraY = y - 2018;
+  }
+  // 平成: 1989/1/8 〜 2019/4/30
+  else if (y > 1989 || (y === 1989 && (m > 1 || (m === 1 && day >= 8)))) {
+    era = '平成'; eraY = y - 1988;
+  }
+  // 昭和: 1926/12/25 〜 1989/1/7
+  else if (y > 1926 || (y === 1926 && m === 12 && day >= 25)) {
+    era = '昭和'; eraY = y - 1925;
+  }
+  // 大正: 1912/7/30 〜 1926/12/24
+  else if (y > 1912 || (y === 1912 && (m > 7 || (m === 7 && day >= 30)))) {
+    era = '大正'; eraY = y - 1911;
+  }
+  // 明治
+  else {
+    era = '明治'; eraY = y - 1867;
+  }
+  const eraYStr = eraY === 1 ? '元' : String(eraY);
+  return era + eraYStr + '年' + m + '月' + day + '日';
+}
+
 function formatProfileValue(val, format) {
   if (val === null || val === undefined || val === '') return '';
   const str = String(val);
   if (format === 'date') {
     return formatDate(val);
+  }
+  if (format === 'dateW') {
+    // 西暦 + 和暦 を併記 (生年月日用)
+    const seki = formatDate(val);
+    const wareki = toWarekiText(val);
+    if (!wareki || !seki) return seki || str;
+    return seki + ' <span style="color:#7e57c2;font-size:11px;font-weight:600;background:#f3e5f5;padding:1px 7px;border-radius:6px;margin-left:4px;">' + wareki + '</span>';
   }
   if (format === 'dateExpiry') {
     const d = new Date(val);
