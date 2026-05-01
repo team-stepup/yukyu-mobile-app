@@ -5301,7 +5301,7 @@ select.sankyu-edit-input {
       </button>
       <button class="action-sheet-item" onclick="startProcedure('idou')">
         <span class="asi-icon" style="background:#e3f2fd;color:#1565c0;">🔄</span>
-        <span class="asi-text">移動入社</span>
+        <span class="asi-text">派遣先 移動 (退社→入社)</span>
         <span class="asi-arrow">›</span>
       </button>
       <button class="action-sheet-item" onclick="startProcedure('shaho')">
@@ -23045,7 +23045,7 @@ function closeActionSheet() {
 
 const PROCEDURE_TYPES = {
   taisha:   { label: '退社報告', icon: '📤' },
-  idou:     { label: '移動入社', icon: '🔄' },
+  idou:     { label: '派遣先 移動 (退社→入社)', icon: '🔄' },
   shaho:    { label: '社保申請', icon: '🏥' },
   dattai:   { label: '脱退連絡票作成', icon: '📋' },
   kyuryo:   { label: '給料精算', icon: '💰' },
@@ -24108,6 +24108,92 @@ async function submitShahoRemoveFuyou() {
 // ============================================================
 // 移動入社 Form (旧派遣先を退社→新派遣先で同番号で新レコード作成)
 // ============================================================
+
+// 移動入社時に引継ぎ表示するカテゴリ (work/insurance派遣関連は新派遣先入力で扱うため除外)
+const IDOU_INHERIT_CATEGORIES = [
+  'basic', 'emergency', 'bank', 'residence',
+  'vehicle', 'license', 'carInsurance', 'insurance'
+];
+
+// 引継ぎ用のシンプルな入力HTML生成 (getEditInputHtml の軽量版、ID prefix 違い)
+function _buildIdouInheritInput(field, val, fieldsMeta, keyMap) {
+  const id = 'idou_inh_' + field.key;
+  const v = (val === null || val === undefined) ? '' : String(val);
+  const dataAttr = ' data-key="' + escHtml(field.key) + '"';
+
+  if (field.format === 'date' || field.format === 'dateExpiry' || field.format === 'dateW') {
+    let dv = '';
+    if (v) {
+      const d = new Date(v);
+      if (!isNaN(d)) dv = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    return '<input type="date" id="' + id + '" value="' + dv + '" data-format="date"' + dataAttr + '>';
+  }
+  if (field.format === 'currency') {
+    return '<input type="number" id="' + id + '" value="' + escHtml(v) + '" data-format="currency"' + dataAttr + '>';
+  }
+  if (field.format === 'tel') {
+    return '<input type="tel" id="' + id + '" value="' + escHtml(v) + '"' + dataAttr + '>';
+  }
+  if (field.format === 'email') {
+    return '<input type="email" id="' + id + '" value="' + escHtml(v) + '"' + dataAttr + '>';
+  }
+  // Choice
+  const ftype = (typeof getFieldType === 'function') ? getFieldType(field.key, keyMap) : '';
+  const choices = (typeof getFieldChoices === 'function') ? getFieldChoices(field.key, keyMap) : null;
+  if ((ftype === 'Choice' || field.format === 'badge') && choices && choices.length > 0) {
+    let h = '<select id="' + id + '"' + dataAttr + '>';
+    h += '<option value="">(未選択)</option>';
+    choices.forEach(function(c) {
+      h += '<option value="' + escHtml(c) + '"' + (v === c ? ' selected' : '') + '>' + escHtml(c) + '</option>';
+    });
+    h += '</select>';
+    return h;
+  }
+  if (ftype === 'Number' || ftype === 'Currency') {
+    return '<input type="number" id="' + id + '" value="' + escHtml(v) + '" data-format="number"' + dataAttr + '>';
+  }
+  return '<input type="text" id="' + id + '" value="' + escHtml(v) + '"' + dataAttr + '>';
+}
+
+// 引継ぎカテゴリのアコーディオンHTML生成
+function _buildIdouInheritHtml(emp, fieldsMeta, keyMap) {
+  let html = '';
+  IDOU_INHERIT_CATEGORIES.forEach(function(catId) {
+    const cat = (typeof PROFILE_CATEGORIES !== 'undefined') ? PROFILE_CATEGORIES.find(c => c.id === catId) : null;
+    if (!cat) return;
+    // 入力フィールドが1つもない場合はスキップ
+    let fieldsHtml = '';
+    let cnt = 0;
+    cat.fields.forEach(function(field) {
+      if (field.key && field.key.startsWith('_calc')) return;
+      if (field.format === 'spUrl') return;
+      if (field.key === 'syainFile') return;
+      // 扶養関連: shahoHuyou='あり' のときのみ表示
+      if (field.showOnlyIfHasFuyou) {
+        const hk = keyMap['shahoHuyou'];
+        const hv = hk ? String(emp[hk] || '') : '';
+        if (hv.indexOf('あり') < 0) return;
+      }
+      if (field.showOnlyResigned) return;  // 退職理由などは新規には不要
+      const odKey = keyMap[field.key];
+      if (!odKey) return;
+      const val = emp[odKey];
+      cnt++;
+      fieldsHtml += '<div class="idou-inh-field">';
+      fieldsHtml +=   '<label>' + escHtml(field.label) + '</label>';
+      fieldsHtml +=   _buildIdouInheritInput(field, val, fieldsMeta, keyMap);
+      fieldsHtml += '</div>';
+    });
+    if (cnt === 0) return;
+    html += '<details class="idou-acc">';
+    html +=   '<summary>' + (cat.icon || '📋') + ' ' + escHtml(cat.label) + ' <span style="margin-left:6px;font-size:10px;color:#888;font-weight:400;">(' + cnt + '項目)</span></summary>';
+    html +=   '<div class="idou-acc-body">' + fieldsHtml + '</div>';
+    html += '</details>';
+  });
+  return html;
+}
+
 async function openIdouForm() {
   const emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
@@ -24203,6 +24289,10 @@ async function openIdouForm() {
   window._idouAllSoshiki = soshikiChoices;
   window._idouAllSyokusyu = syokusyuChoices;
 
+  // 旧派遣先退社日のデフォルト値 = 今日の前日
+  const yest = new Date(); yest.setDate(yest.getDate() - 1);
+  const yesterdayStr = toLocalDateStr(yest);
+
   const overlay = document.createElement('div');
   overlay.className = 'taisha-overlay';
   overlay.id = 'idouOverlay';
@@ -24212,6 +24302,8 @@ async function openIdouForm() {
       '#idouOverlay .taisha-field label { display:block; font-size:13px; font-weight:700; color:#4a148c; margin-bottom:6px; }' +
       '#idouOverlay .taisha-field input[type="text"],' +
       '#idouOverlay .taisha-field input[type="number"],' +
+      '#idouOverlay .taisha-field input[type="tel"],' +
+      '#idouOverlay .taisha-field input[type="email"],' +
       '#idouOverlay .taisha-field input[type="date"],' +
       '#idouOverlay .taisha-field select {' +
         ' width:100%; box-sizing:border-box; padding:13px 14px;' +
@@ -24227,11 +24319,21 @@ async function openIdouForm() {
       '#idouOverlay .taisha-field select:focus {' +
         ' outline:none; border-color:#8e24aa; box-shadow:0 0 0 3px rgba(142,36,170,0.15);' +
       '}' +
+      '#idouOverlay .idou-section-title { font-size:13px;font-weight:800;color:#4a148c;margin:18px 0 8px;padding:8px 12px;background:linear-gradient(135deg,#f3e5f5,#e1bee7);border-radius:8px;border-left:4px solid #6a1b9a; }' +
+      '#idouOverlay details.idou-acc { background:#fff;border:1px solid #e1bee7;border-radius:10px;margin-bottom:8px;overflow:hidden; }' +
+      '#idouOverlay details.idou-acc > summary { padding:10px 14px;cursor:pointer;font-weight:700;font-size:13px;color:#4a148c;background:#faf3fc;list-style:none;display:flex;align-items:center;gap:8px; }' +
+      '#idouOverlay details.idou-acc > summary::-webkit-details-marker { display:none; }' +
+      '#idouOverlay details.idou-acc > summary::after { content:"▶";margin-left:auto;font-size:10px;color:#999;transition:transform 0.15s; }' +
+      '#idouOverlay details.idou-acc[open] > summary::after { transform:rotate(90deg); }' +
+      '#idouOverlay .idou-acc-body { padding:12px 14px;border-top:1px solid #e1bee7; }' +
+      '#idouOverlay .idou-inh-field { margin-bottom:10px; }' +
+      '#idouOverlay .idou-inh-field label { display:block;font-size:11px;font-weight:600;color:#6a1b9a;margin-bottom:4px; }' +
+      '#idouOverlay .idou-inh-field input,#idouOverlay .idou-inh-field select { width:100%;box-sizing:border-box;padding:9px 11px;font-size:14px;border:1px solid #e0d4f5;border-radius:8px;background:#fff;-webkit-appearance:none;appearance:none; }' +
     '</style>' +
     '<div class="taisha-panel">' +
       '<div class="taisha-header" style="background:linear-gradient(135deg,#6a1b9a 0%,#8e24aa 50%,#ab47bc 100%);">' +
         '<div class="taisha-header-bar">' +
-          '<span class="taisha-title">🔄 移動入社</span>' +
+          '<span class="taisha-title">🔄 退社移動・入社報告</span>' +
           '<button class="taisha-close" onclick="closeIdouForm()">✕</button>' +
         '</div>' +
         '<div class="taisha-emp-info">' +
@@ -24242,18 +24344,7 @@ async function openIdouForm() {
       '</div>' +
       '<div class="taisha-body">' +
 
-      // ───── 自動コピー項目(参考表示) ─────
-      '<div style="background:#f3e5f5;border-radius:10px;padding:10px 12px;margin-bottom:10px;">' +
-        '<div style="font-size:11px;font-weight:700;color:#6a1b9a;margin-bottom:6px;">📋 自動引継ぎ(個人情報)</div>' +
-        '<div style="font-size:11px;color:#555;line-height:1.7;">' +
-          '生年月日: ' + escHtml(birthday || '-') + ' / 性別: ' + escHtml(sex || '-') + '<br>' +
-          '本籍: ' + escHtml(nationality || '-') + ' / 〒' + escHtml(yubin || '-') + '<br>' +
-          '住所: ' + escHtml(address || '-') + '<br>' +
-          'TEL: ' + escHtml(keitai || '-') + ' / ' + escHtml(email || '-') + '<br>' +
-          '健保被保険者: ' + escHtml(kenpoHihokensha || '-') + '<br>' +
-          '雇用被保険者番号: ' + escHtml(koyouNo || '-') + ' / 取得日: ' + escHtml(koyouShutoku || '-') +
-        '</div>' +
-      '</div>' +
+      '<div class="idou-section-title">📌 必須入力 (新しい派遣先情報)</div>' +
 
       // ───── 採用種別(移動在職中など) ─────
       '<div class="taisha-field">' +
@@ -24263,11 +24354,16 @@ async function openIdouForm() {
           : '<input type="text" id="idou_zaiyokuSyubetu" value="移動在職中idou zaisyokutyuu">') +
       '</div>' +
 
+      // ───── 派遣先退社日 (旧レコード用、明示入力) ─────
+      '<div class="taisha-field">' +
+        '<label>派遣先退社日 <span style="color:var(--danger);">*</span> <span style="font-size:10px;color:var(--text-light);font-weight:400;">(旧派遣先での最終勤務日)</span></label>' +
+        '<input type="date" id="idou_oldHakenTaisha" value="' + yesterdayStr + '">' +
+      '</div>' +
+
       // ───── 移動入社日 ─────
       '<div class="taisha-field">' +
-        '<label>移動入社日 <span style="color:var(--danger);">*</span></label>' +
+        '<label>移動入社日 <span style="color:var(--danger);">*</span> <span style="font-size:10px;color:var(--text-light);font-weight:400;">(新派遣先での初日)</span></label>' +
         '<input type="date" id="idou_nyushaDate" value="' + today + '">' +
-        '<div style="font-size:10px;color:var(--text-light);margin-top:3px;">旧派遣先の退社日 = この日付の前日に自動設定されます</div>' +
       '</div>' +
 
       // ───── 派遣先(部課) ─────
@@ -24344,9 +24440,16 @@ async function openIdouForm() {
           '</div>'
         : '') +
 
+      // ───── 自動引継ぎ事項（編集可能） ─────
+      '<div class="idou-section-title">📋 自動引継ぎ事項 (必要に応じて編集)</div>' +
+      '<div style="font-size:11px;color:#888;margin-bottom:10px;line-height:1.6;">' +
+        '旧レコードから自動引き継ぎされます。修正が必要な項目だけ各セクションを開いて編集してください。' +
+      '</div>' +
+      _buildIdouInheritHtml(emp, fieldsMeta, keyMap) +
+
       '</div>' +
       '<div class="taisha-footer">' +
-        '<button class="taisha-submit-btn" id="idouSubmitBtn" onclick="submitIdouForm()" style="background:linear-gradient(135deg,#6a1b9a,#8e24aa);">🔄 移動入社を送信</button>' +
+        '<button class="taisha-submit-btn" id="idouSubmitBtn" onclick="submitIdouForm()" style="background:linear-gradient(135deg,#6a1b9a,#8e24aa);">🔄 退社・入社報告を送信</button>' +
       '</div>' +
     '</div>';
 
@@ -24420,6 +24523,7 @@ async function submitIdouForm() {
 
   const zaiyoku = v('idou_zaiyokuSyubetu');
   const nyushaDate = v('idou_nyushaDate');
+  const oldHakenTaishaInput = v('idou_oldHakenTaisha');
   const buka = v('idou_buka');
   const soshiki = v('idou_soshikiTani');
   const syokusyu = v('idou_syokusyu');
@@ -24432,13 +24536,12 @@ async function submitIdouForm() {
   const koyouSyuryo = v('idou_koyouSyuryo');
 
   if (!zaiyoku) { showToast('採用種別を選択してください', 'error'); return; }
+  if (!oldHakenTaishaInput) { showToast('派遣先退社日を入力してください', 'error'); return; }
   if (!nyushaDate) { showToast('移動入社日を入力してください', 'error'); return; }
-  if (!buka) { showToast('派遣先(部課)を選択してください', 'error'); return; }
+  if (!buka) { showToast('新派遣先(部課)を選択してください', 'error'); return; }
 
-  // 旧レコードの派遣先退社日 = 移動入社日 - 1日
-  const d = new Date(nyushaDate);
-  d.setDate(d.getDate() - 1);
-  const oldHakenTaisha = toLocalDateStr(d);
+  // 旧レコードの派遣先退社日 = ユーザー入力値
+  const oldHakenTaisha = oldHakenTaishaInput;
 
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -24447,7 +24550,7 @@ async function submitIdouForm() {
   overlay.className = 'confirm-overlay';
   overlay.style.zIndex = '99999';
   overlay.innerHTML = '<div class="confirm-box">' +
-    '<div class="confirm-title">🔄 移動入社確認</div>' +
+    '<div class="confirm-title">🔄 退社移動・入社報告 確認</div>' +
     '<div class="confirm-msg" style="text-align:left;">' +
     '<strong>' + escHtml(no + ' ' + name) + '</strong><br><br>' +
     '<u>旧レコード(更新)</u><br>' +
@@ -24531,13 +24634,30 @@ async function executeIdouSubmit(p) {
       newBody[F.kisanDate.replace(/^OData_/, '')] = emp[F.kisanDate];
     }
 
-    // 個人情報を旧レコードからコピー
-    ['birthday','sex','nationality','yubin','address','keitai','email',
-     'emergencyName','emergencyRelation','emergencyTel',
-     'bankName','bankBranch','bankAccount','bankMeigi',
-     'zairyuShikaku','zairyuKigen','zairyuKigenCard','zairyuBikou','tokki1',
-     'kenpoHihokensha','kenpoShutoku','seiriNo','koyouNo','koyouShutoku','koyouName'
-    ].forEach(function(k) { copyFromOld(newBody, k); });
+    // 引継ぎ項目: 各 idou_inh_* インプットから値を読み取る (編集された値が反映される)
+    // インプットが存在する全フィールドを処理する (空値は null = 旧から引継がない)
+    const inheritInputs = document.querySelectorAll('[id^="idou_inh_"]');
+    inheritInputs.forEach(function(inp) {
+      const fieldKey = inp.dataset.key;
+      if (!fieldKey) return;
+      const odKey = keyMap[fieldKey];
+      if (!odKey) return;
+      const internalName = odKey.replace(/^OData_/, '');
+      let val = inp.value;
+      if (inp.dataset.format === 'date') {
+        val = val ? (val + 'T00:00:00Z') : null;
+      } else if (inp.dataset.format === 'currency' || inp.dataset.format === 'number') {
+        val = val ? parseFloat(val) : null;
+      } else if (val === '') {
+        val = null;
+      }
+      // 値があるときだけ書き込む (null で上書きしない)
+      if (val !== null && val !== undefined && val !== '') {
+        newBody[internalName] = val;
+      }
+    });
+    // インプットされなかったフィールド (work系等) は旧レコードからコピー
+    // (work セクションは入力フォームで扱うため、ここでは扱わない)
 
     // ユーザー入力
     setFieldByOdata(newBody, F.zaiyokuSyubetu, p.zaiyoku);
@@ -24567,7 +24687,7 @@ async function executeIdouSubmit(p) {
     console.log('[idou] new record body:', JSON.stringify(newBody));
     await spCreateEmployee(newBody);
 
-    showToast('🔄 移動入社を登録しました', 'success');
+    showToast('🔄 退社移動・入社報告を登録しました', 'success');
     closeIdouForm();
 
     // 新レコードに切り替え(同番号で再取得)
@@ -24580,7 +24700,7 @@ async function executeIdouSubmit(p) {
     console.error('Idou submit error:', e);
     showToast('送信に失敗しました: ' + e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 移動入社を送信'; }
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 退社・入社報告を送信'; }
   }
 }
 
