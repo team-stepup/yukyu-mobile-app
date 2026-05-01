@@ -4919,16 +4919,21 @@ select.sankyu-edit-input {
     </div>
   </div>
 
-  <!-- Screen: 役員ダッシュボード (派遣先別在職者分析) -->
+  <!-- Screen: 役員ダッシュボード (派遣先別/担当別在職者分析) -->
   <div class="screen" id="adminDashScreen">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
-      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">📊 派遣先別 在職者分析</h2>
+      <h2 id="adminDashTitle" style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">📊 派遣先別 在職者分析</h2>
+    </div>
+    <!-- ビュー切替: 派遣先別 / 担当別 -->
+    <div style="display:flex;gap:0;margin-bottom:8px;background:#f0f0f5;border-radius:10px;padding:3px;">
+      <button type="button" id="adminDashViewHaken" onclick="setAdminDashView('haken')" style="flex:1;font-size:12px;font-weight:700;padding:7px 10px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">🏭 派遣先別</button>
+      <button type="button" id="adminDashViewTanto" onclick="setAdminDashView('tanto')" style="flex:1;font-size:12px;font-weight:700;padding:7px 10px;border:none;border-radius:8px;background:transparent;color:var(--text-light);cursor:pointer;">👤 担当別</button>
     </div>
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
       <span style="font-size:11px;color:var(--text-light);">並び順:</span>
       <button type="button" data-sort="count" onclick="setAdminDashSort('count',this)" style="font-size:11px;padding:5px 10px;border:1px solid var(--primary);border-radius:6px;background:var(--primary);color:#fff;cursor:pointer;">在職数順</button>
-      <button type="button" data-sort="name" onclick="setAdminDashSort('name',this)" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">部課名順</button>
+      <button type="button" data-sort="name" onclick="setAdminDashSort('name',this)" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">名前順</button>
       <span style="flex:1;"></span>
       <label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px;color:var(--text-light);">
         <input type="checkbox" id="adminDashIncludeRetired" onchange="renderAdminDashboard()" style="accent-color:var(--primary);"> 退職含む
@@ -8621,6 +8626,30 @@ var HAKEN_GENMOTO_INFO = {
   fax: '053-422-6223'
 };
 
+// 派遣先別 担当者 (派遣元責任者) マッピング
+// キー = 派遣先名の部分一致パターン / 値 = 担当者名
+// マッチしない派遣先は HAKEN_TANTO_DEFAULT にフォールバック
+// ※ 実態に合わせてここを編集してください (役員ダッシュボード「担当別」で使用)
+var HAKEN_TANTO_MAP = {
+  // 例: 'ASTI': '山下 浩俊',
+  // 例: '三和電子': '山下 亜実',
+  // 例: 'ユーシン': '山下 浩俊',
+};
+var HAKEN_TANTO_DEFAULT = '山下 浩俊';
+
+// 派遣先名から担当者を取得 (部分一致でフォールバック)
+function getHakenTanto(hakenName) {
+  if (!hakenName) return HAKEN_TANTO_DEFAULT;
+  // 完全一致 優先
+  if (HAKEN_TANTO_MAP[hakenName]) return HAKEN_TANTO_MAP[hakenName];
+  // 部分一致 (派遣先名に key が含まれる)
+  var keys = Object.keys(HAKEN_TANTO_MAP);
+  for (var i = 0; i < keys.length; i++) {
+    if (hakenName.indexOf(keys[i]) >= 0) return HAKEN_TANTO_MAP[keys[i]];
+  }
+  return HAKEN_TANTO_DEFAULT;
+}
+
 // 派遣契約 画面で扱っている派遣先(現在開いている item)
 var _currentKeiyakuHakenItem = null;
 var _currentKeiyakuHakenFieldMap = null;
@@ -8757,7 +8786,7 @@ async function renderHakenKeiyaku() {
         { label: '所在地',                     value: escHtml(HAKEN_GENMOTO_INFO.address) },
         { label: '代表者',                     value: escHtml(HAKEN_GENMOTO_INFO.representative) },
         { label: '労働者派遣事業 許可番号',     value: '<span style="color:#888;font-size:11px;">' + escHtml(HAKEN_GENMOTO_INFO.permitNo) + '</span>' },
-        { label: '派遣元 責任者',              value: escHtml(HAKEN_GENMOTO_INFO.responsible) },
+        { label: '派遣元 責任者',              value: escHtml(getHakenTanto(hakensakiName)) },
         { label: '派遣元 苦情処理担当者',      value: escHtml(HAKEN_GENMOTO_INFO.complaint) },
         { label: '電話 / FAX',                 value: escHtml(HAKEN_GENMOTO_INFO.tel) + ' / ' + escHtml(HAKEN_GENMOTO_INFO.fax) },
       ]
@@ -22043,6 +22072,7 @@ async function exportYukyuBackup() {
 }
 
 let _adminDashSort = 'count';
+let _adminDashView = 'haken';   // 'haken' = 派遣先別 / 'tanto' = 担当別
 let _adminDashCache = null;
 
 async function openAdminDashScreen() {
@@ -22094,7 +22124,59 @@ async function loadAdminDashData() {
     c.jitsudou = c.active - (c.sankyu || 0) - (c.sankyuOwari || 0);
   });
   const totalJitsudou = totalActive - sankyuCounts.total - sankyuCounts.totalOwari;
-  _adminDashCache = { byBuka: byBuka, totalActive: totalActive, totalRetired: totalRetired, totalSankyu: sankyuCounts.total, totalSankyuOwari: sankyuCounts.totalOwari, totalJitsudou: totalJitsudou };
+
+  // 担当者別 集計 (派遣先 → 担当者 で集約)
+  const byTanto = {};
+  Object.keys(byBuka).forEach(b => {
+    const t = getHakenTanto(b);
+    if (!byTanto[t]) byTanto[t] = {
+      active: 0, retired: 0, total: 0, sankyu: 0, sankyuOwari: 0, jitsudou: 0,
+      hakenCount: 0, hakens: []
+    };
+    byTanto[t].active += byBuka[b].active;
+    byTanto[t].retired += byBuka[b].retired;
+    byTanto[t].total += byBuka[b].total;
+    byTanto[t].sankyu += byBuka[b].sankyu || 0;
+    byTanto[t].sankyuOwari += byBuka[b].sankyuOwari || 0;
+    byTanto[t].jitsudou += byBuka[b].jitsudou || 0;
+    byTanto[t].hakenCount++;
+    byTanto[t].hakens.push(b);
+  });
+
+  _adminDashCache = {
+    byBuka: byBuka,
+    byTanto: byTanto,
+    totalActive: totalActive,
+    totalRetired: totalRetired,
+    totalSankyu: sankyuCounts.total,
+    totalSankyuOwari: sankyuCounts.totalOwari,
+    totalJitsudou: totalJitsudou
+  };
+}
+
+// ビュー切替: 派遣先別 / 担当別
+function setAdminDashView(view) {
+  _adminDashView = view;
+  const hakenBtn = document.getElementById('adminDashViewHaken');
+  const tantoBtn = document.getElementById('adminDashViewTanto');
+  const titleEl = document.getElementById('adminDashTitle');
+  if (hakenBtn && tantoBtn) {
+    if (view === 'tanto') {
+      tantoBtn.style.background = 'var(--primary)';
+      tantoBtn.style.color = '#fff';
+      hakenBtn.style.background = 'transparent';
+      hakenBtn.style.color = 'var(--text-light)';
+    } else {
+      hakenBtn.style.background = 'var(--primary)';
+      hakenBtn.style.color = '#fff';
+      tantoBtn.style.background = 'transparent';
+      tantoBtn.style.color = 'var(--text-light)';
+    }
+  }
+  if (titleEl) {
+    titleEl.textContent = (view === 'tanto') ? '👤 担当別 在職者分析' : '📊 派遣先別 在職者分析';
+  }
+  renderAdminDashboard();
 }
 
 async function refreshAdminDashboard() {
@@ -22127,22 +22209,28 @@ function renderAdminDashboard() {
   const body = document.getElementById('adminDashBody');
   const summary = document.getElementById('adminDashSummary');
   const includeRetired = document.getElementById('adminDashIncludeRetired').checked;
-  const byBuka = _adminDashCache.byBuka;
+  const isTanto = (_adminDashView === 'tanto');
+  const source = isTanto ? (_adminDashCache.byTanto || {}) : _adminDashCache.byBuka;
   const totalActive = _adminDashCache.totalActive;
   const totalRetired = _adminDashCache.totalRetired;
   const totalSankyu = _adminDashCache.totalSankyu || 0;
   const totalSankyuOwari = _adminDashCache.totalSankyuOwari || 0;
   const totalJitsudou = (typeof _adminDashCache.totalJitsudou === 'number') ? _adminDashCache.totalJitsudou : (totalActive - totalSankyu - totalSankyuOwari);
 
-  const entries = Object.keys(byBuka).map(b => ({
-    name: b,
-    active: byBuka[b].active,
-    retired: byBuka[b].retired,
-    total: byBuka[b].total,
-    sankyu: byBuka[b].sankyu || 0,
-    sankyuOwari: byBuka[b].sankyuOwari || 0,
-    jitsudou: (typeof byBuka[b].jitsudou === 'number') ? byBuka[b].jitsudou : (byBuka[b].active - (byBuka[b].sankyu || 0) - (byBuka[b].sankyuOwari || 0))
-  }));
+  const entries = Object.keys(source).map(name => {
+    const c = source[name];
+    return {
+      name: name,
+      active: c.active,
+      retired: c.retired,
+      total: c.total,
+      sankyu: c.sankyu || 0,
+      sankyuOwari: c.sankyuOwari || 0,
+      jitsudou: (typeof c.jitsudou === 'number') ? c.jitsudou : (c.active - (c.sankyu || 0) - (c.sankyuOwari || 0)),
+      hakenCount: c.hakenCount,
+      hakens: c.hakens
+    };
+  });
   const visible = includeRetired ? entries : entries.filter(e => e.jitsudou > 0 || e.active > 0);
 
   if (_adminDashSort === 'count') {
@@ -22151,8 +22239,10 @@ function renderAdminDashboard() {
     visible.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   }
 
+  // サマリーラベル: 担当別なら「担当者数」、派遣先別なら「派遣先数」
+  const cntLabel = isTanto ? '担当者数' : '派遣先数';
   let summaryHtml = '<div style="display:flex;gap:18px;flex-wrap:wrap;">' +
-    '<div><div style="font-size:10px;color:#888;">派遣先数</div><div style="font-size:22px;font-weight:800;color:var(--primary);">' + visible.length + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">件</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">' + cntLabel + '</div><div style="font-size:22px;font-weight:800;color:var(--primary);">' + visible.length + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">' + (isTanto ? '名' : '件') + '</span></div></div>' +
     '<div><div style="font-size:10px;color:#888;">実働者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + totalJitsudou + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
     '<div><div style="font-size:10px;color:#888;">🌸 産休育休中</div><div style="font-size:22px;font-weight:800;color:#d81b60;">' + totalSankyu + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   if (totalSankyuOwari > 0) {
@@ -22165,7 +22255,7 @@ function renderAdminDashboard() {
   summary.innerHTML = summaryHtml;
 
   if (visible.length === 0) {
-    body.innerHTML = '<div class="empty-state"><p>該当する派遣先がありません</p></div>';
+    body.innerHTML = '<div class="empty-state"><p>' + (isTanto ? '担当者データがありません' : '該当する派遣先がありません') + '</p></div>';
     return;
   }
 
@@ -22184,14 +22274,29 @@ function renderAdminDashboard() {
       : '';
     const nameEsc = escHtml(e.name);
     const nameArg = nameEsc.replace(/'/g, "\\'");
-    html += '<div onclick="openHakenListFromAdmin(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">' +
+    // 担当別: 派遣先数バッジ + 派遣先一覧 (折り畳み)
+    let extraHeader = '';
+    let hakenList = '';
+    if (isTanto) {
+      extraHeader = '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:1px 6px;background:#e3f2fd;border:1px solid #bbdefb;border-radius:8px;font-size:10px;font-weight:700;color:#1565c0;">🏭 ' + (e.hakenCount || 0) + '</span>';
+      if (e.hakens && e.hakens.length > 0) {
+        hakenList = '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #e0e0e8;font-size:10px;color:#666;line-height:1.6;">' +
+          e.hakens.map(h => escHtml(h)).join(' / ') + '</div>';
+      }
+    }
+    // クリック挙動: 派遣先別 → 派遣先社員一覧 / 担当別 → 静的表示 (派遣先リストを下に展開)
+    const cardOpen = isTanto
+      ? '<div style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;">'
+      : '<div onclick="openHakenListFromAdmin(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">';
+    html += cardOpen +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
-      '<span style="font-size:14px;font-weight:700;color:var(--primary);display:inline-flex;align-items:center;flex-wrap:wrap;">' + nameEsc + sankyuBadge + owariBadge + '</span>' +
+      '<span style="font-size:14px;font-weight:700;color:var(--primary);display:inline-flex;align-items:center;flex-wrap:wrap;">' + (isTanto ? '👤 ' : '') + nameEsc + extraHeader + sankyuBadge + owariBadge + '</span>' +
       '<span><span style="font-size:18px;font-weight:800;color:#2e7d32;">' + e.jitsudou + '</span><span style="font-size:11px;font-weight:500;color:#888;margin-left:2px;">名</span>' + retiredNote + '</span>' +
       '</div>' +
       '<div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden;">' +
       '<div style="height:100%;width:' + barPct + '%;background:linear-gradient(90deg,#66bb6a,#2e7d32);border-radius:3px;"></div>' +
       '</div>' +
+      hakenList +
       '</div>';
   });
   html += '</div>';
