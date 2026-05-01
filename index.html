@@ -406,10 +406,11 @@ body {
 /* Document capture styles */
 .doc-capture-card { border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; background:#fff; }
 .doc-capture-card.has-image { border-color: var(--success); background:#f6fff6; }
-.doc-capture-header { display:flex; align-items:center; gap:8px; }
-.doc-capture-header .doc-icon { font-size:20px; }
-.doc-capture-header .doc-label { font-weight:600; font-size:13px; flex:1; }
-.doc-capture-btn { background:var(--primary); color:#fff; border:none; border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; }
+.doc-capture-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.doc-capture-header .doc-icon { font-size:20px; flex-shrink:0; }
+.doc-capture-header .doc-label { font-weight:600; font-size:13px; flex:1 1 auto; min-width:140px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.doc-capture-header > div { flex-shrink:0; display:flex; gap:4px; flex-wrap:wrap; }
+.doc-capture-btn { background:var(--primary); color:#fff; border:none; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
 .doc-capture-btn:active { background:var(--primary-dark); }
 .doc-capture-btn.remove { background:var(--danger); font-size:11px; padding:4px 10px; }
 .doc-preview { margin-top:8px; position:relative; }
@@ -20876,7 +20877,7 @@ async function renderAddEmployeeForm() {
   html += '<tr><th>社員氏名 <span style="color:var(--danger);">*</span></th><td><input type="text" class="edit-input" id="addField_Title" placeholder="例: ヤマダ タロウ"></td></tr>';
   // 派遣先（部課）ドロップダウン
   const hakenOpts = document.getElementById('hakenSelect');
-  let bukaHtml = '<select class="edit-select" id="addField_buka" onchange="autoAssignSyainNo()">';
+  let bukaHtml = '<select class="edit-select" id="addField_buka" onchange="onAddBukaChange()">';
   bukaHtml += '<option value="">派遣先(部課)を選択...</option>';
   if (hakenOpts) {
     Array.from(hakenOpts.options).forEach(o => {
@@ -20886,8 +20887,40 @@ async function renderAddEmployeeForm() {
   }
   bukaHtml += '</select>';
   html += '<tr><th>派遣先(部課) <span style="color:var(--danger);">*</span></th><td>' + bukaHtml + '</td></tr>';
+  // 組織単位 (派遣先連動)
+  html += '<tr><th>組織単位 <span style="font-size:10px;color:var(--text-light);">(派遣先で絞込)</span></th>' +
+          '<td><select class="edit-select" id="addField_soshikiTani" onchange="onAddSoshikiChange()"><option value="">先に派遣先を選択</option></select></td></tr>';
+  // 職種 (派遣先+組織連動)
+  html += '<tr><th>職種 <span style="font-size:10px;color:var(--text-light);">(派遣先+組織で絞込)</span></th>' +
+          '<td><select class="edit-select" id="addField_syokusyu"><option value="">先に派遣先を選択</option></select></td></tr>';
   html += '<tr><th>社員番号 <span style="color:var(--danger);">*</span></th><td><div style="display:flex;gap:6px;align-items:center;"><input type="number" class="edit-input" id="addField_syainNo" placeholder="部課選択で自動入力" style="flex:1;"><span id="addSyainNoStatus" style="font-size:11px;white-space:nowrap;"></span></div></td></tr>';
   html += '</table></div>';
+
+  // 派遣先×組織×職種 連動マップを社員データから構築 (移動入社フォームと同じロジック)
+  window._addCascade = {};
+  try {
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=2000');
+    const soshikiKey = keyMap['soshikiTani'];
+    const syokusyuKey = keyMap['syokusyu'];
+    allEmps.forEach(function(e) {
+      const b = getBukaValue(e);
+      if (!b) return;
+      const s = soshikiKey ? (e[soshikiKey] || '') : '';
+      const j = syokusyuKey ? (e[syokusyuKey] || '') : '';
+      if (!window._addCascade[b]) window._addCascade[b] = { _allSyokusyu: new Set() };
+      const node = window._addCascade[b];
+      if (s) {
+        if (!node[s]) node[s] = new Set();
+        if (j) node[s].add(j);
+      }
+      if (j) node._allSyokusyu.add(j);
+    });
+    // SP Choice 列のフォールバック値も取っておく
+    window._addAllSoshiki = getFieldChoices('soshikiTani', keyMap) || [];
+    window._addAllSyokusyu = getFieldChoices('syokusyu', keyMap) || [];
+  } catch (e) {
+    console.warn('add cascade fetch failed:', e);
+  }
 
   // Document capture section
   html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
@@ -20925,10 +20958,13 @@ async function renderAddEmployeeForm() {
     html += '<div class="accordion-body"><table class="acc-table">';
     cat.fields.forEach(field => {
       if (field.key.startsWith('_calc') || field.format === 'spUrl') return;
-      // 派遣先は基本必須項目に移動済み
+      // 基本必須項目に移動済み
       if (field.key === 'hakensaki') return;
-      // 新規登録では退社日関連は不要
+      if (field.key === 'soshikiTani') return;     // → 基本必須に移動
+      if (field.key === 'syokusyu') return;        // → 基本必須に移動
+      // 新規登録では退社日/退職理由/次回採用は不要
       if (field.key === 'hakenTaisha' || field.key === 'yukyuTaisha') return;
+      if (field.showOnlyResigned) return;          // 退職理由・次回採用 等
       const odataKey = keyMap[field.key];
       if (!odataKey) return;
       const fieldType = getFieldType(field.key, keyMap);
@@ -20936,12 +20972,14 @@ async function renderAddEmployeeForm() {
       const inputHtml = getEditInputHtml(field, '', fieldType, choices);
       if (!inputHtml) return;
       // Change id to addField_ prefix
-      const addInput = inputHtml.replace('id="editField_', 'id="addField_');
+      let addInput = inputHtml.replace('id="editField_', 'id="addField_');
       // 通勤方法にonchangeイベント追加
       if (field.key === 'tsukinHouhou') {
-        const addInputWithEvent = addInput.replace('id="addField_tsukinHouhou"', 'id="addField_tsukinHouhou" onchange="onAddTsukinChange()"');
-        html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInputWithEvent + '</td></tr>';
-        return;
+        addInput = addInput.replace('id="addField_tsukinHouhou"', 'id="addField_tsukinHouhou" onchange="onAddTsukinChange()"');
+      }
+      // 入社日 → 起算日 自動連動
+      if (field.key === 'nyushaDate') {
+        addInput = addInput.replace('id="addField_nyushaDate"', 'id="addField_nyushaDate" onchange="onAddNyushaChange()"');
       }
       html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
     });
@@ -20964,6 +21002,66 @@ function onAddTsukinChange() {
     const el = document.querySelector('.add-cat-section[data-cat-id="' + id + '"]');
     if (el) el.style.display = isCar ? '' : 'none';
   });
+}
+
+// 派遣先変更 → 組織単位/職種を絞り込み + 社員番号自動採番
+function onAddBukaChange() {
+  // 既存の社員番号 自動採番
+  if (typeof autoAssignSyainNo === 'function') autoAssignSyainNo();
+  // 連動ドロップダウン更新
+  const buka = (document.getElementById('addField_buka') || {}).value || '';
+  const soshikiSel = document.getElementById('addField_soshikiTani');
+  const syokusyuSel = document.getElementById('addField_syokusyu');
+  if (!soshikiSel || !syokusyuSel) return;
+
+  const node = (window._addCascade || {})[buka];
+  let soshikiList = [];
+  let syokusyuList = [];
+  if (node) {
+    soshikiList = Object.keys(node).filter(k => k !== '_allSyokusyu').sort();
+    syokusyuList = Array.from(node._allSyokusyu).sort();
+  }
+  if (soshikiList.length === 0) soshikiList = window._addAllSoshiki || [];
+  if (syokusyuList.length === 0) syokusyuList = window._addAllSyokusyu || [];
+
+  function fill(sel, list, placeholder) {
+    let html = '<option value="">' + placeholder + '</option>';
+    list.forEach(v => { html += '<option value="' + escHtml(v) + '">' + escHtml(v) + '</option>'; });
+    sel.innerHTML = html;
+  }
+  fill(soshikiSel, soshikiList, buka ? '選択してください' : '先に派遣先を選択');
+  fill(syokusyuSel, syokusyuList, buka ? '選択してください' : '先に派遣先を選択');
+}
+
+// 組織単位変更 → 職種をさらに絞り込み
+function onAddSoshikiChange() {
+  const buka = (document.getElementById('addField_buka') || {}).value || '';
+  const soshiki = (document.getElementById('addField_soshikiTani') || {}).value || '';
+  const syokusyuSel = document.getElementById('addField_syokusyu');
+  if (!syokusyuSel) return;
+
+  const node = (window._addCascade || {})[buka];
+  let syokusyuList = [];
+  if (node && soshiki && node[soshiki]) {
+    syokusyuList = Array.from(node[soshiki]).sort();
+  } else if (node) {
+    syokusyuList = Array.from(node._allSyokusyu).sort();
+  }
+  if (syokusyuList.length === 0) syokusyuList = window._addAllSyokusyu || [];
+
+  let html = '<option value="">選択してください</option>';
+  syokusyuList.forEach(v => { html += '<option value="' + escHtml(v) + '">' + escHtml(v) + '</option>'; });
+  syokusyuSel.innerHTML = html;
+}
+
+// 入社日 → 有給付与起算日 自動連動 (起算日が空欄のときのみ)
+function onAddNyushaChange() {
+  const ny = (document.getElementById('addField_nyushaDate') || {}).value || '';
+  if (!ny) return;
+  const ki = document.getElementById('addField_kisanDate');
+  if (ki && !ki.value) {
+    ki.value = ny;
+  }
 }
 
 async function autoAssignSyainNo() {
