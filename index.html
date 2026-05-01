@@ -7672,8 +7672,9 @@ const PROFILE_CATEGORIES = [
       // ── 📞 連絡先 ──
       { key: 'keitai', label: '携帯電話', format: 'tel', group: 'contact' },
       { key: 'email', label: 'Eメール', format: 'email', group: 'contact' },
-      { key: 'yubin', label: '郵便番号', group: 'contact' },
+      // 順序: 住所 → 郵便番号 (郵便番号入力で住所自動取得 zipcloud)
       { key: 'address', label: '住所', format: 'map', group: 'contact' },
+      { key: 'yubin', label: '郵便番号', group: 'contact' },
       // ── 💼 雇用情報 ──
       { key: 'zaiyokuSyubetu', label: '採用種別', format: 'stripRomaji', group: 'employ' },
       { key: 'nyushaDate', label: '入社日', format: 'date', group: 'employ' },
@@ -7732,7 +7733,7 @@ const PROFILE_CATEGORIES = [
       { key: 'zairyuShikaku', label: '在留資格' },
       { key: 'zairyuKigen', label: '在留期限', format: 'dateExpiry' },
       { key: 'zairyuKigenCard', label: '在留期限（カード）', format: 'dateExpiry' },
-      { key: 'zairyuBikou', label: '備考' },
+      { key: 'zairyuBikou', label: '在留カード番号' },
     ]
   },
   {
@@ -21157,6 +21158,14 @@ async function renderAddEmployeeForm() {
       if (field.key === 'nyushaDate') {
         addInput = addInput.replace('id="addField_nyushaDate"', 'id="addField_nyushaDate" onchange="onAddNyushaChange()"');
       }
+      // 郵便番号 → 住所 自動取得 (zipcloud)
+      if (field.key === 'yubin') {
+        addInput = addInput.replace('id="addField_yubin"', 'id="addField_yubin" onchange="onAddYubinChange()" placeholder="例: 4350006 → 住所自動取得"');
+      }
+      // 住所欄: 郵便番号がわからない時の検索ボタン併記
+      if (field.key === 'address') {
+        addInput += '<div style="margin-top:4px;"><button type="button" onclick="openYubinSearchFromAddress()" style="background:#fff;border:1px solid #1976d2;color:#1976d2;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📮 郵便番号を検索 (新タブ)</button></div>';
+      }
       html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
     });
     // 勤務情報の末尾に 雇用保険番号 + 雇用保険氏名 を追加表示
@@ -21255,6 +21264,47 @@ function onAddNyushaChange() {
   if (ki && !ki.value) {
     ki.value = ny;
   }
+}
+
+// 郵便番号 → 住所 自動取得 (zipcloud API、無料・CORS対応)
+async function onAddYubinChange() {
+  const yubinInp = document.getElementById('addField_yubin');
+  const addrInp = document.getElementById('addField_address');
+  if (!yubinInp || !addrInp) return;
+  const zip = String(yubinInp.value || '').replace(/[^\d]/g, '');
+  if (zip.length !== 7) return;
+  try {
+    const resp = await fetch('https://zipcloud.ibsnet.co.jp/api/search?zipcode=' + zip);
+    const data = await resp.json();
+    if (data && data.results && data.results.length > 0) {
+      const r = data.results[0];
+      const addr = (r.address1 || '') + (r.address2 || '') + (r.address3 || '');
+      if (addr) {
+        // 既に住所が入力済みでも上書きするか確認
+        if (!addrInp.value || confirm('郵便番号 ' + zip + ' の住所:\n' + addr + '\n\n現在の住所を上書きしますか？')) {
+          addrInp.value = addr;
+          showToast('🏠 郵便番号から住所を取得しました', 'success');
+        }
+      }
+    } else {
+      showToast('該当する住所が見つかりません', 'error');
+    }
+  } catch (e) {
+    console.warn('zipcloud lookup failed:', e);
+    showToast('住所取得に失敗しました', 'error');
+  }
+}
+
+// 住所欄から日本郵便の郵便番号検索ページを新タブで開く
+function openYubinSearchFromAddress() {
+  const addrInp = document.getElementById('addField_address');
+  const addr = addrInp ? String(addrInp.value || '').trim() : '';
+  // 日本郵便の住所→郵便番号検索ページ (キーワード検索)
+  // 自動検索パラメータがないので、ユーザー入力欄に手動で入れる
+  const url = addr
+    ? 'https://www.google.com/search?q=' + encodeURIComponent('郵便番号 ' + addr)
+    : 'https://www.post.japanpost.jp/zipcode/';
+  window.open(url, '_blank', 'noopener');
 }
 
 async function autoAssignSyainNo() {
