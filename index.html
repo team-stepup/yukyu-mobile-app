@@ -8626,27 +8626,89 @@ var HAKEN_GENMOTO_INFO = {
   fax: '053-422-6223'
 };
 
-// 派遣先別 担当者 (派遣元責任者) マッピング
-// キー = 派遣先名の部分一致パターン / 値 = 担当者名
-// マッチしない派遣先は HAKEN_TANTO_DEFAULT にフォールバック
-// ※ 実態に合わせてここを編集してください (役員ダッシュボード「担当別」で使用)
-var HAKEN_TANTO_MAP = {
+// 派遣先名 → 担当者(派遣元責任者) のマップ
+// 派遣先 SharePoint リスト (HAKENSAKI_LIST_PATH) の「派遣元責任者」列から動的に構築される
+// ハードコードのフォールバックも残してあるが、SP値が優先
+var _hakenTantoSPMap = {};       // SP データから構築されたマップ (Title → 担当者)
+var HAKEN_TANTO_MAP = {           // ハードコード フォールバック (SP に値がない時用)
   // 例: 'ASTI': '山下 浩俊',
-  // 例: '三和電子': '山下 亜実',
-  // 例: 'ユーシン': '山下 浩俊',
 };
-var HAKEN_TANTO_DEFAULT = '山下 浩俊';
+var HAKEN_TANTO_DEFAULT = '山下 浩俊';   // どこにも値が無い時のデフォルト
 
-// 派遣先名から担当者を取得 (部分一致でフォールバック)
+// SP 派遣先リスト から「派遣元責任者」値をマップ化 (再ロード可能)
+async function loadHakenTantoMapFromSP() {
+  try {
+    var token = await getToken();
+    if (!token) return;
+    // フィールドメタ取得 (派遣元責任者の OData キー解決)
+    var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName&$top=200";
+    var fResp = await fetch(fieldsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!fResp.ok) return;
+    var fData = await fResp.json();
+    var fieldMap = {};   // title → odKey
+    ((fData.d && fData.d.results) || []).forEach(function(f) {
+      var intName = f.EntityPropertyName || f.InternalName;
+      var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
+      fieldMap[f.Title] = odKey;
+    });
+    // 派遣元責任者 / 担当者 のキー候補を順に試す
+    var tantoKey = null;
+    var candidates = ['派遣元責任者', '派遣元 責任者', '担当者', '営業担当'];
+    for (var i = 0; i < candidates.length; i++) {
+      if (fieldMap[candidates[i]]) { tantoKey = fieldMap[candidates[i]]; break; }
+    }
+    if (!tantoKey) {
+      // 部分一致 (「責任」を含む列)
+      var titles = Object.keys(fieldMap);
+      for (var j = 0; j < titles.length; j++) {
+        if (titles[j].indexOf('派遣元') >= 0 && titles[j].indexOf('責任') >= 0) {
+          tantoKey = fieldMap[titles[j]];
+          break;
+        }
+      }
+    }
+    if (!tantoKey) {
+      console.warn('派遣元責任者の列が見つかりませんでした');
+      return;
+    }
+    // アイテム取得 (Title + 派遣元責任者 のみ)
+    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=Title," + tantoKey;
+    var resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    var newMap = {};
+    items.forEach(function(it) {
+      var title = String(it.Title || '').trim();
+      var tanto = String(it[tantoKey] || '').trim();
+      if (title && tanto) newMap[title] = tanto;
+    });
+    _hakenTantoSPMap = newMap;
+    console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' assignments from SP');
+  } catch (e) {
+    console.warn('loadHakenTantoMapFromSP error:', e);
+  }
+}
+
+// 派遣先名から担当者を取得 (SP > ハードコード > デフォルト)
 function getHakenTanto(hakenName) {
   if (!hakenName) return HAKEN_TANTO_DEFAULT;
-  // 完全一致 優先
-  if (HAKEN_TANTO_MAP[hakenName]) return HAKEN_TANTO_MAP[hakenName];
-  // 部分一致 (派遣先名に key が含まれる)
-  var keys = Object.keys(HAKEN_TANTO_MAP);
-  for (var i = 0; i < keys.length; i++) {
-    if (hakenName.indexOf(keys[i]) >= 0) return HAKEN_TANTO_MAP[keys[i]];
+  // 1. SP マップから完全一致
+  if (_hakenTantoSPMap[hakenName]) return _hakenTantoSPMap[hakenName];
+  // 2. SP マップから部分一致 (社員側の部課名に "001:" 等のプレフィックスがあるケース)
+  var spKeys = Object.keys(_hakenTantoSPMap);
+  for (var i = 0; i < spKeys.length; i++) {
+    if (hakenName.indexOf(spKeys[i]) >= 0 || spKeys[i].indexOf(hakenName) >= 0) {
+      return _hakenTantoSPMap[spKeys[i]];
+    }
   }
+  // 3. ハードコード フォールバック (完全一致 → 部分一致)
+  if (HAKEN_TANTO_MAP[hakenName]) return HAKEN_TANTO_MAP[hakenName];
+  var hcKeys = Object.keys(HAKEN_TANTO_MAP);
+  for (var k = 0; k < hcKeys.length; k++) {
+    if (hakenName.indexOf(hcKeys[k]) >= 0) return HAKEN_TANTO_MAP[hcKeys[k]];
+  }
+  // 4. デフォルト
   return HAKEN_TANTO_DEFAULT;
 }
 
@@ -8786,7 +8848,7 @@ async function renderHakenKeiyaku() {
         { label: '所在地',                     value: escHtml(HAKEN_GENMOTO_INFO.address) },
         { label: '代表者',                     value: escHtml(HAKEN_GENMOTO_INFO.representative) },
         { label: '労働者派遣事業 許可番号',     value: '<span style="color:#888;font-size:11px;">' + escHtml(HAKEN_GENMOTO_INFO.permitNo) + '</span>' },
-        { label: '派遣元 責任者',              value: escHtml(getHakenTanto(hakensakiName)) },
+        { label: '派遣元 責任者',              value: escHtml(hv(['派遣元責任者', '派遣元 責任者', '担当者', '営業担当']) || getHakenTanto(hakensakiName)) },
         { label: '派遣元 苦情処理担当者',      value: escHtml(HAKEN_GENMOTO_INFO.complaint) },
         { label: '電話 / FAX',                 value: escHtml(HAKEN_GENMOTO_INFO.tel) + ' / ' + escHtml(HAKEN_GENMOTO_INFO.fax) },
       ]
@@ -22098,6 +22160,8 @@ async function openAdminDashScreen() {
 
 async function loadAdminDashData() {
   await resolveBukaKey();
+  // 派遣先リストから「派遣元責任者」を取得して担当者マップを構築
+  await loadHakenTantoMapFromSP();
   const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
   const byBuka = {};
   let totalActive = 0, totalRetired = 0;
