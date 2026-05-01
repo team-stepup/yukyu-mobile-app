@@ -406,11 +406,13 @@ body {
 /* Document capture styles */
 .doc-capture-card { border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; background:#fff; }
 .doc-capture-card.has-image { border-color: var(--success); background:#f6fff6; }
-.doc-capture-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+/* 常時 2段構成: 上段=アイコン+ラベル+件数 / 下段=ボタン群 → ラベル長に関わらず崩れない */
+.doc-capture-header { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
 .doc-capture-header .doc-icon { font-size:20px; flex-shrink:0; }
-.doc-capture-header .doc-label { font-weight:600; font-size:13px; flex:1 1 auto; min-width:140px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.doc-capture-header > div { flex-shrink:0; display:flex; gap:4px; flex-wrap:wrap; }
-.doc-capture-btn { background:var(--primary); color:#fff; border:none; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.doc-capture-header .doc-label { font-weight:600; font-size:13px; flex:1; min-width:0; line-height:1.3; }
+.doc-capture-header .doc-count { font-size:10px; color:var(--primary); font-weight:700; flex-shrink:0; }
+.doc-capture-buttons { display:flex; gap:6px; flex-wrap:wrap; }
+.doc-capture-btn { background:var(--primary); color:#fff; border:none; border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
 .doc-capture-btn:active { background:var(--primary-dark); }
 .doc-capture-btn.remove { background:var(--danger); font-size:11px; padding:4px 10px; }
 .doc-preview { margin-top:8px; position:relative; }
@@ -20078,8 +20080,9 @@ async function deleteEmployee() {
 const DOC_TYPES = [
   { id: 'mynumber', label: 'マイナンバー', icon: '🆔', hint: '表・裏' },
   { id: 'zairyu', label: '在留カード', icon: '🌏', hint: '表・裏' },
-  { id: 'bank', label: 'キャッシュカード/通帳', icon: '🏦', hint: '表紙・見開き' },
+  { id: 'bank', label: '銀行口座', icon: '🏦', hint: '通帳・キャッシュカード' },
   { id: 'license', label: '免許証', icon: '🪪', hint: '表・裏' },
+  { id: 'koyou', label: '雇用保険被保険者証', icon: '📑', hint: '表・裏' },
   { id: 'shaken', label: '車検証', icon: '🚗', hint: '1枚' },
   { id: 'jibaiseki', label: '自賠責保険証', icon: '🛡', hint: '表・裏' },
   { id: 'nini', label: '任意保険証', icon: '📋', hint: '複数ページ可' },
@@ -21099,14 +21102,16 @@ async function renderAddEmployeeForm() {
   html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:8px;">📷 カメラで撮影、または 📁 既存の画像ファイルを選択できます（複数選択可）。SharePointに自動保存され、テキスト抽出でコピペも可能です。</div>';
   DOC_TYPES.forEach(doc => {
     html += '<div class="doc-capture-card" id="docCard_' + doc.id + '">';
+    // 上段: アイコン + ラベル + 件数
     html += '<div class="doc-capture-header">';
     html += '<span class="doc-icon">' + doc.icon + '</span>';
     html += '<span class="doc-label">' + doc.label + (doc.hint ? ' <span style="font-size:10px;color:var(--text-light);font-weight:400;">(' + doc.hint + ')</span>' : '') + '</span>';
-    html += '<span id="docCount_' + doc.id + '" style="font-size:10px;color:var(--primary);font-weight:700;min-width:28px;text-align:center;"></span>';
-    html += '<div style="display:flex;gap:4px;">';
+    html += '<span class="doc-count" id="docCount_' + doc.id + '"></span>';
+    html += '</div>';
+    // 下段: ボタン群
+    html += '<div class="doc-capture-buttons">';
     html +=   '<label class="doc-capture-btn"><input type="file" accept="image/*" capture="environment" style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📷 カメラ</label>';
     html +=   '<label class="doc-capture-btn" style="background:#455a64;"><input type="file" accept="image/*" multiple style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📁 ファイル</label>';
-    html += '</div>';
     html += '</div>';
     html += '<div class="doc-preview" id="docPreview_' + doc.id + '" style="display:none;"></div>';
     html += '</div>';
@@ -21154,6 +21159,23 @@ async function renderAddEmployeeForm() {
       }
       html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
     });
+    // 勤務情報の末尾に 雇用保険番号 + 雇用保険氏名 を追加表示
+    if (cat.id === 'work') {
+      ['koyouNo', 'koyouName'].forEach(function(extKey) {
+        const insuranceCat = PROFILE_CATEGORIES.find(c => c.id === 'insurance');
+        if (!insuranceCat) return;
+        const extField = insuranceCat.fields.find(f => f.key === extKey);
+        if (!extField) return;
+        const odKey = keyMap[extKey];
+        if (!odKey) return;
+        const ftype = getFieldType(extKey, keyMap);
+        const choices = getFieldChoices(extKey, keyMap);
+        const inputHtml = getEditInputHtml(extField, '', ftype, choices);
+        if (!inputHtml) return;
+        const addInput = inputHtml.replace('id="editField_', 'id="addField_');
+        html += '<tr><th>' + escHtml(extField.label) + '</th><td>' + addInput + '</td></tr>';
+      });
+    }
     html += '</table></div></div>';
   });
 
