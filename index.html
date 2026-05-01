@@ -4892,9 +4892,10 @@ select.sankyu-edit-input {
 
   <!-- Screen: 派遣先 詳細 -->
   <div class="screen" id="hakensakiDetailScreen">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <button onclick="switchScreen('hakensakiListScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <div style="flex:1;"></div>
+      <button onclick="openHakenKeiyakuFromHakensaki()" style="background:linear-gradient(135deg,#2e7d32,#66bb6a);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.25);">📋 派遣契約</button>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
     <div id="hakensakiDetailBody"></div>
@@ -6819,7 +6820,6 @@ async function loadLeaveDetails() {
         <button class="profile-quick-btn pq-gensen" onclick="openEmpViewer('gensen','${empBtnB64}')"><span class="pq-icon">📄</span><span class="pq-label">源泉</span></button>
         <button class="profile-quick-btn pq-kyuryou" onclick="openEmpViewer('kyuryou','${empBtnB64}')"><span class="pq-icon">💴</span><span class="pq-label">給料明細</span></button>
         <button class="profile-quick-btn pq-chingin" onclick="openEmpViewer('chingin','${empBtnB64}')"><span class="pq-icon">📒</span><span class="pq-label">賃金台帳</span></button>
-        <button class="profile-quick-btn pq-keiyaku" onclick="openHakenKeiyakuScreen()"><span class="pq-icon">📋</span><span class="pq-label">派遣契約</span></button>
         <button class="profile-quick-btn pq-shaho" onclick="openShahoShutokuEditDialog(currentEmployee)" style="background:linear-gradient(135deg,#42a5f5,#1565c0);color:#fff;"><span class="pq-icon">🏥</span><span class="pq-label">社保編集</span></button>
       </div>
     </div>
@@ -8488,65 +8488,23 @@ var HAKEN_GENMOTO_INFO = {
   fax: '053-422-6223'
 };
 
-// 開く
-async function openHakenKeiyakuScreen() {
-  if (!currentEmployee) { showToast('社員を選択してください', 'error'); return; }
+// 派遣契約 画面で扱っている派遣先(現在開いている item)
+var _currentKeiyakuHakenItem = null;
+var _currentKeiyakuHakenFieldMap = null;
+
+// 派遣先詳細画面 (hakensakiDetailScreen) から契約画面を開く
+function openHakenKeiyakuFromHakensaki() {
+  var item = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!item) { showToast('派遣先を選択してください', 'error'); return; }
+  _currentKeiyakuHakenItem = item;
+  _currentKeiyakuHakenFieldMap = _hakensakiFieldMap;
   switchScreen('hakenKeiyakuScreen');
   showSpinner();
-  try {
-    await renderHakenKeiyaku();
-  } catch (e) {
-    console.error('openHakenKeiyakuScreen error:', e);
+  renderHakenKeiyaku().catch(function(e) {
+    console.error('renderHakenKeiyaku error:', e);
     var body = document.getElementById('hakenKeiyakuBody');
     if (body) body.innerHTML = '<div style="padding:30px;text-align:center;color:#c62828;">読み込みエラー: ' + escHtml(String(e.message || e)) + '</div>';
-  } finally {
-    hideSpinner();
-  }
-}
-
-// 社員の派遣先名から派遣先レコードを検索 (キャッシュ利用)
-var _hakenKeiyakuCache = null;
-async function _fetchHakensakiForEmp(emp) {
-  var hakenName = getHakensaki(emp);
-  if (!hakenName) return null;
-  // 既に派遣先一覧が読み込まれていれば使う
-  if (_hakensakiItems && _hakensakiItems.length > 0) {
-    var match = _hakensakiItems.find(function(it) {
-      var t = String(it.Title || '').trim();
-      return t === hakenName || t.indexOf(hakenName) === 0 || hakenName.indexOf(t) === 0;
-    });
-    if (match) return { item: match, fieldMap: _hakensakiFieldMap };
-  }
-  // 未取得なら派遣先一覧をロード
-  if (!_hakenKeiyakuCache) {
-    try {
-      var token = await getToken();
-      var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName,TypeAsString&$top=200";
-      var fResp = await fetch(fieldsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-      var fieldMap = {};
-      if (fResp.ok) {
-        var fData = await fResp.json();
-        ((fData.d && fData.d.results) || []).forEach(function(f) {
-          var intName = f.EntityPropertyName || f.InternalName;
-          var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
-          fieldMap[f.Title] = odKey;
-        });
-      }
-      var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500";
-      var resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-      if (!resp.ok) return null;
-      var data = await resp.json();
-      _hakenKeiyakuCache = { items: (data.d && data.d.results) || [], fieldMap: fieldMap };
-    } catch (e) {
-      console.warn('haken fetch failed:', e);
-      return null;
-    }
-  }
-  var hit = _hakenKeiyakuCache.items.find(function(it) {
-    var t = String(it.Title || '').trim();
-    return t === hakenName || t.indexOf(hakenName) === 0 || hakenName.indexOf(t) === 0;
-  });
-  return hit ? { item: hit, fieldMap: _hakenKeiyakuCache.fieldMap } : { item: null, fieldMap: _hakenKeiyakuCache.fieldMap };
+  }).finally(function() { hideSpinner(); });
 }
 
 // 派遣先レコードからタイトルでフィールド値を引く
@@ -8574,47 +8532,58 @@ function _hakenVal(record, fieldMap, titleKeywords) {
 }
 
 async function renderHakenKeiyaku() {
-  const emp = currentEmployee;
-  const empName = emp.Title || '';
-  const empNo = emp[F.syainNo] || '';
-  const hakensakiName = getHakensaki(emp) || '';
+  const hakenRec = _currentKeiyakuHakenItem;
+  const hakenFm = _currentKeiyakuHakenFieldMap || {};
+  if (!hakenRec) {
+    document.getElementById('hakenKeiyakuBody').innerHTML = '<div style="padding:30px;text-align:center;color:#c62828;">派遣先が選択されていません</div>';
+    return;
+  }
+  const hv = function(titles) { return _hakenVal(hakenRec, hakenFm, titles); };
+  const hakensakiName = String(hakenRec.Title || '').trim() || hv(['派遣先会社名', '派遣先名']);
+  const soshiki = hv(['組織単位', '組織', '部署', '事業所']);
+  const empty = '<span class="hk-empty">— 要登録</span>';
+  const v = function(s) { return (s && String(s).trim()) ? escHtml(String(s).trim()) : empty; };
+  const note = function(s) { return s ? '<span style="color:#888;font-size:11px;">' + escHtml(s) + '</span>' : empty; };
+  const fmt = function(d) { return d ? formatDate(d) : ''; };
 
   // スティッキーバー
   const bar = document.getElementById('hakenKeiyakuStickyBar');
   if (bar) {
     bar.innerHTML =
       '<span class="ssb-icon">📋</span>' +
-      '<span class="ssb-name">' + escHtml(empName) + '</span>' +
-      (hakensakiName ? '<span class="ssb-haken">🏭 ' + escHtml(hakensakiName) + '</span>' : '') +
-      '<span class="ssb-no">No.' + escHtml(empNo) + '</span>';
+      '<span class="ssb-name">' + escHtml(hakensakiName || '(派遣先)') + '</span>' +
+      (soshiki ? '<span class="ssb-haken">📦 ' + escHtml(soshiki) + '</span>' : '');
   }
 
-  // フィールドメタ + 派遣先レコードをフェッチ
-  await fetchEmployeeFields();
-  const keyMap = employeeFieldsCache ? buildFieldKeyMap(employeeFieldsCache) : {};
-  const empGet = function(k) {
-    var ok = keyMap[k] || F[k];
-    return ok ? (emp[ok] || '') : '';
-  };
-  const hakenInfo = await _fetchHakensakiForEmp(emp);
-  const hakenRec = hakenInfo ? hakenInfo.item : null;
-  const hakenFm = hakenInfo ? hakenInfo.fieldMap : {};
-  const hv = function(titles) { return _hakenVal(hakenRec, hakenFm, titles); };
-
-  // 日付フォーマット
-  const fmt = function(d) { return d ? formatDate(d) : ''; };
-  const empty = '<span class="hk-empty">— 要登録</span>';
-  const v = function(s) { return (s && String(s).trim()) ? escHtml(String(s).trim()) : empty; };
-  const note = function(s) { return s ? '<span style="color:#888;font-size:11px;">' + escHtml(s) + '</span>' : empty; };
-
-  const periodStart = empGet('nyushaDate');
-  const periodEnd = emp[F.hakenTaisha] || emp[F.yukyuTaisha] || '';
-  const periodStr = (periodStart ? fmt(periodStart) : '?') + ' 〜 ' + (periodEnd ? fmt(periodEnd) : '無期限');
-  const seikyuVal = empGet('seikyu');
-  const seikyuStr = seikyuVal ? '¥' + Number(String(seikyuVal).replace(/,/g, '')).toLocaleString() + ' / 時間' : '';
-  const tsukinVal = empGet('tsukinHouhou');
+  // この派遣先に属する社員 (在職のみ) を抽出
+  let memberEmps = [];
+  try {
+    const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+    memberEmps = (allEmps || []).filter(function(emp) {
+      if (isResigned(emp)) return false;
+      const empHaken = getHakensaki(emp) || '';
+      if (!empHaken) return false;
+      // 派遣先名の前方一致 or 完全一致 で判定
+      return empHaken === hakensakiName || empHaken.indexOf(hakensakiName) === 0 || hakensakiName.indexOf(empHaken) === 0;
+    });
+    // 組織単位フィルタ (社員側に soshikiTani があり、派遣先側に soshiki がある場合)
+    if (soshiki) {
+      const ssoMatch = memberEmps.filter(function(emp) {
+        const eso = String(emp[F.soshikiTani] || emp.soshikiTani || '');
+        return eso && (eso === soshiki || eso.indexOf(soshiki) >= 0 || soshiki.indexOf(eso) >= 0);
+      });
+      if (ssoMatch.length > 0) memberEmps = ssoMatch;
+    }
+  } catch (e) {
+    console.warn('member emps fetch failed:', e);
+  }
   const today = new Date();
   const todayStr = today.getFullYear() + '/' + String(today.getMonth() + 1).padStart(2, '0') + '/' + String(today.getDate()).padStart(2, '0');
+
+  // 派遣期間 (派遣先側の値)
+  const periodStartH = hv(['派遣期間　始まり', '派遣期間 始まり', '派遣期間始まり', '派遣開始', '開始日', '契約開始']);
+  const periodEndH = hv(['派遣期間　終わり', '派遣期間 終わり', '派遣期間終わり', '派遣終了', '終了日', '契約終了']);
+  const periodStr = (periodStartH ? fmt(periodStartH) : '?') + ' 〜 ' + (periodEndH ? fmt(periodEndH) : '無期限');
 
   // 5 グループ
   const sections = [
@@ -8624,20 +8593,20 @@ async function renderHakenKeiyaku() {
         { label: '契約書 番号',           value: note('（手動入力 / テンプレート側で連番）') },
         { label: '契約 締結日',           value: note('（テンプレート側で記入: 例 ' + todayStr + '）') },
         { label: '派遣期間',             value: v(periodStr) },
-        { label: '派遣社員 氏名',         value: v(empName) },
-        { label: '社員番号',             value: v(empNo) },
-        { label: '業務内容（職種）',      value: v(empGet('syokusyu')) },
+        { label: '派遣先 / 組織',         value: v(hakensakiName + (soshiki ? ' / ' + soshiki : '')) },
+        { label: '派遣社員 人数',         value: '<span style="font-weight:700;color:#7b1fa2;">' + memberEmps.length + '名</span>' },
+        { label: '業務内容（職種）',      value: note('派遣先の業務内容に従う（社員ごとに異なる場合は別紙）') },
         { label: '業務に伴う責任の程度', value: note('一般職員 (派遣先と協議の上で決定)') },
       ]
     },
     {
       id: 'haken', label: '派遣先情報', icon: '🏭', color: '#1565c0', bg: 'linear-gradient(135deg,#e3f2fd,#bbdefb)',
       rows: [
-        { label: '派遣先 会社名',          value: v(hakensakiName || hv(['Title', '派遣先会社名', '派遣先名'])) },
+        { label: '派遣先 会社名',          value: v(hakensakiName) },
         { label: '所在地（本社）',         value: v(hv(['住所', '所在地'])) },
         { label: '代表者',               value: v(hv(['代表者', '代表'])) },
-        { label: '事業所名（就業場所）',    value: v(empGet('soshikiTani') || hv(['事業所', '組織単位', 'Title'])) },
-        { label: '事業所 所在地',          value: v(hv(['事業所所在地', '住所'])) },
+        { label: '事業所名（就業場所）',    value: v(soshiki) },
+        { label: '事業所 所在地',          value: v(hv(['事業所所在地', '事業所住所', '住所'])) },
         { label: '派遣先 指揮命令者',      value: v(hv(['指揮命令', '指揮命令者'])) },
         { label: '派遣先 責任者',          value: v(hv(['派遣先責任者', '責任者'])) },
         { label: '派遣先 苦情処理担当者',  value: v(hv(['苦情処理担当', '苦情処理'])) },
@@ -8664,8 +8633,8 @@ async function renderHakenKeiyaku() {
         { label: '休憩時間',             value: note('60分（例 12:00 〜 13:00）') },
         { label: '時間外労働の有無',      value: note('あり（36協定の範囲内）') },
         { label: '休日労働の有無',        value: note('原則なし（必要時のみ）') },
-        { label: '派遣料金',             value: seikyuStr ? escHtml(seikyuStr) : empty },
-        { label: '通勤手当の取扱い',      value: note(tsukinVal ? '通勤方法: ' + tsukinVal + ' / 派遣元負担' : '派遣元負担') },
+        { label: '派遣料金',             value: note('社員ごとの請求単価に従う（別紙）') },
+        { label: '通勤手当の取扱い',      value: note('派遣元負担') },
         { label: '安全衛生事項',          value: note('派遣先の安全衛生規定に従う') },
         { label: '派遣契約の解除事項',    value: note('解除30日前までに書面通知 / 派遣労働者の責に帰すべき事由なき場合は新たな就業先確保に努める') },
         { label: '紛争防止措置',          value: note('派遣先・派遣元 双方の責任者で協議の上、解決') },
@@ -8692,7 +8661,7 @@ async function renderHakenKeiyaku() {
   let html = '';
   // データソース注記
   html += '<div style="background:#fffde7;border:1px solid #ffe082;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#827717;line-height:1.6;">';
-  html += '💡 値は <b>社員データ</b> と <b>派遣先リスト</b> から自動取得しています。';
+  html += '💡 値は <b>派遣先リスト</b> から自動取得しています。';
   html += '<span class="hk-empty" style="font-size:10px;margin-left:4px;">— 要登録</span> はリスト側に未登録の項目です。';
   html += '</div>';
 
@@ -8711,12 +8680,38 @@ async function renderHakenKeiyaku() {
     html += '</div>';
   });
 
-  // 派遣先未マッチの警告
-  if (!hakenRec && hakensakiName) {
-    html += '<div style="background:#ffebee;border:1px solid #ef9a9a;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:12px;color:#c62828;">';
-    html += '⚠ 派遣先リストに「' + escHtml(hakensakiName) + '」のレコードが見つかりませんでした。派遣先情報の項目は手動で記入してください。';
-    html += '</div>';
+  // 👥 派遣社員一覧 (この派遣先に所属する在職者)
+  html += '<div class="hk-section">';
+  html += '<div class="hk-section-header" style="background:linear-gradient(135deg,#ede7f6,#d1c4e9);color:#4527a0;">';
+  html +=   '<span style="font-size:15px;">👥</span>';
+  html +=   '<span>派遣社員 一覧 (在職者)</span>';
+  html +=   '<span style="margin-left:auto;font-size:10px;background:rgba(255,255,255,0.6);color:#4527a0;padding:2px 7px;border-radius:8px;">' + memberEmps.length + '名</span>';
+  html += '</div>';
+  if (memberEmps.length === 0) {
+    html += '<div style="padding:14px;text-align:center;color:#888;font-size:12px;">該当する派遣社員はいません</div>';
+  } else {
+    html += '<table class="hk-section-table">';
+    html += '<tr style="background:#f5f3ff;"><th style="border-left:3px solid #4527a0;">No.</th><th>氏名</th><th>職種</th><th>入社日</th></tr>';
+    memberEmps.sort(function(a, b) {
+      var ea = String(a[F.syainNo] || '');
+      var eb = String(b[F.syainNo] || '');
+      return ea.localeCompare(eb);
+    });
+    memberEmps.forEach(function(emp) {
+      var no = emp[F.syainNo] || '';
+      var nm = emp.Title || '';
+      var sk = emp[F.syokusyu] || '';
+      var ny = emp[F.nyushaDate] ? fmt(emp[F.nyushaDate]) : '';
+      var safeEmp = JSON.stringify(emp).replace(/'/g, '&#39;');
+      html += '<tr style="cursor:pointer;" onclick=\'selectEmployee(' + safeEmp + ')\'>' +
+              '<td style="border-left:3px solid #4527a0;">' + escHtml(no) + '</td>' +
+              '<td style="font-weight:600;color:#4527a0;">' + escHtml(nm) + '</td>' +
+              '<td>' + escHtml(sk) + '</td>' +
+              '<td>' + escHtml(ny) + '</td></tr>';
+    });
+    html += '</table>';
   }
+  html += '</div>';
 
   document.getElementById('hakenKeiyakuBody').innerHTML = html;
 }
