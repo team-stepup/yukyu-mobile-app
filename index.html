@@ -6911,9 +6911,11 @@ async function loadLeaveDetails() {
     const empName2 = emp.Title || '';
     const empNo2 = emp[F.syainNo] || '';
     const haken2 = hakensaki || '';
+    // 性別アイコン (色付き円の中に白い人シルエットの SVG)
+    var _personSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff" style="display:block;"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
     var _iconHtml;
-    if (_sexClass === 'male') _iconHtml = '<span class="ssb-icon male" title="男性">男</span>';
-    else if (_sexClass === 'female') _iconHtml = '<span class="ssb-icon female" title="女性">女</span>';
+    if (_sexClass === 'male') _iconHtml = '<span class="ssb-icon male" title="男性">' + _personSvg + '</span>';
+    else if (_sexClass === 'female') _iconHtml = '<span class="ssb-icon female" title="女性">' + _personSvg + '</span>';
     else _iconHtml = '<span class="ssb-icon">👤</span>';
     bar.innerHTML =
       _iconHtml +
@@ -7430,10 +7432,10 @@ function _decodeInternalNameToText(s) {
   return t || s;
 }
 
-// 直近 N 件 (デフォルト3件) の変更内容を抽出
+// 直近 N 件 (デフォルト5件) の変更内容を抽出
 async function fetchEmployeeUpdateHistory(itemId, fieldsMeta, maxRecords) {
   if (!itemId) return [];
-  maxRecords = maxRecords || 3;
+  maxRecords = maxRecords || 5;
   try {
     const token = await getToken();
     if (!token) return [];
@@ -7581,7 +7583,7 @@ async function renderEmployeeUpdateHistory(itemId, fieldsMeta) {
   const body = document.getElementById('updateHistoryBody');
   const cnt = document.getElementById('updateHistoryCount');
   if (!body) return;
-  const history = await fetchEmployeeUpdateHistory(itemId, fieldsMeta, 3);
+  const history = await fetchEmployeeUpdateHistory(itemId, fieldsMeta, 5);
   if (history.length === 0) {
     body.innerHTML = '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:14px 8px;">更新履歴がありません</div>';
     if (cnt) { cnt.textContent = '0件'; cnt.style.background = '#f0f0f0'; cnt.style.color = '#999'; }
