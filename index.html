@@ -8673,55 +8673,84 @@ async function loadHakenTantoMapFromSP() {
       return;
     }
     var tantoKey = tantoMeta.odKey;
+    var intName = tantoMeta.intName;
     var isUser = /^User/i.test(tantoMeta.type);   // "User" or "UserMulti"
     var isMulti = /Multi/i.test(tantoMeta.type);
 
-    // User フィールドは companion Id ('xxxxId' or 'OData_xxxxId') を取得して resolveSpUserNamesByIds で氏名解決
-    // 通常の値 (`xxxx`) は __deferred オブジェクトを返すため expand なしでは使えない
-    var idKey = null;
-    if (isUser) {
-      // odKey が 'OData_xxx' の場合は 'OData_xxxId'、それ以外は xxxId が companion
-      idKey = tantoKey + 'Id';
-    }
-    var selectCols = 'Title,' + tantoKey + (idKey ? (',' + idKey) : '');
-    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=" + selectCols;
+    console.log('[hakenTanto] field detected: title="' + (Object.keys(fieldInfo).find(function(k){return fieldInfo[k]===tantoMeta;}) || '') + '" type=' + tantoMeta.type + ' odKey=' + tantoKey + ' intName=' + intName);
+
+    // User フィールドは companion Id を取得して resolveSpUserNamesByIds で氏名解決
+    // companion Id 列名の候補:
+    //   - odKey + 'Id'        例: 'OData__x6d3e_x9063_x...Id' or 'PartnerLeaderId'
+    //   - intName + 'Id'      例: '_x6d3e_x9063_x...Id'
+    // どちらが返ってくるかは確実でないので両方 $select に入れて、後で実値があるほうを使う
+    var idKeyA = tantoKey + 'Id';
+    var idKeyB = intName + 'Id';
+    var idKeysToSelect = [idKeyA];
+    if (idKeyB !== idKeyA) idKeysToSelect.push(idKeyB);
+
+    var selectCols = ['Title', tantoKey];
+    if (isUser) idKeysToSelect.forEach(function(k){ selectCols.push(k); });
+    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=" + selectCols.join(',');
     var resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     if (!resp.ok) {
-      console.warn('hakensaki items fetch failed', resp.status);
-      return;
+      console.warn('[hakenTanto] items fetch failed status=' + resp.status + ' url=' + itemsUrl);
+      // idKey を含めずに最低限の取得を再試行
+      var basicUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=Title," + tantoKey;
+      resp = await fetch(basicUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+      if (!resp.ok) { console.warn('[hakenTanto] retry failed too', resp.status); return; }
     }
     var data = await resp.json();
     var items = (data.d && data.d.results) || [];
 
+    // サンプル1件を出して実際のキー構造を確認
+    if (items.length > 0) {
+      var s = items[0];
+      var sampleKeys = Object.keys(s).filter(function(k){ return /^_/.test(k) || /Id$/.test(k) || k === tantoKey || k === 'Title'; });
+      console.log('[hakenTanto] sample item keys:', sampleKeys, 'tantoVal=', s[tantoKey], 'idA=', s[idKeyA], 'idB=', s[idKeyB]);
+    }
+
     var newMap = {};
 
+    // Step 1: ID ベースで解決を試みる (User型 と推定される場合)
     if (isUser) {
-      // 全 ID を集めて一括解決
-      var allIds = [];
-      items.forEach(function(it) {
-        var v = it[idKey];
-        if (typeof v === 'number') allIds.push(v);
-        else if (v && v.results && Array.isArray(v.results)) {
-          v.results.forEach(function(x){ if (typeof x === 'number') allIds.push(x); });
-        }
-      });
-      var uniqueIds = [];
-      var seen = {};
-      allIds.forEach(function(id) { if (!seen[id]) { seen[id] = 1; uniqueIds.push(id); } });
-      var nameMap = await resolveSpUserNamesByIds(uniqueIds);
-      items.forEach(function(it) {
-        var title = String(it.Title || '').trim();
-        if (!title) return;
-        var v = it[idKey];
-        var ids = [];
-        if (typeof v === 'number') ids = [v];
-        else if (v && v.results && Array.isArray(v.results)) ids = v.results;
-        var names = ids.map(function(id){ return nameMap[id] || ''; }).filter(Boolean);
-        if (names.length) newMap[title] = isMulti ? names.join(', ') : names[0];
-      });
-      console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' assignments (User type, ' + uniqueIds.length + ' unique users)');
-    } else {
-      // Text 型
+      // どちらの idKey に値があるかを判定 (最初の非nullを採用)
+      var actualIdKey = null;
+      for (var ii = 0; ii < items.length && !actualIdKey; ii++) {
+        if (items[ii][idKeyA] != null) actualIdKey = idKeyA;
+        else if (items[ii][idKeyB] != null) actualIdKey = idKeyB;
+      }
+      if (actualIdKey) {
+        var allIds = [];
+        items.forEach(function(it) {
+          var v = it[actualIdKey];
+          if (typeof v === 'number') allIds.push(v);
+          else if (v && v.results && Array.isArray(v.results)) {
+            v.results.forEach(function(x){ if (typeof x === 'number') allIds.push(x); });
+          }
+        });
+        var uniqueIds = [];
+        var seen = {};
+        allIds.forEach(function(id) { if (!seen[id]) { seen[id] = 1; uniqueIds.push(id); } });
+        var nameMap = await resolveSpUserNamesByIds(uniqueIds);
+        items.forEach(function(it) {
+          var title = String(it.Title || '').trim();
+          if (!title) return;
+          var v = it[actualIdKey];
+          var ids = [];
+          if (typeof v === 'number') ids = [v];
+          else if (v && v.results && Array.isArray(v.results)) ids = v.results;
+          var names = ids.map(function(id){ return nameMap[id] || ''; }).filter(Boolean);
+          if (names.length) newMap[title] = isMulti ? names.join(', ') : names[0];
+        });
+        console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' (User Id, key=' + actualIdKey + ', users=' + uniqueIds.length + ')');
+      } else {
+        console.warn('[hakenTanto] User type detected but companion Id column not found; trying object value fallback');
+      }
+    }
+
+    // Step 2: ID 解決で空のままなら、値オブジェクト (Title/LookupValue) からの抽出を試みる
+    if (Object.keys(newMap).length === 0) {
       items.forEach(function(it) {
         var title = String(it.Title || '').trim();
         if (!title) return;
@@ -8732,11 +8761,16 @@ async function loadHakenTantoMapFromSP() {
         else if (typeof raw === 'object') {
           if (raw.Title) name = raw.Title;
           else if (raw.LookupValue) name = raw.LookupValue;
+          else if (raw.Name) name = raw.Name;
+          else if (raw.results && Array.isArray(raw.results)) {
+            var ns = raw.results.map(function(x){ return (x && (x.Title || x.LookupValue)) || ''; }).filter(Boolean);
+            name = ns.join(', ');
+          }
         }
         name = String(name).trim();
-        if (name) newMap[title] = name;
+        if (name && name !== '[object Object]') newMap[title] = name;
       });
-      console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' assignments (Text type)');
+      console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' (value fallback)');
     }
 
     _hakenTantoSPMap = newMap;
@@ -22317,18 +22351,17 @@ async function openAdminDashScreen() {
     return;
   }
   switchScreen('adminDashScreen');
-  if (!_adminDashCache) {
-    showSpinner();
-    try {
-      await loadAdminDashData();
-    } catch (e) {
-      console.error('Admin dash error:', e);
-      showToast('読み込みエラー: ' + e.message, 'error');
-      hideSpinner();
-      return;
-    }
+  // 担当者マップ修正のため毎回最新データを取得 (キャッシュ無視)
+  showSpinner();
+  try {
+    await loadAdminDashData();
+  } catch (e) {
+    console.error('Admin dash error:', e);
+    showToast('読み込みエラー: ' + e.message, 'error');
     hideSpinner();
+    return;
   }
+  hideSpinner();
   renderAdminDashboard();
 }
 
