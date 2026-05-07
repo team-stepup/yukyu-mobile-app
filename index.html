@@ -8636,55 +8636,110 @@ var HAKEN_TANTO_MAP = {           // ハードコード フォールバック (S
 var HAKEN_TANTO_DEFAULT = '山下 浩俊';   // どこにも値が無い時のデフォルト
 
 // SP 派遣先リスト から「派遣元責任者」値をマップ化 (再ロード可能)
+// 派遣元責任者列は Person/User 型なので Id を解決して氏名を取得する
 async function loadHakenTantoMapFromSP() {
   try {
     var token = await getToken();
     if (!token) return;
-    // フィールドメタ取得 (派遣元責任者の OData キー解決)
-    var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName&$top=200";
+    // フィールドメタ取得 (TypeAsString で User/Text を判別)
+    var fieldsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,EntityPropertyName,TypeAsString&$top=300";
     var fResp = await fetch(fieldsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     if (!fResp.ok) return;
     var fData = await fResp.json();
-    var fieldMap = {};   // title → odKey
+    var fieldInfo = {};   // title → {odKey, intName, type}
     ((fData.d && fData.d.results) || []).forEach(function(f) {
       var intName = f.EntityPropertyName || f.InternalName;
-      var odKey = intName.startsWith('_') ? 'OData_' + intName : intName;
-      fieldMap[f.Title] = odKey;
+      var odKey = (intName && intName.charAt(0) === '_') ? 'OData_' + intName : intName;
+      fieldInfo[f.Title] = { odKey: odKey, intName: intName, type: f.TypeAsString || '' };
     });
     // 派遣元責任者 / 担当者 のキー候補を順に試す
-    var tantoKey = null;
+    var tantoMeta = null;
     var candidates = ['派遣元責任者', '派遣元 責任者', '担当者', '営業担当'];
     for (var i = 0; i < candidates.length; i++) {
-      if (fieldMap[candidates[i]]) { tantoKey = fieldMap[candidates[i]]; break; }
+      if (fieldInfo[candidates[i]]) { tantoMeta = fieldInfo[candidates[i]]; break; }
     }
-    if (!tantoKey) {
-      // 部分一致 (「責任」を含む列)
-      var titles = Object.keys(fieldMap);
+    if (!tantoMeta) {
+      // 部分一致 (「派遣元」と「責任」両方含む列)
+      var titles = Object.keys(fieldInfo);
       for (var j = 0; j < titles.length; j++) {
         if (titles[j].indexOf('派遣元') >= 0 && titles[j].indexOf('責任') >= 0) {
-          tantoKey = fieldMap[titles[j]];
+          tantoMeta = fieldInfo[titles[j]];
           break;
         }
       }
     }
-    if (!tantoKey) {
+    if (!tantoMeta) {
       console.warn('派遣元責任者の列が見つかりませんでした');
       return;
     }
-    // アイテム取得 (Title + 派遣元責任者 のみ)
-    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=Title," + tantoKey;
+    var tantoKey = tantoMeta.odKey;
+    var isUser = /^User/i.test(tantoMeta.type);   // "User" or "UserMulti"
+    var isMulti = /Multi/i.test(tantoMeta.type);
+
+    // User フィールドは companion Id ('xxxxId' or 'OData_xxxxId') を取得して resolveSpUserNamesByIds で氏名解決
+    // 通常の値 (`xxxx`) は __deferred オブジェクトを返すため expand なしでは使えない
+    var idKey = null;
+    if (isUser) {
+      // odKey が 'OData_xxx' の場合は 'OData_xxxId'、それ以外は xxxId が companion
+      idKey = tantoKey + 'Id';
+    }
+    var selectCols = 'Title,' + tantoKey + (idKey ? (',' + idKey) : '');
+    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=" + selectCols;
     var resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      console.warn('hakensaki items fetch failed', resp.status);
+      return;
+    }
     var data = await resp.json();
     var items = (data.d && data.d.results) || [];
+
     var newMap = {};
-    items.forEach(function(it) {
-      var title = String(it.Title || '').trim();
-      var tanto = String(it[tantoKey] || '').trim();
-      if (title && tanto) newMap[title] = tanto;
-    });
+
+    if (isUser) {
+      // 全 ID を集めて一括解決
+      var allIds = [];
+      items.forEach(function(it) {
+        var v = it[idKey];
+        if (typeof v === 'number') allIds.push(v);
+        else if (v && v.results && Array.isArray(v.results)) {
+          v.results.forEach(function(x){ if (typeof x === 'number') allIds.push(x); });
+        }
+      });
+      var uniqueIds = [];
+      var seen = {};
+      allIds.forEach(function(id) { if (!seen[id]) { seen[id] = 1; uniqueIds.push(id); } });
+      var nameMap = await resolveSpUserNamesByIds(uniqueIds);
+      items.forEach(function(it) {
+        var title = String(it.Title || '').trim();
+        if (!title) return;
+        var v = it[idKey];
+        var ids = [];
+        if (typeof v === 'number') ids = [v];
+        else if (v && v.results && Array.isArray(v.results)) ids = v.results;
+        var names = ids.map(function(id){ return nameMap[id] || ''; }).filter(Boolean);
+        if (names.length) newMap[title] = isMulti ? names.join(', ') : names[0];
+      });
+      console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' assignments (User type, ' + uniqueIds.length + ' unique users)');
+    } else {
+      // Text 型
+      items.forEach(function(it) {
+        var title = String(it.Title || '').trim();
+        if (!title) return;
+        var raw = it[tantoKey];
+        var name = '';
+        if (raw == null) name = '';
+        else if (typeof raw === 'string') name = raw;
+        else if (typeof raw === 'object') {
+          if (raw.Title) name = raw.Title;
+          else if (raw.LookupValue) name = raw.LookupValue;
+        }
+        name = String(name).trim();
+        if (name) newMap[title] = name;
+      });
+      console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' assignments (Text type)');
+    }
+
     _hakenTantoSPMap = newMap;
-    console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' assignments from SP');
   } catch (e) {
     console.warn('loadHakenTantoMapFromSP error:', e);
   }
