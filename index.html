@@ -8716,10 +8716,36 @@ async function loadHakenTantoMapFromSP() {
     var isUser = /^User/i.test(tantoMeta.type);   // "User" or "UserMulti"
     var isMulti = /Multi/i.test(tantoMeta.type);
 
+    // 派遣先会社名の列を探す (Title でなく 派遣先名/派遣先会社名 等を優先)
+    var companyKey = null;
+    var companyTitle = '';
+    var companyCandidates = ['派遣先会社名', '派遣先会社', '派遣先名', '派遣先', '会社名'];
+    for (var ci = 0; ci < companyCandidates.length; ci++) {
+      if (fieldInfo[companyCandidates[ci]]) {
+        companyKey = fieldInfo[companyCandidates[ci]].odKey;
+        companyTitle = companyCandidates[ci];
+        break;
+      }
+    }
+    // 部分一致 (派遣先 を含み、派遣元/責任/担当/苦情 を含まない最初の Text 列)
+    if (!companyKey) {
+      for (var cti = 0; cti < titles.length; cti++) {
+        var tt = titles[cti];
+        if (tt.indexOf('派遣先') >= 0 && !/派遣元|責任|担当|苦情|部署|役職|備考/.test(tt)) {
+          companyKey = fieldInfo[tt].odKey;
+          companyTitle = tt;
+          break;
+        }
+      }
+    }
+
     _hakenTantoDebug.detectedTitle = tantoTitle;
     _hakenTantoDebug.detectedType = tantoMeta.type;
     _hakenTantoDebug.detectedKey = tantoKey;
+    _hakenTantoDebug.companyTitle = companyTitle;
+    _hakenTantoDebug.companyKey = companyKey;
     console.log('[hakenTanto] field detected: title=' + JSON.stringify(tantoTitle) + ' type=' + tantoMeta.type + ' odKey=' + tantoKey + ' intName=' + intName);
+    console.log('[hakenTanto] company column: title=' + JSON.stringify(companyTitle) + ' key=' + companyKey);
 
     // User フィールドは companion Id を取得して resolveSpUserNamesByIds で氏名解決
     // companion Id 列名の候補:
@@ -8732,12 +8758,12 @@ async function loadHakenTantoMapFromSP() {
     if (idKeyB !== idKeyA) idKeysToSelect.push(idKeyB);
 
     var selectCols = ['Title', tantoKey];
+    if (companyKey && companyKey !== 'Title') selectCols.push(companyKey);
     if (isUser) idKeysToSelect.forEach(function(k){ selectCols.push(k); });
     var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=" + selectCols.join(',');
     var resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     if (!resp.ok) {
       console.warn('[hakenTanto] items fetch failed status=' + resp.status + ' url=' + itemsUrl);
-      // idKey を含めずに最低限の取得を再試行
       var basicUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=Title," + tantoKey;
       resp = await fetch(basicUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
       if (!resp.ok) { console.warn('[hakenTanto] retry failed too', resp.status); return; }
@@ -8745,16 +8771,30 @@ async function loadHakenTantoMapFromSP() {
     var data = await resp.json();
     var items = (data.d && data.d.results) || [];
 
+    // 各アイテムの「派遣先名」を取得するヘルパー (companyKey > Title の順で fallback)
+    function _getCompanyName(it) {
+      if (companyKey && companyKey !== 'Title') {
+        var v = it[companyKey];
+        if (v) {
+          if (typeof v === 'string') return v.trim();
+          if (typeof v === 'object' && v.Title) return String(v.Title).trim();
+          if (typeof v === 'object' && v.LookupValue) return String(v.LookupValue).trim();
+        }
+      }
+      return String(it.Title || '').trim();
+    }
+
     // サンプル1件を出して実際のキー構造を確認
     _hakenTantoDebug.itemsCount = items.length;
     if (items.length > 0) {
       var s = items[0];
-      var sampleKeys = Object.keys(s).filter(function(k){ return /^_/.test(k) || /Id$/.test(k) || k === tantoKey || k === 'Title'; });
+      var sampleKeys = Object.keys(s).filter(function(k){ return /^_/.test(k) || /Id$/.test(k) || k === tantoKey || k === companyKey || k === 'Title'; });
       _hakenTantoDebug.sampleValue = s[tantoKey];
       _hakenTantoDebug.sampleIdA = s[idKeyA];
       _hakenTantoDebug.sampleIdB = s[idKeyB];
       _hakenTantoDebug.sampleTitle = s.Title;
-      console.log('[hakenTanto] sample item keys:', sampleKeys, 'tantoVal=', s[tantoKey], 'idA=', s[idKeyA], 'idB=', s[idKeyB]);
+      _hakenTantoDebug.sampleCompany = companyKey ? s[companyKey] : null;
+      console.log('[hakenTanto] sample item keys:', sampleKeys, 'companyVal=', companyKey ? s[companyKey] : '(no col)', 'tantoVal=', s[tantoKey], 'idA=', s[idKeyA], 'idB=', s[idKeyB]);
     }
 
     var newMap = {};
@@ -8781,14 +8821,14 @@ async function loadHakenTantoMapFromSP() {
         allIds.forEach(function(id) { if (!seen[id]) { seen[id] = 1; uniqueIds.push(id); } });
         var nameMap = await resolveSpUserNamesByIds(uniqueIds);
         items.forEach(function(it) {
-          var title = String(it.Title || '').trim();
-          if (!title) return;
+          var company = _getCompanyName(it);
+          if (!company) return;
           var v = it[actualIdKey];
           var ids = [];
           if (typeof v === 'number') ids = [v];
           else if (v && v.results && Array.isArray(v.results)) ids = v.results;
           var names = ids.map(function(id){ return nameMap[id] || ''; }).filter(Boolean);
-          if (names.length) newMap[title] = isMulti ? names.join(', ') : names[0];
+          if (names.length) newMap[company] = isMulti ? names.join(', ') : names[0];
         });
         console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' (User Id, key=' + actualIdKey + ', users=' + uniqueIds.length + ')');
       } else {
@@ -8799,8 +8839,8 @@ async function loadHakenTantoMapFromSP() {
     // Step 2: ID 解決で空のままなら、値オブジェクト (Title/LookupValue) からの抽出を試みる
     if (Object.keys(newMap).length === 0) {
       items.forEach(function(it) {
-        var title = String(it.Title || '').trim();
-        if (!title) return;
+        var company = _getCompanyName(it);
+        if (!company) return;
         var raw = it[tantoKey];
         var name = '';
         if (raw == null) name = '';
@@ -8815,7 +8855,7 @@ async function loadHakenTantoMapFromSP() {
           }
         }
         name = String(name).trim();
-        if (name && name !== '[object Object]') newMap[title] = name;
+        if (name && name !== '[object Object]') newMap[company] = name;
       });
       console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' (value fallback)');
     }
@@ -8839,16 +8879,17 @@ function showHakenTantoDebug() {
 
   html += '<div style="margin-bottom:10px;padding:10px;background:#f5f5f5;border-radius:8px;">';
   html += '<div style="font-weight:700;color:#5e35b1;margin-bottom:4px;">検出された列</div>';
-  html += '<div>📌 <b>タイトル:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.detectedTitle || '(なし)')) + '</code></div>';
-  html += '<div>📌 <b>型:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(d.detectedType || '(なし)') + '</code></div>';
-  html += '<div>📌 <b>キー:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;font-size:9px;">' + escHtml(d.detectedKey || '(なし)') + '</code></div>';
+  html += '<div>📌 <b>担当者列:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.detectedTitle || '(なし)')) + '</code> <span style="color:#777;">(' + escHtml(d.detectedType || '?') + ')</span></div>';
+  html += '<div>📌 <b>派遣先名列:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.companyTitle || 'Title (デフォルト)')) + '</code></div>';
+  html += '<div>📌 <b>担当者キー:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;font-size:9px;">' + escHtml(d.detectedKey || '(なし)') + '</code></div>';
   html += '<div>📊 <b>取得アイテム数:</b> ' + (d.itemsCount || 0) + '件</div>';
   html += '<div>📊 <b>マップに登録された派遣先数:</b> ' + Object.keys(_hakenTantoSPMap).length + '件</div>';
   html += '</div>';
 
   html += '<div style="margin-bottom:10px;padding:10px;background:#fff3e0;border-radius:8px;">';
   html += '<div style="font-weight:700;color:#e65100;margin-bottom:4px;">サンプル (1件目のアイテム)</div>';
-  html += '<div>🏷 <b>派遣先名:</b> ' + escHtml(String(d.sampleTitle || '(なし)')) + '</div>';
+  html += '<div>🏷 <b>Title:</b> ' + escHtml(String(d.sampleTitle || '(なし)')) + '</div>';
+  html += '<div>🏢 <b>派遣先名(' + escHtml(d.companyTitle || '?') + '):</b> ' + escHtml(JSON.stringify(d.sampleCompany)) + '</div>';
   html += '<div>👤 <b>担当者の値 (生):</b> <pre style="background:#fff;padding:6px;border-radius:3px;margin:3px 0;white-space:pre-wrap;font-size:10px;">' + escHtml(JSON.stringify(d.sampleValue, null, 2) || '(null)') + '</pre></div>';
   html += '<div>🆔 <b>idA:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.sampleIdA)) + '</code> | <b>idB:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.sampleIdB)) + '</code></div>';
   html += '</div>';
