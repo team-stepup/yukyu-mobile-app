@@ -12864,15 +12864,42 @@ async function saveShahoShutokuEditDialog() {
         changed++;
       }
     });
-    console.log('[社保取得編集] debug:', debug);
-    console.log('[社保取得編集] skipped:', skipped);
-    console.log('[社保取得編集] body to save:', body);
+    var logLabel = (ctx.mode === 'soushitsu') ? '[社保喪失編集]' : '[社保取得編集]';
+    console.log(logLabel + ' debug:', debug);
+    console.log(logLabel + ' skipped:', skipped);
+    console.log(logLabel + ' body to save:', body);
+    console.log(logLabel + ' emp.Id=' + emp.Id + ' syainNo=' + emp[F.syainNo]);
     // PDFファイル (input or drag-drop で設定された window._shahoShutokuPdfFiles)
     var pdfFiles = window._shahoShutokuPdfFiles || [];
     if (changed === 0 && pdfFiles.length === 0) {
-      var msg = '変更もPDFも選択されていません';
-      if (skipped.length > 0) msg += ' (未保存項目: ' + skipped.join(', ') + ')';
-      showToast(msg, 'info');
+      // 未検出項目の詳細を分かりやすく表示
+      var changedRows = debug.filter(function(d) { return d.changed; });
+      var noChangeRows = debug.filter(function(d) { return !d.changed; });
+      var diagHtml = '<div style="text-align:left;font-size:11px;color:#555;margin-top:8px;">';
+      diagHtml += '<div style="font-weight:700;color:#c62828;margin-bottom:4px;">変更が検出されませんでした</div>';
+      diagHtml += '<div style="background:#fff3e0;padding:6px 8px;border-radius:6px;line-height:1.5;">';
+      noChangeRows.forEach(function(d) {
+        diagHtml += '<div>' + escHtml(d.key) + ': <span style="color:#666;">' + escHtml(String(d.oldVal || '空')) + '</span> = <span style="color:#666;">' + escHtml(String(d.newVal || '空')) + '</span></div>';
+      });
+      if (skipped.length > 0) {
+        diagHtml += '<div style="margin-top:6px;color:#c62828;">未保存項目: ' + escHtml(skipped.join(', ')) + '</div>';
+      }
+      diagHtml += '</div></div>';
+      // モーダルで明確に通知
+      var msgOv = document.createElement('div');
+      msgOv.className = 'confirm-overlay';
+      msgOv.style.zIndex = '99999';
+      msgOv.innerHTML = '<div class="confirm-box" style="max-width:460px;">' +
+        '<div class="confirm-title">⚠ 変更が検出されませんでした</div>' +
+        '<div class="confirm-msg" style="text-align:left;">' +
+          '値を変更してから保存してください。<br>下記は現在の比較結果です。' +
+          diagHtml +
+        '</div>' +
+        '<div class="confirm-btns">' +
+          '<button class="btn-ok" onclick="this.closest(\'.confirm-overlay\').remove()">閉じる</button>' +
+        '</div></div>';
+      document.body.appendChild(msgOv);
+      msgOv.addEventListener('click', function(e) { if (e.target === msgOv) msgOv.remove(); });
       if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
       return;
     }
@@ -12889,9 +12916,34 @@ async function saveShahoShutokuEditDialog() {
       }
     }
     // 社員データPATCH (変更があれば)
+    var verifyResult = null;   // 保存後の検証結果 (フィールド名 → SP上の値)
     if (changed > 0) {
-      console.log('[社保取得編集] 保存body:', body, 'skipped:', skipped);
+      console.log(logLabel + ' 保存body:', body, 'skipped:', skipped);
       await spPatchEmployee(emp.Id, body);
+      // PATCH直後の検証: emp.Id で再取得して body に書いた値が反映されているか確認
+      try {
+        var token = await getToken();
+        if (token) {
+          var verifyUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + emp.Id + ")";
+          var vResp = await fetch(verifyUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+          if (vResp.ok) {
+            var vData = await vResp.json();
+            var refreshed = vData.d || {};
+            verifyResult = {};
+            Object.keys(body).forEach(function(internalKey) {
+              if (internalKey === '__metadata') return;
+              // body の internalName を OData_ 付きに復元してから読む
+              var odCheck = internalKey.indexOf('_') === 0 ? 'OData_' + internalKey : internalKey;
+              verifyResult[internalKey] = {
+                expected: body[internalKey],
+                actual: refreshed[odCheck] !== undefined ? refreshed[odCheck] : refreshed[internalKey],
+                odKey: odCheck
+              };
+            });
+            console.log(logLabel + ' PATCH 検証:', verifyResult);
+          }
+        }
+      } catch (vErr) { console.warn('verify failed:', vErr); }
     }
     // PDF アップロード (最大3ファイル)
     var pdfMessage = '';
@@ -12932,9 +12984,34 @@ async function saveShahoShutokuEditDialog() {
         // List9 更新失敗でも他の保存は成功として継続
       }
     }
+    // 検証結果から SP に値が確実に反映されたかチェック
+    var unverified = [];
+    if (verifyResult) {
+      Object.keys(verifyResult).forEach(function(k) {
+        var v = verifyResult[k];
+        // 日付は YYYY-MM-DD 部分で比較、それ以外は厳密比較
+        var exp = v.expected;
+        var act = v.actual;
+        var match = false;
+        if (exp == null && (act == null || act === '')) {
+          match = true;
+        } else if (typeof exp === 'string' && exp.indexOf('T00:00:00Z') > 0) {
+          var ed = exp.substring(0,10);
+          var ad = act ? String(act).substring(0,10) : '';
+          match = ed === ad;
+        } else {
+          match = String(exp == null ? '' : exp) === String(act == null ? '' : act);
+        }
+        if (!match) unverified.push(k);
+      });
+    }
     var savedMsg = (changed > 0 ? '✓ ' + changed + '項目を保存しました' : '項目変更なし');
     if (skipped.length > 0 && changed === 0) savedMsg += ' (未保存項目: ' + skipped.join(', ') + ')';
-    showToast(savedMsg + pdfMessage + list9Message, changed > 0 ? 'success' : 'info');
+    if (unverified.length > 0) {
+      savedMsg += ' / ⚠ SPに未反映: ' + unverified.join(', ');
+      console.warn(logLabel + ' SP未反映フィールド:', unverified, 'verifyResult:', verifyResult);
+    }
+    showToast(savedMsg + pdfMessage + list9Message, (changed > 0 && unverified.length === 0) ? 'success' : 'info');
     // 最新データを再取得して キャッシュ更新
     var updatedEmp = emp;
     try {
