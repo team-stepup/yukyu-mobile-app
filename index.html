@@ -12745,7 +12745,10 @@ async function openShahoShutokuEditDialog(emp, mode) {
         _addPdfFiles('_shahoShutokuPdfFiles', 'shahoShutokuPdfInfo', files || []);
       });
     }
-    window._shahoShutokuEmpData = { emp: emp, km: km, meta: meta };
+    // 開いた経路を記録 (保存後の戻り先を判定するため)
+    // 'soumu' なら 総務ダッシュボードに戻る、それ以外は 社員詳細を開く (既存動作)
+    var openedFrom = (typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.Id === emp.Id) ? 'detail' : 'soumu';
+    window._shahoShutokuEmpData = { emp: emp, km: km, meta: meta, mode: mode, openedFrom: openedFrom };
   } catch (e) {
     console.error('openShahoShutokuEditDialog error:', e);
     showToast('編集ダイアログのオープンに失敗: ' + e.message, 'error');
@@ -12797,8 +12800,13 @@ async function saveShahoShutokuEditDialog() {
   if (!ctx || !ctx.emp) { showToast('データがありません', 'error'); return; }
   var emp = ctx.emp;
   var km = ctx.km;
+  var openedFrom = ctx.openedFrom || 'detail';
   var btn = document.getElementById('shahoShutokuSaveBtn');
   if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+  // 過去のセッションで失敗したフィールドのスキップキャッシュをクリア (リトライ許可)
+  if (typeof _badEmployeeFields !== 'undefined' && _badEmployeeFields && _badEmployeeFields.clear) {
+    _badEmployeeFields.clear();
+  }
   try {
     var body = {};
     var changed = 0;
@@ -12924,25 +12932,41 @@ async function saveShahoShutokuEditDialog() {
         // List9 更新失敗でも他の保存は成功として継続
       }
     }
-    showToast((changed > 0 ? changed + '項目を保存' : '項目変更なし') + pdfMessage + list9Message, 'success');
-    // 最新データを再取得
+    var savedMsg = (changed > 0 ? '✓ ' + changed + '項目を保存しました' : '項目変更なし');
+    if (skipped.length > 0 && changed === 0) savedMsg += ' (未保存項目: ' + skipped.join(', ') + ')';
+    showToast(savedMsg + pdfMessage + list9Message, changed > 0 ? 'success' : 'info');
+    // 最新データを再取得して キャッシュ更新
     var updatedEmp = emp;
     try {
       var updated = await fetchFullEmployee(emp[F.syainNo]);
       if (updated) {
         updatedEmp = Object.assign({}, emp, updated);
-        for (var i = 0; i < _soumuAllEmps.length; i++) {
-          if (_soumuAllEmps[i].Id === emp.Id) {
-            _soumuAllEmps[i] = updatedEmp;
-            break;
+        if (Array.isArray(_soumuAllEmps)) {
+          for (var i = 0; i < _soumuAllEmps.length; i++) {
+            if (_soumuAllEmps[i].Id === emp.Id) {
+              _soumuAllEmps[i] = updatedEmp;
+              break;
+            }
           }
+        }
+        // currentEmployee も同期
+        if (typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.Id === emp.Id) {
+          currentEmployee = updatedEmp;
         }
       }
     } catch(_) {}
     closeShahoShutokuEditDialog();
-    // 編集した社員の 社員情報詳細画面 を開く
+    // 戻り先: 経路により分岐
     setTimeout(function() {
-      if (typeof selectEmployee === 'function') selectEmployee(updatedEmp);
+      if (openedFrom === 'soumu') {
+        // 総務ダッシュボードを更新して戻る (申請中バッジ・カウントが即時反映される)
+        if (typeof loadSoumuDashboard === 'function') {
+          loadSoumuDashboard();
+        }
+      } else if (typeof selectEmployee === 'function') {
+        // 社員詳細から開かれた場合は詳細画面を更新
+        selectEmployee(updatedEmp);
+      }
     }, 200);
   } catch (e) {
     console.error('saveShahoShutokuEditDialog error:', e);
