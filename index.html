@@ -8654,19 +8654,48 @@ async function loadHakenTantoMapFromSP() {
     });
     // 派遣元責任者 / 担当者 のキー候補を順に試す
     var tantoMeta = null;
-    var candidates = ['派遣元責任者', '派遣元 責任者', '担当者', '営業担当'];
+    var tantoTitle = '';
+    // 完全一致候補
+    var candidates = ['派遣元責任者', '派遣元責任者　氏名', '派遣元責任者 氏名', '派遣元 責任者', '担当者', '営業担当'];
     for (var i = 0; i < candidates.length; i++) {
-      if (fieldInfo[candidates[i]]) { tantoMeta = fieldInfo[candidates[i]]; break; }
+      if (fieldInfo[candidates[i]]) { tantoMeta = fieldInfo[candidates[i]]; tantoTitle = candidates[i]; break; }
     }
     if (!tantoMeta) {
-      // 部分一致 (「派遣元」と「責任」両方含む列)
       var titles = Object.keys(fieldInfo);
-      for (var j = 0; j < titles.length; j++) {
-        if (titles[j].indexOf('派遣元') >= 0 && titles[j].indexOf('責任') >= 0) {
-          tantoMeta = fieldInfo[titles[j]];
-          break;
+      // 部署/役職/連絡先 等を除外する判定
+      function _isExcluded(t) {
+        return /部署|役職|連絡|電話|FAX|メール|住所|備考|区分|郵便|宛先|TEL/i.test(t);
+      }
+      // 優先順位:
+      //  1. 「派遣元責任者」(改行/空白を除いた表記が完全一致) かつ 除外語なし
+      //  2. 「氏名」を含む 派遣元/責任 系
+      //  3. 「派遣元」+「責任」を含み 除外語なし
+      //  4. 「担当」を含み 除外語なし
+      var normCandidates = ['派遣元責任者'];
+      for (var jn = 0; jn < titles.length && !tantoMeta; jn++) {
+        var n = titles[jn].replace(/[\s　\n\r]/g, '');
+        if (normCandidates.indexOf(n) >= 0 && !_isExcluded(titles[jn])) {
+          tantoMeta = fieldInfo[titles[jn]]; tantoTitle = titles[jn]; break;
         }
       }
+      for (var j2 = 0; j2 < titles.length && !tantoMeta; j2++) {
+        if (titles[j2].indexOf('氏名') >= 0 && (titles[j2].indexOf('派遣元') >= 0 || titles[j2].indexOf('責任') >= 0) && !_isExcluded(titles[j2])) {
+          tantoMeta = fieldInfo[titles[j2]]; tantoTitle = titles[j2]; break;
+        }
+      }
+      for (var j3 = 0; j3 < titles.length && !tantoMeta; j3++) {
+        if (titles[j3].indexOf('派遣元') >= 0 && titles[j3].indexOf('責任') >= 0 && !_isExcluded(titles[j3])) {
+          tantoMeta = fieldInfo[titles[j3]]; tantoTitle = titles[j3]; break;
+        }
+      }
+      for (var j4 = 0; j4 < titles.length && !tantoMeta; j4++) {
+        if (titles[j4].indexOf('担当') >= 0 && !_isExcluded(titles[j4])) {
+          tantoMeta = fieldInfo[titles[j4]]; tantoTitle = titles[j4]; break;
+        }
+      }
+      // デバッグ用: 派遣元/責任/担当 を含む候補をすべて出力
+      var allRelated = titles.filter(function(t){ return /派遣元|責任|担当/.test(t); });
+      console.log('[hakenTanto] related columns:', allRelated.map(function(t){ return JSON.stringify(t) + ' (' + (fieldInfo[t].type || '?') + ')'; }).join(' | '));
     }
     if (!tantoMeta) {
       console.warn('派遣元責任者の列が見つかりませんでした');
@@ -8677,7 +8706,7 @@ async function loadHakenTantoMapFromSP() {
     var isUser = /^User/i.test(tantoMeta.type);   // "User" or "UserMulti"
     var isMulti = /Multi/i.test(tantoMeta.type);
 
-    console.log('[hakenTanto] field detected: title="' + (Object.keys(fieldInfo).find(function(k){return fieldInfo[k]===tantoMeta;}) || '') + '" type=' + tantoMeta.type + ' odKey=' + tantoKey + ' intName=' + intName);
+    console.log('[hakenTanto] field detected: title=' + JSON.stringify(tantoTitle) + ' type=' + tantoMeta.type + ' odKey=' + tantoKey + ' intName=' + intName);
 
     // User フィールドは companion Id を取得して resolveSpUserNamesByIds で氏名解決
     // companion Id 列名の候補:
