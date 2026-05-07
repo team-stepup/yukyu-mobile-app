@@ -8660,42 +8660,41 @@ async function loadHakenTantoMapFromSP() {
     // 派遣元責任者 / 担当者 のキー候補を順に試す
     var tantoMeta = null;
     var tantoTitle = '';
-    // 完全一致候補
-    var candidates = ['派遣元責任者', '派遣元責任者　氏名', '派遣元責任者 氏名', '派遣元 責任者', '担当者', '営業担当'];
-    for (var i = 0; i < candidates.length; i++) {
-      if (fieldInfo[candidates[i]]) { tantoMeta = fieldInfo[candidates[i]]; tantoTitle = candidates[i]; break; }
+    var titles = Object.keys(fieldInfo);
+    // 改行・空白を取り除いて比較
+    function _norm(t) { return String(t).replace(/[\s　\n\r\t]/g, ''); }
+    // 除外語: 部署/役職等の補助列、苦情(別人) 派遣先(別人) 等
+    function _isExcluded(t) {
+      return /部署|役職|連絡|電話|FAX|メール|住所|備考|区分|郵便|宛先|TEL|苦情/i.test(t);
     }
-    if (!tantoMeta) {
-      var titles = Object.keys(fieldInfo);
-      // 部署/役職/連絡先 等を除外する判定
-      function _isExcluded(t) {
-        return /部署|役職|連絡|電話|FAX|メール|住所|備考|区分|郵便|宛先|TEL/i.test(t);
-      }
-      // 優先順位:
-      //  1. 「派遣元責任者」(改行/空白を除いた表記が完全一致) かつ 除外語なし
-      //  2. 「氏名」を含む 派遣元/責任 系
-      //  3. 「派遣元」+「責任」を含み 除外語なし
-      //  4. 「担当」を含み 除外語なし
-      var normCandidates = ['派遣元責任者'];
-      for (var jn = 0; jn < titles.length && !tantoMeta; jn++) {
-        var n = titles[jn].replace(/[\s　\n\r]/g, '');
-        if (normCandidates.indexOf(n) >= 0 && !_isExcluded(titles[jn])) {
-          tantoMeta = fieldInfo[titles[jn]]; tantoTitle = titles[jn]; break;
-        }
-      }
-      for (var j2 = 0; j2 < titles.length && !tantoMeta; j2++) {
-        if (titles[j2].indexOf('氏名') >= 0 && (titles[j2].indexOf('派遣元') >= 0 || titles[j2].indexOf('責任') >= 0) && !_isExcluded(titles[j2])) {
-          tantoMeta = fieldInfo[titles[j2]]; tantoTitle = titles[j2]; break;
-        }
-      }
-      for (var j3 = 0; j3 < titles.length && !tantoMeta; j3++) {
-        if (titles[j3].indexOf('派遣元') >= 0 && titles[j3].indexOf('責任') >= 0 && !_isExcluded(titles[j3])) {
-          tantoMeta = fieldInfo[titles[j3]]; tantoTitle = titles[j3]; break;
-        }
-      }
-      for (var j4 = 0; j4 < titles.length && !tantoMeta; j4++) {
-        if (titles[j4].indexOf('担当') >= 0 && !_isExcluded(titles[j4])) {
-          tantoMeta = fieldInfo[titles[j4]]; tantoTitle = titles[j4]; break;
+    // 「派遣先」が含まれていて「派遣元」が含まれていない = 派遣先側の情報なので除外
+    function _isHakensaki(t) {
+      return t.indexOf('派遣先') >= 0 && t.indexOf('派遣元') < 0;
+    }
+
+    // 優先順位 (高い順):
+    // 1. 正規化後 = '派遣元責任者氏名' (完全一致)
+    // 2. 正規化後 = '派遣元責任者' (suffix なし)
+    // 3. '派遣元責任者' を含み '氏名' を含み 除外なし
+    // 4. '派遣元' + '責任' + '氏名' を含み 除外なし
+    // 5. '派遣元' + '責任' を含み 除外なし
+    // 6. '担当者' / '営業担当' (完全一致)
+    // 7. '担当' を含み 除外なし
+    var pickFns = [
+      function(t) { return _norm(t) === '派遣元責任者氏名' && !_isExcluded(t) && !_isHakensaki(t); },
+      function(t) { return _norm(t) === '派遣元責任者' && !_isExcluded(t) && !_isHakensaki(t); },
+      function(t) { return t.indexOf('派遣元責任者') >= 0 && t.indexOf('氏名') >= 0 && !_isExcluded(t) && !_isHakensaki(t); },
+      function(t) { return t.indexOf('派遣元') >= 0 && t.indexOf('責任') >= 0 && t.indexOf('氏名') >= 0 && !_isExcluded(t) && !_isHakensaki(t); },
+      function(t) { return t.indexOf('派遣元') >= 0 && t.indexOf('責任') >= 0 && !_isExcluded(t) && !_isHakensaki(t); },
+      function(t) { return _norm(t) === '担当者' || _norm(t) === '営業担当'; },
+      function(t) { return t.indexOf('担当') >= 0 && !_isExcluded(t) && !_isHakensaki(t); }
+    ];
+    for (var pi = 0; pi < pickFns.length && !tantoMeta; pi++) {
+      for (var ti = 0; ti < titles.length; ti++) {
+        if (pickFns[pi](titles[ti])) {
+          tantoMeta = fieldInfo[titles[ti]];
+          tantoTitle = titles[ti];
+          break;
         }
       }
     }
