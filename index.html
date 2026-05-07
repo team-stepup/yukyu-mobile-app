@@ -4899,11 +4899,17 @@ select.sankyu-edit-input {
       <div style="font-size:13px;font-weight:700;margin-bottom:8px;">📊 全体 月別推移</div>
       <div id="analyticsOverallChart"></div>
     </div>
-    <!-- 派遣先別サマリー -->
+    <!-- 派遣先別 / 担当別 サマリー -->
     <div class="card" style="padding:12px;margin-bottom:10px;">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
-        <span style="font-size:13px;font-weight:700;">🏭 派遣先別 期間合計</span>
-        <span style="flex:1;"></span>
+        <span id="analyticsByBukaTitle" style="font-size:13px;font-weight:700;">🏭 派遣先別 期間合計</span>
+      </div>
+      <!-- 派遣先別/担当別 切替タブ -->
+      <div style="display:flex;gap:0;margin-bottom:8px;background:#f0f0f5;border-radius:10px;padding:3px;">
+        <button type="button" id="anaViewHaken" onclick="setAnaView('haken')" style="flex:1;font-size:12px;font-weight:700;padding:6px 10px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">🏭 派遣先別</button>
+        <button type="button" id="anaViewTanto" onclick="setAnaView('tanto')" style="flex:1;font-size:12px;font-weight:700;padding:6px 10px;border:none;border-radius:8px;background:transparent;color:var(--text-light);cursor:pointer;">👤 担当別</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--text-light);">並び順:</span>
         <button type="button" data-anasort="net" onclick="setAnalyticsSort('net',this)" style="font-size:11px;padding:4px 8px;border:1px solid var(--primary);border-radius:6px;background:var(--primary);color:#fff;cursor:pointer;">純増減順</button>
         <button type="button" data-anasort="nyusha" onclick="setAnalyticsSort('nyusha',this)" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">入社順</button>
@@ -22856,7 +22862,26 @@ let _anaRange = 12;
 let _anaEndY = new Date().getFullYear();
 let _anaEndM = new Date().getMonth(); // 0-based, 基準月 (末月)
 let _anaSort = 'net';
+let _anaView = 'haken'; // 'haken' = 派遣先別 / 'tanto' = 担当別
 let _anaCache = null; // { months: [{y,m,label}], overall: [{nyusha,taisha}], byBuka: {name: [{nyusha,taisha}]} }
+
+function setAnaView(view) {
+  _anaView = view;
+  var hk = document.getElementById('anaViewHaken');
+  var tn = document.getElementById('anaViewTanto');
+  var ttl = document.getElementById('analyticsByBukaTitle');
+  if (hk && tn) {
+    if (view === 'tanto') {
+      tn.style.background = 'var(--primary)'; tn.style.color = '#fff';
+      hk.style.background = 'transparent'; hk.style.color = 'var(--text-light)';
+    } else {
+      hk.style.background = 'var(--primary)'; hk.style.color = '#fff';
+      tn.style.background = 'transparent'; tn.style.color = 'var(--text-light)';
+    }
+  }
+  if (ttl) ttl.textContent = (view === 'tanto') ? '👤 担当別 期間合計' : '🏭 派遣先別 期間合計';
+  if (typeof renderAnalytics === 'function') renderAnalytics();
+}
 
 async function openAdminAnalyticsScreen() {
   if (!isAdminUser()) {
@@ -23033,24 +23058,45 @@ function renderAnalytics() {
   });
   document.getElementById('analyticsOverallChart').innerHTML = html;
 
-  // Per-buka summary table
+  // Per-buka summary
   const sankyuByBukaAna = _anaCache.sankyuByBuka || {};
   const bukaList = Object.keys(byBuka).map(b => {
     let n = 0, t = 0;
     byBuka[b].forEach(m => { n += m.nyusha; t += m.taisha; });
     return { name: b, nyusha: n, taisha: t, net: n - t, sankyu: sankyuByBukaAna[b] || 0 };
-  }).filter(b => b.nyusha > 0 || b.taisha > 0 || b.sankyu > 0); // 期間内に動きがあった or 現在産休育休中の派遣先のみ
-  if (_anaSort === 'net') bukaList.sort((a, b) => b.net - a.net || a.name.localeCompare(b.name, 'ja'));
-  else if (_anaSort === 'nyusha') bukaList.sort((a, b) => b.nyusha - a.nyusha || a.name.localeCompare(b.name, 'ja'));
-  else if (_anaSort === 'taisha') bukaList.sort((a, b) => b.taisha - a.taisha || a.name.localeCompare(b.name, 'ja'));
-  else if (_anaSort === 'sankyu') bukaList.sort((a, b) => b.sankyu - a.sankyu || a.name.localeCompare(b.name, 'ja'));
-  else bukaList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  }).filter(b => b.nyusha > 0 || b.taisha > 0 || b.sankyu > 0);
 
-  if (bukaList.length === 0) {
+  // 担当別 集計 (派遣先別の集計を担当者ごとに合算)
+  const isTantoView = (_anaView === 'tanto');
+  let displayList;
+  if (isTantoView) {
+    const byTanto = {};
+    bukaList.forEach(b => {
+      const t = (typeof getHakenTanto === 'function') ? getHakenTanto(b.name) : '⚠ 未割当';
+      if (!byTanto[t]) byTanto[t] = { name: t, nyusha: 0, taisha: 0, net: 0, sankyu: 0 };
+      byTanto[t].nyusha += b.nyusha;
+      byTanto[t].taisha += b.taisha;
+      byTanto[t].net += b.net;
+      byTanto[t].sankyu += b.sankyu;
+    });
+    displayList = Object.values(byTanto);
+  } else {
+    displayList = bukaList;
+  }
+
+  if (_anaSort === 'net') displayList.sort((a, b) => b.net - a.net || a.name.localeCompare(b.name, 'ja'));
+  else if (_anaSort === 'nyusha') displayList.sort((a, b) => b.nyusha - a.nyusha || a.name.localeCompare(b.name, 'ja'));
+  else if (_anaSort === 'taisha') displayList.sort((a, b) => b.taisha - a.taisha || a.name.localeCompare(b.name, 'ja'));
+  else if (_anaSort === 'sankyu') displayList.sort((a, b) => b.sankyu - a.sankyu || a.name.localeCompare(b.name, 'ja'));
+  else displayList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+  if (displayList.length === 0) {
     document.getElementById('analyticsByBukaTable').innerHTML = '<div style="padding:16px;color:var(--text-light);font-size:12px;text-align:center;">期間内に入退社の動きがありません</div>';
   } else {
-    let tbl = '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">派遣先</th><th style="text-align:center;width:45px;">入社</th><th style="text-align:center;width:45px;">退社</th><th style="text-align:center;width:50px;">純増減</th><th style="text-align:center;width:45px;" title="現在時点">🌸</th></tr>';
-    bukaList.forEach(b => {
+    const colHead = isTantoView ? '担当者' : '派遣先';
+    let tbl = '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">' + colHead + '</th><th style="text-align:center;width:45px;">入社</th><th style="text-align:center;width:45px;">退社</th><th style="text-align:center;width:50px;">純増減</th><th style="text-align:center;width:45px;" title="現在時点">🌸</th></tr>';
+    let totN = 0, totT = 0, totNet = 0, totS = 0;
+    displayList.forEach(b => {
       const jColor = b.net > 0 ? '#2e7d32' : b.net < 0 ? '#c62828' : 'var(--text-light)';
       const jSign = b.net > 0 ? '+' : '';
       tbl += '<tr>';
@@ -23060,7 +23106,18 @@ function renderAnalytics() {
       tbl += '<td style="text-align:center;color:' + jColor + ';font-weight:700;">' + jSign + b.net + '</td>';
       tbl += '<td style="text-align:center;color:' + (b.sankyu > 0 ? '#d81b60' : '#ccc') + ';font-weight:700;">' + (b.sankyu || '-') + '</td>';
       tbl += '</tr>';
+      totN += b.nyusha || 0; totT += b.taisha || 0; totNet += b.net || 0; totS += b.sankyu || 0;
     });
+    // 合計行
+    const totColor = totNet > 0 ? '#2e7d32' : totNet < 0 ? '#c62828' : 'var(--text-light)';
+    const totSign = totNet > 0 ? '+' : '';
+    tbl += '<tr style="background:#f5f5f5;border-top:2px solid #ccc;font-weight:800;">';
+    tbl += '<td style="font-weight:800;">合計</td>';
+    tbl += '<td style="text-align:center;color:#2e7d32;font-weight:800;">' + totN + '</td>';
+    tbl += '<td style="text-align:center;color:#c62828;font-weight:800;">' + totT + '</td>';
+    tbl += '<td style="text-align:center;color:' + totColor + ';font-weight:800;">' + totSign + totNet + '</td>';
+    tbl += '<td style="text-align:center;color:' + (totS > 0 ? '#d81b60' : '#ccc') + ';font-weight:800;">' + (totS || '-') + '</td>';
+    tbl += '</tr>';
     tbl += '</table>';
     document.getElementById('analyticsByBukaTable').innerHTML = tbl;
   }
