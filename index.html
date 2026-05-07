@@ -2485,11 +2485,9 @@ body.ana-pc-mode #adminAnalyticsScreen { max-width: 1280px; padding-left: 24px; 
 body.ana-pc-mode .nyutai-buka-table { font-size: 14px; }
 body.ana-pc-mode .nyutai-buka-table th { font-size: 13px; padding: 12px 10px; }
 body.ana-pc-mode .nyutai-buka-table td { padding: 12px 10px; }
-body.ana-pc-mode .ana-row-bar { display: inline-block !important; }
-body.ana-pc-mode .ana-summary-chart { display: block !important; }
-.ana-row-bar { display: none; height: 8px; background: #f0f0f5; border-radius: 4px; overflow: hidden; vertical-align: middle; margin-left: 6px; min-width: 50px; }
-.ana-row-bar > div { height: 100%; }
-.ana-summary-chart { display: none; }
+/* 月別推移 sparkline 列: スマホは非表示、PCモードで表示 */
+.ana-sparkline-col { display: none; }
+body.ana-pc-mode .ana-sparkline-col { display: table-cell; }
 .ana-tanto-row { cursor: pointer; transition: background-color 0.15s; }
 .ana-tanto-row:hover { background: #eef4ff !important; }
 .ana-filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #ede7f6; border: 1px solid #b39ddb; border-radius: 14px; font-size: 11px; font-weight: 700; color: #5e35b1; margin-bottom: 8px; }
@@ -23054,6 +23052,50 @@ function setAnalyticsSort(sort, btn) {
   renderAnalytics();
 }
 
+// 月別 純増減 折れ線グラフを生成 (SVG sparkline)
+//   monthData: [{nyusha, taisha}] の配列 (期間内の月数)
+//   monthLabels: 各月のラベル (tooltip 用)
+function _buildMonthlyNetSparkline(monthData, monthLabels) {
+  if (!monthData || monthData.length === 0) return '';
+  const W = 160, H = 38, PAD_X = 4, PAD_Y = 4;
+  const n = monthData.length;
+  const stepX = (W - 2 * PAD_X) / Math.max(1, n - 1);
+  // 各月の純増減
+  const nets = monthData.map(m => (m.nyusha || 0) - (m.taisha || 0));
+  let minNet = Math.min(0, ...nets);
+  let maxNet = Math.max(0, ...nets);
+  // フラットな線にならないよう最低限のレンジ確保
+  if (minNet === maxNet) { minNet -= 1; maxNet += 1; }
+  const range = maxNet - minNet;
+  const y = (v) => H - PAD_Y - ((v - minNet) / range) * (H - 2 * PAD_Y);
+  const yZero = y(0);
+
+  let path = '';
+  let dots = '';
+  monthData.forEach((m, i) => {
+    const x = PAD_X + i * stepX;
+    const net = nets[i];
+    const yy = y(net);
+    path += (i === 0 ? 'M' : 'L') + x + ',' + yy + ' ';
+    const col = net > 0 ? '#2e7d32' : net < 0 ? '#c62828' : '#999';
+    const lbl = (monthLabels && monthLabels[i]) || ('月' + (i + 1));
+    const sign = net > 0 ? '+' : '';
+    dots += '<circle cx="' + x + '" cy="' + yy + '" r="2.2" fill="' + col + '"><title>' + lbl + ': ' + sign + net + '名</title></circle>';
+  });
+
+  // ゼロ基準線 (符号が両方ある場合のみ)
+  let zeroLine = '';
+  if (minNet < 0 && maxNet > 0) {
+    zeroLine = '<line x1="' + PAD_X + '" y1="' + yZero + '" x2="' + (W - PAD_X) + '" y2="' + yZero + '" stroke="#bbb" stroke-dasharray="2,2" stroke-width="0.8"/>';
+  }
+
+  return '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" style="vertical-align:middle;display:inline-block;overflow:visible;">' +
+    zeroLine +
+    '<path d="' + path + '" stroke="#5e35b1" stroke-width="1.6" fill="none" stroke-linejoin="round"/>' +
+    dots +
+    '</svg>';
+}
+
 function renderAnalytics() {
   if (!_anaCache) return;
   const months = _anaCache.months;
@@ -23109,12 +23151,15 @@ function renderAnalytics() {
   });
   document.getElementById('analyticsOverallChart').innerHTML = html;
 
-  // Per-buka summary
+  // Per-buka summary (月別データも保持)
   const sankyuByBukaAna = _anaCache.sankyuByBuka || {};
+  const monthsCount = (_anaCache.months || []).length;
   const bukaList = Object.keys(byBuka).map(b => {
     let n = 0, t = 0;
     byBuka[b].forEach(m => { n += m.nyusha; t += m.taisha; });
-    return { name: b, nyusha: n, taisha: t, net: n - t, sankyu: sankyuByBukaAna[b] || 0 };
+    // 月ごとの値をコピー (折れ線グラフ用)
+    const monthly = byBuka[b].map(m => ({ nyusha: m.nyusha || 0, taisha: m.taisha || 0 }));
+    return { name: b, nyusha: n, taisha: t, net: n - t, sankyu: sankyuByBukaAna[b] || 0, monthly: monthly };
   }).filter(b => b.nyusha > 0 || b.taisha > 0 || b.sankyu > 0);
 
   // 担当別 集計 (派遣先別の集計を担当者ごとに合算)
@@ -23124,16 +23169,26 @@ function renderAnalytics() {
     const byTanto = {};
     bukaList.forEach(b => {
       const t = (typeof getHakenTanto === 'function') ? getHakenTanto(b.name) : '⚠ 未割当';
-      if (!byTanto[t]) byTanto[t] = { name: t, nyusha: 0, taisha: 0, net: 0, sankyu: 0, hakens: [] };
+      if (!byTanto[t]) {
+        const initMonthly = [];
+        for (let mi = 0; mi < monthsCount; mi++) initMonthly.push({ nyusha: 0, taisha: 0 });
+        byTanto[t] = { name: t, nyusha: 0, taisha: 0, net: 0, sankyu: 0, hakens: [], monthly: initMonthly };
+      }
       byTanto[t].nyusha += b.nyusha;
       byTanto[t].taisha += b.taisha;
       byTanto[t].net += b.net;
       byTanto[t].sankyu += b.sankyu;
       byTanto[t].hakens.push(b.name);
+      // 月別合算
+      b.monthly.forEach((m, i) => {
+        if (byTanto[t].monthly[i]) {
+          byTanto[t].monthly[i].nyusha += m.nyusha;
+          byTanto[t].monthly[i].taisha += m.taisha;
+        }
+      });
     });
     displayList = Object.values(byTanto);
   } else if (_anaTantoFilter) {
-    // 派遣先別ビュー + 担当者フィルタ (drill-down)
     displayList = bukaList.filter(b => {
       const t = (typeof getHakenTanto === 'function') ? getHakenTanto(b.name) : '';
       return t === _anaTantoFilter;
@@ -23151,16 +23206,15 @@ function renderAnalytics() {
   if (displayList.length === 0) {
     document.getElementById('analyticsByBukaTable').innerHTML = '<div style="padding:16px;color:var(--text-light);font-size:12px;text-align:center;">期間内に入退社の動きがありません</div>';
   } else {
-    // 入退社の最大値 (PCモードのバー幅計算用)
-    const maxN = Math.max(1, ...displayList.map(b => b.nyusha || 0));
-    const maxT = Math.max(1, ...displayList.map(b => b.taisha || 0));
     const colHead = isTantoView ? '担当者' : '派遣先';
     // 担当者でフィルタ中のチップ表示
     let header = '';
     if (_anaTantoFilter) {
       header = '<div class="ana-filter-chip">👤 ' + escHtml(_anaTantoFilter) + ' で絞込中 <button onclick="clearAnaTantoFilter()" title="解除">×</button></div>';
     }
-    let tbl = header + '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">' + colHead + '</th><th style="text-align:center;">入社</th><th style="text-align:center;">退社</th><th style="text-align:center;">純増減</th><th style="text-align:center;" title="現在時点">🌸</th></tr>';
+    // 月ラベル (sparkline tooltip用)
+    const monthLabels = (months || []).map(m => m.label || (m.y + '/' + (m.m + 1)));
+    let tbl = header + '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">' + colHead + '</th><th style="text-align:center;">入社</th><th style="text-align:center;">退社</th><th class="ana-sparkline-col" style="text-align:center;">📈 月別推移</th><th style="text-align:center;">純増減</th><th style="text-align:center;" title="現在時点">🌸</th></tr>';
     let totN = 0, totT = 0, totNet = 0, totS = 0;
     displayList.forEach(b => {
       const jColor = b.net > 0 ? '#2e7d32' : b.net < 0 ? '#c62828' : 'var(--text-light)';
@@ -23175,32 +23229,36 @@ function renderAnalytics() {
         hakenSub = '<div style="font-size:10px;color:' + (isMisetting ? '#e57373' : '#888') + ';margin-top:3px;line-height:1.5;font-weight:500;white-space:normal;">' +
           b.hakens.map(h => escHtml(h)).join(' / ') + '</div>';
       }
-      // PC モード: 入社/退社にミニバー (CSSで非表示/表示切替)
-      const nyuBar = (b.nyusha || 0) > 0
-        ? '<span class="ana-row-bar"><div style="background:#2e7d32;width:' + Math.round((b.nyusha / maxN) * 100) + '%;"></div></span>'
-        : '';
-      const taiBar = (b.taisha || 0) > 0
-        ? '<span class="ana-row-bar"><div style="background:#c62828;width:' + Math.round((b.taisha / maxT) * 100) + '%;"></div></span>'
-        : '';
+      // 月別 純増減 折れ線グラフ
+      const sparkline = _buildMonthlyNetSparkline(b.monthly, monthLabels);
       const rowOpen = isClickable
         ? '<tr class="ana-tanto-row" onclick="setAnaTantoFilter(\'' + escHtml(b.name).replace(/'/g, "&#39;").replace(/&#39;/g, "\\'") + '\')">'
         : '<tr>';
       tbl += rowOpen;
       tbl += '<td style="' + nameStyle + 'white-space:normal;word-break:break-all;">' + escHtml(b.name) + (isClickable ? ' <span style="font-size:10px;color:#1565c0;">▶</span>' : '') + hakenSub + '</td>';
-      tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;vertical-align:top;white-space:nowrap;">' + (b.nyusha || '-') + nyuBar + '</td>';
-      tbl += '<td style="text-align:center;color:#c62828;font-weight:700;vertical-align:top;white-space:nowrap;">' + (b.taisha || '-') + taiBar + '</td>';
+      tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;vertical-align:top;">' + (b.nyusha || '-') + '</td>';
+      tbl += '<td style="text-align:center;color:#c62828;font-weight:700;vertical-align:top;">' + (b.taisha || '-') + '</td>';
+      tbl += '<td class="ana-sparkline-col" style="text-align:center;vertical-align:middle;">' + sparkline + '</td>';
       tbl += '<td style="text-align:center;color:' + jColor + ';font-weight:700;vertical-align:top;">' + jSign + b.net + '</td>';
       tbl += '<td style="text-align:center;color:' + (b.sankyu > 0 ? '#d81b60' : '#ccc') + ';font-weight:700;vertical-align:top;">' + (b.sankyu || '-') + '</td>';
       tbl += '</tr>';
       totN += b.nyusha || 0; totT += b.taisha || 0; totNet += b.net || 0; totS += b.sankyu || 0;
     });
-    // 合計行
+    // 合計行 (推移列には displayList 全体の合算 sparkline)
     const totColor = totNet > 0 ? '#2e7d32' : totNet < 0 ? '#c62828' : 'var(--text-light)';
     const totSign = totNet > 0 ? '+' : '';
+    const totMonthly = (months || []).map(() => ({ nyusha: 0, taisha: 0 }));
+    displayList.forEach(b => {
+      (b.monthly || []).forEach((m, i) => {
+        if (totMonthly[i]) { totMonthly[i].nyusha += m.nyusha; totMonthly[i].taisha += m.taisha; }
+      });
+    });
+    const totSpark = _buildMonthlyNetSparkline(totMonthly, monthLabels);
     tbl += '<tr style="background:#f5f5f5;border-top:2px solid #ccc;font-weight:800;">';
     tbl += '<td style="font-weight:800;">合計</td>';
     tbl += '<td style="text-align:center;color:#2e7d32;font-weight:800;">' + totN + '</td>';
     tbl += '<td style="text-align:center;color:#c62828;font-weight:800;">' + totT + '</td>';
+    tbl += '<td class="ana-sparkline-col" style="text-align:center;vertical-align:middle;">' + totSpark + '</td>';
     tbl += '<td style="text-align:center;color:' + totColor + ';font-weight:800;">' + totSign + totNet + '</td>';
     tbl += '<td style="text-align:center;color:' + (totS > 0 ? '#d81b60' : '#ccc') + ';font-weight:800;">' + (totS || '-') + '</td>';
     tbl += '</tr>';
