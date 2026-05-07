@@ -8933,25 +8933,63 @@ function showHakenTantoDebug() {
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
 }
 
+// 派遣先名のマッチング用に正規化
+//   "002:㈱ユーシン"          → "ユーシン"
+//   "株式会社ユーシン・浜松工場" → "ユーシン浜松工場"
+//   "037:㈱浜名プラスチック"   → "浜名プラスチック"
+//   "ASTI㈱掛川"               → "ASTI掛川"
+function _normalizeHakenName(name) {
+  if (!name) return '';
+  var s = String(name);
+  // 1. 数字プレフィックス削除 ("002:" / "002-1：" 等)
+  s = s.replace(/^\s*\d+(?:[-－]\d+)?\s*[:：]\s*/, '');
+  // 2. 法人格表記の正規化
+  s = s.replace(/㈱/g, '').replace(/㈲/g, '');
+  s = s.replace(/株式会社/g, '').replace(/有限会社/g, '');
+  s = s.replace(/\(株\)/g, '').replace(/\(有\)/g, '');
+  // 3. 半角カナ正規化
+  s = s.replace(/ﾕｰｼﾝ/g, 'ユーシン');
+  // 4. 全空白除去 + 区切り文字除去 (・/中点等)
+  s = s.replace(/[\s　・･\-－]/g, '');
+  return s.toLowerCase();
+}
+
 // 派遣先名から担当者を取得 (SP > ハードコード > デフォルト)
 function getHakenTanto(hakenName) {
   if (!hakenName) return HAKEN_TANTO_DEFAULT;
   // 1. SP マップから完全一致
   if (_hakenTantoSPMap[hakenName]) return _hakenTantoSPMap[hakenName];
-  // 2. SP マップから部分一致 (社員側の部課名に "001:" 等のプレフィックスがあるケース)
+  // 2. SP マップから素朴な部分一致 (旧ロジック: そのまま indexOf)
   var spKeys = Object.keys(_hakenTantoSPMap);
   for (var i = 0; i < spKeys.length; i++) {
     if (hakenName.indexOf(spKeys[i]) >= 0 || spKeys[i].indexOf(hakenName) >= 0) {
       return _hakenTantoSPMap[spKeys[i]];
     }
   }
-  // 3. ハードコード フォールバック (完全一致 → 部分一致)
+  // 3. SP マップから 正規化 部分一致 (法人格・記号差異を吸収)
+  //   優先: 「より長くマッチする」 SP キーを採用 (ASTI浜松 vs ASTI 等の混同を回避)
+  var nh = _normalizeHakenName(hakenName);
+  if (nh) {
+    var bestKey = null, bestScore = 0;
+    for (var ii = 0; ii < spKeys.length; ii++) {
+      var ns = _normalizeHakenName(spKeys[ii]);
+      if (!ns) continue;
+      // どちらかが空でない＆相互に部分含みなら候補
+      if (nh.indexOf(ns) >= 0 || ns.indexOf(nh) >= 0) {
+        // 共通部分の長さを点数に
+        var score = Math.min(nh.length, ns.length);
+        if (score > bestScore) { bestScore = score; bestKey = spKeys[ii]; }
+      }
+    }
+    if (bestKey) return _hakenTantoSPMap[bestKey];
+  }
+  // 4. ハードコード フォールバック (完全一致 → 部分一致)
   if (HAKEN_TANTO_MAP[hakenName]) return HAKEN_TANTO_MAP[hakenName];
   var hcKeys = Object.keys(HAKEN_TANTO_MAP);
   for (var k = 0; k < hcKeys.length; k++) {
     if (hakenName.indexOf(hcKeys[k]) >= 0) return HAKEN_TANTO_MAP[hcKeys[k]];
   }
-  // 4. デフォルト
+  // 5. デフォルト
   return HAKEN_TANTO_DEFAULT;
 }
 
