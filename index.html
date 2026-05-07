@@ -22533,6 +22533,7 @@ async function loadAdminDashData() {
   const totalJitsudou = totalActive - sankyuCounts.total - sankyuCounts.totalOwari;
 
   // 担当者別 集計 (派遣先 → 担当者 で集約)
+  // hakens は {name, active, jitsudou} のオブジェクト配列に変更 (実働0を除外可能にするため)
   const byTanto = {};
   Object.keys(byBuka).forEach(b => {
     const t = getHakenTanto(b);
@@ -22546,8 +22547,11 @@ async function loadAdminDashData() {
     byTanto[t].sankyu += byBuka[b].sankyu || 0;
     byTanto[t].sankyuOwari += byBuka[b].sankyuOwari || 0;
     byTanto[t].jitsudou += byBuka[b].jitsudou || 0;
-    byTanto[t].hakenCount++;
-    byTanto[t].hakens.push(b);
+    // 実働0の派遣先は hakens 一覧と hakenCount から除外
+    if ((byBuka[b].active || 0) > 0) {
+      byTanto[t].hakenCount++;
+      byTanto[t].hakens.push({ name: b, active: byBuka[b].active, jitsudou: byBuka[b].jitsudou });
+    }
   });
 
   _adminDashCache = {
@@ -22688,7 +22692,11 @@ function renderAdminDashboard() {
       extraHeader = '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:1px 6px;background:#e3f2fd;border:1px solid #bbdefb;border-radius:8px;font-size:10px;font-weight:700;color:#1565c0;">🏭 ' + (e.hakenCount || 0) + '</span>';
       if (e.hakens && e.hakens.length > 0) {
         hakenList = '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #e0e0e8;font-size:10px;color:#666;line-height:1.6;">' +
-          e.hakens.map(h => escHtml(h)).join(' / ') + '</div>';
+          e.hakens.map(function(h) {
+            // 旧形式(string)・新形式(object)両対応
+            if (typeof h === 'string') return escHtml(h);
+            return escHtml(h.name) + '<span style="color:#2e7d32;font-weight:700;margin-left:3px;">(' + (h.jitsudou || 0) + ')</span>';
+          }).join(' / ') + '</div>';
       }
     }
     // クリック挙動: 派遣先別 → 派遣先社員一覧 / 担当別 → 静的表示 (派遣先リストを下に展開)
