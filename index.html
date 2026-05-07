@@ -23073,11 +23073,12 @@ function renderAnalytics() {
     const byTanto = {};
     bukaList.forEach(b => {
       const t = (typeof getHakenTanto === 'function') ? getHakenTanto(b.name) : '⚠ 未割当';
-      if (!byTanto[t]) byTanto[t] = { name: t, nyusha: 0, taisha: 0, net: 0, sankyu: 0 };
+      if (!byTanto[t]) byTanto[t] = { name: t, nyusha: 0, taisha: 0, net: 0, sankyu: 0, hakens: [] };
       byTanto[t].nyusha += b.nyusha;
       byTanto[t].taisha += b.taisha;
       byTanto[t].net += b.net;
       byTanto[t].sankyu += b.sankyu;
+      byTanto[t].hakens.push(b.name);
     });
     displayList = Object.values(byTanto);
   } else {
@@ -23099,12 +23100,21 @@ function renderAnalytics() {
     displayList.forEach(b => {
       const jColor = b.net > 0 ? '#2e7d32' : b.net < 0 ? '#c62828' : 'var(--text-light)';
       const jSign = b.net > 0 ? '+' : '';
+      // 担当別ビューで「⚠ 未割当」は赤字、それ以外は通常
+      const isMisetting = isTantoView && /未割当/.test(b.name);
+      const nameStyle = isMisetting ? 'font-weight:700;color:#c62828;' : 'font-weight:600;';
+      // 派遣先一覧を小さく併記 (担当別ビューのみ)
+      let hakenSub = '';
+      if (isTantoView && b.hakens && b.hakens.length > 0) {
+        hakenSub = '<div style="font-size:10px;color:' + (isMisetting ? '#e57373' : '#888') + ';margin-top:3px;line-height:1.5;font-weight:500;white-space:normal;">' +
+          b.hakens.map(h => escHtml(h)).join(' / ') + '</div>';
+      }
       tbl += '<tr>';
-      tbl += '<td style="font-weight:600;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(b.name) + '</td>';
-      tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;">' + (b.nyusha || '-') + '</td>';
-      tbl += '<td style="text-align:center;color:#c62828;font-weight:700;">' + (b.taisha || '-') + '</td>';
-      tbl += '<td style="text-align:center;color:' + jColor + ';font-weight:700;">' + jSign + b.net + '</td>';
-      tbl += '<td style="text-align:center;color:' + (b.sankyu > 0 ? '#d81b60' : '#ccc') + ';font-weight:700;">' + (b.sankyu || '-') + '</td>';
+      tbl += '<td style="' + nameStyle + 'white-space:normal;word-break:break-all;">' + escHtml(b.name) + hakenSub + '</td>';
+      tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;vertical-align:top;">' + (b.nyusha || '-') + '</td>';
+      tbl += '<td style="text-align:center;color:#c62828;font-weight:700;vertical-align:top;">' + (b.taisha || '-') + '</td>';
+      tbl += '<td style="text-align:center;color:' + jColor + ';font-weight:700;vertical-align:top;">' + jSign + b.net + '</td>';
+      tbl += '<td style="text-align:center;color:' + (b.sankyu > 0 ? '#d81b60' : '#ccc') + ';font-weight:700;vertical-align:top;">' + (b.sankyu || '-') + '</td>';
       tbl += '</tr>';
       totN += b.nyusha || 0; totT += b.taisha || 0; totNet += b.net || 0; totS += b.sankyu || 0;
     });
