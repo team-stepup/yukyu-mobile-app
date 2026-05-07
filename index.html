@@ -8635,8 +8635,9 @@ var _hakenTantoDebug = {          // デバッグ情報 (showHakenTantoDebug() �
   relatedColumns: [], detectedTitle: '', detectedType: '', detectedKey: '',
   itemsCount: 0, sampleValue: null, sampleIdA: null, sampleIdB: null
 };
-var HAKEN_TANTO_MAP = {           // ハードコード フォールバック (SP に値がない時用)
-  // 例: 'ASTI': '山下 浩俊',
+var HAKEN_TANTO_MAP = {           // ハードコード フォールバック / 強制割当 (部分一致)
+  // 委託管理 (002-1) はユーシン本社マッピングと混じらないよう固定
+  '委託管理': '森 まこと'
 };
 var HAKEN_TANTO_DEFAULT = '山下 浩俊';   // どこにも値が無い時のデフォルト
 
@@ -8828,7 +8829,7 @@ async function loadHakenTantoMapFromSP() {
           if (typeof v === 'number') ids = [v];
           else if (v && v.results && Array.isArray(v.results)) ids = v.results;
           var names = ids.map(function(id){ return nameMap[id] || ''; }).filter(Boolean);
-          if (names.length) newMap[company] = isMulti ? names.join(', ') : names[0];
+          if (names.length) newMap[company] = _normalizeTantoName(isMulti ? names.join(', ') : names[0]);
         });
         console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' (User Id, key=' + actualIdKey + ', users=' + uniqueIds.length + ')');
       } else {
@@ -8854,7 +8855,7 @@ async function loadHakenTantoMapFromSP() {
             name = ns.join(', ');
           }
         }
-        name = String(name).trim();
+        name = _normalizeTantoName(String(name).trim());
         if (name && name !== '[object Object]') newMap[company] = name;
       });
       console.log('[hakenTanto] loaded ' + Object.keys(newMap).length + ' (value fallback)');
@@ -8933,30 +8934,78 @@ function showHakenTantoDebug() {
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
 }
 
+// 半角カタカナ → 全角カタカナ 変換
+function _han2zenKana(s) {
+  if (!s) return '';
+  var dakuMap = {'ｶ':'ガ','ｷ':'ギ','ｸ':'グ','ｹ':'ゲ','ｺ':'ゴ','ｻ':'ザ','ｼ':'ジ','ｽ':'ズ','ｾ':'ゼ','ｿ':'ゾ','ﾀ':'ダ','ﾁ':'ヂ','ﾂ':'ヅ','ﾃ':'デ','ﾄ':'ド','ﾊ':'バ','ﾋ':'ビ','ﾌ':'ブ','ﾍ':'ベ','ﾎ':'ボ','ｳ':'ヴ'};
+  var handakuMap = {'ﾊ':'パ','ﾋ':'ピ','ﾌ':'プ','ﾍ':'ペ','ﾎ':'ポ'};
+  var basicMap = {
+    'ｱ':'ア','ｲ':'イ','ｳ':'ウ','ｴ':'エ','ｵ':'オ',
+    'ｶ':'カ','ｷ':'キ','ｸ':'ク','ｹ':'ケ','ｺ':'コ',
+    'ｻ':'サ','ｼ':'シ','ｽ':'ス','ｾ':'セ','ｿ':'ソ',
+    'ﾀ':'タ','ﾁ':'チ','ﾂ':'ツ','ﾃ':'テ','ﾄ':'ト',
+    'ﾅ':'ナ','ﾆ':'ニ','ﾇ':'ヌ','ﾈ':'ネ','ﾉ':'ノ',
+    'ﾊ':'ハ','ﾋ':'ヒ','ﾌ':'フ','ﾍ':'ヘ','ﾎ':'ホ',
+    'ﾏ':'マ','ﾐ':'ミ','ﾑ':'ム','ﾒ':'メ','ﾓ':'モ',
+    'ﾔ':'ヤ','ﾕ':'ユ','ﾖ':'ヨ',
+    'ﾗ':'ラ','ﾘ':'リ','ﾙ':'ル','ﾚ':'レ','ﾛ':'ロ',
+    'ﾜ':'ワ','ｦ':'ヲ','ﾝ':'ン',
+    'ｧ':'ァ','ｨ':'ィ','ｩ':'ゥ','ｪ':'ェ','ｫ':'ォ',
+    'ｬ':'ャ','ｭ':'ュ','ｮ':'ョ',
+    'ｯ':'ッ','ｰ':'ー','｡':'。','｢':'「','｣':'」','､':'、','･':'・'
+  };
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charAt(i);
+    var nx = s.charAt(i + 1);
+    if (nx === 'ﾞ' && dakuMap[c])      { out += dakuMap[c]; i++; }
+    else if (nx === 'ﾟ' && handakuMap[c]) { out += handakuMap[c]; i++; }
+    else                                  { out += basicMap[c] || c; }
+  }
+  return out;
+}
+
+// 担当者氏名 を比較用に正規化 (吉浦マルセロ と 吉浦　マルセロ を同一視)
+function _normalizeTantoName(name) {
+  if (!name) return '';
+  return String(name).replace(/[\s　]+/g, '').trim();
+}
+
 // 派遣先名のマッチング用に正規化
-//   "002:㈱ユーシン"          → "ユーシン"
-//   "株式会社ユーシン・浜松工場" → "ユーシン浜松工場"
-//   "037:㈱浜名プラスチック"   → "浜名プラスチック"
-//   "ASTI㈱掛川"               → "ASTI掛川"
+//   "002:㈱ユーシン"            → "ユーシン"
+//   "株式会社ユーシン・浜松工場"  → "ユーシン浜松工場"
+//   "037:㈱浜名ﾌﾟﾗｽﾁｯｸ"         → "浜名プラスチック"
 function _normalizeHakenName(name) {
   if (!name) return '';
   var s = String(name);
   // 1. 数字プレフィックス削除 ("002:" / "002-1：" 等)
   s = s.replace(/^\s*\d+(?:[-－]\d+)?\s*[:：]\s*/, '');
-  // 2. 法人格表記の正規化
+  // 2. 半角カタカナ→全角カタカナ
+  s = _han2zenKana(s);
+  // 3. 法人格表記の正規化
   s = s.replace(/㈱/g, '').replace(/㈲/g, '');
   s = s.replace(/株式会社/g, '').replace(/有限会社/g, '');
   s = s.replace(/\(株\)/g, '').replace(/\(有\)/g, '');
-  // 3. 半角カナ正規化
-  s = s.replace(/ﾕｰｼﾝ/g, 'ユーシン');
   // 4. 全空白除去 + 区切り文字除去 (・/中点等)
   s = s.replace(/[\s　・･\-－]/g, '');
   return s.toLowerCase();
 }
 
-// 派遣先名から担当者を取得 (SP > ハードコード > デフォルト)
+// 派遣先名から担当者を取得 (強制割当 > SP > ハードコード > デフォルト)
+// 戻り値は _normalizeTantoName で正規化済み (吉浦マルセロ / 吉浦　マルセロ を統合)
 function getHakenTanto(hakenName) {
+  var raw = _getHakenTantoRaw(hakenName);
+  return _normalizeTantoName(raw) || raw;
+}
+function _getHakenTantoRaw(hakenName) {
   if (!hakenName) return HAKEN_TANTO_DEFAULT;
+  // 0. 強制割当 (HAKEN_TANTO_MAP の部分一致) — SPデータに優先する明示的オーバーライド
+  //    例: "002-1:㈱ﾕｰｼﾝ　委託管理" は「委託管理」をキーに 森まこと へ固定
+  if (HAKEN_TANTO_MAP[hakenName]) return HAKEN_TANTO_MAP[hakenName];
+  var hcKeys = Object.keys(HAKEN_TANTO_MAP);
+  for (var k = 0; k < hcKeys.length; k++) {
+    if (hakenName.indexOf(hcKeys[k]) >= 0) return HAKEN_TANTO_MAP[hcKeys[k]];
+  }
   // 1. SP マップから完全一致
   if (_hakenTantoSPMap[hakenName]) return _hakenTantoSPMap[hakenName];
   // 2. SP マップから素朴な部分一致 (旧ロジック: そのまま indexOf)
@@ -8966,30 +9015,22 @@ function getHakenTanto(hakenName) {
       return _hakenTantoSPMap[spKeys[i]];
     }
   }
-  // 3. SP マップから 正規化 部分一致 (法人格・記号差異を吸収)
-  //   優先: 「より長くマッチする」 SP キーを採用 (ASTI浜松 vs ASTI 等の混同を回避)
+  // 3. SP マップから 正規化 部分一致 (法人格・半角カナ・記号差異を吸収)
+  //    最長一致 SP キーを採用
   var nh = _normalizeHakenName(hakenName);
   if (nh) {
     var bestKey = null, bestScore = 0;
     for (var ii = 0; ii < spKeys.length; ii++) {
       var ns = _normalizeHakenName(spKeys[ii]);
       if (!ns) continue;
-      // どちらかが空でない＆相互に部分含みなら候補
       if (nh.indexOf(ns) >= 0 || ns.indexOf(nh) >= 0) {
-        // 共通部分の長さを点数に
         var score = Math.min(nh.length, ns.length);
         if (score > bestScore) { bestScore = score; bestKey = spKeys[ii]; }
       }
     }
     if (bestKey) return _hakenTantoSPMap[bestKey];
   }
-  // 4. ハードコード フォールバック (完全一致 → 部分一致)
-  if (HAKEN_TANTO_MAP[hakenName]) return HAKEN_TANTO_MAP[hakenName];
-  var hcKeys = Object.keys(HAKEN_TANTO_MAP);
-  for (var k = 0; k < hcKeys.length; k++) {
-    if (hakenName.indexOf(hcKeys[k]) >= 0) return HAKEN_TANTO_MAP[hcKeys[k]];
-  }
-  // 5. デフォルト
+  // 4. デフォルト
   return HAKEN_TANTO_DEFAULT;
 }
 
