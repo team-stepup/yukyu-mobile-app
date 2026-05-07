@@ -22588,8 +22588,9 @@ async function loadAdminDashData() {
     byTanto[t].sankyu += byBuka[b].sankyu || 0;
     byTanto[t].sankyuOwari += byBuka[b].sankyuOwari || 0;
     byTanto[t].jitsudou += byBuka[b].jitsudou || 0;
-    // 実働0の派遣先は hakens 一覧と hakenCount から除外
-    if ((byBuka[b].active || 0) > 0) {
+    // 派遣人数(実働)が0の派遣先は hakens 一覧と hakenCount から除外
+    // (在職者がいても 産休育休/休業終了 だけの派遣先は実働0なので除外する)
+    if ((byBuka[b].jitsudou || 0) > 0) {
       byTanto[t].hakenCount++;
       byTanto[t].hakens.push({ name: b, active: byBuka[b].active, jitsudou: byBuka[b].jitsudou });
     }
@@ -22683,7 +22684,8 @@ function renderAdminDashboard() {
       hakens: c.hakens
     };
   });
-  const visible = includeRetired ? entries : entries.filter(e => e.jitsudou > 0 || e.active > 0);
+  // 派遣人数(実働) 0 の担当者/派遣先カードは非表示 (退職含むON時のみ表示)
+  const visible = includeRetired ? entries : entries.filter(e => (e.jitsudou || 0) > 0);
 
   if (_adminDashSort === 'count') {
     visible.sort((a, b) => (b.jitsudou - a.jitsudou) || a.name.localeCompare(b.name, 'ja'));
