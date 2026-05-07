@@ -12746,8 +12746,12 @@ async function openShahoShutokuEditDialog(emp, mode) {
       });
     }
     // 開いた経路を記録 (保存後の戻り先を判定するため)
-    // 'soumu' なら 総務ダッシュボードに戻る、それ以外は 社員詳細を開く (既存動作)
-    var openedFrom = (typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.Id === emp.Id) ? 'detail' : 'soumu';
+    // 現在の画面で判定: soumuScreen → 'soumu' / それ以外 → 'detail'
+    var openedFrom = 'detail';
+    if (typeof currentScreenId !== 'undefined') {
+      if (currentScreenId === 'soumuScreen') openedFrom = 'soumu';
+    }
+    console.log('[社保編集ダイアログ] open mode=' + mode + ' openedFrom=' + openedFrom + ' empId=' + emp.Id + ' currentScreenId=' + (typeof currentScreenId !== 'undefined' ? currentScreenId : 'undefined'));
     window._shahoShutokuEmpData = { emp: emp, km: km, meta: meta, mode: mode, openedFrom: openedFrom };
   } catch (e) {
     console.error('openShahoShutokuEditDialog error:', e);
@@ -12947,23 +12951,37 @@ async function saveShahoShutokuEditDialog() {
     }
     // PDF アップロード (最大3ファイル)
     var pdfMessage = '';
+    var uploadedPdfs = [];
+    var failedPdfs = [];
+    console.log(logLabel + ' PDF files count:', pdfFiles.length, pdfFiles.map(function(p){return p.name;}));
     if (pdfFiles.length > 0) {
       try {
         var folderPath = await getEmpFolderPath(emp);
+        console.log(logLabel + ' folderPath=' + folderPath);
         if (!folderPath) throw new Error('社員フォルダパスが取得できません (部課・番号・氏名 要確認)');
         // 既存社員フォルダがあればそのまま利用、なければ作成
-        try { await ensureSpFolder(folderPath); } catch(e) {
+        try { await ensureSpFolder(folderPath); console.log(logLabel + ' folder ensured:', folderPath); } catch(e) {
           console.warn('ensureSpFolder 失敗: 既存フォルダと仮定してアップロード続行', e);
         }
         for (var pi = 0; pi < pdfFiles.length; pi++) {
           var pdf = pdfFiles[pi];
           if (btn) btn.textContent = 'PDFアップロード中 (' + (pi + 1) + '/' + pdfFiles.length + ')...';
-          await uploadFileToSp(folderPath, pdf.name, pdf);
+          try {
+            await uploadFileToSp(folderPath, pdf.name, pdf);
+            uploadedPdfs.push(pdf.name);
+            console.log(logLabel + ' PDF uploaded:', pdf.name);
+          } catch (oneErr) {
+            console.error(logLabel + ' PDF upload error for ' + pdf.name + ':', oneErr);
+            failedPdfs.push(pdf.name + ' (' + (oneErr.message || oneErr) + ')');
+          }
         }
-        pdfMessage = ' / PDF ' + pdfFiles.length + '件を社員フォルダに保存';
+        if (uploadedPdfs.length > 0) pdfMessage = ' / PDF ' + uploadedPdfs.length + '件を社員フォルダに保存';
+        if (failedPdfs.length > 0) {
+          showToast('⚠ PDFアップロード失敗 ' + failedPdfs.length + '件: ' + failedPdfs.join(' / '), 'error');
+        }
       } catch (upErr) {
         console.error('PDF upload error:', upErr);
-        showToast('PDFアップロード失敗: ' + upErr.message, 'error');
+        showToast('PDFアップロード失敗: ' + (upErr.message || upErr), 'error');
         if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
         return;
       }
