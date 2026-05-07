@@ -2480,6 +2480,20 @@ select.sankyu-edit-input {
 .nyutai-buka-table th { text-align:left; padding:6px 8px; background:var(--bg); font-weight:700; color:var(--text-light); font-size:11px; border-bottom:1px solid var(--border); }
 .nyutai-buka-table td { padding:6px 8px; border-bottom:1px solid #f0f0f0; }
 .nyutai-buka-table tr:last-child td { border-bottom:none; }
+/* PC 画面モード: ノートPC ~ デスクトップ向けに広げる */
+body.ana-pc-mode #adminAnalyticsScreen { max-width: 1280px; padding-left: 24px; padding-right: 24px; }
+body.ana-pc-mode .nyutai-buka-table { font-size: 14px; }
+body.ana-pc-mode .nyutai-buka-table th { font-size: 13px; padding: 12px 10px; }
+body.ana-pc-mode .nyutai-buka-table td { padding: 12px 10px; }
+body.ana-pc-mode .ana-row-bar { display: inline-block !important; }
+body.ana-pc-mode .ana-summary-chart { display: block !important; }
+.ana-row-bar { display: none; height: 8px; background: #f0f0f5; border-radius: 4px; overflow: hidden; vertical-align: middle; margin-left: 6px; min-width: 50px; }
+.ana-row-bar > div { height: 100%; }
+.ana-summary-chart { display: none; }
+.ana-tanto-row { cursor: pointer; transition: background-color 0.15s; }
+.ana-tanto-row:hover { background: #eef4ff !important; }
+.ana-filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #ede7f6; border: 1px solid #b39ddb; border-radius: 14px; font-size: 11px; font-weight: 700; color: #5e35b1; margin-bottom: 8px; }
+.ana-filter-chip button { background: rgba(94,53,177,0.2); border: none; color: #5e35b1; width: 18px; height: 18px; border-radius: 50%; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; font-weight: 700; }
 
 /* List Screens */
 .list-screen-header {
@@ -4880,7 +4894,7 @@ select.sankyu-edit-input {
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;">📈 月次入退社推移</h2>
     </div>
-    <!-- 期間選択 + 基準月ナビゲーション -->
+    <!-- 期間選択 + 基準月ナビゲーション + PCモード切替 -->
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
       <span style="font-size:11px;color:var(--text-light);">期間:</span>
       <button type="button" data-anarange="6" onclick="setAnalyticsRange(6,this)" style="font-size:11px;padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">6ヶ月</button>
@@ -4888,6 +4902,7 @@ select.sankyu-edit-input {
       <button type="button" data-anarange="24" onclick="setAnalyticsRange(24,this)" style="font-size:11px;padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">24ヶ月</button>
       <button type="button" data-anarange="36" onclick="setAnalyticsRange(36,this)" style="font-size:11px;padding:5px 9px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">36ヶ月</button>
       <span style="flex:1;"></span>
+      <button id="anaPcModeBtn" onclick="toggleAnaPcMode()" style="font-size:11px;padding:5px 9px;border:1px solid #1565c0;border-radius:6px;background:#fff;color:#1565c0;cursor:pointer;font-weight:700;">🖥 PC画面</button>
       <button onclick="changeAnalyticsEndMonth(-1)" style="background:none;border:1px solid #ddd;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;">◀</button>
       <span id="analyticsEndLabel" style="font-size:12px;font-weight:600;color:var(--primary);min-width:70px;text-align:center;"></span>
       <button onclick="changeAnalyticsEndMonth(1)" style="background:none;border:1px solid #ddd;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;">▶</button>
@@ -22863,10 +22878,14 @@ let _anaEndY = new Date().getFullYear();
 let _anaEndM = new Date().getMonth(); // 0-based, 基準月 (末月)
 let _anaSort = 'net';
 let _anaView = 'haken'; // 'haken' = 派遣先別 / 'tanto' = 担当別
-let _anaCache = null; // { months: [{y,m,label}], overall: [{nyusha,taisha}], byBuka: {name: [{nyusha,taisha}]} }
+let _anaPcMode = false; // false = スマホ / true = PC
+let _anaTantoFilter = null; // 担当者でフィルタ中はその名前 (drill-down)
+let _anaCache = null;
 
 function setAnaView(view) {
   _anaView = view;
+  // タブ切替時はフィルタも解除
+  _anaTantoFilter = null;
   var hk = document.getElementById('anaViewHaken');
   var tn = document.getElementById('anaViewTanto');
   var ttl = document.getElementById('analyticsByBukaTitle');
@@ -22881,6 +22900,38 @@ function setAnaView(view) {
   }
   if (ttl) ttl.textContent = (view === 'tanto') ? '👤 担当別 期間合計' : '🏭 派遣先別 期間合計';
   if (typeof renderAnalytics === 'function') renderAnalytics();
+}
+
+function toggleAnaPcMode() {
+  _anaPcMode = !_anaPcMode;
+  document.body.classList.toggle('ana-pc-mode', _anaPcMode);
+  var btn = document.getElementById('anaPcModeBtn');
+  if (btn) {
+    btn.textContent = _anaPcMode ? '📱 スマホ' : '🖥 PC画面';
+    btn.style.background = _anaPcMode ? '#1565c0' : '#fff';
+    btn.style.color = _anaPcMode ? '#fff' : '#1565c0';
+  }
+  if (typeof renderAnalytics === 'function') renderAnalytics();
+}
+
+// 担当者カードクリック → 派遣先別ビューにフィルタ適用
+function setAnaTantoFilter(tantoName) {
+  _anaTantoFilter = tantoName;
+  _anaView = 'haken';
+  var hk = document.getElementById('anaViewHaken');
+  var tn = document.getElementById('anaViewTanto');
+  var ttl = document.getElementById('analyticsByBukaTitle');
+  if (hk && tn) {
+    hk.style.background = 'var(--primary)'; hk.style.color = '#fff';
+    tn.style.background = 'transparent'; tn.style.color = 'var(--text-light)';
+  }
+  if (ttl) ttl.textContent = '🏭 派遣先別 期間合計 (' + tantoName + ' で絞込)';
+  renderAnalytics();
+}
+function clearAnaTantoFilter() {
+  _anaTantoFilter = null;
+  _anaView = 'tanto';
+  setAnaView('tanto');
 }
 
 async function openAdminAnalyticsScreen() {
@@ -23081,6 +23132,12 @@ function renderAnalytics() {
       byTanto[t].hakens.push(b.name);
     });
     displayList = Object.values(byTanto);
+  } else if (_anaTantoFilter) {
+    // 派遣先別ビュー + 担当者フィルタ (drill-down)
+    displayList = bukaList.filter(b => {
+      const t = (typeof getHakenTanto === 'function') ? getHakenTanto(b.name) : '';
+      return t === _anaTantoFilter;
+    });
   } else {
     displayList = bukaList;
   }
@@ -23094,8 +23151,16 @@ function renderAnalytics() {
   if (displayList.length === 0) {
     document.getElementById('analyticsByBukaTable').innerHTML = '<div style="padding:16px;color:var(--text-light);font-size:12px;text-align:center;">期間内に入退社の動きがありません</div>';
   } else {
+    // 入退社の最大値 (PCモードのバー幅計算用)
+    const maxN = Math.max(1, ...displayList.map(b => b.nyusha || 0));
+    const maxT = Math.max(1, ...displayList.map(b => b.taisha || 0));
     const colHead = isTantoView ? '担当者' : '派遣先';
-    let tbl = '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">' + colHead + '</th><th style="text-align:center;width:45px;">入社</th><th style="text-align:center;width:45px;">退社</th><th style="text-align:center;width:50px;">純増減</th><th style="text-align:center;width:45px;" title="現在時点">🌸</th></tr>';
+    // 担当者でフィルタ中のチップ表示
+    let header = '';
+    if (_anaTantoFilter) {
+      header = '<div class="ana-filter-chip">👤 ' + escHtml(_anaTantoFilter) + ' で絞込中 <button onclick="clearAnaTantoFilter()" title="解除">×</button></div>';
+    }
+    let tbl = header + '<table class="nyutai-buka-table" style="width:100%;"><tr><th style="text-align:left;">' + colHead + '</th><th style="text-align:center;">入社</th><th style="text-align:center;">退社</th><th style="text-align:center;">純増減</th><th style="text-align:center;" title="現在時点">🌸</th></tr>';
     let totN = 0, totT = 0, totNet = 0, totS = 0;
     displayList.forEach(b => {
       const jColor = b.net > 0 ? '#2e7d32' : b.net < 0 ? '#c62828' : 'var(--text-light)';
@@ -23103,16 +23168,27 @@ function renderAnalytics() {
       // 担当別ビューで「⚠ 未割当」は赤字、それ以外は通常
       const isMisetting = isTantoView && /未割当/.test(b.name);
       const nameStyle = isMisetting ? 'font-weight:700;color:#c62828;' : 'font-weight:600;';
+      const isClickable = isTantoView; // 担当別ビューの行はクリックでフィルタ
       // 派遣先一覧を小さく併記 (担当別ビューのみ)
       let hakenSub = '';
       if (isTantoView && b.hakens && b.hakens.length > 0) {
         hakenSub = '<div style="font-size:10px;color:' + (isMisetting ? '#e57373' : '#888') + ';margin-top:3px;line-height:1.5;font-weight:500;white-space:normal;">' +
           b.hakens.map(h => escHtml(h)).join(' / ') + '</div>';
       }
-      tbl += '<tr>';
-      tbl += '<td style="' + nameStyle + 'white-space:normal;word-break:break-all;">' + escHtml(b.name) + hakenSub + '</td>';
-      tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;vertical-align:top;">' + (b.nyusha || '-') + '</td>';
-      tbl += '<td style="text-align:center;color:#c62828;font-weight:700;vertical-align:top;">' + (b.taisha || '-') + '</td>';
+      // PC モード: 入社/退社にミニバー (CSSで非表示/表示切替)
+      const nyuBar = (b.nyusha || 0) > 0
+        ? '<span class="ana-row-bar"><div style="background:#2e7d32;width:' + Math.round((b.nyusha / maxN) * 100) + '%;"></div></span>'
+        : '';
+      const taiBar = (b.taisha || 0) > 0
+        ? '<span class="ana-row-bar"><div style="background:#c62828;width:' + Math.round((b.taisha / maxT) * 100) + '%;"></div></span>'
+        : '';
+      const rowOpen = isClickable
+        ? '<tr class="ana-tanto-row" onclick="setAnaTantoFilter(\'' + escHtml(b.name).replace(/'/g, "&#39;").replace(/&#39;/g, "\\'") + '\')">'
+        : '<tr>';
+      tbl += rowOpen;
+      tbl += '<td style="' + nameStyle + 'white-space:normal;word-break:break-all;">' + escHtml(b.name) + (isClickable ? ' <span style="font-size:10px;color:#1565c0;">▶</span>' : '') + hakenSub + '</td>';
+      tbl += '<td style="text-align:center;color:#2e7d32;font-weight:700;vertical-align:top;white-space:nowrap;">' + (b.nyusha || '-') + nyuBar + '</td>';
+      tbl += '<td style="text-align:center;color:#c62828;font-weight:700;vertical-align:top;white-space:nowrap;">' + (b.taisha || '-') + taiBar + '</td>';
       tbl += '<td style="text-align:center;color:' + jColor + ';font-weight:700;vertical-align:top;">' + jSign + b.net + '</td>';
       tbl += '<td style="text-align:center;color:' + (b.sankyu > 0 ? '#d81b60' : '#ccc') + ';font-weight:700;vertical-align:top;">' + (b.sankyu || '-') + '</td>';
       tbl += '</tr>';
