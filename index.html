@@ -9486,30 +9486,38 @@ function clearHakensakiSearch() {
 var _hakensakiCurrentItemIdx = -1;
 var _hakensakiEditMode = false;
 
-// 派遣先フィールドのグループ定義
+// 派遣先フィールドのグループ定義 (派遣元/派遣先で分割)
 function _hakenFieldGroupOf(title) {
   var t = String(title || '');
-  // 基本情報
-  if (t.indexOf('会社') >= 0 || t.indexOf('派遣先') >= 0 || t.indexOf('組織') >= 0 || t.indexOf('部署') >= 0 || t.indexOf('業種') >= 0 || t === 'Title') return 'basic';
-  // 住所
-  if (t.indexOf('住所') >= 0 || t.indexOf('郵便') >= 0 || t.indexOf('所在') >= 0) return 'address';
+  var n = t.replace(/[\s　\n\r]/g, '');  // 空白・改行を除去して比較
+  // 派遣元 (ステップ・アップ側): 派遣元責任者 / 苦情の申出を受ける者
+  if (n.indexOf('派遣元') >= 0) return 'genmoto';
+  if (n.indexOf('苦情') >= 0) return 'genmoto';
+  // 派遣先 責任者 (派遣先側 担当者)
+  if (n.indexOf('派遣先責任者') >= 0) return 'haken_resp';
+  // 派遣先 基本情報
+  if (n === 'Title' || n.indexOf('派遣先会社') >= 0 || n.indexOf('派遣先名') >= 0 || n.indexOf('派遣先') >= 0 || n.indexOf('組織') >= 0 || n.indexOf('部課') >= 0 || n.indexOf('業種') >= 0) return 'haken_basic';
+  // 所在地
+  if (n.indexOf('住所') >= 0 || n.indexOf('郵便') >= 0 || n.indexOf('所在') >= 0) return 'address';
   // 派遣期間
-  if (t.indexOf('期間') >= 0 || t.indexOf('開始') >= 0 || t.indexOf('終わり') >= 0 || t.indexOf('終了') >= 0 || t.indexOf('始まり') >= 0 || t.indexOf('契約開始') >= 0 || t.indexOf('契約終了') >= 0) return 'period';
-  // 人員・契約
-  if (t.indexOf('人数') >= 0 || t.indexOf('単価') >= 0 || t.indexOf('契約') >= 0 || t.indexOf('業務') >= 0 || t.indexOf('職種') >= 0 || t.indexOf('勤務') >= 0) return 'contract';
-  // 担当者
-  if (t.indexOf('担当') >= 0 || t.indexOf('責任') >= 0 || t.indexOf('電話') >= 0 || t.indexOf('TEL') >= 0 || t.indexOf('メール') >= 0 || t.indexOf('Mail') >= 0 || t.indexOf('FAX') >= 0 || t.indexOf('氏名') >= 0 || t.indexOf('連絡') >= 0) return 'contact';
+  if (n.indexOf('期間') >= 0 || n.indexOf('開始') >= 0 || n.indexOf('終わり') >= 0 || n.indexOf('終了') >= 0 || n.indexOf('始まり') >= 0) return 'period';
+  // 契約・人員
+  if (n.indexOf('人数') >= 0 || n.indexOf('単価') >= 0 || n.indexOf('契約') >= 0 || n.indexOf('業務') >= 0 || n.indexOf('職種') >= 0 || n.indexOf('勤務') >= 0 || n.indexOf('責任の程度') >= 0) return 'contract';
+  // 連絡先 (一般、責任者外)
+  if (n.indexOf('電話') >= 0 || n.indexOf('TEL') >= 0 || n.indexOf('メール') >= 0 || n.indexOf('Mail') >= 0 || n.indexOf('FAX') >= 0 || n.indexOf('連絡') >= 0) return 'contact';
   // その他
   return 'other';
 }
 
 var HAKEN_GROUP_DEFS = [
-  { id: 'basic',    label: '基本情報',   icon: '🏢', color: '#1565c0', bg: '#e3f2fd' },
-  { id: 'address',  label: '所在地',     icon: '📍', color: '#00695c', bg: '#e0f2f1' },
-  { id: 'period',   label: '派遣期間',   icon: '📅', color: '#6a1b9a', bg: '#f3e5f5' },
-  { id: 'contract', label: '契約・人員', icon: '📋', color: '#283593', bg: '#e8eaf6' },
-  { id: 'contact',  label: '担当者情報', icon: '👤', color: '#ef6c00', bg: '#fff3e0' },
-  { id: 'other',    label: 'その他',     icon: '📝', color: '#455a64', bg: '#eceff1' }
+  { id: 'haken_basic', label: '派遣先 基本情報',  icon: '🏢', color: '#1565c0', bg: '#e3f2fd' },
+  { id: 'address',     label: '派遣先 所在地',    icon: '📍', color: '#00695c', bg: '#e0f2f1' },
+  { id: 'haken_resp',  label: '派遣先 責任者',    icon: '👔', color: '#ef6c00', bg: '#fff3e0' },
+  { id: 'genmoto',     label: '派遣元 担当者',    icon: '🏬', color: '#5e35b2', bg: '#ede7f6' },
+  { id: 'period',      label: '派遣期間',          icon: '📅', color: '#6a1b9a', bg: '#f3e5f5' },
+  { id: 'contract',    label: '契約・人員',        icon: '📋', color: '#283593', bg: '#e8eaf6' },
+  { id: 'contact',     label: '連絡先',           icon: '☎️', color: '#00838f', bg: '#e0f7fa' },
+  { id: 'other',       label: 'その他',           icon: '📝', color: '#455a64', bg: '#eceff1' }
 ];
 
 function openHakensakiDetail(itemIdx) {
@@ -9580,44 +9588,33 @@ function renderHakensakiDetail() {
   if (soshiki) {
     html += '<div style="font-size:13px;opacity:0.92;margin-top:6px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.25);">' + escHtml(soshiki) + '</div>';
   }
-  // 編集モード切替ボタン
-  if (_hakensakiEditMode) {
-    html += '<div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;">';
-    html += '<button onclick="saveHakensakiDetail()" style="background:#fff;color:' + (statusColor || '#1565c0') + ';border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.15);">💾 保存</button>';
-    html += '<button onclick="cancelHakenEdit()" style="background:rgba(255,255,255,0.25);color:#fff;border:1px solid rgba(255,255,255,0.5);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;">キャンセル</button>';
-    html += '</div>';
-  } else {
-    html += '<button onclick="toggleHakenEditMode()" style="position:absolute;top:10px;right:10px;background:rgba(255,255,255,0.22);color:#fff;border:1px solid rgba(255,255,255,0.4);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">✏️ 編集</button>';
-  }
+  html += '<div style="position:absolute;top:10px;right:10px;font-size:10px;color:#fff;opacity:0.85;background:rgba(255,255,255,0.18);padding:4px 8px;border-radius:8px;">✏️ 各項目で編集</div>';
   html += '</div>';
 
-  if (!_hakensakiEditMode) {
-    // ===== 閲覧モード =====
-    // サマリーカード
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
-    if (statusLabel) {
-      html += '<div style="background:' + statusBg + ';color:' + statusColor + ';padding:12px;border-radius:12px;text-align:center;">';
-      html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">ステータス</div>';
-      html += '<div style="font-size:14px;font-weight:700;">' + statusLabel + '</div>';
-      html += '</div>';
-    }
-    html += '<div style="background:#e8eaf6;color:#283593;padding:12px;border-radius:12px;text-align:center;">';
-    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">派遣人数</div>';
-    html += '<div style="font-size:20px;font-weight:700;">' + ninzu + '<span style="font-size:12px;">名</span></div>';
+  // ===== サマリーカード =====
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+  if (statusLabel) {
+    html += '<div style="background:' + statusBg + ';color:' + statusColor + ';padding:12px;border-radius:12px;text-align:center;">';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">ステータス</div>';
+    html += '<div style="font-size:14px;font-weight:700;">' + statusLabel + '</div>';
     html += '</div>';
-    html += '</div>';
+  }
+  html += '<div style="background:#e8eaf6;color:#283593;padding:12px;border-radius:12px;text-align:center;">';
+  html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">派遣人数</div>';
+  html += '<div style="font-size:20px;font-weight:700;">' + ninzu + '<span style="font-size:12px;">名</span></div>';
+  html += '</div>';
+  html += '</div>';
 
-    // 派遣期間カード
-    if (F.start || F.end) {
-      html += '<div style="background:#fff;border:1px solid #e8e8f0;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">';
-      html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:6px;">📅 派遣期間</div>';
-      html += '<div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;">';
-      html += '<span>' + escHtml(fmtHakenDate(item[F.start])) + '</span>';
-      html += '<span style="color:#ccc;">〜</span>';
-      html += '<span>' + escHtml(fmtHakenDate(item[F.end])) + '</span>';
-      html += '</div>';
-      html += '</div>';
-    }
+  // 派遣期間カード
+  if (F.start || F.end) {
+    html += '<div style="background:#fff;border:1px solid #e8e8f0;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">';
+    html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:6px;">📅 派遣期間</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;">';
+    html += '<span>' + escHtml(fmtHakenDate(item[F.start])) + '</span>';
+    html += '<span style="color:#ccc;">〜</span>';
+    html += '<span>' + escHtml(fmtHakenDate(item[F.end])) + '</span>';
+    html += '</div>';
+    html += '</div>';
   }
 
   // ===== グループ別フィールド表示 =====
@@ -9649,46 +9646,161 @@ function renderHakensakiDetail() {
   body.innerHTML = html;
 }
 
-// 各フィールドの1行をHTML化(閲覧/編集兼用)
+// 各フィールドの1行をHTML化 (✏️ ボタンで個別インライン編集)
 function _hakenRowHtml(item, f) {
   var v = item[f.odKey];
   var isEmpty = (v === null || v === undefined || v === '');
-  var html = '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #f5f5f8;font-size:12px;align-items:flex-start;">';
-  html += '<div style="color:var(--text-light);min-width:110px;flex-shrink:0;font-weight:600;padding-top:4px;">' + escHtml(f.title) + '</div>';
-  html += '<div style="flex:1;min-width:0;">';
-  if (_hakensakiEditMode) {
-    var inputId = 'hkEdit_' + f.odKey;
-    if (f.type === 'DateTime') {
-      html += '<input type="date" id="' + inputId + '" data-od="' + f.odKey + '" data-type="DateTime" value="' + fmtHakenDateInput(v) + '" style="width:100%;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;">';
-    } else if (f.type === 'Number' || f.type === 'Currency') {
-      html += '<input type="number" id="' + inputId + '" data-od="' + f.odKey + '" data-type="' + f.type + '" value="' + (isEmpty ? '' : String(v).replace(/,/g, '')) + '" style="width:100%;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;">';
-    } else if (f.type === 'Note') {
-      html += '<textarea id="' + inputId + '" data-od="' + f.odKey + '" data-type="Note" rows="3" style="width:100%;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;resize:vertical;">' + escHtml(isEmpty ? '' : String(v)) + '</textarea>';
-    } else if (f.type === 'Boolean') {
-      html += '<select id="' + inputId + '" data-od="' + f.odKey + '" data-type="Boolean" style="width:100%;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;">';
-      html += '<option value=""' + (isEmpty ? ' selected' : '') + '>—</option>';
-      html += '<option value="true"' + (String(v) === 'true' || v === true ? ' selected' : '') + '>はい</option>';
-      html += '<option value="false"' + (String(v) === 'false' || v === false ? ' selected' : '') + '>いいえ</option>';
-      html += '</select>';
-    } else {
-      html += '<input type="text" id="' + inputId + '" data-od="' + f.odKey + '" data-type="' + (f.type || 'Text') + '" value="' + escHtml(isEmpty ? '' : String(v)) + '" style="width:100%;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;">';
-    }
-  } else {
-    var display = isEmpty ? '—' : String(v);
-    var valColor = isEmpty ? '#ccc' : 'var(--text)';
-    if (!isEmpty && f.type === 'DateTime') {
-      display = fmtHakenDate(v);
-    } else if (!isEmpty && f.type === 'Number' && !isNaN(Number(v))) {
-      display = Number(v).toLocaleString();
-    } else if (!isEmpty && f.type === 'Currency' && !isNaN(Number(v))) {
-      display = '¥' + Number(v).toLocaleString();
-    } else if (!isEmpty && f.type === 'Boolean') {
-      display = (v === true || String(v) === 'true') ? 'はい' : 'いいえ';
-    }
-    html += '<div style="color:' + valColor + ';word-break:break-all;padding-top:4px;line-height:1.5;">' + escHtml(display) + '</div>';
+  var rowId = 'hkRow_' + f.odKey;
+  // 表示値の整形
+  var display = isEmpty ? '—' : String(v);
+  var valColor = isEmpty ? '#ccc' : 'var(--text)';
+  if (!isEmpty && f.type === 'DateTime') {
+    display = fmtHakenDate(v);
+  } else if (!isEmpty && f.type === 'Number' && !isNaN(Number(v))) {
+    display = Number(v).toLocaleString();
+  } else if (!isEmpty && f.type === 'Currency' && !isNaN(Number(v))) {
+    display = '¥' + Number(v).toLocaleString();
+  } else if (!isEmpty && f.type === 'Boolean') {
+    display = (v === true || String(v) === 'true') ? 'はい' : 'いいえ';
   }
-  html += '</div></div>';
+  var odKeyEsc = String(f.odKey).replace(/'/g, "\\'");
+  var html = '<div id="' + rowId + '" style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #f5f5f8;font-size:12px;align-items:flex-start;">';
+  html += '<div style="color:var(--text-light);min-width:110px;flex-shrink:0;font-weight:600;padding-top:4px;">' + escHtml(f.title) + '</div>';
+  html += '<div class="hk-row-value" style="flex:1;min-width:0;display:flex;align-items:flex-start;gap:6px;padding-top:4px;">';
+  html += '<div style="flex:1;min-width:0;color:' + valColor + ';word-break:break-all;line-height:1.5;white-space:pre-wrap;">' + escHtml(display) + '</div>';
+  html += '<button onclick="startEditHakenField(\'' + odKeyEsc + '\')" title="この項目を編集" style="background:transparent;border:none;color:#1976d2;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:4px;opacity:0.55;flex-shrink:0;transition:opacity 0.15s,background 0.15s;" onmouseover="this.style.opacity=1;this.style.background=\'#e3f2fd\';" onmouseout="this.style.opacity=0.55;this.style.background=\'transparent\';">✏️</button>';
+  html += '</div>';
+  html += '</div>';
   return html;
+}
+
+// インライン編集: 単一フィールドを編集モードに切替
+function startEditHakenField(odKey) {
+  var item = _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!item) return;
+  var field = (_hakensakiAllFields || []).find(function(x) { return x.odKey === odKey; });
+  if (!field) { showToast('フィールド情報が見つかりません', 'error'); return; }
+  var row = document.getElementById('hkRow_' + odKey);
+  if (!row) return;
+  var wrap = row.querySelector('.hk-row-value');
+  if (!wrap) return;
+  if (!wrap.dataset.originalHtml) wrap.dataset.originalHtml = wrap.innerHTML;
+
+  var v = item[odKey];
+  var isEmpty = (v === null || v === undefined || v === '');
+  var inputId = 'hkEdit_' + odKey;
+  var inputHtml = '';
+
+  if (field.type === 'DateTime') {
+    inputHtml = '<input type="date" id="' + inputId + '" value="' + fmtHakenDateInput(v) + '" style="flex:1;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;min-width:120px;">';
+  } else if (field.type === 'Number' || field.type === 'Currency') {
+    inputHtml = '<input type="number" id="' + inputId + '" value="' + (isEmpty ? '' : String(v).replace(/,/g, '')) + '" style="flex:1;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;min-width:100px;">';
+  } else if (field.type === 'Note') {
+    inputHtml = '<textarea id="' + inputId + '" rows="2" style="flex:1;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;resize:vertical;min-width:140px;">' + escHtml(isEmpty ? '' : String(v)) + '</textarea>';
+  } else if (field.type === 'Boolean') {
+    inputHtml = '<select id="' + inputId + '" style="flex:1;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;min-width:100px;">' +
+      '<option value=""' + (isEmpty ? ' selected' : '') + '>—</option>' +
+      '<option value="true"' + (v === true || String(v) === 'true' ? ' selected' : '') + '>はい</option>' +
+      '<option value="false"' + (v === false || String(v) === 'false' ? ' selected' : '') + '>いいえ</option>' +
+      '</select>';
+  } else {
+    inputHtml = '<input type="text" id="' + inputId + '" value="' + escHtml(isEmpty ? '' : String(v)) + '" style="flex:1;padding:6px 8px;border:1.5px solid #e0e0e8;border-radius:6px;font-size:13px;min-width:140px;">';
+  }
+  var odKeyEsc = String(odKey).replace(/'/g, "\\'");
+  wrap.innerHTML =
+    '<div style="display:flex;gap:6px;width:100%;align-items:center;flex-wrap:wrap;">' +
+      inputHtml +
+      '<button onclick="saveEditHakenField(\'' + odKeyEsc + '\')" style="background:#ef6c00;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">💾 保存</button>' +
+      '<button onclick="cancelEditHakenField(\'' + odKeyEsc + '\')" style="background:#9e9e9e;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;">×</button>' +
+    '</div>';
+  var inp = document.getElementById(inputId);
+  if (inp && inp.focus) inp.focus();
+}
+
+function cancelEditHakenField(odKey) {
+  var row = document.getElementById('hkRow_' + odKey);
+  if (!row) return;
+  var wrap = row.querySelector('.hk-row-value');
+  if (wrap && wrap.dataset.originalHtml) {
+    wrap.innerHTML = wrap.dataset.originalHtml;
+    delete wrap.dataset.originalHtml;
+  }
+}
+
+async function saveEditHakenField(odKey) {
+  var item = _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!item) { showToast('アイテムが見つかりません', 'error'); return; }
+  var field = (_hakensakiAllFields || []).find(function(x) { return x.odKey === odKey; });
+  if (!field) { showToast('フィールド情報が見つかりません', 'error'); return; }
+  var inputEl = document.getElementById('hkEdit_' + odKey);
+  if (!inputEl) return;
+  var raw = inputEl.value;
+  var newVal;
+  if (field.type === 'DateTime') {
+    if (raw) {
+      var d = new Date(raw + 'T00:00:00');
+      newVal = d.toISOString();
+    } else {
+      newVal = null;
+    }
+  } else if (field.type === 'Number' || field.type === 'Currency') {
+    if (raw === '') newVal = null;
+    else {
+      var num = Number(raw);
+      newVal = isNaN(num) ? null : num;
+    }
+  } else if (field.type === 'Boolean') {
+    if (raw === '') newVal = null;
+    else newVal = raw === 'true';
+  } else {
+    newVal = (raw === '' ? null : raw);
+  }
+  // 変更がなければスキップ
+  var orig = item[odKey];
+  var origStr = (orig === null || orig === undefined) ? '' : String(orig);
+  var newStr = (newVal === null || newVal === undefined) ? '' : String(newVal);
+  if (field.type === 'DateTime') {
+    var origIso = orig ? new Date(orig).toISOString().substring(0, 10) : '';
+    if (raw === origIso) { cancelEditHakenField(odKey); showToast('変更なし', 'info'); return; }
+  } else if (origStr === newStr) {
+    cancelEditHakenField(odKey); showToast('変更なし', 'info'); return;
+  }
+  try {
+    showToast('保存中...', 'success');
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var entityType = await getHakensakiEntityType();
+    if (!entityType) throw new Error('リスト型取得失敗');
+    var writeKey = odKey;
+    if (writeKey.indexOf('OData_') === 0) writeKey = writeKey.substring(6);
+    var patchBody = {};
+    patchBody[writeKey] = newVal;
+    patchBody['__metadata'] = { type: entityType };
+    var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items(" + item.Id + ")";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE'
+      },
+      body: JSON.stringify(patchBody)
+    });
+    if (!resp.ok) {
+      var errText = await resp.text();
+      console.error('Hakensaki single PATCH error:', errText);
+      throw new Error('保存失敗: ' + resp.status);
+    }
+    item[odKey] = newVal;
+    _hakensakiLoaded = false; // 次回リスト表示時に再読込
+    showToast('✓ 保存しました', 'success');
+    renderHakensakiDetail();
+  } catch (e) {
+    console.error('saveEditHakenField error:', e);
+    showToast('保存エラー: ' + (e.message || String(e)), 'error');
+  }
 }
 
 function cancelHakenEdit() {
