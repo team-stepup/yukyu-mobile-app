@@ -4939,6 +4939,7 @@ select.sankyu-edit-input {
         <input type="checkbox" id="adminDashIncludeRetired" onchange="renderAdminDashboard()" style="accent-color:var(--primary);"> 退職含む
       </label>
       <button type="button" onclick="refreshAdminDashboard()" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">⟳ 更新</button>
+      <button type="button" onclick="showHakenTantoDebug()" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;" title="担当者マップのデバッグ情報">🔍</button>
     </div>
     <div id="adminDashSummary" style="padding:12px 14px;margin-bottom:10px;background:linear-gradient(135deg,#fff9e6,#fff3d4);border-radius:12px;border:1px solid #f0c040;"></div>
     <div id="adminDashBody"></div>
@@ -8630,6 +8631,10 @@ var HAKEN_GENMOTO_INFO = {
 // 派遣先 SharePoint リスト (HAKENSAKI_LIST_PATH) の「派遣元責任者」列から動的に構築される
 // ハードコードのフォールバックも残してあるが、SP値が優先
 var _hakenTantoSPMap = {};       // SP データから構築されたマップ (Title → 担当者)
+var _hakenTantoDebug = {          // デバッグ情報 (showHakenTantoDebug() で表示)
+  relatedColumns: [], detectedTitle: '', detectedType: '', detectedKey: '',
+  itemsCount: 0, sampleValue: null, sampleIdA: null, sampleIdB: null
+};
 var HAKEN_TANTO_MAP = {           // ハードコード フォールバック (SP に値がない時用)
   // 例: 'ASTI': '山下 浩俊',
 };
@@ -8693,12 +8698,18 @@ async function loadHakenTantoMapFromSP() {
           tantoMeta = fieldInfo[titles[j4]]; tantoTitle = titles[j4]; break;
         }
       }
-      // デバッグ用: 派遣元/責任/担当 を含む候補をすべて出力
-      var allRelated = titles.filter(function(t){ return /派遣元|責任|担当/.test(t); });
-      console.log('[hakenTanto] related columns:', allRelated.map(function(t){ return JSON.stringify(t) + ' (' + (fieldInfo[t].type || '?') + ')'; }).join(' | '));
     }
+    // デバッグ用: 派遣元/責任/担当 を含む候補をすべて出力＋保存
+    var _allTitles = Object.keys(fieldInfo);
+    var allRelated = _allTitles.filter(function(t){ return /派遣元|責任|担当|hak|tanto/i.test(t); });
+    _hakenTantoDebug.relatedColumns = allRelated.map(function(t){
+      return { title: t, type: fieldInfo[t].type || '?', odKey: fieldInfo[t].odKey };
+    });
+    console.log('[hakenTanto] related columns:', allRelated.map(function(t){ return JSON.stringify(t) + ' (' + (fieldInfo[t].type || '?') + ')'; }).join(' | '));
     if (!tantoMeta) {
       console.warn('派遣元責任者の列が見つかりませんでした');
+      _hakenTantoDebug.detectedTitle = '(検出失敗)';
+      _hakenTantoDebug.detectedType = '';
       return;
     }
     var tantoKey = tantoMeta.odKey;
@@ -8706,6 +8717,9 @@ async function loadHakenTantoMapFromSP() {
     var isUser = /^User/i.test(tantoMeta.type);   // "User" or "UserMulti"
     var isMulti = /Multi/i.test(tantoMeta.type);
 
+    _hakenTantoDebug.detectedTitle = tantoTitle;
+    _hakenTantoDebug.detectedType = tantoMeta.type;
+    _hakenTantoDebug.detectedKey = tantoKey;
     console.log('[hakenTanto] field detected: title=' + JSON.stringify(tantoTitle) + ' type=' + tantoMeta.type + ' odKey=' + tantoKey + ' intName=' + intName);
 
     // User フィールドは companion Id を取得して resolveSpUserNamesByIds で氏名解決
@@ -8733,9 +8747,14 @@ async function loadHakenTantoMapFromSP() {
     var items = (data.d && data.d.results) || [];
 
     // サンプル1件を出して実際のキー構造を確認
+    _hakenTantoDebug.itemsCount = items.length;
     if (items.length > 0) {
       var s = items[0];
       var sampleKeys = Object.keys(s).filter(function(k){ return /^_/.test(k) || /Id$/.test(k) || k === tantoKey || k === 'Title'; });
+      _hakenTantoDebug.sampleValue = s[tantoKey];
+      _hakenTantoDebug.sampleIdA = s[idKeyA];
+      _hakenTantoDebug.sampleIdB = s[idKeyB];
+      _hakenTantoDebug.sampleTitle = s.Title;
       console.log('[hakenTanto] sample item keys:', sampleKeys, 'tantoVal=', s[tantoKey], 'idA=', s[idKeyA], 'idB=', s[idKeyB]);
     }
 
@@ -8806,6 +8825,72 @@ async function loadHakenTantoMapFromSP() {
   } catch (e) {
     console.warn('loadHakenTantoMapFromSP error:', e);
   }
+}
+
+// 担当者マップのデバッグ情報を画面に表示 (🔍 ボタン)
+function showHakenTantoDebug() {
+  var d = _hakenTantoDebug || {};
+  var html = '<div style="background:#fff;border-radius:14px;max-width:94vw;width:560px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">';
+  html += '<div style="padding:14px 16px;background:#5e35b1;color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0;">';
+  html += '<div style="font-size:22px;">🔍</div>';
+  html += '<div style="flex:1;font-size:14px;font-weight:800;">担当者マップ デバッグ</div>';
+  html += '<button onclick="document.getElementById(\'tantoDebugOv\').remove()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0;">×</button>';
+  html += '</div>';
+  html += '<div style="overflow-y:auto;flex:1;padding:14px;font-size:11px;line-height:1.6;">';
+
+  html += '<div style="margin-bottom:10px;padding:10px;background:#f5f5f5;border-radius:8px;">';
+  html += '<div style="font-weight:700;color:#5e35b1;margin-bottom:4px;">検出された列</div>';
+  html += '<div>📌 <b>タイトル:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.detectedTitle || '(なし)')) + '</code></div>';
+  html += '<div>📌 <b>型:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(d.detectedType || '(なし)') + '</code></div>';
+  html += '<div>📌 <b>キー:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;font-size:9px;">' + escHtml(d.detectedKey || '(なし)') + '</code></div>';
+  html += '<div>📊 <b>取得アイテム数:</b> ' + (d.itemsCount || 0) + '件</div>';
+  html += '<div>📊 <b>マップに登録された派遣先数:</b> ' + Object.keys(_hakenTantoSPMap).length + '件</div>';
+  html += '</div>';
+
+  html += '<div style="margin-bottom:10px;padding:10px;background:#fff3e0;border-radius:8px;">';
+  html += '<div style="font-weight:700;color:#e65100;margin-bottom:4px;">サンプル (1件目のアイテム)</div>';
+  html += '<div>🏷 <b>派遣先名:</b> ' + escHtml(String(d.sampleTitle || '(なし)')) + '</div>';
+  html += '<div>👤 <b>担当者の値 (生):</b> <pre style="background:#fff;padding:6px;border-radius:3px;margin:3px 0;white-space:pre-wrap;font-size:10px;">' + escHtml(JSON.stringify(d.sampleValue, null, 2) || '(null)') + '</pre></div>';
+  html += '<div>🆔 <b>idA:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.sampleIdA)) + '</code> | <b>idB:</b> <code style="background:#fff;padding:2px 5px;border-radius:3px;">' + escHtml(JSON.stringify(d.sampleIdB)) + '</code></div>';
+  html += '</div>';
+
+  html += '<div style="margin-bottom:10px;padding:10px;background:#e8eaf6;border-radius:8px;">';
+  html += '<div style="font-weight:700;color:#3949ab;margin-bottom:4px;">SP リストの 派遣元/責任/担当 関連列 (' + (d.relatedColumns || []).length + '件)</div>';
+  if (!d.relatedColumns || d.relatedColumns.length === 0) {
+    html += '<div style="color:#999;">列が見つかりませんでした</div>';
+  } else {
+    d.relatedColumns.forEach(function(c) {
+      var isSelected = (c.title === d.detectedTitle);
+      html += '<div style="padding:5px 8px;margin:3px 0;background:' + (isSelected ? '#c8e6c9' : '#fff') + ';border-radius:4px;border-left:3px solid ' + (isSelected ? '#4caf50' : '#ccc') + ';">';
+      html += (isSelected ? '✅ ' : '・ ') + '<code>' + escHtml(JSON.stringify(c.title)) + '</code> <span style="color:#777;">(' + escHtml(c.type) + ')</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+
+  html += '<div style="margin-bottom:10px;padding:10px;background:#e0f2f1;border-radius:8px;">';
+  html += '<div style="font-weight:700;color:#00695c;margin-bottom:4px;">登録された担当者マップ (派遣先名 → 担当者)</div>';
+  var spKeys = Object.keys(_hakenTantoSPMap);
+  if (spKeys.length === 0) {
+    html += '<div style="color:#c62828;">⚠ マップが空です。SPからの値取得に失敗しています。</div>';
+  } else {
+    spKeys.slice(0, 30).forEach(function(k) {
+      html += '<div style="padding:3px 6px;border-bottom:1px dotted #ccc;">' + escHtml(k) + ' → <b>' + escHtml(_hakenTantoSPMap[k]) + '</b></div>';
+    });
+    if (spKeys.length > 30) html += '<div style="color:#777;font-size:10px;margin-top:4px;">...他 ' + (spKeys.length - 30) + '件</div>';
+  }
+  html += '</div>';
+
+  html += '</div></div>';
+  var existing = document.getElementById('tantoDebugOv');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'tantoDebugOv';
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '10001';
+  ov.innerHTML = html;
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
 }
 
 // 派遣先名から担当者を取得 (SP > ハードコード > デフォルト)
