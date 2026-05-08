@@ -4864,6 +4864,11 @@ select.sankyu-edit-input {
           <span style="flex:1;font-weight:600;">派遣先別 月次分析 (Excel)</span>
           <span style="color:#bbb;font-size:14px;">↗</span>
         </button>
+        <button type="button" onclick="openMikanyuuListScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">🔴</span>
+          <span style="flex:1;font-weight:600;">社保・雇用保険 未加入者</span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
         <button type="button" onclick="exportEmployeeBackup()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
           <span style="font-size:20px;">📥</span>
           <span style="flex:1;font-weight:600;">社員データ バックアップ (CSV)</span>
@@ -4953,6 +4958,23 @@ select.sankyu-edit-input {
     </div>
     <div id="adminDashSummary" style="padding:12px 14px;margin-bottom:10px;background:linear-gradient(135deg,#fff9e6,#fff3d4);border-radius:12px;border:1px solid #f0c040;"></div>
     <div id="adminDashBody"></div>
+  </div>
+
+  <!-- Screen: 社保・雇用保険 未加入者 リスト (役員専用) -->
+  <div class="screen" id="mikanyuuScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:#c62828;margin:0;flex:1;">🔴 社保・雇用保険 未加入者</h2>
+      <button onclick="renderMikanyuuList()" title="更新" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 10px;font-size:13px;color:var(--primary);cursor:pointer;">⟳</button>
+    </div>
+    <div id="mikanyuuSummary" style="padding:12px 14px;margin-bottom:10px;background:linear-gradient(135deg,#fff5f5,#ffebee);border-radius:12px;border:1px solid #ffcdd2;font-size:13px;"></div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--text-light);">並び順:</span>
+      <button type="button" data-mksort="nyusha" onclick="setMikanyuuSort('nyusha',this)" style="font-size:11px;padding:5px 10px;border:1px solid var(--primary);border-radius:6px;background:var(--primary);color:#fff;cursor:pointer;">入社日順</button>
+      <button type="button" data-mksort="bango" onclick="setMikanyuuSort('bango',this)" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">社員番号順</button>
+      <button type="button" data-mksort="haken" onclick="setMikanyuuSort('haken',this)" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:var(--text-light);cursor:pointer;">派遣先順</button>
+    </div>
+    <div id="mikanyuuList"></div>
   </div>
 
   <!-- Screen: 派遣先一覧 (REST API) -->
@@ -22533,6 +22555,176 @@ function openHakensakiDashboardExcel() {
   if (!isAdminUser()) { showToast('役員権限が必要です', 'error'); return; }
   var url = 'https://teamstepupcom774.sharepoint.com/:x:/r/sites/TeamStepup-58/_layouts/15/Doc.aspx?sourcedoc=%7BF8748FEC-7D41-4F8E-A1C7-3F2C661ADF69%7D&file=%E6%B4%BE%E9%81%A3%E5%85%88%E5%88%A5%E6%9C%88%E6%AC%A1%E5%88%86%E6%9E%90_%E3%83%80%E3%83%83%E3%82%B7%E3%83%A5%E3%83%9C%E3%83%BC%E3%83%89.xlsx&action=default&mobileredirect=true';
   window.open(url, '_blank', 'noopener');
+}
+
+// ============================================================
+// 社保・雇用保険 未加入者 リスト (役員専用)
+// ============================================================
+let _mikanyuuSort = 'nyusha';
+let _mikanyuuFilteredList = [];
+
+async function openMikanyuuListScreen() {
+  if (!isAdminUser()) { showToast('役員のみアクセス可能です', 'error'); return; }
+  switchScreen('mikanyuuScreen');
+  showSpinner();
+  try {
+    if (!_soumuAllEmps || !_soumuKeyMap || Object.keys(_soumuKeyMap || {}).length === 0) {
+      // 総務ダッシュボードのデータをロード (社員リスト + フィールドキーマップ)
+      await loadSoumuDashboard();
+    }
+    renderMikanyuuList();
+  } catch (e) {
+    console.error('openMikanyuuListScreen error:', e);
+    showToast('読み込みエラー: ' + (e.message || String(e)), 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function setMikanyuuSort(sort, btn) {
+  _mikanyuuSort = sort;
+  document.querySelectorAll('#mikanyuuScreen [data-mksort]').forEach(b => {
+    const active = b === btn;
+    b.style.background = active ? 'var(--primary)' : '#fff';
+    b.style.color = active ? '#fff' : 'var(--text-light)';
+    b.style.borderColor = active ? 'var(--primary)' : '#ddd';
+  });
+  renderMikanyuuList();
+}
+
+function renderMikanyuuList() {
+  const body = document.getElementById('mikanyuuList');
+  const summary = document.getElementById('mikanyuuSummary');
+  if (!body || !summary) return;
+  if (!_soumuAllEmps || !_soumuKeyMap) {
+    summary.textContent = 'データ未取得';
+    body.innerHTML = '';
+    return;
+  }
+  const km = _soumuKeyMap;
+  const odKoyou = km['soumuKoyou'];
+  const odShaho = km['soumuShaho'];
+  const odZ = km['zaisyoku'];
+
+  // 在職判定 + 雇用or社保が「✓取得完了」or「不要」でない
+  const filteredList = _soumuAllEmps.filter(function(emp) {
+    if (!emp.Title) return false;
+    const zVal = odZ ? String(emp[odZ] || '') : (typeof isResigned === 'function' && isResigned(emp) ? '退社' : '在職');
+    if (zVal !== '在職') return false;
+    const koyouVal = odKoyou ? String(emp[odKoyou] || '') : '';
+    const shahoVal = odShaho ? String(emp[odShaho] || '') : '';
+    const koyouMi = (koyouVal !== '✓取得完了' && koyouVal !== '不要');
+    const shahoMi = (shahoVal !== '✓取得完了' && shahoVal !== '不要');
+    return koyouMi || shahoMi;
+  });
+
+  // ソート
+  filteredList.sort(function(a, b) {
+    if (_mikanyuuSort === 'bango') {
+      return String(a[F.syainNo] || '').localeCompare(String(b[F.syainNo] || ''), 'ja', { numeric: true });
+    } else if (_mikanyuuSort === 'haken') {
+      const ha = (typeof getHakensaki === 'function') ? (getHakensaki(a) || '') : '';
+      const hb = (typeof getHakensaki === 'function') ? (getHakensaki(b) || '') : '';
+      return ha.localeCompare(hb, 'ja') || String(a[F.syainNo] || '').localeCompare(String(b[F.syainNo] || ''), 'ja', { numeric: true });
+    } else {
+      // 入社日順 (古い順)
+      const na = a[F.nyushaDate] ? new Date(a[F.nyushaDate]).getTime() : 0;
+      const nb = b[F.nyushaDate] ? new Date(b[F.nyushaDate]).getTime() : 0;
+      return na - nb;
+    }
+  });
+
+  // 集計 (両方未加入 / 雇用のみ / 社保のみ)
+  let bothCount = 0, koyouOnlyCount = 0, shahoOnlyCount = 0;
+  filteredList.forEach(function(emp) {
+    const koyouVal = odKoyou ? String(emp[odKoyou] || '') : '';
+    const shahoVal = odShaho ? String(emp[odShaho] || '') : '';
+    const koyouMi = (koyouVal !== '✓取得完了' && koyouVal !== '不要');
+    const shahoMi = (shahoVal !== '✓取得完了' && shahoVal !== '不要');
+    if (koyouMi && shahoMi) bothCount++;
+    else if (koyouMi) koyouOnlyCount++;
+    else if (shahoMi) shahoOnlyCount++;
+  });
+
+  summary.innerHTML =
+    '<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;">' +
+    '<div><div style="font-size:10px;color:#888;">該当者</div><div style="font-size:24px;font-weight:800;color:#c62828;">' + filteredList.length + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+    '<div><div style="font-size:10px;color:#888;">両方未加入</div><div style="font-size:18px;font-weight:700;color:#c62828;">' + bothCount + '名</div></div>' +
+    '<div><div style="font-size:10px;color:#888;">雇用のみ未</div><div style="font-size:18px;font-weight:700;color:#1565c0;">' + koyouOnlyCount + '名</div></div>' +
+    '<div><div style="font-size:10px;color:#888;">社保のみ未</div><div style="font-size:18px;font-weight:700;color:#2e7d32;">' + shahoOnlyCount + '名</div></div>' +
+    '</div>';
+
+  if (filteredList.length === 0) {
+    body.innerHTML = '<div class="empty-state" style="padding:40px 20px;text-align:center;color:var(--text-light);"><div style="font-size:40px;margin-bottom:10px;">🎉</div><p style="font-size:14px;font-weight:600;">該当者なし</p><p style="font-size:11px;">在職中の全員が加入済み(または不要)です</p></div>';
+    _mikanyuuFilteredList = [];
+    return;
+  }
+
+  function statusBadge(label, val, ok, isMi) {
+    let bg, col;
+    if (ok) { bg = '#e8f5e9'; col = '#2e7d32'; }                  // 完了 = 緑
+    else if (val === '→申請中') { bg = '#fff9c4'; col = '#f57f17'; } // 申請中 = 黄
+    else if (val === '不要') { bg = '#eceff1'; col = '#546e7a'; }     // 不要 = 灰
+    else { bg = '#ffebee'; col = '#c62828'; }                      // 未加入/空欄 = 赤
+    const display = val || '未加入';
+    return '<span style="display:inline-block;padding:3px 8px;background:' + bg + ';color:' + col + ';border-radius:8px;font-size:10px;font-weight:700;margin-right:4px;">' + label + ': ' + escHtml(display) + '</span>';
+  }
+
+  let html = '<div style="display:flex;flex-direction:column;gap:6px;">';
+  filteredList.forEach(function(emp, i) {
+    const no = emp[F.syainNo] || '';
+    const name = emp.Title || '';
+    const haken = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
+    const nyushaStr = emp[F.nyushaDate] ? formatDate(emp[F.nyushaDate]) : '未設定';
+    const koyouVal = odKoyou ? String(emp[odKoyou] || '') : '';
+    const shahoVal = odShaho ? String(emp[odShaho] || '') : '';
+    const koyouOk = (koyouVal === '✓取得完了');
+    const shahoOk = (shahoVal === '✓取得完了');
+    const koyouMi = (koyouVal !== '✓取得完了' && koyouVal !== '不要');
+    const shahoMi = (shahoVal !== '✓取得完了' && shahoVal !== '不要');
+
+    // 入社からの日数
+    let daysAgo = '';
+    if (emp[F.nyushaDate]) {
+      const nd = new Date(emp[F.nyushaDate]); nd.setHours(0,0,0,0);
+      const today = new Date(); today.setHours(0,0,0,0);
+      const days = Math.round((today - nd) / 86400000);
+      if (days >= 0) daysAgo = '(入社後 ' + days + '日)';
+      else daysAgo = '(入社まで ' + (-days) + '日)';
+    }
+    // 入社後30日経過なら警告色
+    const isOverdue = emp[F.nyushaDate] && (new Date() - new Date(emp[F.nyushaDate])) / 86400000 > 30;
+    const borderCol = (koyouMi && shahoMi) ? '#ef9a9a' : '#e8e8f0';
+
+    html += '<div onclick="selectEmployeeFromMikanyuu(' + i + ')" style="background:#fff;border:1.5px solid ' + borderCol + ';border-radius:10px;padding:10px 12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.04);">';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">';
+    html += '<span style="font-size:11px;color:#888;font-weight:600;min-width:55px;">No.' + escHtml(String(no)) + '</span>';
+    html += '<span style="font-weight:700;font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(name) + '</span>';
+    html += '<span style="color:#bbb;font-size:13px;flex-shrink:0;">›</span>';
+    html += '</div>';
+    if (haken) {
+      html += '<div style="font-size:11px;color:#1565c0;margin-bottom:3px;font-weight:600;">🏭 ' + escHtml(haken) + '</div>';
+    }
+    html += '<div style="font-size:11px;color:#666;margin-bottom:6px;">📅 入社: <b>' + escHtml(nyushaStr) + '</b>' + (daysAgo ? ' <span style="color:' + (isOverdue ? '#c62828' : '#999') + ';font-size:10px;font-weight:' + (isOverdue ? '700' : '500') + ';">' + daysAgo + '</span>' : '') + '</div>';
+    html += '<div>';
+    html += statusBadge('雇用', koyouVal, koyouOk, koyouMi);
+    html += statusBadge('社保', shahoVal, shahoOk, shahoMi);
+    html += '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  _mikanyuuFilteredList = filteredList;
+  body.innerHTML = html;
+}
+
+function selectEmployeeFromMikanyuu(idx) {
+  const emp = _mikanyuuFilteredList[idx];
+  if (!emp) return;
+  if (typeof selectEmployee === 'function') {
+    selectEmployee(emp);
+  } else {
+    showToast('社員選択機能が見つかりません', 'error');
+  }
 }
 
 // ============================================================
