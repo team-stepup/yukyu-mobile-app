@@ -11768,6 +11768,50 @@ function openEmpDetailFromSoumuList(idx) {
 }
 
 // 総務系オーバーレイ → エクセル項目プレビュー (mode: koyou-kanyuu/koyou-soushitsu/shaho-kanyuu/shaho-soushitsu)
+// Excel項目モーダル: タップで値をクリップボードへコピー
+function copyExcelValueFromData(elem) {
+  if (!elem) return;
+  var v = elem.getAttribute('data-copy-value');
+  if (!v) return;
+  function _flash(el) {
+    var orig = el.style.background;
+    el.style.background = '#c8e6c9';
+    setTimeout(function() { el.style.background = orig || 'transparent'; }, 500);
+  }
+  function _toast(value) {
+    var disp = (value && value.length > 22) ? (value.substring(0, 22) + '…') : value;
+    showToast('✓ コピー: ' + disp, 'success');
+  }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(v).then(function() { _flash(elem); _toast(v); }).catch(function() {
+        _copyFallback(v, elem, _flash, _toast);
+      });
+    } else {
+      _copyFallback(v, elem, _flash, _toast);
+    }
+  } catch (e) {
+    _copyFallback(v, elem, _flash, _toast);
+  }
+}
+function _copyFallback(value, elem, flashFn, toastFn) {
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = value;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) { flashFn(elem); toastFn(value); }
+    else showToast('コピーに失敗しました', 'error');
+  } catch (e) {
+    showToast('コピーエラー: ' + e.message, 'error');
+  }
+}
+
 function openExcelPreviewFromSoumuList(idx) {
   var mode = window._koyouDlMode || 'koyou-kanyuu';
   var list = window._koyouDlList || [];
@@ -11928,26 +11972,30 @@ function openExcelPreviewFromSoumuList(idx) {
     }
   }
 
-  // 行HTML 構築
+  // 行HTML 構築 (タップで値をクリップボードへコピー → 紙申請フォームに貼付け可能)
   var rowsHtml = pairs.map(function(p, i) {
     var label = p[0], val = p[1];
     var isEmpty = (val === null || val === undefined || val === '');
     var bg = (i % 2 === 0) ? '#fff' : '#f9f9fc';
-    // 「個人番号（社員フォルダ）」行 = 📂 をクリックでフォルダを開けるように
     var isFolderRow = (label.indexOf('社員フォルダ') >= 0);
-    var valHtml;
+    var valHtml, valDivAttrs;
     if (isEmpty) {
       valHtml = '—';
+      valDivAttrs = 'style="flex:1;min-width:0;color:#bbb;word-break:break-all;"';
     } else if (isFolderRow && _folderUrl) {
       valHtml = '<a href="' + escHtml(_folderUrl) + '" target="_blank" rel="noopener" style="color:#1565c0;font-weight:700;text-decoration:underline;">' + escHtml(String(val)) + ' を開く</a>';
+      valDivAttrs = 'style="flex:1;min-width:0;color:var(--text);word-break:break-all;"';
     } else if (isFolderRow && !_folderUrl) {
       valHtml = '<span style="color:#bbb;">' + escHtml(String(val)) + ' (URL未設定)</span>';
+      valDivAttrs = 'style="flex:1;min-width:0;color:var(--text);word-break:break-all;"';
     } else {
-      valHtml = escHtml(String(val));
+      // タップで値をコピー (📋 アイコン付き、ホバーで青背景)
+      valHtml = escHtml(String(val)) + ' <span style="color:#1976d2;font-size:11px;opacity:0.5;margin-left:4px;">📋</span>';
+      valDivAttrs = 'onclick="copyExcelValueFromData(this)" data-copy-value="' + escHtml(String(val)) + '" style="flex:1;min-width:0;color:var(--text);word-break:break-all;cursor:pointer;padding:2px 6px;border-radius:4px;transition:background 0.15s;" onmouseover="this.style.background=\'#e3f2fd\';" onmouseout="this.style.background=\'transparent\';" title="📋 タップでコピー"';
     }
     return '<div style="display:flex;gap:10px;padding:8px 14px;background:' + bg + ';border-bottom:1px solid #f0f0f5;font-size:12px;align-items:flex-start;">' +
       '<div style="color:var(--text-light);min-width:130px;flex-shrink:0;font-weight:600;">' + escHtml(label) + '</div>' +
-      '<div style="flex:1;min-width:0;color:' + (isEmpty ? '#bbb' : 'var(--text)') + ';word-break:break-all;">' + valHtml + '</div>' +
+      '<div ' + valDivAttrs + '>' + valHtml + '</div>' +
       '</div>';
   }).join('');
 
