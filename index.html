@@ -22611,11 +22611,33 @@ function renderMikanyuuList() {
   const odShaho = km['soumuShaho'];
   const odZ = km['zaisyoku'];
 
-  // 在職判定 + 雇用or社保が「✓取得完了」or「不要」でない
+  // 除外対象 派遣先 (送迎・委託管理・本社・カミヤ工業 など 加入対象外)
+  function _mikanyuuExcludedHaken(haken) {
+    var h = String(haken || '');
+    if (!h) return false;
+    if (h.indexOf('委託管理') >= 0) return true;       // ㈱ユーシン 委託管理
+    if (h.indexOf('本社（送迎') >= 0) return true;      // 本社（送迎者）
+    if (h.indexOf('本社(送迎') >= 0) return true;       // 半角カッコも対応
+    if (/^\s*\d*[-－:：]?\s*本社\s*$/.test(h)) return true; // "001:本社" や "本社" 単体
+    if (h.indexOf('本社') >= 0 && h.indexOf('工場') < 0 && h.indexOf('オキ') < 0 && h.indexOf('ASTI') < 0) return true; // 本社 (ASTI本社工場 等は除外しない)
+    if (h.indexOf('カミヤ工業') >= 0) return true;
+    return false;
+  }
+  // 除外する社員氏名 (退社予定など)
+  var _MIKANYUU_EXCLUDED_NAMES = ['ハシモト ビビアン', 'ハシモト　ビビアン'];
+  function _mikanyuuExcludedName(name) {
+    var n = String(name || '').replace(/[\s　]+/g, '');
+    return _MIKANYUU_EXCLUDED_NAMES.some(function(x){ return n === String(x).replace(/[\s　]+/g, ''); });
+  }
+
+  // 在職判定 + 雇用or社保が「✓取得完了」or「不要」でない + 除外対象でない
   const filteredList = _soumuAllEmps.filter(function(emp) {
     if (!emp.Title) return false;
+    if (_mikanyuuExcludedName(emp.Title)) return false;
     const zVal = odZ ? String(emp[odZ] || '') : (typeof isResigned === 'function' && isResigned(emp) ? '退社' : '在職');
     if (zVal !== '在職') return false;
+    var hk = (typeof getHakensaki === 'function') ? (getHakensaki(emp) || '') : '';
+    if (_mikanyuuExcludedHaken(hk)) return false;
     const koyouVal = odKoyou ? String(emp[odKoyou] || '') : '';
     const shahoVal = odShaho ? String(emp[odShaho] || '') : '';
     const koyouMi = (koyouVal !== '✓取得完了' && koyouVal !== '不要');
