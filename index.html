@@ -10232,25 +10232,54 @@ async function loadSoumuDashboard() {
     _soumuSankyuSummary = results[3] || { active: 0, upcoming: 0, overdue: 0 };
     var shahoInResult = results[4] || { count: 0, items: [] };
     // 社員データの「総務-社保」が「→申請中」の社員は、加入カードからは除外 (重複カウント防止)
-    if (_soumuAllEmps && _soumuKeyMap && _soumuKeyMap['soumuShaho'] && _soumuShahoInFields && _soumuShahoInFields.bango && F.syainNo) {
-      var odShaho = _soumuKeyMap['soumuShaho'];
-      var bangoKey = _soumuShahoInFields.bango;
-      var shinseiBangoSet = {};
-      _soumuAllEmps.forEach(function(e) {
-        if (String(e[odShaho] || '') === '→申請中') {
-          var bn = String(e[F.syainNo] || '').trim();
-          if (bn) shinseiBangoSet[bn] = true;
+    try {
+      console.log('[社保加入] 重複除外チェック開始 / soumuShahoキー=' + (_soumuKeyMap && _soumuKeyMap['soumuShaho']) + ' / bangoキー=' + (_soumuShahoInFields && _soumuShahoInFields.bango) + ' / F.syainNo=' + F.syainNo);
+      if (_soumuAllEmps && _soumuKeyMap && _soumuKeyMap['soumuShaho']) {
+        var odShaho = _soumuKeyMap['soumuShaho'];
+        // 申請中の社員番号集合 (前後空白・先頭0除去で正規化)
+        function _normBango(v) {
+          var s = String(v == null ? '' : v).trim();
+          // 数字のみなら先頭0除去
+          if (/^\d+$/.test(s)) s = String(parseInt(s, 10));
+          return s;
         }
-      });
-      var before = shahoInResult.items.length;
-      shahoInResult.items = shahoInResult.items.filter(function(it) {
-        var bn = String(it[bangoKey] || '').trim();
-        return !shinseiBangoSet[bn];
-      });
-      shahoInResult.count = shahoInResult.items.length;
-      if (before !== shahoInResult.count) {
-        console.log('[社保加入] 申請中除外:', (before - shahoInResult.count), '件 →', shahoInResult.count, '名');
+        var shinseiBangoSet = {};
+        var shinseiCount = 0;
+        _soumuAllEmps.forEach(function(e) {
+          var sv = String(e[odShaho] || '');
+          // 「→申請中」/「取得申請中」/「申請中」の含む値を全部対象に
+          if (sv.indexOf('申請') >= 0 && sv.indexOf('完了') < 0 && sv.indexOf('喪失') < 0) {
+            var bn = _normBango(F.syainNo ? e[F.syainNo] : '');
+            if (bn) { shinseiBangoSet[bn] = true; shinseiCount++; }
+          }
+        });
+        console.log('[社保加入] 申請中(取得)社員数:', shinseiCount, '社員番号セット:', Object.keys(shinseiBangoSet));
+        // 加入申請リスト側の bango カラムを推定
+        var bangoKey = (_soumuShahoInFields && _soumuShahoInFields.bango) || null;
+        // 1件目のサンプルから候補列を表示
+        if (shahoInResult.items.length > 0) {
+          var sample = shahoInResult.items[0];
+          var sampleKeys = Object.keys(sample).filter(function(k){ return /番号|bango|社員|syainNo/i.test(k); });
+          console.log('[社保加入] item[0] サンプル候補列:', sampleKeys.map(function(k){ return k+'='+sample[k]; }).join(', '));
+        }
+        if (bangoKey) {
+          var before = shahoInResult.items.length;
+          var beforeNumbers = shahoInResult.items.map(function(it){ return _normBango(it[bangoKey]); });
+          console.log('[社保加入] 加入申請リスト 社員番号:', beforeNumbers);
+          shahoInResult.items = shahoInResult.items.filter(function(it) {
+            var bn = _normBango(it[bangoKey]);
+            return !(bn && shinseiBangoSet[bn]);
+          });
+          shahoInResult.count = shahoInResult.items.length;
+          console.log('[社保加入] 申請中除外: ' + (before - shahoInResult.count) + '件除外 → 残り ' + shahoInResult.count + '名');
+        } else {
+          console.warn('[社保加入] bangoKey が見つからないため除外できません');
+        }
+      } else {
+        console.warn('[社保加入] 必要キーが揃わないため除外スキップ');
       }
+    } catch (filterErr) {
+      console.warn('[社保加入] 申請中除外フィルタエラー:', filterErr);
     }
     _soumuShahoInCount = shahoInResult.count;
     _soumuShahoInItems = shahoInResult.items;
