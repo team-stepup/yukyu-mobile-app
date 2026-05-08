@@ -5313,6 +5313,33 @@ select.sankyu-edit-input {
       <span class="action-sheet-emp" id="actionSheetEmpName"></span>
     </div>
     <div class="action-sheet-body">
+      <div style="font-size:10px;color:#888;font-weight:700;letter-spacing:1px;padding:4px 6px 6px;">📂 社員データ・書類</div>
+      <button class="action-sheet-item" onclick="quickAction('syainFile')">
+        <span class="asi-icon" style="background:#fff3e0;color:#e65100;">📂</span>
+        <span class="asi-text">社員ファイル</span>
+        <span class="asi-arrow">›</span>
+      </button>
+      <button class="action-sheet-item" onclick="quickAction('gensen')">
+        <span class="asi-icon" style="background:#fff3e0;color:#ef6c00;">📄</span>
+        <span class="asi-text">源泉徴収票</span>
+        <span class="asi-arrow">›</span>
+      </button>
+      <button class="action-sheet-item" onclick="quickAction('kyuryou')">
+        <span class="asi-icon" style="background:#fce4ec;color:#c62828;">💴</span>
+        <span class="asi-text">給料明細</span>
+        <span class="asi-arrow">›</span>
+      </button>
+      <button class="action-sheet-item" onclick="quickAction('chingin')">
+        <span class="asi-icon" style="background:#f3e5f5;color:#7b1fa2;">📒</span>
+        <span class="asi-text">賃金台帳</span>
+        <span class="asi-arrow">›</span>
+      </button>
+      <button class="action-sheet-item" onclick="quickAction('shahoEdit')">
+        <span class="asi-icon" style="background:#e3f2fd;color:#1565c0;">🏥</span>
+        <span class="asi-text">社保 加入/喪失 編集</span>
+        <span class="asi-arrow">›</span>
+      </button>
+      <div style="font-size:10px;color:#888;font-weight:700;letter-spacing:1px;padding:10px 6px 6px;border-top:1px solid #f0f0f5;margin-top:6px;">⚡ 手続きメニュー</div>
       <button class="action-sheet-item" onclick="startProcedure('taisha')">
         <span class="asi-icon" style="background:#fce4ec;color:#c62828;">📤</span>
         <span class="asi-text">退社報告</span>
@@ -6910,15 +6937,9 @@ async function loadLeaveDetails() {
         ${_retRaw ? '<div class="profile-date-chip ' + (_isFuture ? 'chip-plan' : 'chip-retire') + '"><span class="pdc-lbl">' + (_isFuture ? '退社予定' : '退社日') + '</span><span class="pdc-val">' + escHtml(_retireStr) + '</span></div>' : ''}
       </div>
       <div id="profileStatusRow" class="profile-status-row" style="display:none;"></div>
-      <!-- 社番/派遣先 はスティッキーバーに常時表示されるため、このカード内では省略 -->
       <div id="detailRetireReason" style="display:none;"></div>
-      <div class="profile-quick-actions">
-        ${syainFileUrl ? `<button class="profile-quick-btn pq-folder" onclick="openSyainFolderFromPayload('${sfBtnB64}')"><span class="pq-icon">📂</span><span class="pq-label">社員ファイル</span></button>` : ''}
-        <button class="profile-quick-btn pq-gensen" onclick="openEmpViewer('gensen','${empBtnB64}')"><span class="pq-icon">📄</span><span class="pq-label">源泉</span></button>
-        <button class="profile-quick-btn pq-kyuryou" onclick="openEmpViewer('kyuryou','${empBtnB64}')"><span class="pq-icon">💴</span><span class="pq-label">給料明細</span></button>
-        <button class="profile-quick-btn pq-chingin" onclick="openEmpViewer('chingin','${empBtnB64}')"><span class="pq-icon">📒</span><span class="pq-label">賃金台帳</span></button>
-        <button class="profile-quick-btn pq-shaho" onclick="openShahoShutokuEditDialog(currentEmployee)" style="background:linear-gradient(135deg,#42a5f5,#1565c0);color:#fff;"><span class="pq-icon">🏥</span><span class="pq-label">社保編集</span></button>
-      </div>
+      <!-- ⚡FAB から「社員ファイル/源泉/給料明細/賃金台帳/社保編集」をすべて呼び出し -->
+      <div style="margin-top:8px;font-size:10px;color:#999;letter-spacing:0.5px;text-align:center;opacity:0.75;">右上の <span style="color:#ef6c00;font-weight:700;">⚡</span> から書類・手続きメニュー</div>
     </div>
   `;
 
@@ -24256,6 +24277,35 @@ const PROCEDURE_TYPES = {
   kyuryo:   { label: '給料精算', icon: '💰' },
   zaishoku: { label: '在職証明作成', icon: '📄' },
 };
+
+// クイックアクション (アクションシート上部の「📂 社員データ・書類」)
+function quickAction(type) {
+  closeActionSheet();
+  const emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  const empNo = (typeof F !== 'undefined' && F.syainNo) ? (emp[F.syainNo] || '') : '';
+  const empName = emp.Title || '';
+  if (type === 'syainFile') {
+    // emp 内の spUrl型フィールドからURLを取得
+    let url = '';
+    for (var k in emp) {
+      var v = emp[k];
+      if (v && typeof v === 'object' && v.Url) { url = v.Url; break; }
+    }
+    if (url) window.open(url, '_blank', 'noopener');
+    else showToast('社員ファイルURL未設定', 'error');
+  } else if (type === 'gensen' && typeof openGensenForEmp === 'function') {
+    openGensenForEmp(empNo, empName);
+  } else if (type === 'kyuryou' && typeof openKyuryouForEmp === 'function') {
+    openKyuryouForEmp(empNo, empName);
+  } else if (type === 'chingin' && typeof openChinginForEmp === 'function') {
+    openChinginForEmp(empNo, empName);
+  } else if (type === 'shahoEdit' && typeof openShahoShutokuEditDialog === 'function') {
+    openShahoShutokuEditDialog(emp);
+  } else {
+    showToast('対応する機能が見つかりません', 'error');
+  }
+}
 
 function startProcedure(type) {
   closeActionSheet();
