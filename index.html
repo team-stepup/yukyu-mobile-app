@@ -9530,25 +9530,30 @@ var _hakensakiCurrentItemIdx = -1;
 var _hakensakiEditMode = false;
 
 // 派遣先フィールドのグループ定義 (派遣元/派遣先で分割)
+//   重要: 苦情の申出を受ける者 は「派遣先」「派遣元」両側にあるので個別に振分が必要。
+//        判定順序を厳密に: 派遣元責任者 → 苦情(派遣元) → 派遣先責任者 → 苦情(派遣先) → ...
 function _hakenFieldGroupOf(title) {
   var t = String(title || '');
-  var n = t.replace(/[\s　\n\r]/g, '');  // 空白・改行を除去して比較
-  // 派遣元 (ステップ・アップ側): 派遣元責任者 / 苦情の申出を受ける者
-  if (n.indexOf('派遣元') >= 0) return 'genmoto';
-  if (n.indexOf('苦情') >= 0) return 'genmoto';
-  // 派遣先 責任者 (派遣先側 担当者)
+  var n = t.replace(/[\s　\n\r]/g, '');
+  // 1. 派遣元 担当者
+  if (n.indexOf('派遣元責任者') >= 0) return 'genmoto';
+  if (n.indexOf('苦情') >= 0 && n.indexOf('派遣元') >= 0) return 'genmoto';
+  // 2. 派遣先 責任者
   if (n.indexOf('派遣先責任者') >= 0) return 'haken_resp';
-  // 派遣先 基本情報
+  if (n.indexOf('苦情') >= 0 && n.indexOf('派遣先') >= 0) return 'haken_resp';
+  // 3. 派遣元 (上記以外で派遣元を含む)
+  if (n.indexOf('派遣元') >= 0) return 'genmoto';
+  // 4. 派遣先 基本情報
   if (n === 'Title' || n.indexOf('派遣先会社') >= 0 || n.indexOf('派遣先名') >= 0 || n.indexOf('派遣先') >= 0 || n.indexOf('組織') >= 0 || n.indexOf('部課') >= 0 || n.indexOf('業種') >= 0) return 'haken_basic';
-  // 所在地
+  // 5. 所在地
   if (n.indexOf('住所') >= 0 || n.indexOf('郵便') >= 0 || n.indexOf('所在') >= 0) return 'address';
-  // 派遣期間
+  // 6. 派遣期間
   if (n.indexOf('期間') >= 0 || n.indexOf('開始') >= 0 || n.indexOf('終わり') >= 0 || n.indexOf('終了') >= 0 || n.indexOf('始まり') >= 0) return 'period';
-  // 契約・人員
+  // 7. 契約・人員
   if (n.indexOf('人数') >= 0 || n.indexOf('単価') >= 0 || n.indexOf('契約') >= 0 || n.indexOf('業務') >= 0 || n.indexOf('職種') >= 0 || n.indexOf('勤務') >= 0 || n.indexOf('責任の程度') >= 0) return 'contract';
-  // 連絡先 (一般、責任者外)
+  // 8. 連絡先 (一般、責任者外)
   if (n.indexOf('電話') >= 0 || n.indexOf('TEL') >= 0 || n.indexOf('メール') >= 0 || n.indexOf('Mail') >= 0 || n.indexOf('FAX') >= 0 || n.indexOf('連絡') >= 0) return 'contact';
-  // その他
+  // 9. その他
   return 'other';
 }
 
