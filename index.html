@@ -10231,6 +10231,27 @@ async function loadSoumuDashboard() {
     _soumuSeisanCount = results[2] || 0;
     _soumuSankyuSummary = results[3] || { active: 0, upcoming: 0, overdue: 0 };
     var shahoInResult = results[4] || { count: 0, items: [] };
+    // 社員データの「総務-社保」が「→申請中」の社員は、加入カードからは除外 (重複カウント防止)
+    if (_soumuAllEmps && _soumuKeyMap && _soumuKeyMap['soumuShaho'] && _soumuShahoInFields && _soumuShahoInFields.bango && F.syainNo) {
+      var odShaho = _soumuKeyMap['soumuShaho'];
+      var bangoKey = _soumuShahoInFields.bango;
+      var shinseiBangoSet = {};
+      _soumuAllEmps.forEach(function(e) {
+        if (String(e[odShaho] || '') === '→申請中') {
+          var bn = String(e[F.syainNo] || '').trim();
+          if (bn) shinseiBangoSet[bn] = true;
+        }
+      });
+      var before = shahoInResult.items.length;
+      shahoInResult.items = shahoInResult.items.filter(function(it) {
+        var bn = String(it[bangoKey] || '').trim();
+        return !shinseiBangoSet[bn];
+      });
+      shahoInResult.count = shahoInResult.items.length;
+      if (before !== shahoInResult.count) {
+        console.log('[社保加入] 申請中除外:', (before - shahoInResult.count), '件 →', shahoInResult.count, '名');
+      }
+    }
     _soumuShahoInCount = shahoInResult.count;
     _soumuShahoInItems = shahoInResult.items;
     renderSoumuDashboard();
