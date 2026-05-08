@@ -22630,7 +22630,16 @@ function renderMikanyuuList() {
     return _MIKANYUU_EXCLUDED_NAMES.some(function(x){ return n === String(x).replace(/[\s　]+/g, ''); });
   }
 
-  // 在職判定 + 雇用or社保が「✓取得完了」or「不要」でない + 除外対象でない
+  // 「未加入」と判定する関数: ✓取得完了/不要/移動 のいずれでもない値
+  function _mikanyuuStatusIsMi(val) {
+    var v = String(val || '');
+    if (v === '✓取得完了') return false;
+    if (v === '不要') return false;
+    if (v.indexOf('移動') >= 0) return false; // 移動 / →移動 / ✓移動 等
+    return true;
+  }
+
+  // 在職判定 + 雇用or社保が「未加入」 + 除外対象でない
   const filteredList = _soumuAllEmps.filter(function(emp) {
     if (!emp.Title) return false;
     if (_mikanyuuExcludedName(emp.Title)) return false;
@@ -22640,8 +22649,8 @@ function renderMikanyuuList() {
     if (_mikanyuuExcludedHaken(hk)) return false;
     const koyouVal = odKoyou ? String(emp[odKoyou] || '') : '';
     const shahoVal = odShaho ? String(emp[odShaho] || '') : '';
-    const koyouMi = (koyouVal !== '✓取得完了' && koyouVal !== '不要');
-    const shahoMi = (shahoVal !== '✓取得完了' && shahoVal !== '不要');
+    const koyouMi = _mikanyuuStatusIsMi(koyouVal);
+    const shahoMi = _mikanyuuStatusIsMi(shahoVal);
     return koyouMi || shahoMi;
   });
 
@@ -22661,13 +22670,13 @@ function renderMikanyuuList() {
     }
   });
 
-  // 集計 (両方未加入 / 雇用のみ / 社保のみ)
+  // 集計 (両方未加入 / 雇用のみ / 社保のみ) — フィルタと同じ判定
   let bothCount = 0, koyouOnlyCount = 0, shahoOnlyCount = 0;
   filteredList.forEach(function(emp) {
     const koyouVal = odKoyou ? String(emp[odKoyou] || '') : '';
     const shahoVal = odShaho ? String(emp[odShaho] || '') : '';
-    const koyouMi = (koyouVal !== '✓取得完了' && koyouVal !== '不要');
-    const shahoMi = (shahoVal !== '✓取得完了' && shahoVal !== '不要');
+    const koyouMi = _mikanyuuStatusIsMi(koyouVal);
+    const shahoMi = _mikanyuuStatusIsMi(shahoVal);
     if (koyouMi && shahoMi) bothCount++;
     else if (koyouMi) koyouOnlyCount++;
     else if (shahoMi) shahoOnlyCount++;
@@ -22707,8 +22716,8 @@ function renderMikanyuuList() {
     const shahoVal = odShaho ? String(emp[odShaho] || '') : '';
     const koyouOk = (koyouVal === '✓取得完了');
     const shahoOk = (shahoVal === '✓取得完了');
-    const koyouMi = (koyouVal !== '✓取得完了' && koyouVal !== '不要');
-    const shahoMi = (shahoVal !== '✓取得完了' && shahoVal !== '不要');
+    const koyouMi = _mikanyuuStatusIsMi(koyouVal);
+    const shahoMi = _mikanyuuStatusIsMi(shahoVal);
 
     // 入社からの日数
     let daysAgo = '';
