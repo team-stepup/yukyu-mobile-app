@@ -6827,7 +6827,16 @@ function calcLeaveOverdraftList(allEmps, allLeaveRecords) {
         remainPerGrant[gi] -= take;
         toConsume -= take;
       }
-      if (toConsume > 0) overflow += toConsume;
+      if (toConsume > 0) {
+      // 「何らかの付与の有効期間内」の消費だけ overflow に計上する。
+      // 入社前/期算定日前の古いレコードや、制度がカバーしない期間外の記録は誤検知になるので無視。
+      var withinAnyGrant = false;
+      for (var gix = 0; gix < sortedGrants.length; gix++) {
+        var gx = sortedGrants[gix];
+        if (d >= gx.grantDate && d < gx.expiryDate) { withinAnyGrant = true; break; }
+      }
+      if (withinAnyGrant) overflow += toConsume;
+    }
     }
 
     // 今日時点で有効な付与の残合計
@@ -19793,7 +19802,16 @@ function calcCurrentOverdraft() {
       remainPerGrant[i] -= take;
       toConsume -= take;
     }
-    if (toConsume > 0) overflow += toConsume;
+    if (toConsume > 0) {
+      // 「何らかの付与の有効期間内」の消費だけ overflow に計上する。
+      // 入社前/期算定日前の古いレコードや、制度がカバーしない期間外の記録は誤検知になるので無視。
+      var withinAnyGrant = false;
+      for (var gix = 0; gix < sortedGrants.length; gix++) {
+        var gx = sortedGrants[gix];
+        if (d >= gx.grantDate && d < gx.expiryDate) { withinAnyGrant = true; break; }
+      }
+      if (withinAnyGrant) overflow += toConsume;
+    }
   }
   return overflow;
 }
