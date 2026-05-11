@@ -20135,6 +20135,21 @@ function updateCalcSummary() {
   }
 }
 
+// 有給申請関連の注意喚起モーダル（toastより目立つ、確実に気づかせるため）。
+// messageHtml は呼び出し側で組み立てる（社員名等の外部入力は escHtml で必ずエスケープすること）。
+function showLeaveAlertPopup(title, messageHtml) {
+  var overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.innerHTML = '<div class="confirm-box">' +
+    '<div class="confirm-title" style="color:#c62828;">⚠️ ' + escHtml(title) + '</div>' +
+    '<div class="confirm-msg">' + messageHtml + '</div>' +
+    '<div class="confirm-btns">' +
+      '<button class="btn-ok" onclick="this.closest(\'.confirm-overlay\').remove()">OK</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+}
+
 // ============================================================
 // Submit Leave Application
 // ============================================================
@@ -20191,17 +20206,24 @@ async function submitLeaveApplication() {
   const totalDaysNeeded = selectedDates.length * daysPerDate;
 
   if (totalRemain < 0) {
-    showToast('有給残がマイナス（' + totalRemain + '日）です。申請できません', 'error');
+    showLeaveAlertPopup('申請できません',
+      '現時点で有給残が <strong style="color:#c62828;">' + totalRemain + '日</strong>（マイナス）です。<br>' +
+      '総務までご確認ください。');
     return;
   }
   if (totalDaysNeeded > totalRemain) {
-    showToast('残日数が不足しています', 'error');
+    const afterRemain = totalRemain - totalDaysNeeded;
+    showLeaveAlertPopup('申請できません',
+      '申請すると有給残が <strong style="color:#c62828;">' + afterRemain + '日</strong> になり、マイナスになります。<br><br>' +
+      '現在の残: ' + totalRemain + '日<br>' +
+      '申請日数: ' + totalDaysNeeded + '日');
     return;
   }
 
   showSpinner();
   let successCount = 0;
   let errorCount = 0;
+  const createdIds = []; // ロールバック用: POST成功した Item ID を保持
 
   // leaveTypeDetail を leaveType から導出（半日記録を確実に0.5日とカウントするため）
   let leaveTypeDetail = '';
@@ -20225,7 +20247,8 @@ async function submitLeaveApplication() {
         [F.category]: category,
       };
 
-      await spPost(LIST_LEAVE_GUID, body);
+      const result = await spPost(LIST_LEAVE_GUID, body);
+      if (result && result.d && result.d.Id) createdIds.push(result.d.Id);
       successCount++;
     } catch (e) {
       console.error('Submit error for ' + dateStr, e);
@@ -20234,6 +20257,33 @@ async function submitLeaveApplication() {
   }
 
   hideSpinner();
+
+  // 事後検証: 申請後に残がマイナスなら全件ロールバック（並列申請などで事前チェックを抜けたケースの安全網）
+  if (createdIds.length > 0) {
+    const finalRemain = totalRemain - successCount * daysPerDate;
+    if (finalRemain < 0) {
+      showSpinner();
+      let rolledBack = 0, rollbackFailed = 0;
+      for (const id of createdIds) {
+        try { await spDelete(id); rolledBack++; }
+        catch (e) { console.error('Rollback failed for id=' + id, e); rollbackFailed++; }
+      }
+      hideSpinner();
+      let msg = '申請後の有給残が <strong style="color:#c62828;">' + finalRemain + '日</strong>（マイナス）になるため、<br>' +
+        '今回の申請 <strong>' + rolledBack + '件</strong> をすべて取り消しました。<br><br>' +
+        '総務までご確認ください。';
+      if (rollbackFailed > 0) {
+        msg += '<br><br><span style="color:#c62828;">⚠ ' + rollbackFailed + '件の取り消しに失敗しました。総務に連絡してください。</span>';
+      }
+      showLeaveAlertPopup('申請を取り消しました', msg);
+      selectedDates = [];
+      showSpinner();
+      try { await loadLeaveDetails(); } catch (e) { /* ignore */ }
+      hideSpinner();
+      switchScreen('detailScreen');
+      return;
+    }
+  }
 
   if (errorCount === 0) {
     showToast(successCount + '件の申請が完了しました', 'success');
