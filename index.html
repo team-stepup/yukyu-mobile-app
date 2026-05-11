@@ -4744,6 +4744,7 @@ select.sankyu-edit-input {
         <span class="ql-icon">📅</span>
         <span class="ql-text">有給確認</span>
         <span id="yukyuBadgeCount" class="ql-badge" style="background:#1565c0;display:none;"></span>
+        <span id="yukyuBadgeMinus" class="ql-badge" style="background:#c62828;display:none;top:4px;left:4px;right:auto;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('nyutaiScreen')" style="position:relative;">
         <span class="ql-icon">🚪</span>
@@ -5288,6 +5289,7 @@ select.sankyu-edit-input {
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:4px 8px;"><span id="yukyuListCount" style="font-size:13px;color:var(--text-light);"></span><button class="refresh-btn" onclick="loadYukyuList()">&#x21bb; 更新</button></div>
+    <div id="yukyuOverdraftSection" style="margin:0 8px;"></div>
     <div id="yukyuListBody"></div>
   </div>
 
@@ -6768,6 +6770,82 @@ function applyUsageFIFO(grants, leaveRecords) {
   }
 
   return sortedGrants;
+}
+
+// ============================================================
+// 全社員の有給残マイナス判定（過剰使用の検出）
+// ============================================================
+// 「有給残がマイナスの社員」を返す。
+//   allEmps: 社員レコード配列
+//   allLeaveRecords: 有給申請レコード配列（全件 or 必要十分な範囲）
+// 戻り値: [{ emp, netRemain, overflow }]  (netRemain < 0 のみ、マイナスが大きい順)
+function calcLeaveOverdraftList(allEmps, allLeaveRecords) {
+  if (!Array.isArray(allEmps) || !Array.isArray(allLeaveRecords)) return [];
+
+  // 社員番号 → レコード配列
+  var recByEmp = {};
+  for (var i = 0; i < allLeaveRecords.length; i++) {
+    var r = allLeaveRecords[i];
+    var k = String(r[F.syainNo] || '').trim();
+    if (!k) continue;
+    (recByEmp[k] = recByEmp[k] || []).push(r);
+  }
+
+  var today = new Date();
+  var result = [];
+
+  for (var j = 0; j < allEmps.length; j++) {
+    var emp = allEmps[j];
+    if (isResigned(emp)) continue; // 退社済みはスキップ
+    var kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
+    if (!kisanDate) continue;
+    var retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+
+    var grants;
+    try { grants = calculateGrants(kisanDate, retireDate); } catch (e) { continue; }
+    if (!grants || grants.length === 0) continue;
+
+    var sortedGrants = grants.slice().sort(function(a, b) { return a.grantDate - b.grantDate; });
+    var empKey = String(emp[F.syainNo] || '').trim();
+    var myRecs = (recByEmp[empKey] || []).slice().sort(function(a, b) {
+      return new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]);
+    });
+
+    // FIFOで消費（残量はクランプ、消化しきれなかった分は overflow に積む）
+    var remainPerGrant = sortedGrants.map(function(g) { return g.grantedDays; });
+    var overflow = 0;
+    for (var ri = 0; ri < myRecs.length; ri++) {
+      var rec = myRecs[ri];
+      var d = new Date(rec[F.leaveDate]);
+      var toConsume = getRecordDays(rec);
+      for (var gi = 0; gi < sortedGrants.length && toConsume > 0; gi++) {
+        var grant = sortedGrants[gi];
+        if (d < grant.grantDate) continue;
+        if (d >= grant.expiryDate) continue;
+        if (remainPerGrant[gi] <= 0) continue;
+        var take = Math.min(remainPerGrant[gi], toConsume);
+        remainPerGrant[gi] -= take;
+        toConsume -= take;
+      }
+      if (toConsume > 0) overflow += toConsume;
+    }
+
+    // 今日時点で有効な付与の残合計
+    var activeRemain = 0;
+    for (var gi2 = 0; gi2 < sortedGrants.length; gi2++) {
+      if (sortedGrants[gi2].expiryDate < today) continue;
+      activeRemain += remainPerGrant[gi2];
+    }
+
+    var netRemain = activeRemain - overflow;
+    if (netRemain < 0) {
+      result.push({ emp: emp, netRemain: netRemain, overflow: overflow });
+    }
+  }
+
+  // マイナスが大きい順
+  result.sort(function(a, b) { return a.netRemain - b.netRemain; });
+  return result;
 }
 
 function getRecordDays(record) {
@@ -8271,7 +8349,10 @@ async function loadHomeBadges() {
   var mFilter = "$filter=" + MF.payDate + " ge datetime'" + friStart.toISOString() + "' and " + MF.payDate + " le datetime'" + friEnd.toISOString() + "'&$top=500";
   var yFilter = "$filter=" + F.leaveDate + " ge datetime'" + monthStart.toISOString() + "' and " + F.leaveDate + " le datetime'" + todayEnd.toISOString() + "'&$top=500";
 
-  // 6つのAPI呼び出しを同時実行
+  // 有給残マイナス判定用に有給レコードを全件取得（社番＋日付＋区分のみで軽量化）
+  var leaveAllSelect = '$top=5000&$select=Id,Title,' + [F.syainNo, F.leaveDate, F.leaveType, F.leaveTypeDetail].join(',');
+
+  // 7つのAPI呼び出しを同時実行
   var results = await Promise.allSettled([
     spGet(LIST_MAEBARI_GUID, mFilter).catch(function(e) { console.log('Maebari badge error:', e); return []; }),
     spGetAll(LIST_EMPLOYEES_GUID, '$top=500').catch(function(e) { console.log('Employee fetch error:', e); return []; }),
@@ -8279,7 +8360,8 @@ async function loadHomeBadges() {
     fetchEmployeeFields().catch(function(e) { console.log('Fields fetch error:', e); return []; }),
     loadVehicleBadgeData().catch(function(e) { console.log('Vehicle badge error:', e); return null; }),
     fetchSankyuSummary().catch(function(e) { console.log('Sankyu badge error:', e); return null; }),
-    fetchHakensakiBadgeData().catch(function(e) { console.log('Hakensaki badge error:', e); return null; })
+    fetchHakensakiBadgeData().catch(function(e) { console.log('Hakensaki badge error:', e); return null; }),
+    spGetAll(LIST_LEAVE_GUID, leaveAllSelect).catch(function(e) { console.log('Yukyu all fetch error:', e); return []; })
   ]);
 
   var mRecs = results[0].value || [];
@@ -8289,6 +8371,7 @@ async function loadHomeBadges() {
   var vehicleResult = results[4].value;
   var sankyuResult = results[5].value;
   var hakenBadgeResult = results[6].value;
+  var leaveAll = results[7].value || [];
 
   // 前払いバッジ（件数）
   var mBadge = document.getElementById('maebariBadgeCount');
@@ -8336,6 +8419,21 @@ async function loadHomeBadges() {
     if (yRecs.length > 0) { yBadge.textContent = yRecs.length; yBadge.style.display = 'inline-block'; }
     else { yBadge.style.display = 'none'; }
   }
+
+  // 有給残マイナス者バッジ（過剰使用者数）
+  try {
+    var overdrafts = calcLeaveOverdraftList(allEmps, leaveAll || []);
+    window._overdraftEmployees = overdrafts;
+    var yMinusBadge = document.getElementById('yukyuBadgeMinus');
+    if (yMinusBadge) {
+      if (overdrafts.length > 0) {
+        yMinusBadge.textContent = '-' + overdrafts.length;
+        yMinusBadge.style.display = 'inline-block';
+      } else {
+        yMinusBadge.style.display = 'none';
+      }
+    }
+  } catch (e) { console.warn('[overdraft] badge calc error', e); }
 
   // 期限注意バッジ
   var keyMap = meta && Object.keys(meta).length > 0 ? buildFieldKeyMap(meta) : {};
@@ -19377,7 +19475,49 @@ function initYukyuListDate() {
   }
   onDateInputChange('yukyuListDateFrom', 'yukyuFromDisplay');
   onDateInputChange('yukyuListDateTo', 'yukyuToDisplay');
+  renderYukyuOverdraftSection();
   loadYukyuList();
+}
+
+// 有給確認画面の上部に「残マイナス者一覧」を描画
+// window._overdraftEmployees はホームの loadHomeBadges でセット済み
+function renderYukyuOverdraftSection() {
+  const sec = document.getElementById('yukyuOverdraftSection');
+  if (!sec) return;
+  const list = window._overdraftEmployees || [];
+  if (list.length === 0) {
+    sec.style.display = 'none';
+    sec.innerHTML = '';
+    return;
+  }
+  let rows = '';
+  list.forEach((o, idx) => {
+    const haken = getHakensaki(o.emp) || '-';
+    const shimei = o.emp.Title || '';
+    const remainStr = (Math.round(o.netRemain * 10) / 10) + '日';
+    rows += '<tr style="cursor:pointer;" onclick="openOverdraftEmployee(' + idx + ')">'
+      + '<td>' + escHtml(haken) + '</td>'
+      + '<td>' + (o.emp[F.syainNo] || '') + '</td>'
+      + '<td>' + escHtml(shimei) + '</td>'
+      + '<td style="text-align:right;color:#c62828;font-weight:700;">' + remainStr + '</td>'
+      + '</tr>';
+  });
+  sec.innerHTML =
+    '<div class="card" style="border-left:4px solid #c62828;padding:10px;margin:8px 0;">'
+    + '<div style="font-weight:700;color:#c62828;margin-bottom:6px;">⚠ 有給残がマイナスの社員（' + list.length + '人）</div>'
+    + '<table class="list-table"><thead><tr><th>派遣先</th><th>社番</th><th>氏名</th><th style="text-align:right;">残</th></tr></thead><tbody>'
+    + rows
+    + '</tbody></table>'
+    + '</div>';
+  sec.style.display = 'block';
+}
+
+// マイナス一覧の行をタップ → 該当社員の詳細画面を開く
+function openOverdraftEmployee(idx) {
+  const list = window._overdraftEmployees || [];
+  const o = list[idx];
+  if (!o || !o.emp) return;
+  selectEmployee(o.emp);
 }
 
 async function loadYukyuList() {
@@ -19629,6 +19769,35 @@ async function openApplyScreen() {
   switchScreen('applyScreen');
 }
 
+// 現在開いている社員の有給「過剰使用日数」を計算（applyUsageFIFO の Math.max(0,…) で
+// 切り捨てられている消化しきれなかった日数を、別途FIFOで積み上げて返す）。
+// 真の残 = (clamped totalRemain) - calcCurrentOverdraft()
+function calcCurrentOverdraft() {
+  if (!Array.isArray(currentGrantData) || currentGrantData.length === 0) return 0;
+  if (!Array.isArray(appliedDatesCache) || appliedDatesCache.length === 0) return 0;
+  const sortedGrants = currentGrantData.slice().sort((a, b) => a.grantDate - b.grantDate);
+  const remainPerGrant = sortedGrants.map(g => g.grantedDays);
+  const sortedRecs = appliedDatesCache.slice().sort((a, b) =>
+    new Date(a[F.leaveDate]) - new Date(b[F.leaveDate])
+  );
+  let overflow = 0;
+  for (const rec of sortedRecs) {
+    const d = new Date(rec[F.leaveDate]);
+    let toConsume = getRecordDays(rec);
+    for (let i = 0; i < sortedGrants.length && toConsume > 0; i++) {
+      const g = sortedGrants[i];
+      if (d < g.grantDate) continue;
+      if (d >= g.expiryDate) continue;
+      if (remainPerGrant[i] <= 0) continue;
+      const take = Math.min(remainPerGrant[i], toConsume);
+      remainPerGrant[i] -= take;
+      toConsume -= take;
+    }
+    if (toConsume > 0) overflow += toConsume;
+  }
+  return overflow;
+}
+
 function renderApplyScreen() {
   const emp = currentEmployee;
   if (!emp) {
@@ -19639,6 +19808,8 @@ function renderApplyScreen() {
   const activeGrants = (currentGrantData || []).filter(g => !g.expired);
   let totalRemain = 0;
   activeGrants.forEach(g => totalRemain += g.remainingDays);
+  // 過剰使用（消化しきれなかった有給日数）を差し引いて、真の残を出す（マイナスも有り得る）
+  totalRemain -= calcCurrentOverdraft();
 
   const fullDayHours = emp[F.fullDayHours] || 8;
   const amHours = emp[F.amHours] || 4;
@@ -19646,12 +19817,18 @@ function renderApplyScreen() {
 
   const hakensaki = getHakensaki(emp);
 
+  const isOverdraft = totalRemain < 0;
+
   document.getElementById('applyContent').innerHTML = `
     <div class="detail-header">
       <div class="name">${escHtml(emp.Title || '')}</div>
       <div class="sub">${hakensaki ? '派遣先: ' + escHtml(hakensaki) + ' | ' : ''}残日数: ${totalRemain}日</div>
     </div>
 
+    ${isOverdraft ? `
+    <div class="warning-msg show" style="background:#fee;color:#c62828;font-weight:700;border:1px solid #c62828;padding:10px 12px;border-radius:6px;margin:8px;">
+      ⚠ 有給残がマイナス（${totalRemain}日）です。総務までご確認ください。新規申請はできません。
+    </div>` : ''}
     <div class="warning-msg" id="balanceWarning">残日数が不足しています。申請できません。</div>
 
     <div class="card">
@@ -19696,7 +19873,7 @@ function renderApplyScreen() {
       </div>
     </div>
 
-    <button class="btn btn-success btn-block btn-lg" id="submitBtn" onclick="submitLeaveApplication()" ${totalRemain <= 0 ? 'disabled' : ''}>
+    <button class="btn btn-success btn-block btn-lg" id="submitBtn" onclick="submitLeaveApplication()" ${(isOverdraft || totalRemain <= 0) ? 'disabled' : ''}>
       申請する
     </button>
   `;
@@ -19849,6 +20026,8 @@ function updateCalcSummary() {
   const activeGrants = (currentGrantData || []).filter(g => !g.expired);
   let totalRemain = 0;
   activeGrants.forEach(g => totalRemain += g.remainingDays);
+  // 過剰使用（消化しきれなかった有給日数）を差し引いて、真の残を出す（マイナスも有り得る）
+  totalRemain -= calcCurrentOverdraft();
   const afterRemain = totalRemain - totalDays;
 
   document.getElementById('calcDays').textContent = totalDays + '日';
@@ -19918,10 +20097,16 @@ async function submitLeaveApplication() {
   const activeGrants = (currentGrantData || []).filter(g => !g.expired);
   let totalRemain = 0;
   activeGrants.forEach(g => totalRemain += g.remainingDays);
+  // 過剰使用（消化しきれなかった有給日数）を差し引いて、真の残を出す（マイナスも有り得る）
+  totalRemain -= calcCurrentOverdraft();
   let daysPerDate = 1;
   if (leaveType.indexOf('半日') >= 0) daysPerDate = 0.5;
   const totalDaysNeeded = selectedDates.length * daysPerDate;
 
+  if (totalRemain < 0) {
+    showToast('有給残がマイナス（' + totalRemain + '日）です。申請できません', 'error');
+    return;
+  }
   if (totalDaysNeeded > totalRemain) {
     showToast('残日数が不足しています', 'error');
     return;
