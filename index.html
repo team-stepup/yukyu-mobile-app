@@ -19558,7 +19558,7 @@ function initYukyuListDate() {
   loadYukyuList();
 }
 
-// 有給確認画面の上部に「残マイナス者一覧」を描画
+// 有給確認画面の上部に「残マイナス者一覧」を描画（カード型）
 // window._overdraftEmployees はホームの loadHomeBadges でセット済み
 function renderYukyuOverdraftSection() {
   const sec = document.getElementById('yukyuOverdraftSection');
@@ -19569,25 +19569,41 @@ function renderYukyuOverdraftSection() {
     sec.innerHTML = '';
     return;
   }
-  let rows = '';
+  let cards = '';
   list.forEach((o, idx) => {
     const haken = getHakensaki(o.emp) || '-';
     const shimei = o.emp.Title || '';
-    const remainStr = (Math.round(o.netRemain * 10) / 10) + '日';
-    rows += '<tr style="cursor:pointer;" onclick="openOverdraftEmployee(' + idx + ')">'
-      + '<td>' + escHtml(haken) + '</td>'
-      + '<td>' + (o.emp[F.syainNo] || '') + '</td>'
-      + '<td>' + escHtml(shimei) + '</td>'
-      + '<td style="text-align:right;color:#c62828;font-weight:700;">' + remainStr + '</td>'
-      + '</tr>';
+    const syainNo = String(o.emp[F.syainNo] || '');
+    const remainNum = Math.round(o.netRemain * 10) / 10;
+    cards +=
+      '<div onclick="openOverdraftEmployee(' + idx + ')" ' +
+        'style="background:#fff;border:1px solid #fee2e2;border-radius:10px;padding:10px 12px;margin-top:8px;cursor:pointer;display:flex;align-items:center;gap:10px;' +
+        'box-shadow:0 1px 3px rgba(0,0,0,0.04);-webkit-tap-highlight-color:transparent;">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:11px;color:#888;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+            escHtml(haken) + '<span style="color:#ccc;margin:0 6px;">·</span>' + escHtml(syainNo) +
+          '</div>' +
+          '<div style="font-weight:700;font-size:14px;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+            escHtml(shimei) +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;background:#fef2f2;border-radius:8px;padding:4px 10px;min-width:56px;">' +
+          '<span style="font-size:9px;color:#991b1b;font-weight:600;line-height:1;margin-bottom:2px;letter-spacing:1px;">残</span>' +
+          '<span style="font-weight:800;font-size:16px;color:#c62828;line-height:1.1;">' + remainNum + '<span style="font-size:10px;margin-left:1px;">日</span></span>' +
+        '</div>' +
+        '<span style="color:#c62828;font-size:20px;font-weight:300;flex-shrink:0;line-height:1;">›</span>' +
+      '</div>';
   });
+
   sec.innerHTML =
-    '<div class="card" style="border-left:4px solid #c62828;padding:10px;margin:8px 0;">'
-    + '<div style="font-weight:700;color:#c62828;margin-bottom:6px;">⚠ 有給残がマイナスの社員（' + list.length + '人）</div>'
-    + '<table class="list-table"><thead><tr><th>派遣先</th><th>社番</th><th>氏名</th><th style="text-align:right;">残</th></tr></thead><tbody>'
-    + rows
-    + '</tbody></table>'
-    + '</div>';
+    '<div style="background:linear-gradient(135deg, #fff5f5 0%, #fef0f0 100%);border:1px solid #fecaca;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 2px 8px rgba(198,40,40,0.08);">' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:18px;line-height:1;">⚠️</span>' +
+        '<span style="font-weight:700;color:#991b1b;font-size:14px;flex:1;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">有給残マイナス</span>' +
+        '<span style="background:#c62828;color:#fff;font-weight:700;font-size:11px;padding:3px 10px;border-radius:999px;letter-spacing:0.3px;flex-shrink:0;">' + list.length + '人</span>' +
+      '</div>' +
+      cards +
+    '</div>';
   sec.style.display = 'block';
 }
 
