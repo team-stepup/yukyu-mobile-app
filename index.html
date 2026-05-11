@@ -2303,6 +2303,19 @@ select.sankyu-edit-input {
   padding: 4px;
   flex-shrink: 0;
 }
+.header-logout-sm.is-loggedout {
+  background: #c62828;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  animation: authPulse 1.6s ease-in-out infinite;
+}
+@keyframes authPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(198, 40, 40, 0); }
+}
 
 /* FAB Button (画面右上に固定: ヘッダー(56px)の直下)
    body は max-width:500px で中央寄せのため、PC でも
@@ -5719,9 +5732,43 @@ setTimeout(checkForUpdate, 3000);
 setInterval(checkForUpdate, 3 * 60 * 1000);
 
 // ============================================================
+// 認証状態インジケーター / セッション切れリカバリー
+// ============================================================
+// ヘッダーの authBtn の見た目を「ログイン中」/「未ログイン」で切替える。
+// 未ログイン時は赤背景＋脈動アニメで視認性を上げる（iOS A2HS で気づきにくい問題対策）。
+function updateAuthIndicator(isLoggedIn) {
+  var btn = document.getElementById('authBtn');
+  if (!btn) return;
+  if (isLoggedIn) {
+    btn.textContent = 'logout';
+    btn.classList.remove('is-loggedout');
+    btn.title = 'ログイン中';
+  } else {
+    btn.textContent = '⚠ 未ログイン';
+    btn.classList.add('is-loggedout');
+    btn.title = 'タップしてログインしてください';
+  }
+}
+
+// API 呼び出しでトークン取得不能になった時の共通リカバリー処理。
+// loginScreen に戻し、視認性高いトーストを出す。短時間の連発を抑制する。
+function handleSessionLost() {
+  if (window._sessionLostHandled) return;
+  window._sessionLostHandled = true;
+  setTimeout(function() { window._sessionLostHandled = false; }, 5000);
+
+  accessToken = null;
+  updateAuthIndicator(false);
+  try { showToast('セッションが切れました。再ログインしてください', 'error'); } catch(e) {}
+  try { switchScreen('loginScreen'); } catch(e) {}
+}
+
+// ============================================================
 // Initialize MSAL
 // ============================================================
 function initMsal() {
+  // 起動時はデフォルト「未ログイン」見た目に。ログイン完了したら updateAuthIndicator(true) で上書きされる。
+  updateAuthIndicator(false);
   try {
     msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
     msalInstance.initialize().then(() => {
@@ -5729,12 +5776,26 @@ function initMsal() {
         if (resp) { onLoginSuccess(resp); }
         else {
           const accounts = msalInstance.getAllAccounts();
-          if (accounts.length > 0) { acquireToken().then(() => { populateHakenDropdown(); applyAdminVisibility(); }); }
+          if (accounts.length > 0) {
+            acquireToken().then(token => {
+              if (token) { populateHakenDropdown(); applyAdminVisibility(); }
+              // token === null の場合は acquireToken 内の acquireTokenRedirect が走るが、
+              // A2HS で外部Safari に飛んで戻らないことがあるので見た目を未ログインに保つ。
+              else { updateAuthIndicator(false); }
+            });
+          } else {
+            // アカウント自体無し → 未ログイン表示で待ち
+            updateAuthIndicator(false);
+          }
         }
-      }).catch(err => console.error('Redirect error:', err));
+      }).catch(err => {
+        console.error('Redirect error:', err);
+        updateAuthIndicator(false);
+      });
     });
   } catch (e) {
     console.error('MSAL init error:', e);
+    updateAuthIndicator(false);
   }
 }
 
@@ -5743,7 +5804,7 @@ async function handleAuth() {
     msalInstance.logoutRedirect();
     accessToken = null;
     currentEmployee = null;
-    document.getElementById('authBtn').textContent = 'login';
+    updateAuthIndicator(false);
     showScreen('loginScreen');
     return;
   }
@@ -5775,7 +5836,7 @@ async function onLoginSuccess(resp) {
     try { if (msalInstance) msalInstance.logoutRedirect(); } catch(e) {}
     return;
   }
-  document.getElementById('authBtn').textContent = 'logout';
+  updateAuthIndicator(true);
   switchScreen('searchScreen');
   showToast('ログインしました', 'success');
   populateHakenDropdown();
@@ -5801,7 +5862,7 @@ async function acquireToken() {
       return null;
     }
     accessToken = resp.accessToken;
-    document.getElementById('authBtn').textContent = 'logout';
+    updateAuthIndicator(true);
     switchScreen('searchScreen');
     loadHomeBadges();
     loadSharedConfig();
@@ -5825,7 +5886,11 @@ async function acquireToken() {
 
 async function getToken() {
   if (accessToken) return accessToken;
-  return await acquireToken();
+  const token = await acquireToken();
+  // トークン取得不能 = セッション切れ。ログイン画面に戻して再ログインを促す。
+  // (iOS A2HS で acquireTokenRedirect が外部Safari に飛んで戻ってこないケース対策)
+  if (!token) handleSessionLost();
+  return token;
 }
 
 // ============================================================
@@ -32725,7 +32790,7 @@ if (PREVIEW_MODE) {
 
     // 自動ログイン（検索画面へ）
     setTimeout(function() {
-      document.getElementById('authBtn').textContent = 'logout';
+      updateAuthIndicator(true);
       // hakenSelectにダミーデータを設定
       var sel = document.getElementById('hakenSelect');
       if (sel) {
