@@ -21102,66 +21102,59 @@ function copyDetailToClipboard() {
   if (!emp || !currentGrantData) return;
 
   const hakensaki = getHakensaki(emp);
-  const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
   const grants = currentGrantData;
-  const latestG = grants[grants.length - 1];
-  const dispRemain = latestG ? latestG._displayRemain : 0;
-  const dispCarry = latestG ? latestG._displayCarryover : 0;
-  const dispGranted = latestG ? latestG.grantedDays : 0;
+  // 「現在の付与」を取得（isCurrentPeriod=true、なければ最新）
+  const currentG = grants.find(g => g.isCurrentPeriod) || grants[grants.length - 1];
+  if (!currentG) {
+    showToast('付与情報がありません', 'error');
+    return;
+  }
+
+  // 期間: 付与日 ～ 付与日+12ヶ月-1日
+  const periodStart = currentG.grantDate;
+  const periodEnd = new Date(currentG.grantDate);
+  periodEnd.setMonth(periodEnd.getMonth() + 12);
+  periodEnd.setDate(periodEnd.getDate() - 1);
+
+  // 今期の取得レコード（古い順）
+  const records = (appliedDatesCache || []).filter(r => {
+    const d = new Date(r[F.leaveDate]);
+    return d >= periodStart && d <= periodEnd;
+  }).sort((a, b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
+
+  let usedTotal = 0;
+  records.forEach(r => { usedTotal += getRecordDays(r); });
+
+  const granted = currentG.grantedDays || 0;
+  const carryover = currentG._displayCarryover || 0;
+  const remain = currentG._displayRemain != null ? currentG._displayRemain : 0;
+
+  function fmtDay(n) { return (n % 1 === 0) ? n + '日' : n.toFixed(1) + '日'; }
 
   let text = '【有給休暇明細】\n';
   text += '氏名: ' + (emp.Title || '') + (hakensaki ? '（' + hakensaki + '）' : '') + '\n';
   text += '社員番号: ' + (emp[F.syainNo] || '') + '\n';
-  text += '起算日: ' + formatDate(kisanDate) + '\n';
-  text += '現在: 繰越 ' + dispCarry + '日 + 今期付与 ' + dispGranted + '日 → 合計残 ' + dispRemain + '日\n';
-  text += '─────────────────\n';
+  text += '\n';
+  text += '■ 現在の付与期間: ' + formatDateShort(periodStart) + ' ～ ' + formatDateShort(periodEnd) + '\n';
+  text += '  今期付与:  ' + fmtDay(granted);
+  if (carryover > 0) text += '（前期からの繰越 ' + fmtDay(carryover) + ')';
+  text += '\n';
+  text += '  取得済み:  ' + fmtDay(usedTotal) + '\n';
+  text += '  残日数  :  ' + fmtDay(remain) + '\n';
 
-  const records = appliedDatesCache || [];
-
-  grants.slice().reverse().forEach((g, idx) => {
-    const origIdx = grants.indexOf(g);
-    const grantNum = origIdx + 1;
-    const nextGrant = grants[origIdx + 1];
-    let periodEnd;
-    if (nextGrant) {
-      periodEnd = new Date(nextGrant.grantDate.getTime() - 86400000);
-    } else {
-      const nd = new Date(g.grantDate);
-      nd.setMonth(nd.getMonth() + 12);
-      periodEnd = new Date(nd.getTime() - 86400000);
-    }
-
-    const periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
-    const grantRecords = records.filter(r => {
-      const d = new Date(r[F.leaveDate]);
-      return d >= g.grantDate && d < periodEndFilter;
-    }).sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
-    let periodUsed = 0;
-    grantRecords.forEach(r => { periodUsed += getRecordDays(r); });
-
-    const dCarry = g._displayCarryover || 0;
-    const dExpired = g._displayExpired || 0;
-    const dRemain = g._displayRemain || 0;
-
-    text += '\n■ 付与' + grantNum + '回目' + (g.isCurrentPeriod ? '（現在の付与）' : '') + '（' + formatDateShort(g.grantDate) + ' ～ ' + formatDateShort(periodEnd) + '）\n';
-    text += '  消滅 ' + dExpired + '日 / 繰越 ' + dCarry + '日 / 付与 ' + g.grantedDays + '日 / 使用 ' + periodUsed + '日 / 残 ' + dRemain + '日';
-    text += '  [' + (g.expired ? '消滅済' : '有効') + ']\n';
-
-    if (g._expiredDetails && g._expiredDetails.length > 0) {
-      g._expiredDetails.forEach(function(ed) {
-        text += '  ※ ' + formatDateShort(ed.date) + ' に付与' + ed.grantNum + '回目の未使用 ' + ed.days + '日が時効消滅\n';
-      });
-    }
-
-    if (grantRecords.length > 0) {
-      text += '  取得履歴:\n';
-      grantRecords.forEach(r => {
-        const typeStr = getRecordTypeLabel(r);
-        const dayCount = getRecordDays(r);
-        text += '    ' + formatDate(r[F.leaveDate]) + '  ' + typeStr + '（' + dayCount + '日）\n';
-      });
-    }
-  });
+  if (records.length > 0) {
+    text += '\n■ 今期の取得履歴\n';
+    let cum = 0;
+    records.forEach((r, i) => {
+      cum += getRecordDays(r);
+      const typeStr = getRecordTypeLabel(r);
+      const dayCount = getRecordDays(r);
+      const num = String(i + 1).padStart(2, ' ');
+      text += '  ' + num + '. ' + formatDate(r[F.leaveDate]) + '  ' + typeStr + '（' + fmtDay(dayCount) + '）  累計 ' + fmtDay(cum) + '\n';
+    });
+  } else {
+    text += '\n（今期の取得履歴はありません）\n';
+  }
 
   navigator.clipboard.writeText(text).then(() => {
     showToast('クリップボードにコピーしました', 'success');
