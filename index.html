@@ -29187,26 +29187,69 @@ async function executeSaveVehicleEdit(idx) {
     }
 
     var itemId = item.Id || item.ID;
-    var resp = await fetch(listApi + "/items(" + itemId + ")", {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Accept': 'application/json;odata=verbose',
-        'Content-Type': 'application/json;odata=verbose',
-        // IF-MATCH に古い etag を使うと、保存後 etag が変わって2度目の保存で 412 Precondition Failed になる。
-        // 管理者が1人で編集する前提なので楽観ロックは無効化し常に上書き許可。
-        'IF-MATCH': '*',
-        'X-HTTP-Method': 'MERGE'
-      },
-      body: JSON.stringify(body)
-    });
+
+    async function attemptSave(useEtag) {
+      return await fetch(listApi + "/items(" + itemId + ")", {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Accept': 'application/json;odata=verbose',
+          'Content-Type': 'application/json;odata=verbose',
+          'IF-MATCH': useEtag,
+          'X-HTTP-Method': 'MERGE'
+        },
+        body: JSON.stringify(body)
+      });
+    }
+
+    // 1) まず編集開始時の etag で楽観ロック保存を試みる
+    var currentEtag = (item.__metadata && item.__metadata.etag) ? item.__metadata.etag : '*';
+    var resp = await attemptSave(currentEtag);
+
+    // 2) 412 Precondition Failed = 他のユーザーが先に編集 → 衝突モーダル
+    if (resp.status === 412) {
+      // 最新データを取得して衝突フィールドを抽出
+      var freshResp = await fetch(listApi + "/items(" + itemId + ")", {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+      });
+      var conflicts = [];
+      var freshItem = null;
+      if (freshResp.ok) {
+        var freshData = await freshResp.json();
+        freshItem = freshData.d;
+        editFields.forEach(function(f) {
+          if (!(f.prop in body)) return; // 今回変更を試みたフィールドのみ対象
+          var theirVal = freshItem ? freshItem[f.prop] : null;
+          var ourBaseVal = item[f.prop]; // 編集を開始した時の値
+          var theirStr = theirVal === null || theirVal === undefined ? '' : String(theirVal).substring(0, 10);
+          var ourBaseStr = ourBaseVal === null || ourBaseVal === undefined ? '' : String(ourBaseVal).substring(0, 10);
+          // 「他の人が編集を開始時の値から変更した」フィールドだけ衝突として表示
+          if (f.type === 'date') {
+            if (theirStr !== ourBaseStr) conflicts.push({ label: f.label, ours: body[f.prop], theirs: theirVal });
+          } else {
+            var theirFull = theirVal === null || theirVal === undefined ? '' : String(theirVal);
+            var ourBaseFull = ourBaseVal === null || ourBaseVal === undefined ? '' : String(ourBaseVal);
+            if (theirFull !== ourBaseFull) conflicts.push({ label: f.label, ours: body[f.prop], theirs: theirVal });
+          }
+        });
+      }
+
+      var doOverwrite = await showVehicleConflictDialog(conflicts);
+      if (!doOverwrite) {
+        // 編集フォームはそのまま残し、保存中止
+        throw new Error('保存を中止しました（他のユーザーが先に編集していました）');
+      }
+
+      // ユーザーが「上書きする」を選択 → IF-MATCH:* で強制保存
+      resp = await attemptSave('*');
+    }
 
     if (!resp.ok) {
       var errText = await resp.text();
       throw new Error('更新失敗(' + resp.status + '): ' + errText.substring(0, 200));
     }
 
-    // PATCH レスポンスから新しい etag を取り出してローカルに反映（次回保存で IF-MATCH:* を使わなくても済むよう保険）
+    // PATCH レスポンスから新しい etag を取り出してローカルに反映（次回保存も楽観ロックを継続できる）
     var newEtag = resp.headers.get('ETag') || resp.headers.get('etag');
     if (newEtag) {
       if (!_vehicleData[idx].__metadata) _vehicleData[idx].__metadata = {};
@@ -29236,6 +29279,60 @@ async function executeSaveVehicleEdit(idx) {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
   }
+}
+
+// 楽観ロック衝突時の確認モーダル。 Promise<boolean> を返す（true=上書き、false=キャンセル）
+function showVehicleConflictDialog(conflicts) {
+  return new Promise(function(resolve) {
+    var ov = document.createElement('div');
+    ov.className = 'confirm-overlay';
+    ov.style.zIndex = '99999';
+
+    var displayVal = function(v) {
+      if (v === null || v === undefined || v === '') return '<span style="color:#999;">(なし)</span>';
+      var s = String(v);
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) s = s.substring(0, 10); // 日付は YYYY-MM-DD だけ
+      return escHtml(s);
+    };
+
+    var conflictHtml = '';
+    if (conflicts && conflicts.length > 0) {
+      conflictHtml = '<div style="margin:10px 0 0;padding:8px;background:#fff8e1;border:1px solid #ffd54f;border-radius:6px;text-align:left;font-size:11px;line-height:1.5;">';
+      conflictHtml += '<div style="font-weight:700;color:#e65100;margin-bottom:6px;">⚡ 競合しているフィールド</div>';
+      conflicts.forEach(function(c) {
+        conflictHtml += '<div style="margin:6px 0;padding:6px;background:#fff;border-radius:4px;">';
+        conflictHtml += '<div style="font-weight:600;color:#444;">' + escHtml(c.label) + '</div>';
+        conflictHtml += '<div style="color:#c62828;">他の人: ' + displayVal(c.theirs) + '</div>';
+        conflictHtml += '<div style="color:#1565c0;">あなた: ' + displayVal(c.ours) + '</div>';
+        conflictHtml += '</div>';
+      });
+      conflictHtml += '</div>';
+    }
+
+    ov.innerHTML = '<div class="confirm-box" style="max-width:380px;">' +
+      '<div class="confirm-title" style="color:#f57c00;">⚠ 他の人が先に編集しました</div>' +
+      '<div class="confirm-msg">' +
+        '別のユーザーがこの車両を編集して保存しています。<br>' +
+        'あなたの変更で<strong style="color:#c62828;">上書き</strong>すると、相手の変更が消える可能性があります。' +
+        conflictHtml +
+      '</div>' +
+      '<div class="confirm-btns">' +
+        '<button class="btn-cancel" id="vehConflictCancel">キャンセル</button>' +
+        '<button class="btn-ok" id="vehConflictOk">上書きする</button>' +
+      '</div></div>';
+    document.body.appendChild(ov);
+
+    var done = false;
+    document.getElementById('vehConflictCancel').onclick = function() {
+      if (done) return; done = true; ov.remove(); resolve(false);
+    };
+    document.getElementById('vehConflictOk').onclick = function() {
+      if (done) return; done = true; ov.remove(); resolve(true);
+    };
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov && !done) { done = true; ov.remove(); resolve(false); }
+    });
+  });
 }
 
 // 車両フォルダーを開く（親フォルダURL直接アクセス方式 — API不要で確実）
