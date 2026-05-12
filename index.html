@@ -2303,6 +2303,34 @@ select.sankyu-edit-input {
   padding: 4px;
   flex-shrink: 0;
 }
+/* ===== 派遣書類（労働契約書③/就業条件明示書③等）プレビュー & 印刷 ===== */
+.haisen-doc-body { padding: 12px; background: #f0f0f5; min-height: calc(100vh - 56px); }
+.haisen-doc-page {
+  background: #fff; max-width: 800px; margin: 0 auto 16px; padding: 16mm 12mm;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1); font-size: 11px; line-height: 1.55;
+  color: #111; font-family: 'メイリオ','Meiryo','Hiragino Kaku Gothic ProN', sans-serif;
+}
+.haisen-doc-page h1 { text-align:center; font-size:18px; font-weight:700; margin:0 0 10px; letter-spacing:2px; }
+.haisen-doc-page h2 { font-size:13px; font-weight:700; margin:14px 0 6px; padding:3px 6px; background:#f5f5f5; border-left:3px solid #555; }
+.haisen-doc-page .hd-meta { font-size:10px; color:#444; text-align:right; margin-bottom:8px; }
+.haisen-doc-page table { width:100%; border-collapse:collapse; margin-bottom:6px; }
+.haisen-doc-page table th, .haisen-doc-page table td { border:1px solid #888; padding:5px 7px; vertical-align:top; font-size:11px; }
+.haisen-doc-page table th { background:#fafafa; font-weight:600; width:32%; white-space:nowrap; }
+.haisen-doc-page table td.colspan-row { background:#fafafa; font-weight:600; }
+.haisen-doc-actions { position:sticky; bottom:0; background:#fff; padding:10px 12px; box-shadow:0 -2px 8px rgba(0,0,0,0.06); display:flex; gap:8px; }
+.haisen-doc-actions button { flex:1; }
+.haisen-doc-warning { background:#fff8e1; border:1px solid #ffd54f; color:#e65100; padding:8px 10px; border-radius:6px; font-size:11px; margin-bottom:8px; }
+
+@media print {
+  body { background: #fff !important; }
+  .header, .fab-btn, .haisen-doc-actions, .toast-container, .update-badge,
+  .teams-btn, .header-cache-btn, .header-refresh-btn, .haisen-doc-warning { display: none !important; }
+  .screen:not(.active) { display: none !important; }
+  .haisen-doc-body { padding: 0 !important; background: #fff !important; min-height: 0 !important; }
+  .haisen-doc-page { box-shadow: none !important; margin: 0 !important; max-width: 100% !important; padding: 0 !important; page-break-after: always; }
+  @page { size: A4 portrait; margin: 12mm; }
+}
+
 .header-logout-sm.is-loggedout {
   background: #c62828;
   color: #fff;
@@ -5337,6 +5365,14 @@ select.sankyu-edit-input {
     <div id="applyContent"></div>
   </div>
 
+  <!-- Screen: 派遣書類作成 (労働契約書③ / 就業条件明示書③ など) -->
+  <div class="screen" id="haisenDocScreen">
+    <div id="haisenDocBody" class="haisen-doc-body"></div>
+    <div class="haisen-doc-actions no-print" id="haisenDocActions" style="display:none;">
+      <button onclick="window.print()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存</button>
+    </div>
+  </div>
+
 </div>
 
 <!-- FAB Button -->
@@ -5407,6 +5443,11 @@ select.sankyu-edit-input {
       <button class="action-sheet-item" onclick="startProcedure('zaishoku')">
         <span class="asi-icon" style="background:#e0f7fa;color:#00838f;">📄</span>
         <span class="asi-text">在職証明作成</span>
+        <span class="asi-arrow">›</span>
+      </button>
+      <button class="action-sheet-item" onclick="openHaisenDocScreen('roudouKeiyaku')">
+        <span class="asi-icon" style="background:#e8eaf6;color:#3949ab;">📝</span>
+        <span class="asi-text">労働契約書③ 作成</span>
         <span class="asi-arrow">›</span>
       </button>
     </div>
@@ -7712,6 +7753,242 @@ async function saveYukyuSkipChange(emp, ym, doSkip) {
   // ローカルキャッシュ更新
   emp.yukyuSkipPeriods = newValue;
   return true;
+}
+
+// ============================================================
+// 派遣書類作成（労働契約書③、就業条件明示書③ ほか）
+// ============================================================
+// 派遣先情報リスト (派遣先情報040623, GUID 2a2ab839-...) のフィールド InternalName マップ。
+// 取得元: SharePoint /_api/web/lists.../fields。 派遣契約書テンプレで参照される項目を抜粋。
+const HF = {
+  buka:                 'Title',
+  bango:                '_x756a__x53f7_',
+  hakensaki_keiyaku:    '_x6d3e__x9063__x5148__x4f1a__x79',    // 派遣先会社名（契約先）
+  hakensaki_name:       '_x6d3e__x9063__x5148__x4f1a__x790',   // 派遣先会社名
+  syuugyou_busho:       '_x5c31__x696d__x90e8__x7f72_',         // 就業部署
+  soshiki:              '_x7d44__x7e54__x5358__x4f4d_',         // 組織単位
+  gyoumu:               '_x696d__x52d9__x5185__x5bb9_',         // 業務内容
+  gyoumu5:              '_x696d__x52d9__x5185__x5bb9_5',        // 業務内容5
+  syokushu_meishou:     '_x8077__x7a2e__x756a__x53f7__x54',     // 職種番号名称
+  haken_period_start:   '_x6d3e__x9063__x671f__x9593__x00',     // 派遣期間始まり
+  haken_period_end:     '_x6d3e__x9063__x671f__x9593__x000',    // 派遣期間終わり
+  keiyaku_period:       '_x5951__x7d04__x671f__x9593_',         // 契約期間 (文字列)
+  haken_tel:            '_x6d3e__x9063__x5148__x000a__x96',     // 派遣先電話番号
+  sekinin_teido:        '_x8cac__x4efb__x306e__x7a0b__x5e',     // 責任の程度
+  syuugyou_time1:       '_x5c31__x696d__x6642__x9593__x24',     // 就業時間①
+  jitsudou_time1:       '_x5b9f__x50cd__x6642__x9593__x24',     // 実働時間①
+  kyuukei_total1:       '_x4f11__x61a9__x6642__x9593__x00',     // 休憩時間合計①
+  kyuukei1_1:           '_x4f11__x61a9__x6642__x9593__x000',    // 休憩時間①-①
+  jikangai_1day:        '_x6642__x9593__x5916__x52b4__x000',    // 時間外労働1日 (要確認)
+  jikangai_1month:      '_x6642__x9593__x5916__x52b4__x00',     // 時間外労働1か月 (要確認)
+  jikangai_1year:       '_x6642__x9593__x5916__x52b4__x001',    // 時間外労働1年 (要確認)
+  kyuujitsu_roudou:     '_x4f11__x65e5__x52b4__x50cd__x00',     // 休日労働 (要確認)
+  syuugyoubi:           '_x5c31__x0020__x696d__x0020__x65',     // 就業日 (要確認)
+};
+
+const LIST_HAKENSAKI_GUID = '2a2ab839-9dcd-4385-a72b-f20449ceddc4';
+
+// 社員データの「部課」 (例: "071:三和電子サーキット㈱") から派遣先番号を抽出
+function extractHakenBango(emp) {
+  if (!emp) return '';
+  // F.haken は部課キーのはず。candidates も試す
+  var cand = emp[F.haken] || emp[F.hakensaki] || emp[F.buka] || '';
+  if (!cand) {
+    // emp 内の OData_x90e8__x8ab2_ (部課) を探す
+    for (var k in emp) {
+      if (k.indexOf('x90e8') >= 0 && k.indexOf('x8ab2') >= 0) { cand = emp[k]; break; }
+    }
+  }
+  var s = String(cand || '').trim();
+  var m = s.match(/^(\d+)[\-:：－]/);
+  return m ? m[1] : '';
+}
+
+// 派遣先リストから、現在の社員の派遣先レコードを取得
+async function fetchHakensakiByEmp(emp) {
+  var bango = extractHakenBango(emp);
+  if (!bango) throw new Error('社員データに派遣先番号(例: 071:...)が見つかりません');
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  // List path 経由でアクセス（既存 loadHakensakiList と同方式）
+  var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=200";
+  var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!resp.ok) throw new Error('派遣先データ取得失敗 ' + resp.status);
+  var data = await resp.json();
+  var items = (data.d && data.d.results) || [];
+  // 「番号」フィールドで一致
+  var matched = items.find(function(it) { return String(it[HF.bango] || '').trim() === bango; });
+  if (!matched) throw new Error('派遣先番号「' + bango + '」が派遣先情報リストに見つかりません');
+  return matched;
+}
+
+// 派遣書類作成画面を開く（docType: 'roudouKeiyaku' / 'syuugyouJouken'）
+async function openHaisenDocScreen(docType) {
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  closeActionSheet();
+  switchScreen('haisenDocScreen');
+  var body = document.getElementById('haisenDocBody');
+  var actions = document.getElementById('haisenDocActions');
+  if (actions) actions.style.display = 'none';
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-light);"><div style="font-size:24px;margin-bottom:8px;">📝</div>派遣先データ取得中...</div>';
+
+  try {
+    var h = await fetchHakensakiByEmp(emp);
+    if (docType === 'roudouKeiyaku') {
+      renderRoudouKeiyakushoSan(emp, h);
+    } else {
+      body.innerHTML = '<div style="padding:20px;color:#c62828;">未実装の書類タイプ: ' + escHtml(docType) + '</div>';
+      return;
+    }
+    if (actions) actions.style.display = 'flex';
+  } catch (e) {
+    console.error('openHaisenDocScreen error', e);
+    body.innerHTML =
+      '<div style="padding:20px;">' +
+        '<div style="background:#ffebee;border:1px solid #ffcdd2;color:#c62828;padding:12px;border-radius:6px;font-size:13px;">' +
+          '⚠ 書類の作成に失敗しました<br>' +
+          '<strong>' + escHtml(e.message || String(e)) + '</strong>' +
+        '</div>' +
+      '</div>';
+  }
+}
+
+// 日付フォーマッタ (yyyy/mm/dd → 令和xx年m月d日 形式や、シンプル yyyy/mm/dd)
+function fmtDateJa(v) {
+  if (!v) return '';
+  try {
+    var d = new Date(v);
+    if (isNaN(d)) return String(v);
+    return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  } catch (e) { return String(v); }
+}
+function valOr(v, fallback) { return (v === null || v === undefined || v === '') ? (fallback || '') : v; }
+
+// 労働契約書③ レンダリング (シンプル版・A4縦)
+function renderRoudouKeiyakushoSan(emp, h) {
+  var hkName = h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '';
+  var hkBuka = h[HF.buka] || '';
+  var hkSoshiki = h[HF.soshiki] || '';
+  var gyoumu = h[HF.gyoumu5] || h[HF.gyoumu] || '';
+  var syokushu = h[HF.syokushu_meishou] || '';
+  var sekinin = h[HF.sekinin_teido] || '';
+  var jiTime1 = h[HF.syuugyou_time1] || '';
+  var jisuTime1 = h[HF.jitsudou_time1] || '';
+  var kyukeiTotal = h[HF.kyuukei_total1] || '';
+  var kyukei1 = h[HF.kyuukei1_1] || '';
+
+  // 社員データから
+  var name = emp.Title || '';
+  var syainNo = emp[F.syainNo] || '';
+  var sex = '';
+  for (var k in emp) {
+    if (k.indexOf('x6027__x5225') >= 0) { sex = emp[k]; break; }
+  }
+  var koyouStart = emp[F.koyoStart] || emp.koyoukeiyaku_kaisibi || '';
+  var koyouEnd = emp[F.koyoEnd] || emp.koyoukeiyaku_syuuryoubi || '';
+  for (var k2 in emp) {
+    if (!koyouStart && k2.indexOf('x96c7__x7528__x5951__x7d04__x95') >= 0) koyouStart = emp[k2];
+    if (!koyouEnd && k2.indexOf('x5951__x7d04__x671f__x9593__x6e80') >= 0) koyouEnd = emp[k2];
+  }
+  var yukiMuki = '';
+  for (var k3 in emp) {
+    if (k3.indexOf('x6709__x671f') >= 0 && k3.indexOf('x7121__x671f') >= 0) { yukiMuki = emp[k3]; break; }
+  }
+  var hourlyRate = 0;
+  for (var k4 in emp) {
+    if (k4.indexOf('x7d66__x6599__x6642__x7d66') >= 0) { hourlyRate = emp[k4]; break; }
+  }
+
+  var today = new Date();
+  var todayStr = today.getFullYear() + '年' + (today.getMonth() + 1) + '月' + today.getDate() + '日';
+
+  var bisRow = '<tr><th>{LABEL}</th><td>{VAL}</td></tr>';
+  function row(label, val) {
+    return '<tr><th>' + escHtml(label) + '</th><td>' + (val == null || val === '' ? '<span style="color:#bbb;">(未設定)</span>' : escHtml(String(val))) + '</td></tr>';
+  }
+
+  var html =
+    '<div class="haisen-doc-page">' +
+      '<div class="haisen-doc-warning no-print">⚠ 試作版です。レイアウトは Excel テンプレと完全一致ではありません。データ項目の網羅と印刷動作を先に確認してください。</div>' +
+      '<div class="hd-meta">作成日: ' + todayStr + '</div>' +
+      '<h1>労働契約書 兼 労働条件通知書（派遣）</h1>' +
+      '<div style="margin:8px 0;font-size:11px;">本書は、有限会社ステップ・アップと、氏名  <strong>' + escHtml(name) + '</strong>  との間に締結される労働契約に関し、労働基準法第15条及び労働者派遣法に基づき明示する。</div>' +
+
+      '<h2>1. 労働者</h2>' +
+      '<table>' +
+        row('氏名', name) +
+        row('社員番号', syainNo) +
+        row('性別', sex) +
+      '</table>' +
+
+      '<h2>2. 契約期間</h2>' +
+      '<table>' +
+        row('雇用区分', yukiMuki) +
+        row('雇用契約開始日', fmtDateJa(koyouStart)) +
+        row('雇用契約終了日', yukiMuki && String(yukiMuki).indexOf('無期') >= 0 ? '期間の定めなし' : fmtDateJa(koyouEnd)) +
+      '</table>' +
+
+      '<h2>3. 就業場所</h2>' +
+      '<table>' +
+        row('派遣先', hkName) +
+        row('部課', hkBuka) +
+        row('組織単位', hkSoshiki) +
+        row('就業場所（変更の範囲）', '会社が労働者派遣個別契約を締結している派遣先事業所（主に静岡県西部地域）') +
+      '</table>' +
+
+      '<h2>4. 業務内容</h2>' +
+      '<table>' +
+        row('業務内容', gyoumu) +
+        row('職種', syokushu) +
+        row('責任の程度', sekinin || '役職を有さない（部下なし）') +
+        row('業務内容（変更の範囲）', '会社が労働者派遣個別契約を締結している派遣先事業所の業務（主に製造、梱包、運搬、清掃業務）') +
+      '</table>' +
+
+      '<h2>5. 就業時間・休憩</h2>' +
+      '<table>' +
+        row('就業時間', jiTime1) +
+        row('実働時間', jisuTime1) +
+        row('休憩時間（合計）', kyukeiTotal) +
+        row('休憩時間（内訳）', kyukei1) +
+      '</table>' +
+
+      '<h2>6. 休日</h2>' +
+      '<table>' +
+        row('休日', '定例日：毎週土曜日・日曜日（一部除く）／その他就業先カレンダーによる') +
+      '</table>' +
+
+      '<h2>7. 賃金</h2>' +
+      '<table>' +
+        row('基本賃金（時間給）', hourlyRate ? Number(hourlyRate).toLocaleString() + '円/時間' : '') +
+        row('時間外（25%）', '上記時間給 × 1.25') +
+        row('法定休日（35%）', '上記時間給 × 1.35') +
+        row('賃金支払方法', '会社指定金融機関口座振込（給与明細は電子メール）') +
+      '</table>' +
+
+      '<h2>8. 社会保険・労働保険</h2>' +
+      '<table>' +
+        row('加入保険', '☑労災保険　☑雇用保険　☑厚生年金　☑健康保険') +
+      '</table>' +
+
+      '<h2>9. 派遣先との契約終了時</h2>' +
+      '<table>' +
+        '<tr><td colspan="2" style="background:#fff;font-size:10.5px;line-height:1.7;">' +
+          '・派遣先との労働者派遣契約が終了した場合、会社は速やかに別の派遣先に派遣するよう努める。<br>' +
+          '・会社と派遣先との労働者派遣契約の終了等で、無期雇用派遣労働者または雇用契約期間中の労働者を解雇しようとする場合は、労働基準法第20条に基づき手続を行う。' +
+        '</td></tr>' +
+      '</table>' +
+
+      '<div style="margin-top:24px;">' +
+        '<table>' +
+          '<tr><th style="width:30%;">使用者（派遣元）</th><td>有限会社ステップ・アップ<br>(派22-300880)</td></tr>' +
+          '<tr><th>所在地</th><td>静岡県磐田市</td></tr>' +
+          '<tr><th>署名・捺印（労働者）</th><td style="height:50px;"></td></tr>' +
+        '</table>' +
+      '</div>' +
+    '</div>';
+
+  document.getElementById('haisenDocBody').innerHTML = html;
 }
 
 // ============================================================
