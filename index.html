@@ -19188,8 +19188,9 @@ function getNthFriday(year, month, n) {
 
 // Get the 前払い period that contains today (offset by maebariPeriodOffset months)
 // Period: 2nd Friday of month M ~ 1st Friday of month M+1
-// 今月分(offset=0)の終了日はユーザーが変更可能（localStorage保存）
-// 変更した場合、翌月(offset=1)の開始日は変更後終了日の翌週金曜日
+// 任意の月の終了日をカスタム可能。
+//   - 表示中月 (refMonth) にカスタムがあれば終了日を上書き
+//   - 1つ前の月にカスタムがあれば、開始日を「前月カスタム終了 + 7日後の金曜日」に上書き
 function getMaebariPeriod(offset) {
   const today = new Date();
   let refYear = today.getFullYear();
@@ -19203,21 +19204,38 @@ function getMaebariPeriod(offset) {
   if (endMonth > 11) { endMonth -= 12; endYear++; }
   const defaultEnd = getNthFriday(endYear, endMonth, 1);
 
-  // Check if current month(offset=0) has custom end date (shared across all users)
-  const customKey = 'maebari_custom_end_' + today.getFullYear() + '_' + today.getMonth();
+  // 表示中月の customKey
+  const customKey = 'maebari_custom_end_' + refYear + '_' + refMonth;
   const customEndStr = (_sharedConfig && _sharedConfig[customKey]) || null;
 
-  if (offset === 0 && customEndStr) {
-    // 今月分: use custom end
-    return { start: defaultStart, end: new Date(customEndStr + 'T00:00:00'), customEnd: true };
-  } else if (offset === 1 && customEndStr) {
-    // 翌月分: start = custom end の1週間後の金曜日
-    const customEnd = new Date(customEndStr + 'T00:00:00');
-    const newStart = getNextFridayAfter(customEnd, 7);
-    return { start: newStart, end: defaultEnd };
+  // 1つ前の月の customKey (この月の開始日を後ろにずらす根拠)
+  let prevMonth = refMonth - 1;
+  let prevYear = refYear;
+  if (prevMonth < 0) { prevMonth += 12; prevYear--; }
+  const prevCustomKey = 'maebari_custom_end_' + prevYear + '_' + prevMonth;
+  const prevCustomEndStr = (_sharedConfig && _sharedConfig[prevCustomKey]) || null;
+
+  let start = defaultStart;
+  let end = defaultEnd;
+
+  if (customEndStr) {
+    end = new Date(customEndStr + 'T00:00:00');
+  }
+  if (prevCustomEndStr) {
+    start = getNextFridayAfter(new Date(prevCustomEndStr + 'T00:00:00'), 7);
   }
 
-  return { start: defaultStart, end: defaultEnd };
+  return { start: start, end: end, customEnd: !!customEndStr };
+}
+
+// 表示中の月 (maebariPeriodOffset) の年月を返す
+function getMaebariRefYearMonth(offset) {
+  const today = new Date();
+  let refYear = today.getFullYear();
+  let refMonth = today.getMonth() + offset;
+  while (refMonth < 0) { refMonth += 12; refYear--; }
+  while (refMonth > 11) { refMonth -= 12; refYear++; }
+  return { year: refYear, month: refMonth };
 }
 
 function formatCurrency(num) {
@@ -19263,8 +19281,13 @@ async function loadMaebariData() {
 
     // Period end: 役員のみ編集可 (どの月でも)。一般ユーザーは表示のみ
     const endEditable = (typeof isAdminUser === 'function' && isAdminUser());
+    const _ref = getMaebariRefYearMonth(maebariPeriodOffset);
+    let _endMonth = _ref.month + 1, _endYear = _ref.year;
+    if (_endMonth > 11) { _endMonth -= 12; _endYear++; }
+    const _defaultEndISO = formatDateISO(getNthFriday(_endYear, _endMonth, 1));
+    const _curEndISO = formatDateISO(period.end);
     const endDateHtml = endEditable
-      ? `<span id="maebariPeriodEndDisplay" style="cursor:pointer;text-decoration:underline dotted;color:var(--primary);" onclick="document.getElementById('maebariPeriodEndInput').showPicker()">${formatDateShort(period.end)}</span><input type="date" id="maebariPeriodEndInput" value="${formatDateISO(period.end)}" style="position:absolute;opacity:0;width:0;height:0;" onchange="onMaebariPeriodEndChange(this.value)">`
+      ? `<span style="cursor:pointer;color:var(--primary);font-weight:600;padding:2px 4px;border-bottom:1.5px dashed var(--primary);" onclick="openMaebariPeriodEndEditor('${_curEndISO}','${_defaultEndISO}')">${formatDateShort(period.end)} ✎</span>`
       : formatDateShort(period.end);
 
     container.innerHTML = `
@@ -19445,24 +19468,70 @@ function toggleMaebariCalendar() {
   }
 }
 
-async function onMaebariPeriodEndChange(val) {
+async function onMaebariPeriodEndChange(val, opts) {
   if (!val) return;
-  // Save custom end date to shared config (SharePoint file, shared across all users)
-  const today = new Date();
-  const customKey = 'maebari_custom_end_' + today.getFullYear() + '_' + today.getMonth();
+  opts = opts || {};
+  // 表示中の月（maebariPeriodOffset）に対する customKey を生成
+  const ref = getMaebariRefYearMonth(maebariPeriodOffset);
+  const customKey = 'maebari_custom_end_' + ref.year + '_' + ref.month;
   const config = Object.assign({}, _sharedConfig);
-  config[customKey] = val;
+  if (opts.clear) {
+    delete config[customKey];
+  } else {
+    config[customKey] = val;
+  }
   showSpinner();
   const ok = await saveSharedConfig(config);
   hideSpinner();
   if (ok) {
-    showToast('期間終了日を変更しました（全ユーザーに適用）', 'success');
+    showToast(opts.clear ? '期間終了日のカスタム設定を解除しました' : '期間終了日を変更しました（全ユーザーに適用）', 'success');
   } else {
     showToast('期間終了日の保存に失敗しました', 'error');
     return;
   }
   // Reload maebari data with new period
   loadMaebariData();
+}
+
+// 終了日変更モーダル（iPhoneでも確実にタップできるよう、明示的なinput表示）
+function openMaebariPeriodEndEditor(currentEndISO, defaultEndISO) {
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '99999';
+  var hasCustom = currentEndISO !== defaultEndISO;
+  ov.innerHTML = '<div class="confirm-box" style="max-width:380px;">' +
+    '<div class="confirm-title" style="color:var(--primary);">⚙ 前払い期間 終了日の変更</div>' +
+    '<div class="confirm-msg" style="text-align:left;font-size:12px;line-height:1.7;">' +
+      '表示中の月の終了日を変更します。<br>' +
+      '<span style="color:#888;font-size:11px;">※翌月分の開始日は、変更後の終了日+1週間の金曜日に自動でずれます。</span><br><br>' +
+      '<label style="font-size:11px;color:#666;font-weight:600;">新しい終了日:</label>' +
+      '<input type="date" id="mbEndEditInput" value="' + escHtml(currentEndISO) + '" style="display:block;width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px;margin-top:6px;box-sizing:border-box;">' +
+      (hasCustom ? '<div style="margin-top:10px;font-size:11px;color:#888;">標準: ' + escHtml(defaultEndISO) + '（カスタム設定中）</div>' : '') +
+    '</div>' +
+    '<div class="confirm-btns" style="flex-direction:column;gap:6px;">' +
+      '<div style="display:flex;gap:8px;width:100%;">' +
+        '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()" style="flex:1;">キャンセル</button>' +
+        '<button class="btn-ok" onclick="submitMaebariEndEdit()" style="flex:1;">変更する</button>' +
+      '</div>' +
+      (hasCustom ? '<button onclick="resetMaebariEndEdit()" style="background:#fff3e0;color:#e65100;border:1px solid #ffcc80;padding:8px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">↺ 標準に戻す</button>' : '') +
+    '</div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+}
+async function submitMaebariEndEdit() {
+  var input = document.getElementById('mbEndEditInput');
+  if (!input) return;
+  var val = input.value;
+  if (!val) { showToast('日付を選択してください', 'error'); return; }
+  var ov = input.closest('.confirm-overlay');
+  if (ov) ov.remove();
+  await onMaebariPeriodEndChange(val);
+}
+async function resetMaebariEndEdit() {
+  var input = document.getElementById('mbEndEditInput');
+  var ov = input ? input.closest('.confirm-overlay') : null;
+  if (ov) ov.remove();
+  await onMaebariPeriodEndChange('reset', { clear: true });
 }
 
 function changeMaebariCalMonth(dir) {
