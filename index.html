@@ -7527,8 +7527,11 @@ async function loadLeaveDetails() {
 
     <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
       <button class="refresh-btn" onclick="loadLeaveDetails()">&#x21bb; 更新</button>
-      <button class="btn" onclick="copyDetailToClipboard()" style="background:#f0f0ff;color:var(--primary);font-size:12px;padding:6px 14px;">
-        コピー
+      <button class="btn" onclick="copyDetailToClipboard('ja')" style="background:#f0f0ff;color:var(--primary);font-size:12px;padding:6px 12px;font-weight:600;">
+        📋 JP
+      </button>
+      <button class="btn" onclick="copyDetailToClipboard('pt')" style="background:#fff3e0;color:#e65100;font-size:12px;padding:6px 12px;font-weight:600;">
+        📋 PT
       </button>
     </div>
 
@@ -21097,7 +21100,54 @@ async function spDelete(itemId) {
   return true;
 }
 
-function copyDetailToClipboard() {
+// 言語別ラベル定義 (ja/pt)
+const _LV_I18N = {
+  title:         { ja: '有給休暇明細',                       pt: 'Demonstrativo de Férias Remuneradas' },
+  name:          { ja: '氏名',                               pt: 'Nome' },
+  syainNo:       { ja: '社員番号',                           pt: 'Nº do funcionário' },
+  currentPeriod: { ja: '現在の付与期間',                     pt: 'Período atual de concessão' },
+  granted:       { ja: '今期付与',                           pt: 'Concedido neste período' },
+  carryover:     { ja: '前期からの繰越',                     pt: 'Saldo do período anterior' },
+  used:          { ja: '取得済み',                           pt: 'Dias já utilizados' },
+  remain:        { ja: '残日数',                             pt: 'Saldo restante' },
+  history:       { ja: '今期の取得履歴',                     pt: 'Histórico de uso no período' },
+  cumulative:    { ja: '累計',                               pt: 'Acumulado' },
+  noHistory:     { ja: '（今期の取得履歴はありません）',     pt: '(Sem histórico de uso neste período)' },
+  noGrant:       { ja: '付与情報がありません',               pt: 'Sem informações de concessão' },
+  copied:        { ja: 'クリップボードにコピーしました',     pt: 'Copiado para a área de transferência' },
+};
+const _LV_TYPE_LABEL = {
+  '1日':   { ja: '1日',    pt: 'Dia inteiro' },
+  'AM有給': { ja: 'AM有給', pt: 'Meio dia (Manhã)' },
+  'PM有給': { ja: 'PM有給', pt: 'Meio dia (Tarde)' },
+};
+function _lvT(key, lang) {
+  return (_LV_I18N[key] && _LV_I18N[key][lang]) || (_LV_I18N[key] && _LV_I18N[key].ja) || key;
+}
+function _lvTypeStr(r, lang) {
+  const lbl = getRecordTypeLabel(r);
+  return (_LV_TYPE_LABEL[lbl] && _LV_TYPE_LABEL[lbl][lang]) || lbl;
+}
+// 日付フォーマット: ja=YYYY/MM/DD, pt=DD/MM/YYYY
+function _lvDate(d, lang) {
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt)) return '';
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return lang === 'pt' ? (dd + '/' + m + '/' + y) : (y + '/' + m + '/' + dd);
+}
+// 日数フォーマット: ja="1日"/"1.5日", pt="1 dia"/"1.5 dias"/"0.5 dia"
+function _lvDay(n, lang) {
+  if (lang === 'pt') {
+    const unit = (n === 1) ? 'dia' : 'dias';
+    return ((n % 1 === 0) ? String(n) : n.toFixed(1)) + ' ' + unit;
+  }
+  return (n % 1 === 0) ? (n + '日') : (n.toFixed(1) + '日');
+}
+
+function copyDetailToClipboard(lang) {
+  lang = (lang === 'pt') ? 'pt' : 'ja';
   const emp = currentEmployee;
   if (!emp || !currentGrantData) return;
 
@@ -21106,7 +21156,7 @@ function copyDetailToClipboard() {
   // 「現在の付与」を取得（isCurrentPeriod=true、なければ最新）
   const currentG = grants.find(g => g.isCurrentPeriod) || grants[grants.length - 1];
   if (!currentG) {
-    showToast('付与情報がありません', 'error');
+    showToast(_lvT('noGrant', lang), 'error');
     return;
   }
 
@@ -21129,35 +21179,33 @@ function copyDetailToClipboard() {
   const carryover = currentG._displayCarryover || 0;
   const remain = currentG._displayRemain != null ? currentG._displayRemain : 0;
 
-  function fmtDay(n) { return (n % 1 === 0) ? n + '日' : n.toFixed(1) + '日'; }
-
-  let text = '【有給休暇明細】\n';
-  text += '氏名: ' + (emp.Title || '') + (hakensaki ? '（' + hakensaki + '）' : '') + '\n';
-  text += '社員番号: ' + (emp[F.syainNo] || '') + '\n';
+  let text = '【' + _lvT('title', lang) + '】\n';
+  text += _lvT('name', lang) + ': ' + (emp.Title || '') + (hakensaki ? '（' + hakensaki + '）' : '') + '\n';
+  text += _lvT('syainNo', lang) + ': ' + (emp[F.syainNo] || '') + '\n';
   text += '\n';
-  text += '■ 現在の付与期間: ' + formatDateShort(periodStart) + ' ～ ' + formatDateShort(periodEnd) + '\n';
-  text += '  今期付与:  ' + fmtDay(granted);
-  if (carryover > 0) text += '（前期からの繰越 ' + fmtDay(carryover) + ')';
+  text += '■ ' + _lvT('currentPeriod', lang) + ': ' + _lvDate(periodStart, lang) + ' ～ ' + _lvDate(periodEnd, lang) + '\n';
+  text += '  ' + _lvT('granted', lang) + ':  ' + _lvDay(granted, lang);
+  if (carryover > 0) text += '（' + _lvT('carryover', lang) + ' ' + _lvDay(carryover, lang) + ')';
   text += '\n';
-  text += '  取得済み:  ' + fmtDay(usedTotal) + '\n';
-  text += '  残日数  :  ' + fmtDay(remain) + '\n';
+  text += '  ' + _lvT('used', lang) + ':  ' + _lvDay(usedTotal, lang) + '\n';
+  text += '  ' + _lvT('remain', lang) + ':  ' + _lvDay(remain, lang) + '\n';
 
   if (records.length > 0) {
-    text += '\n■ 今期の取得履歴\n';
+    text += '\n■ ' + _lvT('history', lang) + '\n';
     let cum = 0;
     records.forEach((r, i) => {
       cum += getRecordDays(r);
-      const typeStr = getRecordTypeLabel(r);
+      const typeStr = _lvTypeStr(r, lang);
       const dayCount = getRecordDays(r);
       const num = String(i + 1).padStart(2, ' ');
-      text += '  ' + num + '. ' + formatDate(r[F.leaveDate]) + '  ' + typeStr + '（' + fmtDay(dayCount) + '）  累計 ' + fmtDay(cum) + '\n';
+      text += '  ' + num + '. ' + _lvDate(r[F.leaveDate], lang) + '  ' + typeStr + '（' + _lvDay(dayCount, lang) + '）  ' + _lvT('cumulative', lang) + ' ' + _lvDay(cum, lang) + '\n';
     });
   } else {
-    text += '\n（今期の取得履歴はありません）\n';
+    text += '\n' + _lvT('noHistory', lang) + '\n';
   }
 
   navigator.clipboard.writeText(text).then(() => {
-    showToast('クリップボードにコピーしました', 'success');
+    showToast(_lvT('copied', lang), 'success');
   }).catch(() => {
     // Fallback for mobile
     const ta = document.createElement('textarea');
@@ -21168,7 +21216,7 @@ function copyDetailToClipboard() {
     ta.select();
     document.execCommand('copy');
     document.body.removeChild(ta);
-    showToast('コピーしました', 'success');
+    showToast(_lvT('copied', lang), 'success');
   });
 }
 
