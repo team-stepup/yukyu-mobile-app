@@ -7011,7 +7011,7 @@ function calcLeaveOverdraftList(allEmps, allLeaveRecords) {
 //   - 「現在の付与」= isCurrentPeriod=true の付与（最新の活性付与）
 //   - 期限 = currentGrant.grantDate + 12ヶ月
 //   - 警告開始 = 期限 - 3ヶ月
-function calcLeaveBelow5List(allEmps, allLeaveRecords) {
+function calcLeaveBelow5List(allEmps, allLeaveRecords, sankyuActiveSet) {
   if (!Array.isArray(allEmps) || !Array.isArray(allLeaveRecords)) return [];
 
   var recByEmp = {};
@@ -7022,12 +7022,22 @@ function calcLeaveBelow5List(allEmps, allLeaveRecords) {
     (recByEmp[k] = recByEmp[k] || []).push(r);
   }
 
+  // 産休育休中の社員番号セット (引数で渡されたものを正規化なしで使用)
+  var hasSankyu = sankyuActiveSet && typeof sankyuActiveSet.has === 'function' && sankyuActiveSet.size > 0;
+
   var today = new Date();
   var result = [];
 
   for (var j = 0; j < allEmps.length; j++) {
     var emp = allEmps[j];
     if (isResigned(emp)) continue;
+
+    // 産休育休中の社員は年5日取得義務の対象外
+    if (hasSankyu) {
+      var empBn = String(emp[F.syainNo] == null ? '' : emp[F.syainNo]).trim();
+      if (/^\d+$/.test(empBn)) empBn = String(parseInt(empBn, 10));
+      if (empBn && sankyuActiveSet.has(empBn)) continue;
+    }
 
     // 派遣先による除外（年5日取得義務の対象外: ㈱ユーシン委託管理・本社送迎者）
     var hakenNameForFilter = '';
@@ -9030,9 +9040,10 @@ async function loadHomeBadges() {
     }
   } catch (e) { console.warn('[overdraft] badge calc error', e); }
 
-  // 有給5日未満警告バッジ（年5日取得義務、期限3ヶ月前から警告）
+  // 有給5日未満警告バッジ（年5日取得義務、期限3ヶ月前から警告、産休育休中の社員は除外）
   try {
-    var below5List = calcLeaveBelow5List(allEmps, leaveAll || []);
+    var sankyuActiveSet = await fetchSankyuActiveBangoSet().catch(function() { return new Set(); });
+    var below5List = calcLeaveBelow5List(allEmps, leaveAll || [], sankyuActiveSet);
     window._below5Employees = below5List;
     var yBelow5Badge = document.getElementById('yukyuBadgeBelow5');
     if (yBelow5Badge) {
@@ -11093,6 +11104,40 @@ async function fetchSankyuSummary() {
     return { active: 0, upcoming: 0, overdue: 0 };
   }
 }
+
+// 産休育休（状況が「終了/完了」でない）社員の社員番号セットを返す。
+// 「年5日未取得」など、産休育休中の社員を除外したい集計で使用。
+async function fetchSankyuActiveBangoSet() {
+  try {
+    var token = await getToken();
+    if (!token) return new Set();
+    var meta = await fetchSankyuFields();
+    if (!meta) return new Set();
+    var statusKey = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+    var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+    var url = SP_SITE_URL + "/_api/web/GetList('" + SANKYU_LIST_PATH + "')/items?$top=500";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) return new Set();
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    var set = new Set();
+    items.forEach(function(it) {
+      var s = String((statusKey && it[statusKey]) || '');
+      var isOwari = s.indexOf('終了') >= 0 || s.indexOf('完了') >= 0;
+      if (isOwari) return;
+      var bn = String(it[kSyainNo] == null ? '' : it[kSyainNo]).trim();
+      if (!bn) return;
+      // 数値文字列なら先頭0除去で正規化
+      if (/^\d+$/.test(bn)) bn = String(parseInt(bn, 10));
+      set.add(bn);
+    });
+    return set;
+  } catch (e) {
+    console.warn('fetchSankyuActiveBangoSet error:', e);
+    return new Set();
+  }
+}
+
 
 // 給料精算リスト (List6) の件数を取得 — ルートサイト
 // Power Apps: 総務部ｿｳﾑ ≠ "✓支払済ｼﾊﾗｲｽﾞﾐ" (= "→計算中ｹｲｻﾝﾁｭｳ" or 空白)
