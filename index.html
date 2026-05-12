@@ -21658,7 +21658,25 @@ async function saveEditField(catId, fieldKey) {
     const body = {};
     body[internalName] = newVal;
     await spPatchEmployee(emp.Id, body);
-    showToast('✓ 保存しました', 'success');
+
+    // 「総務-社保」を ✓取得完了 にした場合は List9 (社会保険加入申請リスト) も同期
+    var list9Msg = '';
+    if (field.key === 'soumuShaho') {
+      var newValStr = String(newVal == null ? '' : newVal);
+      console.log('[saveEditField soumuShaho] newVal=' + newValStr);
+      if (newValStr.indexOf('取得完了') >= 0 && newValStr.indexOf('喪失') < 0) {
+        try {
+          var r9 = await completeShahoList9ForEmp(emp);
+          console.log('[List9 sync from saveEditField]', r9);
+          if (r9 && r9.updated > 0) list9Msg = ' / 加入申請 ' + r9.updated + '件を完了に';
+          else if (r9 && r9.msg) console.log('[List9 sync msg]', r9.msg);
+        } catch (l9Err) {
+          console.warn('[List9 sync error from saveEditField]', l9Err);
+        }
+      }
+    }
+
+    showToast('✓ 保存しました' + list9Msg, 'success');
     // 更新後の社員レコードを再取得して画面全体を再描画
     const updated = await fetchFullEmployee(emp[F.syainNo]);
     if (updated) {
