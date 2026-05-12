@@ -7842,22 +7842,56 @@ function extractHakenBango(emp) {
   return m ? m[1] : '';
 }
 
-// 派遣先リストから、現在の社員の派遣先レコードを取得
+// 派遣先リストから、現在の社員の派遣先レコードを取得。
+// 派遣先側「番号」は 077-1 / 077-2 / 002-1（ドアラッチ）などの枝番付き。
+// 社員側「部課」は 077:XXX で枝番なし。 → 先頭一致＋組織単位で絞り込む。
 async function fetchHakensakiByEmp(emp) {
   var bango = extractHakenBango(emp);
   if (!bango) throw new Error('社員データに派遣先番号(例: 071:...)が見つかりません');
+
+  // 社員の組織単位を取得（複数候補の絞り込み用）
+  var empSoshiki = '';
+  for (var k in emp) {
+    if (k.indexOf('x7d44') >= 0 && k.indexOf('x7e54') >= 0) {
+      empSoshiki = String(emp[k] || '').trim();
+      break;
+    }
+  }
+
   var token = await getToken();
   if (!token) throw new Error('認証エラー');
-  // List path 経由でアクセス（既存 loadHakensakiList と同方式）
   var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=200";
   var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
   if (!resp.ok) throw new Error('派遣先データ取得失敗 ' + resp.status);
   var data = await resp.json();
   var items = (data.d && data.d.results) || [];
-  // 「番号」フィールドで一致
-  var matched = items.find(function(it) { return String(it[HF.bango] || '').trim() === bango; });
-  if (!matched) throw new Error('派遣先番号「' + bango + '」が派遣先情報リストに見つかりません');
-  return matched;
+
+  // 「番号」フィールドで先頭一致 (077, 077-1, 077-2, 077（…）, 077(…) などをカバー)
+  var candidates = items.filter(function(it) {
+    var v = String(it[HF.bango] || '').trim();
+    if (v === bango) return true;
+    if (v.indexOf(bango + '-') === 0) return true;
+    if (v.indexOf(bango + '（') === 0) return true;
+    if (v.indexOf(bango + '(') === 0) return true;
+    return false;
+  });
+  if (candidates.length === 0) {
+    throw new Error('派遣先番号「' + bango + '」が派遣先情報リストに見つかりません');
+  }
+  if (candidates.length === 1) return candidates[0];
+
+  // 複数候補 → 組織単位で絞り込み
+  if (empSoshiki) {
+    var byOrg = candidates.filter(function(it) {
+      var org = String(it[HF.soshiki] || '').trim();
+      if (!org) return false;
+      return org === empSoshiki || org.indexOf(empSoshiki) >= 0 || empSoshiki.indexOf(org) >= 0;
+    });
+    if (byOrg.length > 0) return byOrg[0];
+  }
+
+  console.warn('[fetchHakensakiByEmp] 複数候補(' + candidates.length + '件)、組織単位で絞り込めず最初を使用:', candidates.map(function(c){return c[HF.bango];}));
+  return candidates[0];
 }
 
 // 派遣書類作成画面を開く（docType: 'roudouKeiyaku' / 'syuugyouJouken'）
