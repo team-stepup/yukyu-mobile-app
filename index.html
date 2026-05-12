@@ -14461,13 +14461,15 @@ async function completeShahoList9ForEmp(emp) {
     var body = {};
     // 申請区分で分岐: 扶養追加 は 扶養加入 / それ以外 は 本人加入
     var targetHuyou = (kubun === '扶養追加');
-    // 「本人加入」「扶養加入」は Choice 型で選択肢に「✓完了」がある（'完了' は無効値）
+    // 「本人加入」「扶養加入」は Choice 型で選択肢に「✓完了」がある。
+    // List9 のフィールドは EntityPropertyName に「OData_」プレフィックスが付いており、
+    // 書き込み時にそれを外すと 400 になるためキーをそのまま使う。
     if (targetHuyou && huyouKey) {
       var curHuyou = String(it[huyouKey] || '').trim();
-      if (curHuyou === '') body[huyouKey.replace(/^OData_/, '')] = '✓完了';
+      if (curHuyou === '') body[huyouKey] = '✓完了';
     } else if (!targetHuyou && honninKey) {
       var curHonnin = String(it[honninKey] || '').trim();
-      if (curHonnin === '') body[honninKey.replace(/^OData_/, '')] = '✓完了';
+      if (curHonnin === '') body[honninKey] = '✓完了';
     }
     if (Object.keys(body).length === 0) continue;
     if (entityType) body['__metadata'] = { type: entityType };
