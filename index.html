@@ -2304,19 +2304,34 @@ select.sankyu-edit-input {
   flex-shrink: 0;
 }
 /* ===== 派遣書類（労働契約書③/就業条件明示書③等）プレビュー & 印刷 ===== */
-.haisen-doc-body { padding: 12px; background: #f0f0f5; min-height: calc(100vh - 56px); }
+.haisen-doc-body { padding: 12px; background: #e8e8ee; min-height: calc(100vh - 56px); }
 .haisen-doc-page {
-  background: #fff; max-width: 800px; margin: 0 auto 16px; padding: 16mm 12mm;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1); font-size: 11px; line-height: 1.55;
-  color: #111; font-family: 'メイリオ','Meiryo','Hiragino Kaku Gothic ProN', sans-serif;
+  background: #fff; max-width: 820px; margin: 0 auto 16px; padding: 14mm 14mm 18mm;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12); font-size: 10.5pt; line-height: 1.55;
+  color: #000; font-family: 'Yu Gothic UI','Yu Gothic','メイリオ','Meiryo','Hiragino Kaku Gothic ProN', sans-serif;
 }
-.haisen-doc-page h1 { text-align:center; font-size:18px; font-weight:700; margin:0 0 10px; letter-spacing:2px; }
-.haisen-doc-page h2 { font-size:13px; font-weight:700; margin:14px 0 6px; padding:3px 6px; background:#f5f5f5; border-left:3px solid #555; }
-.haisen-doc-page .hd-meta { font-size:10px; color:#444; text-align:right; margin-bottom:8px; }
-.haisen-doc-page table { width:100%; border-collapse:collapse; margin-bottom:6px; }
-.haisen-doc-page table th, .haisen-doc-page table td { border:1px solid #888; padding:5px 7px; vertical-align:top; font-size:11px; }
-.haisen-doc-page table th { background:#fafafa; font-weight:600; width:32%; white-space:nowrap; }
-.haisen-doc-page table td.colspan-row { background:#fafafa; font-weight:600; }
+.haisen-doc-page h1 {
+  text-align:center; font-size:20pt; font-weight:700; margin:0 0 14px;
+  letter-spacing:6px; padding:8px 0 10px; border-bottom:3px double #000;
+}
+.haisen-doc-page h2 {
+  font-size:11pt; font-weight:700; margin:14px 0 4px; padding:3px 0 3px 8px;
+  background:none; border-left:4px solid #000; color:#000;
+}
+.haisen-doc-page .hd-meta { font-size:9pt; color:#000; text-align:right; margin-bottom:4px; }
+.haisen-doc-page .hd-intro { font-size:10pt; line-height:1.7; margin:8px 0 14px; }
+.haisen-doc-page table { width:100%; border-collapse:collapse; margin-bottom:4px; table-layout:fixed; }
+.haisen-doc-page table th, .haisen-doc-page table td { border:0.8pt solid #000; padding:5px 8px; vertical-align:top; font-size:10pt; word-break:break-all; }
+.haisen-doc-page table th { background:#f0f0f0; font-weight:600; width:30%; }
+.haisen-doc-page table.hd-2col th { width:18%; }
+.haisen-doc-page table.hd-2col td.hd-val { width:32%; }
+.haisen-doc-page .hd-fulltext { padding:8px 10px; font-size:10pt; line-height:1.8; border:0.8pt solid #000; background:#fff; }
+.haisen-doc-page .hd-check { font-size:10pt; line-height:1.7; }
+.haisen-doc-page .hd-check-row { margin:2px 0; }
+.haisen-doc-page .hd-sign-block { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:18px; }
+.haisen-doc-page .hd-sign-block .hd-sign-box { border:0.8pt solid #000; padding:8px 10px; min-height:90px; position:relative; font-size:10pt; }
+.haisen-doc-page .hd-sign-block .hd-sign-label { font-weight:700; font-size:10pt; margin-bottom:6px; }
+.haisen-doc-page .hd-sign-block .hd-inn-spot { position:absolute; right:8px; top:8px; width:46px; height:46px; border:1pt dashed #999; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:9pt; color:#999; }
 .haisen-doc-actions { position:sticky; bottom:0; background:#fff; padding:10px 12px; box-shadow:0 -2px 8px rgba(0,0,0,0.06); display:flex; gap:8px; }
 .haisen-doc-actions button { flex:1; }
 .haisen-doc-warning { background:#fff8e1; border:1px solid #ffd54f; color:#e65100; padding:8px 10px; border-radius:6px; font-size:11px; margin-bottom:8px; }
@@ -7985,25 +8000,34 @@ function renderRoudouKeiyakushoSan(emp, h) {
     return '<tr><th>' + escHtml(label) + '</th><td>' + (val == null || val === '' ? '<span style="color:#bbb;">(未設定)</span>' : escHtml(String(val))) + '</td></tr>';
   }
 
+  var isMuki = yukiMuki && String(yukiMuki).indexOf('無期') >= 0;
+  function chk(on) { return on ? '☑' : '☐'; }
+
   var html =
     '<div class="haisen-doc-page">' +
-      '<div class="haisen-doc-warning no-print">⚠ 試作版です。レイアウトは Excel テンプレと完全一致ではありません。データ項目の網羅と印刷動作を先に確認してください。</div>' +
+      '<div class="haisen-doc-warning no-print">⚠ 試作版です。データ項目の網羅と印刷動作を先に確認してください。</div>' +
       '<div class="hd-meta">作成日: ' + todayStr + '</div>' +
       '<h1>労働契約書 兼 労働条件通知書（派遣）</h1>' +
-      '<div style="margin:8px 0;font-size:11px;">本書は、有限会社ステップ・アップと、氏名  <strong>' + escHtml(name) + '</strong>  との間に締結される労働契約に関し、労働基準法第15条及び労働者派遣法に基づき明示する。</div>' +
+      '<div class="hd-intro">本書は、有限会社ステップ・アップ（以下「会社」という）と、氏名 <strong>' + escHtml(name) + '</strong> （以下「労働者」という）との間に締結される労働契約に関し、労働基準法第15条及び労働者派遣法に基づき次のとおり明示する。</div>' +
 
       '<h2>1. 労働者</h2>' +
-      '<table>' +
-        row('氏名', name) +
-        row('社員番号', syainNo) +
-        row('性別', sex) +
+      '<table class="hd-2col">' +
+        '<tr><th>氏名</th><td class="hd-val">' + escHtml(name) + '</td>' +
+            '<th>社員番号</th><td class="hd-val">' + escHtml(String(syainNo)) + '</td></tr>' +
+        '<tr><th>性別</th><td class="hd-val">' + escHtml(sex) + '</td>' +
+            '<th>就業場所</th><td class="hd-val">' + escHtml(hkName) + '</td></tr>' +
       '</table>' +
 
       '<h2>2. 契約期間</h2>' +
       '<table>' +
-        row('雇用区分', yukiMuki) +
-        row('雇用契約開始日', fmtDateJa(koyouStart)) +
-        row('雇用契約終了日', yukiMuki && String(yukiMuki).indexOf('無期') >= 0 ? '期間の定めなし' : fmtDateJa(koyouEnd)) +
+        '<tr><th>契約区分</th><td>' +
+          '<div class="hd-check-row">' + chk(isMuki) + ' 1. 期間の定めなし</div>' +
+          '<div class="hd-check-row">' + chk(!isMuki) + ' 2. 期間の定めあり' +
+            (!isMuki && koyouStart ? '（' + fmtDateJa(koyouStart) + ' ～ ' + fmtDateJa(koyouEnd) + '）' : '') +
+          '</div>' +
+        '</td></tr>' +
+        (isMuki ? '<tr><th>雇用契約開始日</th><td>' + escHtml(fmtDateJa(koyouStart) || '(未設定)') + '</td></tr>' : '') +
+        '<tr><th>契約更新の上限</th><td>契約期間は通算1年を上限とする（無期雇用は除く）</td></tr>' +
       '</table>' +
 
       '<h2>3. 就業場所</h2>' +
@@ -8014,7 +8038,7 @@ function renderRoudouKeiyakushoSan(emp, h) {
         row('就業場所（変更の範囲）', '会社が労働者派遣個別契約を締結している派遣先事業所（主に静岡県西部地域）') +
       '</table>' +
 
-      '<h2>4. 業務内容</h2>' +
+      '<h2>4. 従事すべき業務</h2>' +
       '<table>' +
         row('業務内容', gyoumu) +
         row('職種', syokushu) +
@@ -8022,46 +8046,67 @@ function renderRoudouKeiyakushoSan(emp, h) {
         row('業務内容（変更の範囲）', '会社が労働者派遣個別契約を締結している派遣先事業所の業務（主に製造、梱包、運搬、清掃業務）') +
       '</table>' +
 
-      '<h2>5. 就業時間・休憩</h2>' +
-      '<table>' +
-        row('就業時間', jiTime1) +
-        row('実働時間', jisuTime1) +
-        row('休憩時間（合計）', kyukeiTotal) +
-        row('休憩時間（内訳）', kyukei1) +
+      '<h2>5. 始業・終業の時刻、休憩時間</h2>' +
+      '<table class="hd-2col">' +
+        '<tr><th>就業時間</th><td class="hd-val">' + escHtml(jiTime1) + '</td>' +
+            '<th>実働時間</th><td class="hd-val">' + escHtml(jisuTime1) + '</td></tr>' +
+        '<tr><th>休憩時間（合計）</th><td class="hd-val">' + escHtml(kyukeiTotal) + '</td>' +
+            '<th>休憩時間帯</th><td class="hd-val">' + escHtml(kyukei1) + '</td></tr>' +
       '</table>' +
 
-      '<h2>6. 休日</h2>' +
+      '<h2>6. 所定時間外労働・休日労働</h2>' +
+      '<table>' +
+        row('時間外労働', '労働基準法第36条に基づく協定の範囲内（1日 / 1か月 / 1年 の上限あり）') +
+        row('休日労働', '労使協定の範囲内（1か月の上限あり）') +
+      '</table>' +
+
+      '<h2>7. 休日</h2>' +
       '<table>' +
         row('休日', '定例日：毎週土曜日・日曜日（一部除く）／その他就業先カレンダーによる') +
       '</table>' +
 
-      '<h2>7. 賃金</h2>' +
+      '<h2>8. 賃金</h2>' +
       '<table>' +
-        row('基本賃金（時間給）', hourlyRate ? Number(hourlyRate).toLocaleString() + '円/時間' : '') +
-        row('時間外（25%）', '上記時間給 × 1.25') +
-        row('法定休日（35%）', '上記時間給 × 1.35') +
-        row('賃金支払方法', '会社指定金融機関口座振込（給与明細は電子メール）') +
+        row('基本賃金（時間給）', hourlyRate ? Number(hourlyRate).toLocaleString() + ' 円/時間' : '(未設定)') +
+        row('時間外（割増）', '法定時間外 25%／法定休日 35%／深夜（22:00～5:00）25%（重複時は加算）') +
+        row('60時間超', '法定時間外60時間超 50%') +
+        row('賃金締切日', '末日締め') +
+        row('賃金支払日', '翌月20日払い（金融機関休業日は前営業日）') +
+        row('賃金支払方法', '会社指定金融機関口座振込／給与明細は電子メール') +
       '</table>' +
 
-      '<h2>8. 社会保険・労働保険</h2>' +
+      '<h2>9. 社会保険・労働保険</h2>' +
       '<table>' +
-        row('加入保険', '☑労災保険　☑雇用保険　☑厚生年金　☑健康保険') +
+        row('加入保険', '☑ 労災保険　☑ 雇用保険　☑ 厚生年金　☑ 健康保険') +
       '</table>' +
 
-      '<h2>9. 派遣先との契約終了時</h2>' +
+      '<h2>10. 派遣先との契約終了時</h2>' +
+      '<div class="hd-fulltext">' +
+        '一、派遣先との労働者派遣契約が終了した場合、会社は速やかに別の派遣先に派遣するよう努める。<br>' +
+        '一、会社と派遣先との労働者派遣契約の終了等で、無期雇用派遣労働者または雇用契約期間中の労働者を解雇しようとする場合は、労働基準法第20条に基づき手続を行う。<br>' +
+        '一、本書面に記載のない事項は、就業規則（派遣）に準ずる。' +
+      '</div>' +
+
+      '<h2>11. 雇用管理の相談窓口</h2>' +
       '<table>' +
-        '<tr><td colspan="2" style="background:#fff;font-size:10.5px;line-height:1.7;">' +
-          '・派遣先との労働者派遣契約が終了した場合、会社は速やかに別の派遣先に派遣するよう努める。<br>' +
-          '・会社と派遣先との労働者派遣契約の終了等で、無期雇用派遣労働者または雇用契約期間中の労働者を解雇しようとする場合は、労働基準法第20条に基づき手続を行う。' +
-        '</td></tr>' +
+        row('短時間有期雇用管理者', '森 ゆうじ　TEL: 0538-36-6968') +
       '</table>' +
 
-      '<div style="margin-top:24px;">' +
-        '<table>' +
-          '<tr><th style="width:30%;">使用者（派遣元）</th><td>有限会社ステップ・アップ<br>(派22-300880)</td></tr>' +
-          '<tr><th>所在地</th><td>静岡県磐田市</td></tr>' +
-          '<tr><th>署名・捺印（労働者）</th><td style="height:50px;"></td></tr>' +
-        '</table>' +
+      '<div class="hd-sign-block">' +
+        '<div class="hd-sign-box">' +
+          '<div class="hd-sign-label">使用者（派遣元）</div>' +
+          '<div>有限会社ステップ・アップ</div>' +
+          '<div>（許可番号：派22-300880）</div>' +
+          '<div>静岡県磐田市</div>' +
+          '<div class="hd-inn-spot">㊞</div>' +
+        '</div>' +
+        '<div class="hd-sign-box">' +
+          '<div class="hd-sign-label">労働者　署名・捺印</div>' +
+          '<div style="margin-top:6px;font-size:9pt;color:#555;">氏名：' + escHtml(name) + '</div>' +
+          '<div style="margin-top:24px;border-bottom:0.5pt solid #555;width:80%;">　</div>' +
+          '<div style="font-size:9pt;color:#555;margin-top:2px;">（署名）</div>' +
+          '<div class="hd-inn-spot">㊞</div>' +
+        '</div>' +
       '</div>' +
     '</div>';
 
