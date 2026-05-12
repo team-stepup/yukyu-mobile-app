@@ -29193,7 +29193,9 @@ async function executeSaveVehicleEdit(idx) {
         'Authorization': 'Bearer ' + token,
         'Accept': 'application/json;odata=verbose',
         'Content-Type': 'application/json;odata=verbose',
-        'IF-MATCH': item.__metadata ? item.__metadata.etag : '*',
+        // IF-MATCH に古い etag を使うと、保存後 etag が変わって2度目の保存で 412 Precondition Failed になる。
+        // 管理者が1人で編集する前提なので楽観ロックは無効化し常に上書き許可。
+        'IF-MATCH': '*',
         'X-HTTP-Method': 'MERGE'
       },
       body: JSON.stringify(body)
@@ -29202,6 +29204,13 @@ async function executeSaveVehicleEdit(idx) {
     if (!resp.ok) {
       var errText = await resp.text();
       throw new Error('更新失敗(' + resp.status + '): ' + errText.substring(0, 200));
+    }
+
+    // PATCH レスポンスから新しい etag を取り出してローカルに反映（次回保存で IF-MATCH:* を使わなくても済むよう保険）
+    var newEtag = resp.headers.get('ETag') || resp.headers.get('etag');
+    if (newEtag) {
+      if (!_vehicleData[idx].__metadata) _vehicleData[idx].__metadata = {};
+      _vehicleData[idx].__metadata.etag = newEtag;
     }
 
     // ローカルデータ更新
