@@ -21106,16 +21106,24 @@ const _LV_I18N = {
   name:          { ja: '氏名',                               pt: 'Nome' },
   syainNo:       { ja: '社員番号',                           pt: 'Nº do funcionário' },
   currentPeriod: { ja: '現在の付与期間',                     pt: 'Período atual de concessão' },
-  granted:       { ja: '今期付与',                           pt: 'Concedido neste período' },
-  carryover:     { ja: '前期からの繰越',                     pt: 'Saldo do período anterior' },
-  used:          { ja: '取得済み',                           pt: 'Dias já utilizados' },
-  remain:        { ja: '残日数',                             pt: 'Saldo restante' },
-  history:       { ja: '今期の取得履歴',                     pt: 'Histórico de uso no período' },
+  period:        { ja: '期間',                               pt: 'Período' },
+  granted:       { ja: '付与',                               pt: 'Concedido' },
+  carryover:     { ja: '前期繰越',                           pt: 'Saldo anterior' },
+  used:          { ja: '取得',                               pt: 'Utilizado' },
+  remain:        { ja: '残',                                 pt: 'Saldo' },
+  expiredDays:   { ja: '消滅',                               pt: 'Expirado' },
+  current:       { ja: '現在の付与',                         pt: 'Concessão atual' },
+  expiredTag:    { ja: '消滅済',                             pt: 'já expirado' },
+  history:       { ja: '取得履歴',                           pt: 'Histórico de uso' },
   cumulative:    { ja: '累計',                               pt: 'Acumulado' },
-  noHistory:     { ja: '（今期の取得履歴はありません）',     pt: '(Sem histórico de uso neste período)' },
+  noHistory:     { ja: '（取得履歴はありません）',           pt: '(Sem histórico de uso)' },
   noGrant:       { ja: '付与情報がありません',               pt: 'Sem informações de concessão' },
   copied:        { ja: 'クリップボードにコピーしました',     pt: 'Copiado para a área de transferência' },
+  totalAll:      { ja: '全期間の取得合計',                   pt: 'Total acumulado em todos os períodos' },
 };
+function _lvGrantNum(n, lang) {
+  return lang === 'pt' ? ('Concessão Nº ' + n) : ('第' + n + '回付与');
+}
 const _LV_TYPE_LABEL = {
   '1日':   { ja: '1日',    pt: 'Dia inteiro' },
   'AM有給': { ja: 'AM有給', pt: 'Meio dia (Manhã)' },
@@ -21153,56 +21161,83 @@ function copyDetailToClipboard(lang) {
 
   const hakensaki = getHakensaki(emp);
   const grants = currentGrantData;
-  // 「現在の付与」を取得（isCurrentPeriod=true、なければ最新）
-  const currentG = grants.find(g => g.isCurrentPeriod) || grants[grants.length - 1];
-  if (!currentG) {
+  if (!grants || grants.length === 0) {
     showToast(_lvT('noGrant', lang), 'error');
     return;
   }
-
-  // 期間: 付与日 ～ 付与日+12ヶ月-1日
-  const periodStart = currentG.grantDate;
-  const periodEnd = new Date(currentG.grantDate);
-  periodEnd.setMonth(periodEnd.getMonth() + 12);
-  periodEnd.setDate(periodEnd.getDate() - 1);
-
-  // 今期の取得レコード（古い順）
-  const records = (appliedDatesCache || []).filter(r => {
-    const d = new Date(r[F.leaveDate]);
-    return d >= periodStart && d <= periodEnd;
-  }).sort((a, b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
-
-  let usedTotal = 0;
-  records.forEach(r => { usedTotal += getRecordDays(r); });
-
-  const granted = currentG.grantedDays || 0;
-  const carryover = currentG._displayCarryover || 0;
-  const remain = currentG._displayRemain != null ? currentG._displayRemain : 0;
+  const records = appliedDatesCache || [];
 
   let text = '【' + _lvT('title', lang) + '】\n';
   text += _lvT('name', lang) + ': ' + (emp.Title || '') + (hakensaki ? '（' + hakensaki + '）' : '') + '\n';
   text += _lvT('syainNo', lang) + ': ' + (emp[F.syainNo] || '') + '\n';
-  text += '\n';
-  text += '■ ' + _lvT('currentPeriod', lang) + ': ' + _lvDate(periodStart, lang) + ' ～ ' + _lvDate(periodEnd, lang) + '\n';
-  text += '  ' + _lvT('granted', lang) + ':  ' + _lvDay(granted, lang);
-  if (carryover > 0) text += '（' + _lvT('carryover', lang) + ' ' + _lvDay(carryover, lang) + ')';
-  text += '\n';
-  text += '  ' + _lvT('used', lang) + ':  ' + _lvDay(usedTotal, lang) + '\n';
-  text += '  ' + _lvT('remain', lang) + ':  ' + _lvDay(remain, lang) + '\n';
 
-  if (records.length > 0) {
-    text += '\n■ ' + _lvT('history', lang) + '\n';
-    let cum = 0;
-    records.forEach((r, i) => {
-      cum += getRecordDays(r);
-      const typeStr = _lvTypeStr(r, lang);
-      const dayCount = getRecordDays(r);
-      const num = String(i + 1).padStart(2, ' ');
-      text += '  ' + num + '. ' + _lvDate(r[F.leaveDate], lang) + '  ' + typeStr + '（' + _lvDay(dayCount, lang) + '）  ' + _lvT('cumulative', lang) + ' ' + _lvDay(cum, lang) + '\n';
-    });
-  } else {
-    text += '\n' + _lvT('noHistory', lang) + '\n';
-  }
+  // 全付与期間を新しい順で（現在→過去）走査
+  let grandTotalUsed = 0;
+  const sortedGrants = grants.slice().reverse();
+  sortedGrants.forEach((g) => {
+    const origIdx = grants.indexOf(g);
+    const grantNum = origIdx + 1;
+    const nextGrant = grants[origIdx + 1];
+
+    // 期間末: 次の付与日-1日 (なければ 12ヶ月後 - 1日)
+    let periodEnd;
+    if (nextGrant) {
+      periodEnd = new Date(nextGrant.grantDate.getTime() - 86400000);
+    } else {
+      const nd = new Date(g.grantDate);
+      nd.setMonth(nd.getMonth() + 12);
+      periodEnd = new Date(nd.getTime() - 86400000);
+    }
+    const periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
+
+    // この期間の取得レコード（古い順）
+    const periodRecords = records.filter(r => {
+      const d = new Date(r[F.leaveDate]);
+      return d >= g.grantDate && d < periodEndFilter;
+    }).sort((a, b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]));
+
+    let periodUsed = 0;
+    periodRecords.forEach(r => { periodUsed += getRecordDays(r); });
+    grandTotalUsed += periodUsed;
+
+    const granted = g.grantedDays || 0;
+    const carryover = g._displayCarryover || 0;
+    const remain = g._displayRemain != null ? g._displayRemain : 0;
+    const expired = g._displayExpired || 0;
+    const tags = [];
+    if (g.isCurrentPeriod) tags.push(_lvT('current', lang));
+    if (g.expired) tags.push(_lvT('expiredTag', lang));
+    const tagStr = tags.length > 0 ? '（' + tags.join(' / ') + '）' : '';
+
+    text += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    text += '\n■ ' + _lvGrantNum(grantNum, lang) + tagStr + '\n';
+    text += '  ' + _lvT('period', lang) + ': ' + _lvDate(g.grantDate, lang) + ' ～ ' + _lvDate(periodEnd, lang) + '\n';
+    text += '  ' + _lvT('granted', lang) + ': ' + _lvDay(granted, lang);
+    if (carryover > 0) text += '（' + _lvT('carryover', lang) + ' ' + _lvDay(carryover, lang) + '）';
+    text += '\n';
+    text += '  ' + _lvT('used', lang) + ': ' + _lvDay(periodUsed, lang) + '\n';
+    text += '  ' + _lvT('remain', lang) + ': ' + _lvDay(remain, lang) + '\n';
+    if (expired > 0) {
+      text += '  ' + _lvT('expiredDays', lang) + ': ' + _lvDay(expired, lang) + '\n';
+    }
+
+    if (periodRecords.length > 0) {
+      text += '\n';
+      let cum = 0;
+      periodRecords.forEach((r, i) => {
+        cum += getRecordDays(r);
+        const typeStr = _lvTypeStr(r, lang);
+        const dayCount = getRecordDays(r);
+        const num = String(i + 1).padStart(2, ' ');
+        text += '  ' + num + '. ' + _lvDate(r[F.leaveDate], lang) + '  ' + typeStr + '（' + _lvDay(dayCount, lang) + '）  ' + _lvT('cumulative', lang) + ' ' + _lvDay(cum, lang) + '\n';
+      });
+    } else {
+      text += '\n  ' + _lvT('noHistory', lang) + '\n';
+    }
+  });
+
+  text += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+  text += '\n■ ' + _lvT('totalAll', lang) + ': ' + _lvDay(grandTotalUsed, lang) + '\n';
 
   navigator.clipboard.writeText(text).then(() => {
     showToast(_lvT('copied', lang), 'success');
