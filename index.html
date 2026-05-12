@@ -6737,7 +6737,26 @@ const GRANT_TABLE = [
   { months: 78, days: 20 },
 ];
 
-function calculateGrants(kisanDateStr, retireDateStr) {
+// 社員データの「有給付与スキップ期」(yukyuSkipPeriods) を YYYY-MM の配列に変換。
+// SharePoint 側に存在しなければ空配列を返す（機能無効化）。
+function parseSkipPeriods(emp) {
+  if (!emp) return [];
+  var raw = emp.yukyuSkipPeriods;
+  if (raw === undefined || raw === null) raw = emp.OData_yukyuSkipPeriods || '';
+  if (!raw) return [];
+  return String(raw).split(/[,、\s]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+}
+function isGrantSkipped(grantDate, skipList) {
+  if (!grantDate || !skipList || skipList.length === 0) return false;
+  var ym = grantDate.getFullYear() + '-' + String(grantDate.getMonth() + 1).padStart(2, '0');
+  return skipList.indexOf(ym) >= 0;
+}
+function grantYM(grantDate) {
+  if (!grantDate) return '';
+  return grantDate.getFullYear() + '-' + String(grantDate.getMonth() + 1).padStart(2, '0');
+}
+
+function calculateGrants(kisanDateStr, retireDateStr, emp) {
   if (!kisanDateStr) return [];
   const kisanDate = new Date(kisanDateStr);
   const today = new Date();
@@ -6779,6 +6798,19 @@ function calculateGrants(kisanDateStr, retireDateStr) {
       expired: expiryDate < today,
       isCurrentPeriod: false,
     });
+  }
+
+  // 出勤率80%未満などで付与スキップ指定があれば、該当期の grantedDays を 0 にしフラグ付与
+  // (UI 上はカード自体は残し「スキップ済」表示にしてユーザーが解除可能にする)
+  const skipList = parseSkipPeriods(emp);
+  if (skipList.length > 0) {
+    for (let gi = 0; gi < grants.length; gi++) {
+      if (isGrantSkipped(grants[gi].grantDate, skipList)) {
+        grants[gi].skipped = true;
+        grants[gi].originalGrantedDays = grants[gi].grantedDays;
+        grants[gi].grantedDays = 0;
+      }
+    }
   }
 
   // Mark the last two non-expired (or most recent two) as current/carryover
@@ -6874,7 +6906,7 @@ function calcLeaveOverdraftList(allEmps, allLeaveRecords) {
     var retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
 
     var grants;
-    try { grants = calculateGrants(kisanDate, retireDate); } catch (e) { continue; }
+    try { grants = calculateGrants(kisanDate, retireDate, emp); } catch (e) { continue; }
     if (!grants || grants.length === 0) continue;
 
     var sortedGrants = grants.slice().sort(function(a, b) { return a.grantDate - b.grantDate; });
@@ -6968,7 +7000,7 @@ function calcLeaveBelow5List(allEmps, allLeaveRecords) {
     var retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
 
     var grants;
-    try { grants = calculateGrants(kisanDate, retireDate); } catch (e) { continue; }
+    try { grants = calculateGrants(kisanDate, retireDate, emp); } catch (e) { continue; }
     if (!grants || grants.length === 0) continue;
 
     // 現在の付与（isCurrentPeriod=true）を取得
@@ -7054,7 +7086,7 @@ async function loadLeaveDetails() {
 
   const kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
   const retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
-  const grants = calculateGrants(kisanDate, retireDate);
+  const grants = calculateGrants(kisanDate, retireDate, emp);
 
   // Load leave records from SharePoint
   const filter = "$filter=" + F.syainNo + " eq " + emp[F.syainNo] +
@@ -7494,10 +7526,13 @@ async function loadLeaveDetails() {
               ${formatDateShort(g.grantDate)} ～ ${formatDateShort(periodEnd)}
             </div>
           </div>
-          <span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;
-            background:${g.expired ? '#eee' : '#e8f5e9'};color:${g.expired ? '#999' : '#2e7d32'};">
-            ${g.expired ? '消滅済' : '有効'}
-          </span>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            <span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;
+              background:${g.expired ? '#eee' : '#e8f5e9'};color:${g.expired ? '#999' : '#2e7d32'};">
+              ${g.expired ? '消滅済' : '有効'}
+            </span>
+            ${g.skipped ? '<span style="padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#fff8e1;color:#e65100;border:1px solid #ffd54f;">⚠ スキップ済</span>' : ''}
+          </div>
         </div>
 
         <table style="width:100%;border-collapse:collapse;margin-bottom:10px;text-align:center;table-layout:fixed;">
@@ -7562,10 +7597,121 @@ async function loadLeaveDetails() {
           </div>
         ` : `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px;">取得なし</div>`}
 
+        ${!resigned ? `<div style="text-align:right;margin-top:10px;">
+          <button onclick="confirmToggleYukyuSkip('${grantYM(g.grantDate)}', ${g.skipped ? 'false' : 'true'}, '${formatDateShort(g.grantDate)}', ${g.skipped ? (g.originalGrantedDays || 0) : g.grantedDays})"
+            style="background:none;border:1px dashed ${g.skipped ? '#7c3aed' : '#ccc'};color:${g.skipped ? '#7c3aed' : '#888'};padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600;">
+            ${g.skipped ? '✓ 出勤率不足スキップを解除' : '⚠ 出勤率不足でスキップする'}
+          </button>
+        </div>` : ''}
+
         ${isCurrent && !resigned ? `<button class="btn btn-primary btn-block btn-lg" onclick="openApplyScreen()" style="margin-top:12px;">新規申請</button>` : ''}
       </div>`;
     }).join('')}
   `;
+}
+
+// ============================================================
+// 有給付与スキップ（出勤率80%未満などで該当期を付与なし扱いにする）
+// ============================================================
+// SharePoint 社員リストの `yukyuSkipPeriods` (Text) に YYYY-MM をカンマ区切りで保存。
+// フィールドが未追加の場合は SharePoint 側で400エラーになるので、ユーザーに案内する。
+function confirmToggleYukyuSkip(ym, doSkip, grantDateStr, days) {
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員が選択されていません', 'error'); return; }
+
+  var titleColor = doSkip ? '#e65100' : '#7c3aed';
+  var titleIcon = doSkip ? '⚠️' : '✓';
+  var titleText = doSkip ? '付与をスキップしますか？' : 'スキップを解除しますか？';
+  var msg = doSkip
+    ? '<strong>' + escHtml(grantDateStr) + ' 付与（' + (days || 0) + '日）</strong>を、<br>' +
+      '<span style="color:#c62828;font-weight:700;">出勤率80%未満として「付与なし」扱い</span>にします。<br><br>' +
+      '取得済みの有給はそのまま残ります（消費分は他の付与から消化）。<br>' +
+      '解除はいつでも可能です。'
+    : '<strong>' + escHtml(grantDateStr) + ' 付与</strong>のスキップを解除し、<br>' +
+      '機械計算の付与日数（<strong>' + (days || 0) + '日</strong>）を復活させます。';
+
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '99999';
+  ov.innerHTML = '<div class="confirm-box" style="max-width:360px;">' +
+    '<div class="confirm-title" style="color:' + titleColor + ';">' + titleIcon + ' ' + escHtml(titleText) + '</div>' +
+    '<div class="confirm-msg">' + msg + '</div>' +
+    '<div class="confirm-btns">' +
+      '<button class="btn-cancel" id="ysCancel">キャンセル</button>' +
+      '<button class="btn-ok" id="ysOk" style="background:' + (doSkip ? 'linear-gradient(135deg,#ff9800,#f57c00)' : 'linear-gradient(135deg,#9333ea,#7c3aed)') + ';">' +
+        (doSkip ? 'スキップする' : '解除する') +
+      '</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('ysCancel').onclick = function() { ov.remove(); };
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.getElementById('ysOk').onclick = async function() {
+    ov.remove();
+    try {
+      showSpinner();
+      await saveYukyuSkipChange(emp, ym, doSkip);
+      hideSpinner();
+      showToast(doSkip ? '⚠ ' + grantDateStr + ' をスキップしました' : '✓ ' + grantDateStr + ' のスキップを解除しました', 'success');
+      // 詳細を再ロード（最新の付与一覧を表示）
+      try { await loadLeaveDetails(); } catch(e) { /* ignore */ }
+    } catch (err) {
+      hideSpinner();
+      console.error('Yukyu skip save error:', err);
+      var errMsg = '保存に失敗しました: ' + err.message;
+      if (err.message && err.message.indexOf('field') >= 0) {
+        errMsg += '\n\nSharePoint 社員リストに「yukyuSkipPeriods」フィールドが必要です。';
+      }
+      showToast(errMsg, 'error');
+    }
+  };
+}
+
+// 現在の社員のスキップ年月リストを更新し、SharePoint に保存
+async function saveYukyuSkipChange(emp, ym, doSkip) {
+  // 現在のスキップリストを取得
+  var current = parseSkipPeriods(emp);
+  var idx = current.indexOf(ym);
+  if (doSkip) {
+    if (idx < 0) current.push(ym);
+  } else {
+    if (idx >= 0) current.splice(idx, 1);
+  }
+  current.sort();
+  var newValue = current.join(',');
+
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー（再ログインしてください）');
+
+  // SharePoint List item を MERGE で更新
+  var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+  var body = { __metadata: { type: entityType } };
+  // フィールド InternalName は yukyuSkipPeriods (英数字想定)
+  body['yukyuSkipPeriods'] = newValue || null;
+
+  var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + emp.Id + ")";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'MERGE'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    var errText = '';
+    try { errText = await resp.text(); } catch(_) {}
+    if (resp.status === 400 && errText.indexOf('does not exist') >= 0) {
+      throw new Error('SharePoint に「yukyuSkipPeriods」フィールドが未追加です');
+    }
+    throw new Error('SP更新失敗(' + resp.status + ')');
+  }
+
+  // ローカルキャッシュ更新
+  emp.yukyuSkipPeriods = newValue;
+  return true;
 }
 
 // ============================================================
