@@ -2330,6 +2330,47 @@ select.sankyu-edit-input {
 .haisen-doc-page .hd-fulltext { padding:8px 10px; font-size:10pt; line-height:1.8; border:0.8pt solid #000; background:#fff; }
 .haisen-doc-page .hd-check { font-size:10pt; line-height:1.7; }
 .haisen-doc-page .hd-check-row { margin:2px 0; }
+
+/* === Excelテンプレ準拠 労働契約書③ === */
+.haisen-doc-page table.hd-header { width:100%; border-collapse:collapse; margin-bottom:10px; table-layout:fixed; }
+.haisen-doc-page table.hd-header td { border:0.8pt solid #000; padding:6px 10px; vertical-align:middle; font-size:10pt; }
+.haisen-doc-page table.hd-header .hd-h-name { width:38%; font-size:14pt; font-weight:600; text-align:center; }
+.haisen-doc-page table.hd-header .hd-h-l { width:18%; background:#f3f3f3; font-weight:600; text-align:center; white-space:nowrap; }
+.haisen-doc-page table.hd-header .hd-h-r { font-size:10pt; line-height:1.6; }
+
+.haisen-doc-page table.hd-main { width:100%; border-collapse:collapse; margin-bottom:6px; table-layout:fixed; }
+.haisen-doc-page table.hd-main th, .haisen-doc-page table.hd-main td {
+  border:0.8pt solid #000; padding:6px 10px; vertical-align:top; font-size:10pt; line-height:1.7; word-break:break-all;
+}
+.haisen-doc-page table.hd-main th {
+  background:#f3f3f3; font-weight:600; width:22%; text-align:left; white-space:nowrap; line-height:1.4;
+}
+.haisen-doc-page table.hd-main td.hd-cell-no-pad { padding:0; }
+
+/* 入れ子テーブル（就業場所/契約更新の有無） */
+.haisen-doc-page table.hd-inner { width:100%; border-collapse:collapse; border:none; margin:0; }
+.haisen-doc-page table.hd-inner td { border:0.5pt solid #aaa; padding:5px 8px; font-size:9.5pt; vertical-align:top; }
+.haisen-doc-page table.hd-inner td.hd-inner-l { background:#fafafa; width:14%; white-space:nowrap; color:#333; }
+.haisen-doc-page table.hd-inner td.hd-inner-v { background:#fff; }
+
+/* 就業時間テーブル */
+.haisen-doc-page table.hd-shift-table { width:100%; border-collapse:collapse; }
+.haisen-doc-page table.hd-shift-table th,
+.haisen-doc-page table.hd-shift-table td { border:0.5pt solid #888; padding:4px 6px; font-size:9.5pt; text-align:center; }
+.haisen-doc-page table.hd-shift-table th { background:#fafafa; font-weight:600; }
+.haisen-doc-page table.hd-shift-table td.hd-shift-no { background:#f3f3f3; font-weight:600; width:6%; }
+
+/* 賃金欄 */
+.haisen-doc-page td.hd-chingin { line-height:1.85; }
+.haisen-doc-page .hd-num { font-weight:700; min-width:48px; display:inline-block; text-align:right; padding:0 4px; border-bottom:0.5pt solid #999; }
+.haisen-doc-page .hd-period-dates { font-weight:600; }
+
+/* フッター */
+.haisen-doc-page .hd-footer { margin-top:18px; }
+.haisen-doc-page .hd-footer-date { font-size:10pt; }
+.haisen-doc-page .hd-footer-sign { font-size:10pt; margin-top:12px; text-align:right; }
+.haisen-doc-page .hd-footer-sign-line { font-size:10pt; margin-top:8px; text-align:right; }
+
 .haisen-doc-page .hd-sign-block { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:18px; }
 .haisen-doc-page .hd-sign-block .hd-sign-box { border:0.8pt solid #000; padding:8px 10px; min-height:90px; position:relative; font-size:10pt; }
 .haisen-doc-page .hd-sign-block .hd-sign-label { font-weight:700; font-size:10pt; margin-bottom:6px; }
@@ -7830,6 +7871,9 @@ const HF = {
   haken_period_end:     'OData__x6d3e__x9063__x671f__x9593__x000',
   keiyaku_period:       'OData__x5951__x7d04__x671f__x9593_',
   haken_tel:            'OData__x6d3e__x9063__x5148__x000a__x96',
+  haken_jusho:          'OData__x6d3e__x9063__x5148__x000a__x4f',  // 派遣先住所
+  kinmu_jusho:          'OData__x5c31__x696d__x5834__x6240__xff',   // 就業場所(所在地)
+  kinmu_tel:            'OData__x5c31__x696d__x5834__x6240__xff0',  // 就業場所(電話番号)
   sekinin_teido:        'OData__x8cac__x4efb__x306e__x7a0b__x5e',
   syuugyou_time1:       'OData__x5c31__x696d__x6642__x9593__x24',
   jitsudou_time1:       'OData__x5b9f__x50cd__x6642__x9593__x24',
@@ -7985,6 +8029,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
   // 「部課」表示は派遣先データの「就業部署」を使う（Title は派遣先担当者名のため誤り）
   var hkBuka = h[HF.syuugyou_busho] || '';
   var hkSoshiki = h[HF.soshiki] || '';
+  var kinmuTel = h[HF.kinmu_tel] || h[HF.haken_tel] || '';
+  var kinmuJusho = h[HF.kinmu_jusho] || h[HF.haken_jusho] || '';
   var gyoumu = h[HF.gyoumu5] || h[HF.gyoumu] || '';
   var syokushu = h[HF.syokushu_meishou] || '';
   var sekinin = h[HF.sekinin_teido] || '';
@@ -8045,6 +8091,13 @@ function renderRoudouKeiyakushoSan(emp, h) {
   for (var k4 in emp) {
     if (k4.indexOf('x7d66__x6599__x6642__x7d66') >= 0) { hourlyRate = emp[k4]; break; }
   }
+  // 通勤手当 (1日)
+  var tsukin1day = 0;
+  for (var k5 in emp) {
+    if (k5.indexOf('x901a__x52e4__x624b__x5f53') >= 0) { tsukin1day = Number(emp[k5]) || 0; break; }
+  }
+  var katamichiKm = tsukin1day ? Math.round((tsukin1day / 12 / 2) * 10) / 10 : 0;  // 1km=12円・往復
+  var tsukin21day = tsukin1day ? tsukin1day * 21 : 0;
 
   var today = new Date();
   var todayStr = today.getFullYear() + '年' + (today.getMonth() + 1) + '月' + today.getDate() + '日';
@@ -8056,124 +8109,251 @@ function renderRoudouKeiyakushoSan(emp, h) {
 
   var isMuki = yukiMuki && String(yukiMuki).indexOf('無期') >= 0;
   function chk(on) { return on ? '☑' : '☐'; }
+  function nz(v, suffix){ return (v != null && v !== '') ? (escHtml(String(v)) + (suffix||'')) : ''; }
+  function dash(v){ return (v != null && v !== '') ? escHtml(String(v)) : '<span style="color:#bbb;">―</span>'; }
+
+  // 36協定 数値 (1週 = 1日 × 5 として算出)
+  var oh1d = sankyo1day, oh1m = sankyo1mon, oh1y = sankyo1year;
+  var oh1w = (oh1d != null && oh1d !== '') ? Number(oh1d) * 5 : '';
+  var hkm = kyujitsuMon;
+  // 時間外労働・休日労働の「有・無」
+  var jikangaiUmu = (oh1d || oh1m || oh1y) ? '有' : '無';
+  var kyuujitsuUmu = hkm ? '有' : '無';
+
+  // 始業・終業4行（データは①②③のみ。④は常に空）
+  function shiftRow(idx, jikan, jisu, total, s1, s2, s3) {
+    return '<tr>' +
+      '<td class="hd-shift-no">' + idx + '</td>' +
+      '<td>' + (jikan ? escHtml(jikan) : '-') + '</td>' +
+      '<td>' + (jisu ? escHtml(jisu) : '-') + '</td>' +
+      '<td>' + (total ? escHtml(total) : '-') + '</td>' +
+      '<td>' + (s1 ? escHtml(s1) : '-') + '</td>' +
+      '<td>' + (s2 ? escHtml(s2) : '-') + '</td>' +
+      '<td>' + (s3 ? escHtml(s3) : '-') + '</td>' +
+    '</tr>';
+  }
 
   var html =
     '<div class="haisen-doc-page">' +
-      '<div class="haisen-doc-warning no-print">⚠ 試作版です。データ項目の網羅と印刷動作を先に確認してください。</div>' +
-      '<div class="hd-meta">作成日: ' + todayStr + '</div>' +
+      '<div class="haisen-doc-warning no-print">⚠ Excelテンプレ準拠版です。データ未設定箇所は「-」表示。</div>' +
       '<h1>労働契約書 兼 労働条件通知書（派遣）</h1>' +
-      '<div class="hd-intro">本書は、有限会社ステップ・アップ（以下「会社」という）と、氏名 <strong>' + escHtml(name) + '</strong> （以下「労働者」という）との間に締結される労働契約に関し、労働基準法第15条及び労働者派遣法に基づき次のとおり明示する。</div>' +
 
-      '<h2>1. 労働者</h2>' +
-      '<table class="hd-2col">' +
-        '<tr><th>氏名</th><td class="hd-val">' + escHtml(name) + '</td>' +
-            '<th>社員番号</th><td class="hd-val">' + escHtml(String(syainNo)) + '</td></tr>' +
-        '<tr><th>性別</th><td class="hd-val">' + escHtml(sex) + '</td>' +
-            '<th>就業場所</th><td class="hd-val">' + escHtml(hkName) + '</td></tr>' +
+      // ヘッダー：氏名 + 名称所在地 + 使用者
+      '<table class="hd-header">' +
+        '<tr>' +
+          '<td class="hd-h-name" rowspan="2">' + escHtml(name) + ' 様</td>' +
+          '<td class="hd-h-l">名称・所在地</td>' +
+          '<td class="hd-h-r">（会社名）&nbsp;&nbsp;有限会社ステップ・アップ<br>静岡県磐田市上本郷1006-7</td>' +
+        '</tr>' +
+        '<tr>' +
+          '<td class="hd-h-l">使用者職氏名</td>' +
+          '<td class="hd-h-r">代表取締役&nbsp;&nbsp;山下浩俊</td>' +
+        '</tr>' +
       '</table>' +
 
-      '<h2>2. 契約期間</h2>' +
-      '<table>' +
-        '<tr><th>契約区分</th><td>' +
-          '<div class="hd-check-row">' + chk(isMuki) + ' 1. 期間の定めなし</div>' +
-          '<div class="hd-check-row">' + chk(!isMuki) + ' 2. 期間の定めあり' +
-            (!isMuki && koyouStart ? '（' + fmtDateJa(koyouStart) + ' ～ ' + fmtDateJa(koyouEnd) + '）' : '') +
-          '</div>' +
-        '</td></tr>' +
-        (isMuki ? '<tr><th>雇用契約開始日</th><td>' + escHtml(fmtDateJa(koyouStart) || '(未設定)') + '</td></tr>' : '') +
-        '<tr><th>契約更新の上限</th><td>契約期間は通算1年を上限とする（無期雇用は除く）</td></tr>' +
-      '</table>' +
-
-      '<h2>3. 就業場所</h2>' +
-      '<table>' +
-        row('派遣先', hkName) +
-        row('就業部署', hkBuka) +
-        row('組織単位', hkSoshiki) +
-        row('就業場所（変更の範囲）', '会社が労働者派遣個別契約を締結している派遣先事業所（主に静岡県西部地域）') +
-      '</table>' +
-
-      '<h2>4. 従事すべき業務</h2>' +
-      '<table>' +
-        row('業務内容', gyoumu) +
-        row('職種', syokushu) +
-        row('責任の程度', sekinin || '役職を有さない（部下なし）') +
-        row('業務内容（変更の範囲）', '会社が労働者派遣個別契約を締結している派遣先事業所の業務（主に製造、梱包、運搬、清掃業務）') +
-      '</table>' +
-
-      '<h2>5. 始業・終業の時刻、休憩時間</h2>' +
-      (function(){
-        var rows = '';
-        shifts.forEach(function(s){
-          var slotsTxt = s.slots.length > 0 ? s.slots.join(' / ') : '';
-          rows += '<tr><th class="hd-shift-n">' + s.n + '</th>' +
-                  '<th>就業時間</th><td>' + escHtml(s.jikan) + '</td>' +
-                  '<th>実働</th><td>' + escHtml(s.jisu) + '</td></tr>';
-          if (slotsTxt || s.total) {
-            rows += '<tr><th></th><th>休憩時間帯</th><td colspan="3">' +
-                    escHtml(slotsTxt) +
-                    (s.total ? '　<span style="color:#555;font-size:9.5pt;">（合計 ' + escHtml(s.total) + '）</span>' : '') +
-                    '</td></tr>';
-          }
-        });
-        return '<table class="hd-shifts"><colgroup><col style="width:5%"><col style="width:15%"><col style="width:30%"><col style="width:12%"><col style="width:38%"></colgroup>' + rows + '</table>';
-      })() +
-
-      '<h2>6. 所定時間外労働・休日労働（36協定の範囲内）</h2>' +
-      '<table class="hd-2col">' +
-        '<tr><th>1日 上限</th><td class="hd-val">' + (sankyo1day != null && sankyo1day !== '' ? escHtml(String(sankyo1day)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td>' +
-            '<th>1か月 上限</th><td class="hd-val">' + (sankyo1mon != null && sankyo1mon !== '' ? escHtml(String(sankyo1mon)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td></tr>' +
-        '<tr><th>1年 上限</th><td class="hd-val">' + (sankyo1year != null && sankyo1year !== '' ? escHtml(String(sankyo1year)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td>' +
-            '<th>休日労働 1か月</th><td class="hd-val">' + (kyujitsuMon != null && kyujitsuMon !== '' ? escHtml(String(kyujitsuMon)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td></tr>' +
-        (sankyoText || sankyo1MText ? '<tr><th>備考</th><td colspan="3">' + escHtml(sankyoText) + (sankyo1MText ? '　' + escHtml(sankyo1MText) : '') + '</td></tr>' : '') +
-      '</table>' +
-
-      '<h2>7. 休日</h2>' +
-      '<table>' +
-        row('休日', '定例日：毎週土曜日・日曜日（一部除く）／その他就業先カレンダーによる') +
-      '</table>' +
-
-      '<h2>8. 賃金</h2>' +
-      '<table>' +
-        row('基本賃金（時間給）', hourlyRate ? Number(hourlyRate).toLocaleString() + ' 円/時間' : '(未設定)') +
-        row('時間外（割増）', '法定時間外 25%／法定休日 35%／深夜（22:00～5:00）25%（重複時は加算）') +
-        row('60時間超', '法定時間外60時間超 50%') +
-        row('賃金締切日', '末日締め') +
-        row('賃金支払日', '翌月20日払い（金融機関休業日は前営業日）') +
-        row('賃金支払方法', '会社指定金融機関口座振込／給与明細は電子メール') +
-      '</table>' +
-
-      '<h2>9. 社会保険・労働保険</h2>' +
-      '<table>' +
-        row('加入保険', '☑ 労災保険　☑ 雇用保険　☑ 厚生年金　☑ 健康保険') +
-      '</table>' +
-
-      '<h2>10. 派遣先との契約終了時</h2>' +
-      '<div class="hd-fulltext">' +
-        '一、派遣先との労働者派遣契約が終了した場合、会社は速やかに別の派遣先に派遣するよう努める。<br>' +
-        '一、会社と派遣先との労働者派遣契約の終了等で、無期雇用派遣労働者または雇用契約期間中の労働者を解雇しようとする場合は、労働基準法第20条に基づき手続を行う。<br>' +
-        '一、本書面に記載のない事項は、就業規則（派遣）に準ずる。' +
+      '<div class="hd-intro">' +
+        '本書は、有限会社ステップ・アップと、氏名 <strong>' + escHtml(name) + '</strong> との間に締結される労働契約に関し、<br>' +
+        '労働基準法第15条の労働条件通知書としての性格も有するものであり、労使間の合意に基づいて作成されたものである。' +
       '</div>' +
 
-      '<h2>11. 雇用管理の相談窓口</h2>' +
-      '<table>' +
-        row('短時間有期雇用管理者', '森 ゆうじ　TEL: 0538-36-6968') +
+      '<table class="hd-main">' +
+
+        // 契約期間
+        '<tr>' +
+          '<th>契約期間</th>' +
+          '<td>' +
+            chk(isMuki) + ' 1. 期間の定めなし　・　' + chk(!isMuki) + ' 2. 期間の定めあり' +
+            (!isMuki ? '<span class="hd-period-dates">　&nbsp;&nbsp;&nbsp;&nbsp;' + escHtml(fmtDateJa(koyouStart) || '') + '　～　' + escHtml(fmtDateJa(koyouEnd) || '') + '</span>' : '') +
+          '</td>' +
+        '</tr>' +
+
+        // 就業場所（雇入れ直後）
+        '<tr>' +
+          '<th>就業場所<br>（雇入れ直後）</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr><td class="hd-inner-l">（名称）</td><td class="hd-inner-v">' + escHtml(hkName) + '</td>' +
+                  '<td class="hd-inner-l">（電話）</td><td class="hd-inner-v">' + escHtml(kinmuTel) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">（所在地）</td><td class="hd-inner-v" colspan="3">' + escHtml(kinmuJusho) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">（部署）</td><td class="hd-inner-v" colspan="3">' + escHtml(hkBuka || hkName) + '</td></tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+
+        // 就業場所（変更の範囲）
+        '<tr>' +
+          '<th>就業場所<br>（変更の範囲）</th>' +
+          '<td>会社が労働者派遣個別契約を締結している派遣先事業所（主に静岡県西部地域）</td>' +
+        '</tr>' +
+
+        // 従事すべき業務の内容（雇入れ直後）
+        '<tr>' +
+          '<th>従事すべき業務の内容<br>（雇入れ直後）</th>' +
+          '<td>' + escHtml(gyoumu) + '</td>' +
+        '</tr>' +
+
+        // 従事すべき業務の内容（変更の範囲）
+        '<tr>' +
+          '<th>従事すべき業務の内容<br>（変更の範囲）</th>' +
+          '<td>会社が労働者派遣個別契約を締結している派遣先事業所の業務（主に製造、梱包、運搬、清掃業務）</td>' +
+        '</tr>' +
+
+        // 契約更新の上限
+        '<tr>' +
+          '<th>契約更新の上限</th>' +
+          '<td>契約期間は通算1年を上限とする</td>' +
+        '</tr>' +
+
+        // 始業・終業の時刻、休憩時間
+        '<tr>' +
+          '<th>始業、終業の時刻、<br>休憩時間</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-shift-table">' +
+              '<tr><th></th><th>就業時間</th><th>実働時間</th><th>休憩時間</th><th colspan="3">休憩時間帯</th></tr>' +
+              shiftRow(1, h[HF.syuugyou_time1], h[HF.jitsudou_time1], h[HF.kyuukei_total1], h[HF.kyuukei1_1], h[HF.kyuukei1_2], h[HF.kyuukei1_3]) +
+              shiftRow(2, h[HF.syuugyou_time2], h[HF.jitsudou_time2], h[HF.kyuukei_total2], h[HF.kyuukei2_1], h[HF.kyuukei2_2], h[HF.kyuukei2_3]) +
+              shiftRow(3, h[HF.syuugyou_time3], h[HF.jitsudou_time3], h[HF.kyuukei_total3], h[HF.kyuukei3_1], h[HF.kyuukei3_2], h[HF.kyuukei3_3]) +
+              shiftRow(4, '', '', '', '', '', '') +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+
+        // 所定時間外労働の有無
+        '<tr>' +
+          '<th>所定時間外労働<br>の有無</th>' +
+          '<td>' +
+            chk(jikangaiUmu === '有') + ' 有　（1日 <span class="hd-num">' + dash(oh1d) + '</span> 時間　' +
+            '１週 <span class="hd-num">' + dash(oh1w) + '</span> 時間　' +
+            '１か月 <span class="hd-num">' + dash(oh1m) + '</span> 時間　' +
+            '１年 <span class="hd-num">' + dash(oh1y) + '</span> 時間）　' +
+            chk(jikangaiUmu === '無') + ' 無' +
+          '</td>' +
+        '</tr>' +
+
+        // 休日労働の有無
+        '<tr>' +
+          '<th>休日労働の有無</th>' +
+          '<td>' +
+            chk(kyuujitsuUmu === '有') + ' 有　（１か月 <span class="hd-num">' + dash(hkm) + '</span> 日）　　' +
+            chk(kyuujitsuUmu === '無') + ' 無' +
+          '</td>' +
+        '</tr>' +
+
+        // 休日
+        '<tr>' +
+          '<th>休日</th>' +
+          '<td>定例日：毎週　土曜日　日曜日（一部土曜日除く）　その他就業先カレンダーによる</td>' +
+        '</tr>' +
+
+        // 休暇
+        '<tr>' +
+          '<th>休暇</th>' +
+          '<td>' +
+            '1.&nbsp;年次有給休暇　　6か月継続勤務した場合 → 法定通りの日数<br>' +
+            '<span style="margin-left:14px;">継続勤務6か月以内の年次有給休暇（　無　）</span>' +
+          '</td>' +
+        '</tr>' +
+
+        // 賃金
+        '<tr>' +
+          '<th>賃金</th>' +
+          '<td class="hd-chingin">' +
+            '1.&nbsp;基本賃金　　イ.&nbsp;時間給　<span class="hd-num">' + (hourlyRate ? escHtml(Number(hourlyRate).toLocaleString()) : '―') + '</span> 円　　　ロ.&nbsp;日給<br>' +
+            '2.&nbsp;諸手当の額及び計算方法<br>' +
+            '<span style="margin-left:14px;">イ.（通勤手当　　<span class="hd-num">' + (tsukin1day ? escHtml(Number(tsukin1day).toLocaleString()) : '―') + '</span> 円）/1日　片道 <span class="hd-num">' + (katamichiKm ? escHtml(String(katamichiKm)) : '―') + '</span> ㎞（1Km12円計算・1円未満切上げ）</span><br>' +
+            '<span style="margin-left:14px;">イ.（通勤手当　例　　<span class="hd-num">' + (tsukin21day ? escHtml(Number(tsukin21day).toLocaleString()) : '―') + '</span> 円）/21日の場合</span><br>' +
+            '3.&nbsp;法定時間外、休日または深夜労働に対して支払われる割増賃金率<br>' +
+            '<span style="margin-left:14px;">イ.法定時間外（25%）　　ロ.法定休日（35%）</span><br>' +
+            '<span style="margin-left:14px;">ハ.深夜（25%）　　イ.法定時間外60時間越えた分（50%）</span><br>' +
+            '4.&nbsp;賃金締切日　毎月 末日　・　賃金支払日　翌月20日 支払<br>' +
+            '5.&nbsp;労使協定に基づく賃金支払時の控除（　有　・　無　）<br>' +
+            '6.&nbsp;昇給　（　有　・　無　）　1年に1回の勤務評価、賃金表による（労使協定方式を採用）<br>' +
+            '7.&nbsp;賞与　（　有　　時間給に含む　）<br>' +
+            '8.&nbsp;退職金（　有　・　無　）（時間給に含む6%）<br>' +
+            '<span style="color:#444;">※上記賃金等は全て　現金　・　口座振込　により支払う。給料明細については電子メールで送る。</span>' +
+          '</td>' +
+        '</tr>' +
+
+        // 契約更新の有無
+        '<tr>' +
+          '<th>契約更新の有無<br>（契約期間について<br>《期間の定めあり》<br>とした場合）</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr>' +
+                '<td class="hd-inner-l" style="width:35%;vertical-align:top;">1.&nbsp;契約更新の有無<br>' +
+                  '<span style="margin-left:14px;">' + chk(false) + ' A&nbsp;自動的に更新する</span><br>' +
+                  '<span style="margin-left:14px;">' + chk(!isMuki) + ' B&nbsp;更新する場合がありえる</span><br>' +
+                  '<span style="margin-left:14px;">' + chk(false) + ' C&nbsp;更新しない</span>' +
+                '</td>' +
+                '<td class="hd-inner-l" style="vertical-align:top;">2.&nbsp;契約の更新は、次のいずれかにより判断する<br>' +
+                  '<span style="margin-left:14px;">・契約期間満了時の業務量</span><br>' +
+                  '<span style="margin-left:14px;">・従事している業務の進捗状況</span><br>' +
+                  '<span style="margin-left:14px;">・有期契約従業員の能力業務成績、勤務態度</span><br>' +
+                  '<span style="margin-left:14px;">・会社の経営状況</span><br>' +
+                  '<span style="margin-left:14px;">・その他（　　　　　　　　　　　　　　）</span>' +
+                '</td>' +
+              '</tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+
+        // 退職に関する事項
+        '<tr>' +
+          '<th>退職に関する事項</th>' +
+          '<td>' +
+            '1.&nbsp;定年制　（　有（65歳）　再雇用（無）　）<br>' +
+            '2.&nbsp;自己都合退職の手続（退職する30日以上前に届け出ること）<br>' +
+            '3.&nbsp;解雇の事由及び手続（就業規則（派遣）第7章第47条、第8章第51条、第52条による）' +
+          '</td>' +
+        '</tr>' +
+
+        // 教育訓練に関する事項
+        '<tr>' +
+          '<th>教育訓練に関する事項</th>' +
+          '<td>' +
+            '1.&nbsp;従業員は入社時及び在職時において会社が定める教育訓練を受講するものとする。<br>' +
+            '2.&nbsp;教育訓練の受講は有給とし、受講した時間においては時間給計算として賃金支払をする。' +
+          '</td>' +
+        '</tr>' +
+
+        // 派遣先との契約終了時
+        '<tr>' +
+          '<th>派遣先との契約終了時</th>' +
+          '<td>' +
+            '1.&nbsp;派遣先との労働者派遣契約が終了した場合においては、会社は速やかに派遣労働者を別の派遣先に派遣するように努める。<br>' +
+            '2.&nbsp;前項の場合において、新たな就業の機会を確保できない時は、会社は無期雇用派遣労働者については、会社と派遣先との労働者派遣契約終了のみを理由として解雇することはできない。また、有期雇用派遣労働者については、労働者派遣契約終了時に労働契約が存続している場合は労働者派遣契約終了のみを理由として解雇することはできない。' +
+          '</td>' +
+        '</tr>' +
+
+        // 休業補償に関する事項
+        '<tr>' +
+          '<th>休業補償に関する事項</th>' +
+          '<td>' +
+            '1.&nbsp;会社と派遣先との労働者派遣契約の終了等で、無期雇用派遣労働者または、雇用契約期間内の有期雇用派遣労働者に対し、次の派遣先が見つからない等使用者の責に帰すべき事由により休業させた場合は、労働基準法第26条に基づく休業手当を支払う。' +
+          '</td>' +
+        '</tr>' +
+
+        // その他
+        '<tr>' +
+          '<th>その他</th>' +
+          '<td>' +
+            '・労働保険・社会保険の加入状況<br>' +
+            '<span style="margin-left:14px;">（　☑ 労災保険　・　☑ 雇用保険　・　☑ 厚生年金　・　☑ 健康保険　）</span><br>' +
+            '・就労時間：労働時間40時間／週を原則とする。<br>' +
+            '・本書面に記載されていない事項に関しては、当社就業規則に準ずることとする。就業規則名（就業規則（派遣））<br>' +
+            '・本書は、労働契約書及び労働条件通知書を兼ねるものとする<br>' +
+            '・雇用の相談窓口は短時間有期雇用管理者の森&nbsp;ゆうじ&nbsp;Tel:0538-36-6968<br>' +
+            '・就業規則を確認できる場所や方法<br>' +
+            '<span style="margin-left:14px;">（本社事務所内に掲示、給与明細備考欄のリンク、又はこちらのリンクより 就業規則の確認）</span>' +
+          '</td>' +
+        '</tr>' +
+
       '</table>' +
 
-      '<div class="hd-sign-block">' +
-        '<div class="hd-sign-box">' +
-          '<div class="hd-sign-label">使用者（派遣元）</div>' +
-          '<div>有限会社ステップ・アップ</div>' +
-          '<div>（許可番号：派22-300880）</div>' +
-          '<div>静岡県磐田市</div>' +
-          '<div class="hd-inn-spot">㊞</div>' +
-        '</div>' +
-        '<div class="hd-sign-box">' +
-          '<div class="hd-sign-label">労働者　署名・捺印</div>' +
-          '<div style="margin-top:6px;font-size:9pt;color:#555;">氏名：' + escHtml(name) + '</div>' +
-          '<div style="margin-top:24px;border-bottom:0.5pt solid #555;width:80%;">　</div>' +
-          '<div style="font-size:9pt;color:#555;margin-top:2px;">（署名）</div>' +
-          '<div class="hd-inn-spot">㊞</div>' +
-        '</div>' +
+      '<div class="hd-footer">' +
+        '<div class="hd-footer-date">' + escHtml(todayStr) + '</div>' +
+        '<div class="hd-footer-sign">上記の内容を確認して理解しました。</div>' +
+        '<div class="hd-footer-sign-line">氏名：<span style="margin-left:14px;border-bottom:0.5pt solid #555;display:inline-block;min-width:260px;">　</span>&nbsp;&nbsp;&nbsp;<span style="border:0.8pt dashed #999;border-radius:50%;width:42px;height:42px;display:inline-block;vertical-align:middle;text-align:center;line-height:42px;color:#999;font-size:9pt;">㊞</span></div>' +
       '</div>' +
     '</div>';
 
