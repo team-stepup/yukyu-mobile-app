@@ -10677,14 +10677,18 @@ async function loadSoumuDashboard() {
         var shinseiBangoSet = {};
         var shinseiCount = 0;
         _soumuAllEmps.forEach(function(e) {
-          var sv = String(e[odShaho] || '');
-          // 「→申請中」/「取得申請中」/「申請中」の含む値を全部対象に
-          if (sv.indexOf('申請') >= 0 && sv.indexOf('完了') < 0 && sv.indexOf('喪失') < 0) {
+          var sv = String(e[odShaho] || '').trim();
+          // 「総務-社保」に何らかの社保ステータスが入っている社員はすべて加入カードから除外する。
+          //   - →申請中 / 取得申請中 / 申請中     → 既に申請済（重複防止）
+          //   - ✓取得完了                          → 既に加入完了
+          //   - →喪失申請中 / ✓喪失完了           → 既に離脱手続中・離脱済
+          //   - →移動 / ✓移動                     → 別会社等への移動扱い
+          if (sv && (sv.indexOf('申請') >= 0 || sv.indexOf('完了') >= 0 || sv.indexOf('喪失') >= 0 || sv.indexOf('移動') >= 0)) {
             var bn = _normBango(F.syainNo ? e[F.syainNo] : '');
             if (bn) { shinseiBangoSet[bn] = true; shinseiCount++; }
           }
         });
-        console.log('[社保加入] 申請中(取得)社員数:', shinseiCount, '社員番号セット:', Object.keys(shinseiBangoSet));
+        console.log('[社保加入] 除外対象社員数(申請中/取得完了/喪失/移動):', shinseiCount, '社員番号セット:', Object.keys(shinseiBangoSet));
         // 加入申請リスト側の bango カラムを推定
         var bangoKey = (_soumuShahoInFields && _soumuShahoInFields.bango) || null;
         // 1件目のサンプルから候補列を表示
