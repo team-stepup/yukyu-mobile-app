@@ -7558,6 +7558,21 @@ async function loadLeaveDetails() {
       let actualUsedDays = 0;
       grantRecords.forEach(r => { actualUsedDays += getRecordDays(r); });
 
+      // 取得日を「古い順」で番号(①②...)と累計日数を計算してマップ化
+      // (表示は既存の新しい順だが、各行に古い順での通算番号と累計を出すため)
+      const cumByRecordId = {};
+      const grantRecordsAsc = [...grantRecords].sort((a,b) =>
+        new Date(a[F.leaveDate]) - new Date(b[F.leaveDate])
+      );
+      let _runningCum = 0;
+      grantRecordsAsc.forEach((r, i) => {
+        _runningCum += getRecordDays(r);
+        cumByRecordId[r.Id] = { idx: i + 1, cum: _runningCum };
+      });
+      function _fmtCum(n) {
+        return (n % 1 === 0) ? (n + '日') : (n.toFixed(1) + '日');
+      }
+
       const grantNum = origIdx + 1;
       const isCurrent = g.isCurrentPeriod;
 
@@ -7634,15 +7649,17 @@ async function loadLeaveDetails() {
               const dayCount = getRecordDays(r);
               const twoMonthsAgo = new Date(); twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
               const canDelete = new Date(r[F.leaveDate]) >= twoMonthsAgo;
+              const cumMeta = cumByRecordId[r.Id] || { idx: '?', cum: 0 };
               return `
-              <div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;">
-                <span style="min-width:95px;font-weight:500;">${formatDate(r[F.leaveDate])}</span>
-                <span style="background:${typeLabel==='1日'?'#e3f2fd':'#fff3e0'};color:${typeLabel==='1日'?'#1565c0':'#e65100'};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;min-width:55px;text-align:center;">
+              <div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;gap:6px;">
+                <span style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;background:#e8eaf6;color:#3949ab;border-radius:50%;font-size:11px;font-weight:700;flex-shrink:0;">${cumMeta.idx}</span>
+                <span style="font-weight:500;flex-shrink:0;">${formatDate(r[F.leaveDate])}</span>
+                <span style="background:${typeLabel==='1日'?'#e3f2fd':'#fff3e0'};color:${typeLabel==='1日'?'#1565c0':'#e65100'};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;min-width:55px;text-align:center;flex-shrink:0;">
                   ${typeLabel}
                 </span>
-                <span style="margin-left:4px;font-size:11px;color:var(--text-light);">${dayCount}日</span>
+                <span style="margin-left:auto;font-size:10px;font-weight:700;color:#3949ab;background:#eef2ff;padding:3px 8px;border-radius:8px;flex-shrink:0;">累計 ${_fmtCum(cumMeta.cum)}</span>
                 ${canDelete ? `<button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
-                  style="margin-left:auto;background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;">&times;</button>` : ''}
+                  style="background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;flex-shrink:0;">&times;</button>` : ''}
               </div>`;
             }).join('')}
           </div>
