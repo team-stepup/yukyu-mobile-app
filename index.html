@@ -7821,15 +7821,23 @@ const LIST_HAKENSAKI_GUID = '2a2ab839-9dcd-4385-a72b-f20449ceddc4';
 // 社員データの「部課」 (例: "071:三和電子サーキット㈱") から派遣先番号を抽出
 function extractHakenBango(emp) {
   if (!emp) return '';
-  // F.haken は部課キーのはず。candidates も試す
-  var cand = emp[F.haken] || emp[F.hakensaki] || emp[F.buka] || '';
+  var cand = '';
+  // 1. グローバルで解決済みの bukaODataKey を最優先
+  try {
+    if (typeof bukaODataKey !== 'undefined' && bukaODataKey) cand = emp[bukaODataKey] || '';
+  } catch(_) {}
+  // 2. フォールバック: emp の中から部課らしき OData キー (_x90e8__x8ab2_) を探す
   if (!cand) {
-    // emp 内の OData_x90e8__x8ab2_ (部課) を探す
     for (var k in emp) {
       if (k.indexOf('x90e8') >= 0 && k.indexOf('x8ab2') >= 0) { cand = emp[k]; break; }
     }
   }
+  // 3. それでもダメなら hakensaki 系も試す（古い形式の場合）
+  if (!cand) {
+    try { cand = emp[F.hakensaki] || ''; } catch(_) {}
+  }
   var s = String(cand || '').trim();
+  // 「071:三和電子サーキット㈱」「071-...」「071：...」 形式から番号抽出
   var m = s.match(/^(\d+)[\-:：－]/);
   return m ? m[1] : '';
 }
