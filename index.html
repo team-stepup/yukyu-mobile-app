@@ -6955,6 +6955,14 @@ function calcLeaveBelow5List(allEmps, allLeaveRecords) {
   for (var j = 0; j < allEmps.length; j++) {
     var emp = allEmps[j];
     if (isResigned(emp)) continue;
+
+    // 派遣先による除外（年5日取得義務の対象外: ㈱ユーシン委託管理・本社送迎者）
+    var hakenNameForFilter = '';
+    try { hakenNameForFilter = String(getHakensaki(emp) || ''); } catch(e) {}
+    if (hakenNameForFilter.indexOf('委託管理') >= 0) continue;
+    if (hakenNameForFilter.indexOf('本社（送迎') >= 0) continue;
+    if (hakenNameForFilter.indexOf('本社(送迎') >= 0) continue;
+
     var kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
     if (!kisanDate) continue;
     var retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
