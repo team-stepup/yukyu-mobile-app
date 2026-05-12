@@ -4758,6 +4758,7 @@ select.sankyu-edit-input {
         <span class="ql-text">有給確認</span>
         <span id="yukyuBadgeCount" class="ql-badge" style="background:#1565c0;display:none;"></span>
         <span id="yukyuBadgeMinus" class="ql-badge" style="background:#c62828;display:none;top:4px;left:4px;right:auto;"></span>
+        <span id="yukyuBadgeBelow5" class="ql-badge" style="background:#7c3aed;display:none;bottom:4px;left:4px;top:auto;right:auto;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('nyutaiScreen')" style="position:relative;">
         <span class="ql-icon">🚪</span>
@@ -5303,6 +5304,7 @@ select.sankyu-edit-input {
     </div>
     <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:4px 8px;"><span id="yukyuListCount" style="font-size:13px;color:var(--text-light);"></span><button class="refresh-btn" onclick="loadYukyuList()">&#x21bb; 更新</button></div>
     <div id="yukyuOverdraftSection" style="margin:0 8px;"></div>
+    <div id="yukyuBelow5Section" style="margin:0 8px;"></div>
     <div id="yukyuListBody"></div>
   </div>
 
@@ -6927,6 +6929,89 @@ function calcLeaveOverdraftList(allEmps, allLeaveRecords) {
   return result;
 }
 
+// ============================================================
+// 年5日有給取得義務違反リスクの検知
+// ============================================================
+// 労働基準法第39条第7項: 10日以上付与された社員は、付与日から1年以内に
+// 5日以上の年休を取得させる義務がある。
+// 期限の3ヶ月前を過ぎても 5日未満なら警告対象としてリストアップする。
+//   - 「現在の付与」= isCurrentPeriod=true の付与（最新の活性付与）
+//   - 期限 = currentGrant.grantDate + 12ヶ月
+//   - 警告開始 = 期限 - 3ヶ月
+function calcLeaveBelow5List(allEmps, allLeaveRecords) {
+  if (!Array.isArray(allEmps) || !Array.isArray(allLeaveRecords)) return [];
+
+  var recByEmp = {};
+  for (var i = 0; i < allLeaveRecords.length; i++) {
+    var r = allLeaveRecords[i];
+    var k = String(r[F.syainNo] || '').trim();
+    if (!k) continue;
+    (recByEmp[k] = recByEmp[k] || []).push(r);
+  }
+
+  var today = new Date();
+  var result = [];
+
+  for (var j = 0; j < allEmps.length; j++) {
+    var emp = allEmps[j];
+    if (isResigned(emp)) continue;
+    var kisanDate = emp[F.kisanDate] || emp[F.nyushaDate];
+    if (!kisanDate) continue;
+    var retireDate = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
+
+    var grants;
+    try { grants = calculateGrants(kisanDate, retireDate); } catch (e) { continue; }
+    if (!grants || grants.length === 0) continue;
+
+    // 現在の付与（isCurrentPeriod=true）を取得
+    var currentGrant = null;
+    for (var gi = 0; gi < grants.length; gi++) {
+      if (grants[gi].isCurrentPeriod) { currentGrant = grants[gi]; break; }
+    }
+    if (!currentGrant) continue;
+
+    // 10日未満付与は年5日取得義務の対象外
+    if (currentGrant.grantedDays < 10) continue;
+
+    // 義務期限 = 付与日 + 12ヶ月
+    var obligationEnd = new Date(currentGrant.grantDate);
+    obligationEnd.setFullYear(obligationEnd.getFullYear() + 1);
+
+    // 警告開始 = 期限 - 3ヶ月
+    var warnFrom = new Date(obligationEnd);
+    warnFrom.setMonth(warnFrom.getMonth() - 3);
+
+    // 今日が警告期間に入っていなければスキップ
+    if (today < warnFrom) continue;
+
+    // 現在の付与期間内（grantDate 〜 obligationEnd）の取得日数を集計
+    var empKey = String(emp[F.syainNo] || '').trim();
+    var myRecs = recByEmp[empKey] || [];
+    var takenDays = 0;
+    for (var ri = 0; ri < myRecs.length; ri++) {
+      var rec = myRecs[ri];
+      var d = new Date(rec[F.leaveDate]);
+      if (d < currentGrant.grantDate) continue;
+      if (d >= obligationEnd) continue;
+      takenDays += getRecordDays(rec);
+    }
+
+    if (takenDays >= 5) continue;
+
+    result.push({
+      emp: emp,
+      takenDays: takenDays,
+      shortfall: 5 - takenDays,
+      grantDate: currentGrant.grantDate,
+      obligationEnd: obligationEnd
+    });
+  }
+
+  // 不足日数が多い順
+  result.sort(function(a, b) { return b.shortfall - a.shortfall; });
+  return result;
+}
+
 function getRecordDays(record) {
   // 半日キーワードがどちらかのフィールドにあれば0.5日（'1'検出より優先）
   const type = (record[F.leaveType] || '').trim();
@@ -8513,6 +8598,21 @@ async function loadHomeBadges() {
       }
     }
   } catch (e) { console.warn('[overdraft] badge calc error', e); }
+
+  // 有給5日未満警告バッジ（年5日取得義務、期限3ヶ月前から警告）
+  try {
+    var below5List = calcLeaveBelow5List(allEmps, leaveAll || []);
+    window._below5Employees = below5List;
+    var yBelow5Badge = document.getElementById('yukyuBadgeBelow5');
+    if (yBelow5Badge) {
+      if (below5List.length > 0) {
+        yBelow5Badge.textContent = below5List.length;
+        yBelow5Badge.style.display = 'inline-block';
+      } else {
+        yBelow5Badge.style.display = 'none';
+      }
+    }
+  } catch (e) { console.warn('[below5] badge calc error', e); }
 
   // 期限注意バッジ
   var keyMap = meta && Object.keys(meta).length > 0 ? buildFieldKeyMap(meta) : {};
@@ -19555,10 +19655,26 @@ function initYukyuListDate() {
   onDateInputChange('yukyuListDateFrom', 'yukyuFromDisplay');
   onDateInputChange('yukyuListDateTo', 'yukyuToDisplay');
   renderYukyuOverdraftSection();
+  renderYukyuBelow5Section();
   loadYukyuList();
 }
 
-// 有給確認画面の上部に「残マイナス者一覧」を描画（カード型）
+// アコーディオンのヘッダー要素を受け取って、ボディの開閉と矢印を切替える共通関数
+function toggleAccordion(headerEl) {
+  if (!headerEl) return;
+  const body = headerEl.nextElementSibling;
+  const arrow = headerEl.querySelector('.acc-arrow');
+  if (!body) return;
+  if (body.style.display === 'none' || body.style.display === '') {
+    body.style.display = 'block';
+    if (arrow) arrow.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    if (arrow) arrow.textContent = '▶';
+  }
+}
+
+// 有給確認画面の上部に「残マイナス者一覧」をアコーディオンで描画（デフォルト閉じ）
 // window._overdraftEmployees はホームの loadHomeBadges でセット済み
 function renderYukyuOverdraftSection() {
   const sec = document.getElementById('yukyuOverdraftSection');
@@ -19596,13 +19712,17 @@ function renderYukyuOverdraftSection() {
   });
 
   sec.innerHTML =
-    '<div style="background:linear-gradient(135deg, #fff5f5 0%, #fef0f0 100%);border:1px solid #fecaca;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 2px 8px rgba(198,40,40,0.08);">' +
-      '<div style="display:flex;align-items:center;gap:8px;">' +
+    '<div style="background:#fff;border:1px solid #fecaca;border-radius:14px;margin:8px 0;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">' +
+      '<div class="acc-header" onclick="toggleAccordion(this)" ' +
+        'style="background:linear-gradient(135deg,#fff5f5 0%,#fef0f0 100%);padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;-webkit-tap-highlight-color:transparent;">' +
         '<span style="font-size:18px;line-height:1;">⚠️</span>' +
         '<span style="font-weight:700;color:#991b1b;font-size:14px;flex:1;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">有給残マイナス</span>' +
-        '<span style="background:#c62828;color:#fff;font-weight:700;font-size:11px;padding:3px 10px;border-radius:999px;letter-spacing:0.3px;flex-shrink:0;">' + list.length + '人</span>' +
+        '<span style="background:#c62828;color:#fff;font-weight:700;font-size:11px;padding:3px 10px;border-radius:999px;flex-shrink:0;">' + list.length + '人</span>' +
+        '<span class="acc-arrow" style="color:#991b1b;font-size:12px;width:14px;text-align:center;line-height:1;flex-shrink:0;">▶</span>' +
       '</div>' +
-      cards +
+      '<div class="acc-body" style="display:none;padding:4px 12px 12px;">' +
+        cards +
+      '</div>' +
     '</div>';
   sec.style.display = 'block';
 }
@@ -19610,6 +19730,68 @@ function renderYukyuOverdraftSection() {
 // マイナス一覧の行をタップ → 該当社員の詳細画面を開く
 function openOverdraftEmployee(idx) {
   const list = window._overdraftEmployees || [];
+  const o = list[idx];
+  if (!o || !o.emp) return;
+  selectEmployee(o.emp);
+}
+
+// 「年5日未満」社員のアコーディオン（紫テーマ、デフォルト閉じ）
+function renderYukyuBelow5Section() {
+  const sec = document.getElementById('yukyuBelow5Section');
+  if (!sec) return;
+  const list = window._below5Employees || [];
+  if (list.length === 0) {
+    sec.style.display = 'none';
+    sec.innerHTML = '';
+    return;
+  }
+  let cards = '';
+  list.forEach((o, idx) => {
+    const haken = getHakensaki(o.emp) || '-';
+    const shimei = o.emp.Title || '';
+    const syainNo = String(o.emp[F.syainNo] || '');
+    const taken = Math.round(o.takenDays * 10) / 10;
+    const limitStr = o.obligationEnd ? formatDateShort(o.obligationEnd) : '';
+    cards +=
+      '<div onclick="openBelow5Employee(' + idx + ')" ' +
+        'style="background:#fff;border:1px solid #ddd6fe;border-radius:10px;padding:10px 12px;margin-top:8px;cursor:pointer;display:flex;align-items:center;gap:10px;' +
+        'box-shadow:0 1px 3px rgba(0,0,0,0.04);-webkit-tap-highlight-color:transparent;">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:11px;color:#888;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+            escHtml(haken) + '<span style="color:#ccc;margin:0 6px;">·</span>' + escHtml(syainNo) +
+          '</div>' +
+          '<div style="font-weight:700;font-size:14px;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+            escHtml(shimei) +
+          '</div>' +
+          (limitStr ? '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">期限 ' + limitStr + '</div>' : '') +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;background:#f3f0ff;border-radius:8px;padding:4px 10px;min-width:56px;">' +
+          '<span style="font-size:9px;color:#5b21b6;font-weight:600;line-height:1;margin-bottom:2px;letter-spacing:1px;">取得</span>' +
+          '<span style="font-weight:800;font-size:16px;color:#7c3aed;line-height:1.1;">' + taken + '<span style="font-size:10px;margin-left:1px;">日</span></span>' +
+        '</div>' +
+        '<span style="color:#7c3aed;font-size:20px;font-weight:300;flex-shrink:0;line-height:1;">›</span>' +
+      '</div>';
+  });
+
+  sec.innerHTML =
+    '<div style="background:#fff;border:1px solid #ddd6fe;border-radius:14px;margin:8px 0;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">' +
+      '<div class="acc-header" onclick="toggleAccordion(this)" ' +
+        'style="background:linear-gradient(135deg,#f5f3ff 0%,#eef0ff 100%);padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;-webkit-tap-highlight-color:transparent;">' +
+        '<span style="font-size:18px;line-height:1;">📅</span>' +
+        '<span style="font-weight:700;color:#5b21b6;font-size:14px;flex:1;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">年5日未取得（義務注意）</span>' +
+        '<span style="background:#7c3aed;color:#fff;font-weight:700;font-size:11px;padding:3px 10px;border-radius:999px;flex-shrink:0;">' + list.length + '人</span>' +
+        '<span class="acc-arrow" style="color:#5b21b6;font-size:12px;width:14px;text-align:center;line-height:1;flex-shrink:0;">▶</span>' +
+      '</div>' +
+      '<div class="acc-body" style="display:none;padding:4px 12px 12px;">' +
+        cards +
+      '</div>' +
+    '</div>';
+  sec.style.display = 'block';
+}
+
+// 5日未満一覧の行をタップ → 該当社員の詳細画面を開く
+function openBelow5Employee(idx) {
+  const list = window._below5Employees || [];
   const o = list[idx];
   if (!o || !o.emp) return;
   selectEmployee(o.emp);
