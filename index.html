@@ -14232,16 +14232,23 @@ async function saveShahoShutokuEditDialog() {
       if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
       return;
     }
-    // soumuShaho が ✓取得完了 に設定されたかチェック (変更検出)
+    // soumuShaho が ✓取得完了 なら List9 同期チェックを実行する。
+    // 「保存操作で総務-社保フィールドが変更された場合」だけでなく、
+    // 「既に ✓取得完了 だが List9 側がまだ未同期」のケースもカバー（毎回0件で終わるので副作用なし）。
     var soumuShahoSetToComplete = false;
     var odShaho = km['soumuShaho'];
     if (odShaho) {
       var internalShaho = odataKeyToInternal(odShaho);
-      if (internalShaho && body[internalShaho]) {
-        var newShahoVal = String(body[internalShaho] || '');
-        if (newShahoVal.indexOf('取得完了') >= 0 && newShahoVal.indexOf('喪失') < 0) {
-          soumuShahoSetToComplete = true;
-        }
+      // body の変更値があれば優先、なければ emp の現在値で判定
+      var newShahoVal = '';
+      if (internalShaho && body[internalShaho] !== undefined && body[internalShaho] !== null) {
+        newShahoVal = String(body[internalShaho]);
+      } else {
+        newShahoVal = String(emp[odShaho] || '');
+      }
+      console.log('[List9 sync判定] internalShaho=' + internalShaho + ' bodyVal=' + (body[internalShaho] || '(none)') + ' empVal=' + (emp[odShaho] || '(none)') + ' final=' + newShahoVal);
+      if (newShahoVal.indexOf('取得完了') >= 0 && newShahoVal.indexOf('喪失') < 0) {
+        soumuShahoSetToComplete = true;
       }
     }
     // 社員データPATCH (変更があれば)
