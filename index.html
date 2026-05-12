@@ -2306,7 +2306,7 @@ select.sankyu-edit-input {
 /* ===== 派遣書類（労働契約書③/就業条件明示書③等）プレビュー & 印刷 ===== */
 .haisen-doc-body { padding: 12px; background: #e8e8ee; min-height: calc(100vh - 56px); }
 .haisen-doc-page {
-  background: #fff; max-width: 820px; margin: 0 auto 16px; padding: 14mm 14mm 18mm;
+  background: #fff; max-width: 820px; margin: 0 auto 16px; padding: 10mm 10mm 14mm;
   box-shadow: 0 2px 8px rgba(0,0,0,0.12); font-size: 10.5pt; line-height: 1.55;
   color: #000; font-family: 'Yu Gothic UI','Yu Gothic','メイリオ','Meiryo','Hiragino Kaku Gothic ProN', sans-serif;
 }
@@ -2325,6 +2325,8 @@ select.sankyu-edit-input {
 .haisen-doc-page table th { background:#f0f0f0; font-weight:600; width:30%; }
 .haisen-doc-page table.hd-2col th { width:18%; }
 .haisen-doc-page table.hd-2col td.hd-val { width:32%; }
+.haisen-doc-page table.hd-shifts th.hd-shift-n { text-align:center; font-size:11pt; background:#f3f3f3; }
+.haisen-doc-page table.hd-shifts td { font-size:10.5pt; }
 .haisen-doc-page .hd-fulltext { padding:8px 10px; font-size:10pt; line-height:1.8; border:0.8pt solid #000; background:#fff; }
 .haisen-doc-page .hd-check { font-size:10pt; line-height:1.7; }
 .haisen-doc-page .hd-check-row { margin:2px 0; }
@@ -2352,7 +2354,7 @@ select.sankyu-edit-input {
   /* 表と見出しは可能な限り途中で改ページしない */
   .haisen-doc-page table { page-break-inside: avoid; }
   .haisen-doc-page h2 { page-break-after: avoid; }
-  @page { size: A4 portrait; margin: 12mm; }
+  @page { size: A4 portrait; margin: 8mm; }
 }
 
 .header-logout-sm.is-loggedout {
@@ -7831,8 +7833,29 @@ const HF = {
   sekinin_teido:        'OData__x8cac__x4efb__x306e__x7a0b__x5e',
   syuugyou_time1:       'OData__x5c31__x696d__x6642__x9593__x24',
   jitsudou_time1:       'OData__x5b9f__x50cd__x6642__x9593__x24',
+  syuugyou_time2:       'OData__x5c31__x696d__x6642__x9593__x240',
+  jitsudou_time2:       'OData__x5b9f__x50cd__x6642__x9593__x240',
+  syuugyou_time3:       'OData__x5c31__x696d__x6642__x9593__x241',
+  jitsudou_time3:       'OData__x5b9f__x50cd__x6642__x9593__x241',
   kyuukei_total1:       'OData__x4f11__x61a9__x6642__x9593__x00',
   kyuukei1_1:           'OData__x4f11__x61a9__x6642__x9593__x000',
+  kyuukei1_2:           'OData__x4f11__x61a9__x6642__x9593__x001',
+  kyuukei1_3:           'OData__x4f11__x61a9__x6642__x9593__x002',
+  kyuukei_total2:       'OData__x4f11__x61a9__x6642__x9593__x54',
+  kyuukei2_1:           'OData__x4f11__x61a9__x6642__x9593__x24',
+  kyuukei2_2:           'OData__x4f11__x61a9__x6642__x9593__x240',
+  kyuukei2_3:           'OData__x4f11__x61a9__x6642__x9593__x241',
+  kyuukei_total3:       'OData__x4f11__x61a9__x6642__x9593__x540',
+  kyuukei3_1:           'OData__x4f11__x61a9__x6642__x9593__x242',
+  kyuukei3_2:           'OData__x4f11__x61a9__x6642__x9593__x243',
+  kyuukei3_3:           'OData__x4f11__x61a9__x6642__x9593__x244',
+  // 36協定
+  jikangai_1day:        'OData__x6642__x9593__x5916__x52b4__x50',   // Number 時間外労働 1日
+  jikangai_1month:      'OData__x6642__x9593__x5916__x52b4__x500',  // Number 時間外労働 1か月
+  jikangai_1year:       'OData__x6642__x9593__x5916__x52b4__x501',  // Number 時間外労働 1年
+  kyujitsu_1month:      'OData__x4f11__x65e5__x52b4__x50cd__x00',   // Number 休日労働 1か月
+  sankyou_text:         'OData__x0033_6_x5354__x5b9a_',              // Text 36協定
+  sankyou_1month_text:  'OData__x0033_6_x5354__x5b9a__xff08_1_x',   // Text 36協定(1か月)
 };
 
 const LIST_HAKENSAKI_GUID = '2a2ab839-9dcd-4385-a72b-f20449ceddc4';
@@ -7965,10 +7988,41 @@ function renderRoudouKeiyakushoSan(emp, h) {
   var gyoumu = h[HF.gyoumu5] || h[HF.gyoumu] || '';
   var syokushu = h[HF.syokushu_meishou] || '';
   var sekinin = h[HF.sekinin_teido] || '';
-  var jiTime1 = h[HF.syuugyou_time1] || '';
-  var jisuTime1 = h[HF.jitsudou_time1] || '';
-  var kyukeiTotal = h[HF.kyuukei_total1] || '';
-  var kyukei1 = h[HF.kyuukei1_1] || '';
+  // 3シフト分の就業/実働/休憩を取得
+  var shifts = [
+    {
+      n: '①',
+      jikan:   h[HF.syuugyou_time1] || '',
+      jisu:    h[HF.jitsudou_time1] || '',
+      total:   h[HF.kyuukei_total1] || '',
+      slots:   [h[HF.kyuukei1_1], h[HF.kyuukei1_2], h[HF.kyuukei1_3]].filter(function(v){return v;})
+    },
+    {
+      n: '②',
+      jikan:   h[HF.syuugyou_time2] || '',
+      jisu:    h[HF.jitsudou_time2] || '',
+      total:   h[HF.kyuukei_total2] || '',
+      slots:   [h[HF.kyuukei2_1], h[HF.kyuukei2_2], h[HF.kyuukei2_3]].filter(function(v){return v;})
+    },
+    {
+      n: '③',
+      jikan:   h[HF.syuugyou_time3] || '',
+      jisu:    h[HF.jitsudou_time3] || '',
+      total:   h[HF.kyuukei_total3] || '',
+      slots:   [h[HF.kyuukei3_1], h[HF.kyuukei3_2], h[HF.kyuukei3_3]].filter(function(v){return v;})
+    }
+  ];
+  // 何かしらデータがあるシフトのみ残す
+  shifts = shifts.filter(function(s){ return s.jikan || s.jisu || s.total || s.slots.length > 0; });
+  if (shifts.length === 0) shifts = [{ n: '①', jikan: '', jisu: '', total: '', slots: [] }];
+
+  // 36協定
+  var sankyo1day   = h[HF.jikangai_1day];
+  var sankyo1mon   = h[HF.jikangai_1month];
+  var sankyo1year  = h[HF.jikangai_1year];
+  var kyujitsuMon  = h[HF.kyujitsu_1month];
+  var sankyoText   = h[HF.sankyou_text] || '';
+  var sankyo1MText = h[HF.sankyou_1month_text] || '';
 
   // 社員データから
   var name = emp.Title || '';
@@ -8047,17 +8101,30 @@ function renderRoudouKeiyakushoSan(emp, h) {
       '</table>' +
 
       '<h2>5. 始業・終業の時刻、休憩時間</h2>' +
-      '<table class="hd-2col">' +
-        '<tr><th>就業時間</th><td class="hd-val">' + escHtml(jiTime1) + '</td>' +
-            '<th>実働時間</th><td class="hd-val">' + escHtml(jisuTime1) + '</td></tr>' +
-        '<tr><th>休憩時間（合計）</th><td class="hd-val">' + escHtml(kyukeiTotal) + '</td>' +
-            '<th>休憩時間帯</th><td class="hd-val">' + escHtml(kyukei1) + '</td></tr>' +
-      '</table>' +
+      (function(){
+        var rows = '';
+        shifts.forEach(function(s){
+          var slotsTxt = s.slots.length > 0 ? s.slots.join(' / ') : '';
+          rows += '<tr><th class="hd-shift-n">' + s.n + '</th>' +
+                  '<th>就業時間</th><td>' + escHtml(s.jikan) + '</td>' +
+                  '<th>実働</th><td>' + escHtml(s.jisu) + '</td></tr>';
+          if (slotsTxt || s.total) {
+            rows += '<tr><th></th><th>休憩時間帯</th><td colspan="3">' +
+                    escHtml(slotsTxt) +
+                    (s.total ? '　<span style="color:#555;font-size:9.5pt;">（合計 ' + escHtml(s.total) + '）</span>' : '') +
+                    '</td></tr>';
+          }
+        });
+        return '<table class="hd-shifts"><colgroup><col style="width:5%"><col style="width:15%"><col style="width:30%"><col style="width:12%"><col style="width:38%"></colgroup>' + rows + '</table>';
+      })() +
 
-      '<h2>6. 所定時間外労働・休日労働</h2>' +
-      '<table>' +
-        row('時間外労働', '労働基準法第36条に基づく協定の範囲内（1日 / 1か月 / 1年 の上限あり）') +
-        row('休日労働', '労使協定の範囲内（1か月の上限あり）') +
+      '<h2>6. 所定時間外労働・休日労働（36協定の範囲内）</h2>' +
+      '<table class="hd-2col">' +
+        '<tr><th>1日 上限</th><td class="hd-val">' + (sankyo1day != null && sankyo1day !== '' ? escHtml(String(sankyo1day)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td>' +
+            '<th>1か月 上限</th><td class="hd-val">' + (sankyo1mon != null && sankyo1mon !== '' ? escHtml(String(sankyo1mon)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td></tr>' +
+        '<tr><th>1年 上限</th><td class="hd-val">' + (sankyo1year != null && sankyo1year !== '' ? escHtml(String(sankyo1year)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td>' +
+            '<th>休日労働 1か月</th><td class="hd-val">' + (kyujitsuMon != null && kyujitsuMon !== '' ? escHtml(String(kyujitsuMon)) + ' 時間' : '<span style="color:#bbb;">―</span>') + '</td></tr>' +
+        (sankyoText || sankyo1MText ? '<tr><th>備考</th><td colspan="3">' + escHtml(sankyoText) + (sankyo1MText ? '　' + escHtml(sankyo1MText) : '') + '</td></tr>' : '') +
       '</table>' +
 
       '<h2>7. 休日</h2>' +
