@@ -6525,11 +6525,23 @@ function getFieldChoices(fieldKey, keyMap) {
 const screenHistory = [];
 let currentScreenId = 'loginScreen';
 
+// 画面ごとに viewport のピンチズーム許可を切り替える
+function setViewportZoom(allowZoom) {
+  var vp = document.querySelector('meta[name="viewport"]');
+  if (!vp) return;
+  vp.setAttribute('content', allowZoom
+    ? 'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'
+    : 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+}
+
 function switchScreen(screenId, skipHistory) {
   if (!skipHistory && currentScreenId && currentScreenId !== screenId) {
     screenHistory.push(currentScreenId);
   }
   currentScreenId = screenId;
+
+  // 派遣書類/有給管理簿などのドキュメント画面ではピンチズームを許可
+  setViewportZoom(screenId === 'haisenDocScreen');
 
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
