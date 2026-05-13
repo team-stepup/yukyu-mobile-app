@@ -2378,9 +2378,12 @@ select.sankyu-edit-input {
 
 /* === 年次有給休暇管理簿（付与ごとに1ページ） === */
 .kanribo-page { padding:2mm 2mm 3mm !important; }
-/* スマホ等の狭い画面では、管理簿レイアウトを保つため最小幅+横スクロールを許可 */
+/* スマホ等の狭い画面: 派遣書類は本来の幅で表示し、横スクロール可能に */
 @media screen and (max-width: 700px) {
   .haisen-doc-body { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+  /* 労働契約書③ など haisen-doc-page 全般: 720px 固定 */
+  .haisen-doc-page { min-width: 720px; max-width: 720px; padding: 8mm !important; }
+  /* 有給管理簿: 680px 固定・padding 5mm (より密) */
   .haisen-doc-page.kanribo-page { min-width: 680px; max-width: 680px; padding: 5mm !important; }
 }
 .kanribo-page h1 { display:none; }
@@ -8200,17 +8203,21 @@ async function fetchHakensakiByEmp(emp) {
 
 // 派遣書類/管理簿のズーム制御 (CSS zoom を使用、iOS Safari でも確実に動作)
 // delta=0 でリセット、それ以外は加算
-// スマホでは初期値 50%、PCでは 100%。最小 20% 〜 最大 250%。
+// mobileDefault/desktopDefault でドキュメントごとの初期倍率を指定可能
+//   - 有給管理簿: mobile 0.5 / desktop 1.0
+//   - 労働契約書③: mobile 0.5 / desktop 0.6
+// 最小 20% 〜 最大 250%
 var _haisenDocZoom = 1;
 function isMobileForZoom() {
   return window.innerWidth <= 700;
 }
-function zoomHaisenDoc(delta) {
+function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
   var body = document.getElementById('haisenDocBody');
   if (!body) return;
   if (delta === 0) {
-    // リセット: スマホは 50%、PCは 100% に初期化
-    _haisenDocZoom = isMobileForZoom() ? 0.5 : 1;
+    _haisenDocZoom = isMobileForZoom()
+      ? (typeof mobileDefault === 'number' ? mobileDefault : 0.5)
+      : (typeof desktopDefault === 'number' ? desktopDefault : 1);
   } else {
     _haisenDocZoom = Math.max(0.2, Math.min(2.5, +(_haisenDocZoom + delta).toFixed(2)));
   }
@@ -8247,7 +8254,8 @@ async function openHaisenDocScreen(docType) {
       return;
     }
     if (actions) actions.style.display = 'flex';
-    if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0);  // スマホは50%、PCは100%
+    // 労働契約書③: スマホ50% / PC60%
+    if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.6);
   } catch (e) {
     console.error('openHaisenDocScreen error', e);
     body.innerHTML =
