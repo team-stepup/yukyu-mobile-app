@@ -5525,12 +5525,6 @@ select.sankyu-edit-input {
         <button onclick="zoomHaisenDoc(0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍＋</button>
       </div>
       <button onclick="window.print()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存</button>
-      <div style="font-size:10px;color:#666;text-align:left;line-height:1.6;background:#f5f7fa;padding:6px 10px;border-radius:6px;border:1px solid #e0e6ed;">
-        💡 印刷ダイアログの推奨設定:<br>
-        　・<b>余白</b>: 既定 / 最小 / なし のいずれか<br>
-        　・<b>オプション</b> → <b>ヘッダーとフッター</b>: <b>チェックを外す</b>（URL・ページ番号が消えます）<br>
-        　・<b>背景のグラフィック</b>: チェック（色付き帯を印刷）
-      </div>
     </div>
   </div>
 
@@ -8079,14 +8073,19 @@ async function fetchHakensakiByEmp(emp) {
 
 // 派遣書類/管理簿のズーム制御 (CSS zoom を使用、iOS Safari でも確実に動作)
 // delta=0 でリセット、それ以外は加算
+// スマホでは初期値 50%、PCでは 100%。最小 20% 〜 最大 250%。
 var _haisenDocZoom = 1;
+function isMobileForZoom() {
+  return window.innerWidth <= 700;
+}
 function zoomHaisenDoc(delta) {
   var body = document.getElementById('haisenDocBody');
   if (!body) return;
   if (delta === 0) {
-    _haisenDocZoom = 1;
+    // リセット: スマホは 50%、PCは 100% に初期化
+    _haisenDocZoom = isMobileForZoom() ? 0.5 : 1;
   } else {
-    _haisenDocZoom = Math.max(0.5, Math.min(2.5, +(_haisenDocZoom + delta).toFixed(2)));
+    _haisenDocZoom = Math.max(0.2, Math.min(2.5, +(_haisenDocZoom + delta).toFixed(2)));
   }
   // CSS zoom は iOS Safari / Chrome で動作。Firefox は transform: scale で代替。
   body.style.zoom = _haisenDocZoom;
