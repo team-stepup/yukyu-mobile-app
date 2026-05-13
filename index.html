@@ -8203,11 +8203,8 @@ async function fetchHakensakiByEmp(emp) {
   return candidates[0];
 }
 
-// 派遣書類/管理簿のズーム制御 (CSS zoom を使用、iOS Safari でも確実に動作)
-// delta=0 でリセット、それ以外は加算
-// mobileDefault/desktopDefault でドキュメントごとの初期倍率を指定可能
-//   - 有給管理簿: mobile 0.5 / desktop 1.0
-//   - 労働契約書③: mobile 0.5 / desktop 0.6
+// 派遣書類/管理簿のズーム制御 (transform: scale を使用、iOS Safari の text inflation を回避)
+// delta=0 でリセット (スマホでは画面幅に自動フィット、PC では desktopDefault)
 // 最小 20% 〜 最大 250%
 var _haisenDocZoom = 1;
 function isMobileForZoom() {
@@ -8216,22 +8213,37 @@ function isMobileForZoom() {
 function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
   var body = document.getElementById('haisenDocBody');
   if (!body) return;
+  var page = body.querySelector('.haisen-doc-page');
+  if (!page) return;
+
   if (delta === 0) {
-    _haisenDocZoom = isMobileForZoom()
-      ? (typeof mobileDefault === 'number' ? mobileDefault : 0.5)
-      : (typeof desktopDefault === 'number' ? desktopDefault : 1);
+    if (isMobileForZoom()) {
+      // スマホは画面幅に自動フィット (PDFビューアの "fit to width" と同じ)
+      var pageW = page.classList.contains('kanribo-page') ? 680 : 720;
+      var fit = (window.innerWidth - 16) / pageW;
+      _haisenDocZoom = Math.max(0.2, Math.min(1.0, +fit.toFixed(2)));
+    } else {
+      _haisenDocZoom = typeof desktopDefault === 'number' ? desktopDefault : 1;
+    }
   } else {
     _haisenDocZoom = Math.max(0.2, Math.min(2.5, +(_haisenDocZoom + delta).toFixed(2)));
   }
-  // CSS zoom は iOS Safari / Chrome で動作。Firefox は transform: scale で代替。
-  body.style.zoom = _haisenDocZoom;
-  body.style.transform = 'none';
-  if (!CSS.supports('zoom', '0.5')) {
-    body.style.zoom = '';
-    body.style.transformOrigin = 'top left';
-    body.style.transform = 'scale(' + _haisenDocZoom + ')';
-    body.style.width = (100 / _haisenDocZoom) + '%';
-  }
+
+  // 旧 zoom スタイルを除去し transform: scale に統一 (text inflation 回避)
+  page.style.zoom = '';
+  body.style.zoom = '';
+  page.style.transformOrigin = 'top left';
+  page.style.transform = 'scale(' + _haisenDocZoom + ')';
+
+  // 親コンテナを scale 後の見かけサイズに合わせる (空白防止/横スクロール調整)
+  requestAnimationFrame(function() {
+    var w = page.offsetWidth * _haisenDocZoom;
+    var h = page.offsetHeight * _haisenDocZoom;
+    body.style.width = w + 'px';
+    body.style.height = h + 'px';
+    body.style.maxWidth = 'none';
+  });
+
   var label = document.getElementById('haisenZoomReset');
   if (label) label.textContent = Math.round(_haisenDocZoom * 100) + '%';
 }
