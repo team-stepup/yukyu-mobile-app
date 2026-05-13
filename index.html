@@ -2362,6 +2362,11 @@ select.sankyu-edit-input {
 
 /* 賃金欄 */
 .haisen-doc-page td.hd-chingin { line-height:1.85; }
+/* ○マーク（選択された項目を強調） */
+.haisen-doc-page .hd-circle {
+  display:inline-block; border:1.5pt solid #c62828; border-radius:50%;
+  padding:0 6px; font-weight:700; color:#c62828; line-height:1.2;
+}
 .haisen-doc-page .hd-num { font-weight:700; min-width:48px; display:inline-block; text-align:right; padding:0 4px; border-bottom:0.5pt solid #999; }
 .haisen-doc-page .hd-period-dates { font-weight:600; }
 
@@ -2462,8 +2467,9 @@ select.sankyu-edit-input {
   .screen:not(.active) { display: none !important; }
   .haisen-doc-body { padding: 0 !important; background: #fff !important; min-height: 0 !important; height: auto !important; overflow: visible !important; }
   .haisen-doc-page { box-shadow: none !important; margin: 0 !important; max-width: 100% !important; padding: 0 !important; }
-  /* 表と見出しは可能な限り途中で改ページしない */
-  .haisen-doc-page table { page-break-inside: avoid; }
+  /* 表は途中で改ページOK、ただし行 (tr) は分断しない */
+  .haisen-doc-page table { page-break-inside: auto; }
+  .haisen-doc-page table tr { page-break-inside: avoid; }
   .haisen-doc-page h2 { page-break-after: avoid; }
   /* 年次有給休暇管理簿: 付与ごとに改ページ */
   .kanribo-page .kanribo-page-section { page-break-after: always; }
@@ -8241,6 +8247,7 @@ async function openHaisenDocScreen(docType) {
       return;
     }
     if (actions) actions.style.display = 'flex';
+    if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0);  // スマホは50%、PCは100%
   } catch (e) {
     console.error('openHaisenDocScreen error', e);
     body.innerHTML =
@@ -8266,15 +8273,26 @@ function valOr(v, fallback) { return (v === null || v === undefined || v === '')
 
 // 労働契約書③ レンダリング (シンプル版・A4縦)
 function renderRoudouKeiyakushoSan(emp, h) {
-  var hkName = h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '';
+  // 派遣先データ中の <br> や HTML タグをクリーンアップ
+  function _clean(s) {
+    if (!s) return '';
+    return String(s)
+      .replace(/<br\s*\/?>/gi, ' ')      // <br> → 空白
+      .replace(/<[^>]+>/g, '')           // 他のHTMLタグも除去
+      .replace(/[\r\n]+/g, ' ')          // 改行 → 空白
+      .replace(/[ 　\t]+/g, ' ')         // 連続空白を1つに
+      .replace(/[→↓↑←]+\s*$/g, '')      // 末尾の矢印記号を除去
+      .trim();
+  }
+  var hkName = _clean(h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '');
   // 「部課」表示は派遣先データの「就業部署」を使う（Title は派遣先担当者名のため誤り）
-  var hkBuka = h[HF.syuugyou_busho] || '';
-  var hkSoshiki = h[HF.soshiki] || '';
-  var kinmuTel = h[HF.kinmu_tel] || h[HF.haken_tel] || '';
-  var kinmuJusho = h[HF.kinmu_jusho] || h[HF.haken_jusho] || '';
-  var gyoumu = h[HF.gyoumu5] || h[HF.gyoumu] || '';
-  var syokushu = h[HF.syokushu_meishou] || '';
-  var sekinin = h[HF.sekinin_teido] || '';
+  var hkBuka = _clean(h[HF.syuugyou_busho] || '');
+  var hkSoshiki = _clean(h[HF.soshiki] || '');
+  var kinmuTel = _clean(h[HF.kinmu_tel] || h[HF.haken_tel] || '');
+  var kinmuJusho = _clean(h[HF.kinmu_jusho] || h[HF.haken_jusho] || '');
+  var gyoumu = _clean(h[HF.gyoumu5] || h[HF.gyoumu] || '');
+  var syokushu = _clean(h[HF.syokushu_meishou] || '');
+  var sekinin = _clean(h[HF.sekinin_teido] || '');
   // 3シフト分の就業/実働/休憩を取得
   var shifts = [
     {
@@ -8507,11 +8525,11 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '<span style="margin-left:14px;">イ.法定時間外（25%）　　ロ.法定休日（35%）</span><br>' +
             '<span style="margin-left:14px;">ハ.深夜（25%）　　イ.法定時間外60時間越えた分（50%）</span><br>' +
             '4.&nbsp;賃金締切日　毎月 末日　・　賃金支払日　翌月20日 支払<br>' +
-            '5.&nbsp;労使協定に基づく賃金支払時の控除（　有　・　無　）<br>' +
-            '6.&nbsp;昇給　（　有　・　無　）　1年に1回の勤務評価、賃金表による（労使協定方式を採用）<br>' +
-            '7.&nbsp;賞与　（　有　　時間給に含む　）<br>' +
-            '8.&nbsp;退職金（　有　・　無　）（時間給に含む6%）<br>' +
-            '<span style="color:#444;">※上記賃金等は全て　現金　・　口座振込　により支払う。給料明細については電子メールで送る。</span>' +
+            '5.&nbsp;労使協定に基づく賃金支払時の控除（　<span class="hd-circle">有</span>　・　無　）<br>' +
+            '6.&nbsp;昇給　（　<span class="hd-circle">有</span>　・　無　）　1年に1回の勤務評価、賃金表による（労使協定方式を採用）<br>' +
+            '7.&nbsp;賞与　（　<span class="hd-circle">有</span>　　時間給に含む　）<br>' +
+            '8.&nbsp;退職金（　<span class="hd-circle">有</span>　・　無　）（時間給に含む6%）<br>' +
+            '<span style="color:#444;">※上記賃金等は全て　現金　・　<span class="hd-circle">口座振込</span>　により支払う。給料明細については電子メールで送る。</span>' +
           '</td>' +
         '</tr>' +
 
@@ -8521,12 +8539,12 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '<td class="hd-cell-no-pad">' +
             '<table class="hd-inner">' +
               '<tr>' +
-                '<td class="hd-inner-l" style="width:35%;vertical-align:top;">1.&nbsp;契約更新の有無<br>' +
+                '<td class="hd-inner-l" style="width:50%;vertical-align:top;">1.&nbsp;契約更新の有無<br>' +
                   '<span style="margin-left:14px;">' + chk(false) + ' A&nbsp;自動的に更新する</span><br>' +
                   '<span style="margin-left:14px;">' + chk(!isMuki) + ' B&nbsp;更新する場合がありえる</span><br>' +
                   '<span style="margin-left:14px;">' + chk(false) + ' C&nbsp;更新しない</span>' +
                 '</td>' +
-                '<td class="hd-inner-l" style="vertical-align:top;">2.&nbsp;契約の更新は、次のいずれかにより判断する<br>' +
+                '<td class="hd-inner-l" style="width:50%;vertical-align:top;">2.&nbsp;契約の更新は、次のいずれかにより判断する<br>' +
                   '<span style="margin-left:14px;">・契約期間満了時の業務量</span><br>' +
                   '<span style="margin-left:14px;">・従事している業務の進捗状況</span><br>' +
                   '<span style="margin-left:14px;">・有期契約従業員の能力業務成績、勤務態度</span><br>' +
@@ -8585,7 +8603,7 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '・本書は、労働契約書及び労働条件通知書を兼ねるものとする<br>' +
             '・雇用の相談窓口は短時間有期雇用管理者の森&nbsp;ゆうじ&nbsp;Tel:0538-36-6968<br>' +
             '・就業規則を確認できる場所や方法<br>' +
-            '<span style="margin-left:14px;">（本社事務所内に掲示、給与明細備考欄のリンク、又はこちらのリンクより 就業規則の確認）</span>' +
+            '<span style="margin-left:14px;">（本社事務所内に掲示、給与明細備考欄のリンク、又は<a href="https://team-stepup.github.io/staff-portal/#kiyosoku" target="_blank" rel="noopener" style="color:#1976d2;text-decoration:underline;">こちらのリンク</a>より 就業規則の確認）</span>' +
           '</td>' +
         '</tr>' +
 
