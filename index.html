@@ -3097,6 +3097,21 @@ select.sankyu-edit-input {
   cursor: not-allowed;
   text-decoration: line-through;
 }
+.calendar-cell.over-balance {
+  background: #fff5f5;
+  color: #c0c0c0;
+  cursor: not-allowed;
+  position: relative;
+}
+.calendar-cell.over-balance::after {
+  content: '✕';
+  position: absolute;
+  font-size: 9px;
+  color: #d32f2f;
+  bottom: 1px;
+  right: 2px;
+  opacity: 0.6;
+}
 .calendar-cell.today {
   border: 2px solid var(--primary);
   font-weight: 700;
@@ -7070,6 +7085,112 @@ function applyUsageFIFO(grants, leaveRecords) {
   }
 
   return sortedGrants;
+}
+
+// ============================================================
+// FIFO 残数シミュレーション (申請日のバリデーション用)
+// ============================================================
+// targetDate 時点での FIFO 残数を返す。
+// 既存の申請記録(appliedDatesCache) + 追加で消化したい日付(extras) を、
+// 全て時系列順に FIFO で消化したあと、targetDate に有効な付与の合計残を返す。
+// extras: [{ dateStr: 'YYYY-MM-DD', days: 0.5|1 }, ...]
+function balanceAtDate(targetDate, extras) {
+  if (!currentGrantData || currentGrantData.length === 0) return 0;
+  extras = extras || [];
+  const tDate = (targetDate instanceof Date) ? targetDate : new Date(targetDate);
+  // Grant のシミュレーション用コピー
+  const sim = currentGrantData
+    .map(g => ({
+      grantDate: new Date(g.grantDate),
+      expiryDate: new Date(g.expiryDate),
+      grantedDays: g.grantedDays || 0,
+      _used: 0
+    }))
+    .sort((a, b) => a.grantDate - b.grantDate);
+  // targetDate 以前の消化イベントを収集 (既存 + 追加)
+  const events = [];
+  for (const r of (appliedDatesCache || [])) {
+    const d = new Date(r[F.leaveDate]);
+    if (d <= tDate) events.push({ date: d, days: getRecordDays(r) });
+  }
+  for (const e of extras) {
+    const d = new Date(e.dateStr);
+    if (d <= tDate) events.push({ date: d, days: e.days });
+  }
+  events.sort((a, b) => a.date - b.date);
+  // FIFO 消化
+  for (const ev of events) {
+    let need = ev.days;
+    for (const g of sim) {
+      if (need <= 0) break;
+      if (ev.date < g.grantDate) continue;
+      if (ev.date >= g.expiryDate) continue;
+      const avail = g.grantedDays - g._used;
+      if (avail <= 0) continue;
+      const take = Math.min(need, avail);
+      g._used += take;
+      need -= take;
+    }
+  }
+  // targetDate に有効な付与の残合計
+  let bal = 0;
+  for (const g of sim) {
+    if (g.grantDate <= tDate && tDate < g.expiryDate) {
+      bal += Math.max(0, g.grantedDays - g._used);
+    }
+  }
+  return bal;
+}
+
+// 一括申請バリデーション (時系列順に FIFO 消化を試行)
+// applications: [{ dateStr: 'YYYY-MM-DD', days: 0.5|1 }, ...]
+// 戻り値: { ok: true } もしくは { ok: false, failedDate: 'YYYY-MM-DD', remainAtFail: <num> }
+function validateLeaveApplications(applications) {
+  if (!currentGrantData || currentGrantData.length === 0) return { ok: false, failedDate: applications[0] && applications[0].dateStr, remainAtFail: 0 };
+  // Grant のシミュレーション用コピー
+  const sim = currentGrantData
+    .map(g => ({
+      grantDate: new Date(g.grantDate),
+      expiryDate: new Date(g.expiryDate),
+      grantedDays: g.grantedDays || 0,
+      _used: 0
+    }))
+    .sort((a, b) => a.grantDate - b.grantDate);
+  // 既存申請 + 新規申請を時系列順に
+  const events = [];
+  for (const r of (appliedDatesCache || [])) {
+    events.push({ date: new Date(r[F.leaveDate]), days: getRecordDays(r), isNew: false });
+  }
+  for (const a of applications) {
+    events.push({ date: new Date(a.dateStr), days: a.days, isNew: true, dateStr: a.dateStr });
+  }
+  events.sort((a, b) => a.date - b.date);
+  // FIFO 消化
+  for (const ev of events) {
+    let need = ev.days;
+    for (const g of sim) {
+      if (need <= 0) break;
+      if (ev.date < g.grantDate) continue;
+      if (ev.date >= g.expiryDate) continue;
+      const avail = g.grantedDays - g._used;
+      if (avail <= 0) continue;
+      const take = Math.min(need, avail);
+      g._used += take;
+      need -= take;
+    }
+    if (need > 0 && ev.isNew) {
+      // 新規申請で消化しきれない → NG。その時点の残合計を返す
+      let bal = 0;
+      for (const g of sim) {
+        if (g.grantDate <= ev.date && ev.date < g.expiryDate) {
+          bal += Math.max(0, g.grantedDays - g._used);
+        }
+      }
+      return { ok: false, failedDate: ev.dateStr, remainAtFail: bal };
+    }
+    // 既存記録で消化しきれない場合は過剰使用 (overdraft) として無視 (現状の仕様)
+  }
+  return { ok: true };
 }
 
 // ============================================================
@@ -21229,6 +21350,10 @@ function renderCalendar() {
   const today = new Date();
   const todayStr = formatDateISO(today);
 
+  // 現在の有給種別から1日あたりの日数を取得 (0.5 or 1)
+  const _curType = (typeof getSelectedLeaveType === 'function') ? getSelectedLeaveType() : '1日（定時）';
+  const daysPerDate = (_curType.indexOf('半日') >= 0) ? 0.5 : 1;
+
   // Empty cells before first day
   for (let i = 0; i < startDow; i++) {
     html += '<div class="calendar-cell"></div>';
@@ -21251,7 +21376,21 @@ function renderCalendar() {
     const isSelected = selectedDates.includes(dateStr);
     if (isSelected) classes.push('selected');
 
-    const onclick = isApplied ? '' : `onclick="toggleDate('${dateStr}')"`;
+    // FIFO残数チェック: その日に有効な付与残が不足していたらグレーアウト
+    let isOverBalance = false;
+    if (!isApplied && !isSelected) {
+      const otherSelections = selectedDates
+        .filter(d => d !== dateStr)
+        .map(d => ({ dateStr: d, days: daysPerDate }));
+      const bal = balanceAtDate(date, otherSelections);
+      if (bal < daysPerDate) {
+        isOverBalance = true;
+        classes.push('over-balance');
+      }
+    }
+
+    const clickable = !isApplied && !isOverBalance;
+    const onclick = clickable ? `onclick="toggleDate('${dateStr}')"` : '';
 
     html += `<div class="${classes.join(' ')}" ${onclick}>${day}</div>`;
   }
@@ -21303,6 +21442,8 @@ function selectLeaveType(el) {
   document.querySelectorAll('#leaveTypeSelector .type-option').forEach(o => o.classList.remove('active'));
   el.classList.add('active');
   updateCalcSummary();
+  // 半日 ↔ 1日 で必要残数が変わるため、カレンダーのグレーアウトも再評価
+  if (typeof renderCalendar === 'function') renderCalendar();
 }
 
 function getSelectedLeaveType() {
@@ -21432,28 +21573,35 @@ async function submitLeaveApplication() {
     return;
   }
 
-  // Balance check
-  const activeGrants = (currentGrantData || []).filter(g => !g.expired);
-  let totalRemain = 0;
-  activeGrants.forEach(g => totalRemain += g.remainingDays);
-  // 過剰使用（消化しきれなかった有給日数）を差し引いて、真の残を出す（マイナスも有り得る）
-  totalRemain -= calcCurrentOverdraft();
+  // Balance check (FIFO厳密検証)
   let daysPerDate = 1;
   if (leaveType.indexOf('半日') >= 0) daysPerDate = 0.5;
   const totalDaysNeeded = selectedDates.length * daysPerDate;
 
+  // 過剰使用が現時点で発生している場合は申請不可
+  const activeGrants = (currentGrantData || []).filter(g => !g.expired);
+  let totalRemain = 0;
+  activeGrants.forEach(g => totalRemain += g.remainingDays);
+  totalRemain -= calcCurrentOverdraft();
   if (totalRemain < 0) {
     showLeaveAlertPopup('申請できません',
       '現時点で有給残が <strong style="color:#c62828;">' + totalRemain + '日</strong>（マイナス）です。<br>' +
       '総務までご確認ください。');
     return;
   }
-  if (totalDaysNeeded > totalRemain) {
-    const afterRemain = totalRemain - totalDaysNeeded;
+
+  // 各申請日を時系列順に FIFO で消化シミュレーション
+  // 申請日 < その日に有効な付与のいずれか の場合は拒否
+  const applications = [...selectedDates].sort().map(d => ({ dateStr: d, days: daysPerDate }));
+  const validation = validateLeaveApplications(applications);
+  if (!validation.ok) {
+    const parts = validation.failedDate.split('-');
+    const failedJa = parts[0] + '年' + parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
     showLeaveAlertPopup('申請できません',
-      '申請すると有給残が <strong style="color:#c62828;">' + afterRemain + '日</strong> になり、マイナスになります。<br><br>' +
-      '現在の残: ' + totalRemain + '日<br>' +
-      '申請日数: ' + totalDaysNeeded + '日');
+      '<strong style="color:#c62828;">' + failedJa + '</strong> はその時点で有給残がありません。<br>' +
+      '（その日に有効な付与の合計残: <strong>' + validation.remainAtFail + '日</strong>）<br><br>' +
+      '※付与日より前の日付では、その付与は使用できません。<br>' +
+      '他の日に変更するか、総務までご確認ください。');
     return;
   }
 
