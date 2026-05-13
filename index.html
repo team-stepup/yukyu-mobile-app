@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -5519,6 +5519,11 @@ select.sankyu-edit-input {
   <div class="screen" id="haisenDocScreen">
     <div id="haisenDocBody" class="haisen-doc-body"></div>
     <div class="haisen-doc-actions no-print" id="haisenDocActions" style="display:none;flex-direction:column;gap:6px;">
+      <div style="display:flex;gap:6px;align-items:center;justify-content:center;">
+        <button onclick="zoomHaisenDoc(-0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍−</button>
+        <button onclick="zoomHaisenDoc(0)" id="haisenZoomReset" style="flex:1;background:#fff;color:#555;padding:10px;border:1px solid #ddd;border-radius:8px;font-weight:700;font-size:13px;">100%</button>
+        <button onclick="zoomHaisenDoc(0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍＋</button>
+      </div>
       <button onclick="window.print()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存</button>
       <div style="font-size:10px;color:#666;text-align:left;line-height:1.6;background:#f5f7fa;padding:6px 10px;border-radius:6px;border:1px solid #e0e6ed;">
         💡 印刷ダイアログの推奨設定:<br>
@@ -8070,6 +8075,30 @@ async function fetchHakensakiByEmp(emp) {
 
   console.warn('[fetchHakensakiByEmp] 複数候補(' + candidates.length + '件)、組織単位で絞り込めず最初を使用:', candidates.map(function(c){return c[HF.bango];}));
   return candidates[0];
+}
+
+// 派遣書類/管理簿のズーム制御 (CSS zoom を使用、iOS Safari でも確実に動作)
+// delta=0 でリセット、それ以外は加算
+var _haisenDocZoom = 1;
+function zoomHaisenDoc(delta) {
+  var body = document.getElementById('haisenDocBody');
+  if (!body) return;
+  if (delta === 0) {
+    _haisenDocZoom = 1;
+  } else {
+    _haisenDocZoom = Math.max(0.5, Math.min(2.5, +(_haisenDocZoom + delta).toFixed(2)));
+  }
+  // CSS zoom は iOS Safari / Chrome で動作。Firefox は transform: scale で代替。
+  body.style.zoom = _haisenDocZoom;
+  body.style.transform = 'none';
+  if (!CSS.supports('zoom', '0.5')) {
+    body.style.zoom = '';
+    body.style.transformOrigin = 'top left';
+    body.style.transform = 'scale(' + _haisenDocZoom + ')';
+    body.style.width = (100 / _haisenDocZoom) + '%';
+  }
+  var label = document.getElementById('haisenZoomReset');
+  if (label) label.textContent = Math.round(_haisenDocZoom * 100) + '%';
 }
 
 // 派遣書類作成画面を開く（docType: 'roudouKeiyaku' / 'syuugyouJouken'）
@@ -21772,6 +21801,7 @@ function showYukyuKanribo() {
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
   renderYukyuKanribo(emp, currentGrantData, appliedDatesCache || []);
+  zoomHaisenDoc(0);  // ズームを 100% にリセット
 }
 
 function renderYukyuKanribo(emp, grants, records) {
