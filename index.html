@@ -2371,6 +2371,41 @@ select.sankyu-edit-input {
 .haisen-doc-page .hd-footer-sign { font-size:10pt; margin-top:12px; text-align:right; }
 .haisen-doc-page .hd-footer-sign-line { font-size:10pt; margin-top:8px; text-align:right; }
 
+/* === 年次有給休暇管理簿 === */
+.kanribo-page h1 { letter-spacing:4px; }
+.kanribo-page table.kanribo-header { width:100%; border-collapse:collapse; margin-bottom:14px; table-layout:fixed; }
+.kanribo-page table.kanribo-header th, .kanribo-page table.kanribo-header td {
+  border:0.8pt solid #000; padding:6px 10px; font-size:10pt; vertical-align:middle;
+}
+.kanribo-page table.kanribo-header th { background:#f3f3f3; width:14%; font-weight:600; }
+.kanribo-page .kanribo-grant { margin-bottom:14px; border:0.8pt solid #000; padding:0; }
+.kanribo-page .kanribo-grant.is-expired { background:#fafafa; opacity:0.85; }
+.kanribo-page .kanribo-grant-head {
+  display:flex; justify-content:space-between; align-items:center;
+  background:#1976d2; color:#fff; padding:6px 12px; font-size:11pt; font-weight:700;
+}
+.kanribo-page .kanribo-grant.is-expired .kanribo-grant-head { background:#757575; }
+.kanribo-page .kr-grant-status { font-size:9.5pt; font-weight:600; padding:2px 8px; background:rgba(255,255,255,0.25); border-radius:10px; }
+.kanribo-page table.kanribo-info { width:100%; border-collapse:collapse; margin:0; table-layout:fixed; }
+.kanribo-page table.kanribo-info th, .kanribo-page table.kanribo-info td {
+  border:0.5pt solid #888; padding:4px 8px; font-size:9.5pt; vertical-align:middle;
+}
+.kanribo-page table.kanribo-info th { background:#f5f5f5; width:18%; font-weight:600; }
+.kanribo-page table.kanribo-records { width:100%; border-collapse:collapse; margin:0; }
+.kanribo-page table.kanribo-records th, .kanribo-page table.kanribo-records td {
+  border:0.5pt solid #888; padding:3px 6px; font-size:9.5pt; text-align:center;
+}
+.kanribo-page table.kanribo-records thead th { background:#eef2ff; font-weight:600; }
+.kanribo-page table.kanribo-records td.kr-no { width:6%; color:#666; }
+.kanribo-page table.kanribo-records td.kr-date { width:26%; }
+.kanribo-page table.kanribo-records td.kr-type { width:18%; }
+.kanribo-page table.kanribo-records td.kr-days { width:16%; }
+.kanribo-page table.kanribo-records td.kr-cum { width:16%; font-weight:600; background:#fafafa; }
+.kanribo-page .kanribo-foot {
+  margin-top:14px; padding:8px 10px; background:#f5f5f5; border-left:3px solid #1976d2;
+  font-size:9pt; line-height:1.7; color:#444;
+}
+
 .haisen-doc-page .hd-sign-block { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:18px; }
 .haisen-doc-page .hd-sign-block .hd-sign-box { border:0.8pt solid #000; padding:8px 10px; min-height:90px; position:relative; font-size:10pt; }
 .haisen-doc-page .hd-sign-block .hd-sign-label { font-weight:700; font-size:10pt; margin-bottom:6px; }
@@ -7592,13 +7627,16 @@ async function loadLeaveDetails() {
       </div>
     </div>
 
-    <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
+    <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
       <button class="refresh-btn" onclick="loadLeaveDetails()">&#x21bb; 更新</button>
       <button class="btn" onclick="copyDetailToClipboard('ja')" style="background:#f0f0ff;color:var(--primary);font-size:12px;padding:6px 12px;font-weight:600;">
         📋 JP
       </button>
       <button class="btn" onclick="copyDetailToClipboard('pt')" style="background:#fff3e0;color:#e65100;font-size:12px;padding:6px 12px;font-weight:600;">
         📋 PT
+      </button>
+      <button class="btn" onclick="showYukyuKanribo()" style="background:#e8f5e9;color:#2e7d32;font-size:12px;padding:6px 12px;font-weight:600;border:1px solid #a5d6a7;">
+        📒 管理簿
       </button>
     </div>
 
@@ -21528,6 +21566,8 @@ const _LV_I18N = {
   noGrant:       { ja: '付与情報がありません',               pt: 'Sem informações de concessão' },
   copied:        { ja: 'クリップボードにコピーしました',     pt: 'Copiado para a área de transferência' },
   totalAll:      { ja: '全期間の取得合計',                   pt: 'Total acumulado em todos os períodos' },
+  hireDate:      { ja: '入社日',                             pt: 'Data de admissão' },
+  kisanDate:     { ja: '有給起算日',                         pt: 'Data base de férias' },
 };
 function _lvGrantNum(n, lang) {
   return lang === 'pt' ? ('Concessão Nº ' + n) : ('第' + n + '回付与');
@@ -21578,6 +21618,11 @@ function copyDetailToClipboard(lang) {
   let text = '【' + _lvT('title', lang) + '】\n';
   text += _lvT('name', lang) + ': ' + (emp.Title || '') + (hakensaki ? '（' + hakensaki + '）' : '') + '\n';
   text += _lvT('syainNo', lang) + ': ' + (emp[F.syainNo] || '') + '\n';
+  // 入社日 / 起算日 (起算日が入社日と異なる場合のみ別行で表示)
+  var _nyushaStr = emp[F.nyushaDate] ? _lvDate(emp[F.nyushaDate], lang) : '';
+  var _kisanStr  = emp[F.kisanDate]  ? _lvDate(emp[F.kisanDate],  lang) : '';
+  if (_nyushaStr) text += _lvT('hireDate', lang) + ': ' + _nyushaStr + '\n';
+  if (_kisanStr && _kisanStr !== _nyushaStr) text += _lvT('kisanDate', lang) + ': ' + _kisanStr + '\n';
 
   // 全付与期間を新しい順で（現在→過去）走査
   let grandTotalUsed = 0;
@@ -21661,6 +21706,137 @@ function copyDetailToClipboard(lang) {
     document.body.removeChild(ta);
     showToast(_lvT('copied', lang), 'success');
   });
+}
+
+// ============================================================
+// 年次有給休暇管理簿 (労基法施行規則第24条の7)
+// ============================================================
+function showYukyuKanribo() {
+  var emp = currentEmployee;
+  if (!emp || !currentGrantData) { showToast('社員データが読み込まれていません', 'error'); return; }
+  switchScreen('haisenDocScreen');
+  var actions = document.getElementById('haisenDocActions');
+  if (actions) actions.style.display = 'flex';
+  renderYukyuKanribo(emp, currentGrantData, appliedDatesCache || []);
+}
+
+function renderYukyuKanribo(emp, grants, records) {
+  var name = emp.Title || '';
+  var syainNo = emp[F.syainNo] || '';
+  var hakensaki = (typeof getHakensaki === 'function') ? getHakensaki(emp) : '';
+  var nyusha = emp[F.nyushaDate] ? fmtDateJa(emp[F.nyushaDate]) : '';
+  var kisan  = emp[F.kisanDate]  ? fmtDateJa(emp[F.kisanDate])  : '';
+  var today = new Date();
+  var todayStr = today.getFullYear() + '年' + (today.getMonth()+1) + '月' + today.getDate() + '日';
+
+  function fmtDay(n){
+    if (n == null) return '';
+    return (n % 1 === 0) ? (n + '日') : (n.toFixed(1) + '日');
+  }
+
+  // 各付与回ごとに、5日取得義務の判定（10日以上付与時のみ対象）
+  // 「基準日から1年以内」に5日以上取得しているかをチェック
+  function checkGoNichi(g, periodRecords) {
+    if (!g.grantedDays || g.grantedDays < 10) return { applicable: false, label: '対象外（10日未満）', daysIn1Y: 0 };
+    var deadline = new Date(g.grantDate); deadline.setFullYear(deadline.getFullYear() + 1);
+    var daysIn1Y = 0;
+    periodRecords.forEach(function(r){
+      var d = new Date(r[F.leaveDate]);
+      if (d >= g.grantDate && d < deadline) daysIn1Y += getRecordDays(r);
+    });
+    if (daysIn1Y >= 5) return { applicable: true, label: '✅ 達成（' + fmtDay(daysIn1Y) + '）', daysIn1Y: daysIn1Y };
+    // 期限が今日以降なら未達警告のみ、期限を過ぎていれば違反
+    if (deadline > today) return { applicable: true, label: '進行中（' + fmtDay(daysIn1Y) + ' / 5日）', daysIn1Y: daysIn1Y };
+    return { applicable: true, label: '⚠ 未達（' + fmtDay(daysIn1Y) + ' / 5日）', daysIn1Y: daysIn1Y };
+  }
+
+  // 古い順で並べる（管理簿は古→新）
+  var sortedGrants = grants.slice().sort(function(a,b){ return a.grantDate - b.grantDate; });
+
+  var sections = sortedGrants.map(function(g, idx){
+    var origIdx = grants.indexOf(g);
+    var grantNum = origIdx + 1;
+    var nextGrant = grants[origIdx + 1];
+    var periodEnd;
+    if (nextGrant) {
+      periodEnd = new Date(nextGrant.grantDate.getTime() - 86400000);
+    } else {
+      var nd = new Date(g.grantDate); nd.setMonth(nd.getMonth() + 12);
+      periodEnd = new Date(nd.getTime() - 86400000);
+    }
+    var periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
+    var periodRecords = records.filter(function(r){
+      var d = new Date(r[F.leaveDate]);
+      return d >= g.grantDate && d < periodEndFilter;
+    }).sort(function(a,b){ return new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]); });
+
+    var periodUsed = 0;
+    periodRecords.forEach(function(r){ periodUsed += getRecordDays(r); });
+
+    // 有効期限 (付与日 + 2年 - 1日)
+    var expiry = new Date(g.grantDate);
+    expiry.setFullYear(expiry.getFullYear() + 2);
+    expiry = new Date(expiry.getTime() - 86400000);
+    var expired = expiry < today;
+
+    var go = checkGoNichi(g, periodRecords);
+
+    // 取得記録のテーブル行
+    var cum = 0;
+    var rows = periodRecords.map(function(r, i){
+      cum += getRecordDays(r);
+      var t = getRecordTypeLabel(r);
+      var d = getRecordDays(r);
+      return '<tr><td class="kr-no">' + (i+1) + '</td>' +
+             '<td class="kr-date">' + fmtDateJa(r[F.leaveDate]) + '</td>' +
+             '<td class="kr-type">' + escHtml(t) + '</td>' +
+             '<td class="kr-days">' + fmtDay(d) + '</td>' +
+             '<td class="kr-cum">' + fmtDay(cum) + '</td></tr>';
+    }).join('');
+    if (!periodRecords.length) {
+      rows = '<tr><td colspan="5" style="text-align:center;color:#888;padding:8px;">（取得実績なし）</td></tr>';
+    }
+
+    return '' +
+      '<div class="kanribo-grant' + (expired ? ' is-expired' : '') + '">' +
+        '<div class="kanribo-grant-head">' +
+          '<span class="kr-grant-num">第' + grantNum + '回付与</span>' +
+          '<span class="kr-grant-status">' + (expired ? '時効消滅' : (g.isCurrentPeriod ? '現在の付与' : '有効')) + '</span>' +
+        '</div>' +
+        '<table class="kanribo-info">' +
+          '<tr><th>基準日（付与日）</th><td>' + fmtDateJa(g.grantDate) + '</td>' +
+              '<th>付与日数</th><td>' + fmtDay(g.grantedDays || 0) + '</td></tr>' +
+          '<tr><th>付与期間</th><td>' + fmtDateJa(g.grantDate) + ' ～ ' + fmtDateJa(periodEnd) + '</td>' +
+              '<th>有効期限（2年）</th><td>' + fmtDateJa(expiry) + '</td></tr>' +
+          '<tr><th>取得日数 合計</th><td>' + fmtDay(periodUsed) + '</td>' +
+              '<th>5日取得義務</th><td>' + go.label + '</td></tr>' +
+        '</table>' +
+        '<table class="kanribo-records">' +
+          '<thead><tr><th>No.</th><th>取得した日付（時季）</th><th>区分</th><th>日数</th><th>累計</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>';
+  }).join('');
+
+  var html =
+    '<div class="haisen-doc-page kanribo-page">' +
+      '<h1>年次有給休暇 管理簿</h1>' +
+      '<div class="hd-meta">作成日: ' + escHtml(todayStr) + '　／　労働基準法施行規則第24条の7</div>' +
+      '<table class="kanribo-header">' +
+        '<tr><th>氏名</th><td>' + escHtml(name) + '</td>' +
+            '<th>社員番号</th><td>' + escHtml(String(syainNo)) + '</td></tr>' +
+        '<tr><th>入社日</th><td>' + escHtml(nyusha || '―') + '</td>' +
+            '<th>有給起算日</th><td>' + escHtml(kisan || nyusha || '―') + '</td></tr>' +
+        '<tr><th>派遣先</th><td colspan="3">' + escHtml(hakensaki || '―') + '</td></tr>' +
+      '</table>' +
+      sections +
+      '<div class="kanribo-foot">' +
+        '本管理簿は労働基準法施行規則第24条の7に基づき作成・保存するものである。<br>' +
+        '保存期間：当該年休を与えた期間中及び満了後3年（労基法第109条）' +
+      '</div>' +
+    '</div>';
+
+  document.getElementById('haisenDocBody').innerHTML = html;
 }
 
 async function deleteLeaveRecord(itemId, dateStr) {
