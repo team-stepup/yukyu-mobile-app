@@ -2459,7 +2459,7 @@ select.sankyu-edit-input {
   /* 表と見出しは可能な限り途中で改ページしない */
   .haisen-doc-page table { page-break-inside: avoid; }
   .haisen-doc-page h2 { page-break-after: avoid; }
-  @page { size: A4 portrait; margin: 2mm; }
+  /* 印刷時のページ余白は @page で 0 にする（実際の余白はコンテンツ側 padding で制御） */
   /* 年次有給休暇管理簿: 付与ごとに改ページ */
   .kanribo-page .kanribo-page-section { page-break-after: always; }
   .kanribo-page .kanribo-page-section:last-of-type { page-break-after: auto; }
@@ -2467,7 +2467,16 @@ select.sankyu-edit-input {
   .kanribo-page .kanribo-records-title { page-break-after: avoid; }
   .kanribo-page table.kanribo-records thead { display: table-header-group; }
   .kanribo-page table.kanribo-records tr { page-break-inside: avoid; }
+  /* 管理簿は印刷時 padding を最小化 (印刷不能領域用に 3mm のみ) */
+  .kanribo-page { padding: 3mm !important; }
+  /* 背景色を確実に印刷 */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
+
+/* @page は @media print の外側で宣言（ブラウザ互換性のため） */
+@page { size: A4 portrait; margin: 0; }
+@page :left  { margin-left: 0; margin-right: 0; }
+@page :right { margin-left: 0; margin-right: 0; }
 
 .header-logout-sm.is-loggedout {
   background: #c62828;
@@ -5506,8 +5515,9 @@ select.sankyu-edit-input {
   <!-- Screen: 派遣書類作成 (労働契約書③ / 就業条件明示書③ など) -->
   <div class="screen" id="haisenDocScreen">
     <div id="haisenDocBody" class="haisen-doc-body"></div>
-    <div class="haisen-doc-actions no-print" id="haisenDocActions" style="display:none;">
+    <div class="haisen-doc-actions no-print" id="haisenDocActions" style="display:none;flex-direction:column;gap:6px;">
       <button onclick="window.print()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存</button>
+      <div style="font-size:10px;color:#666;text-align:center;line-height:1.5;background:#fff8e1;padding:5px 8px;border-radius:6px;border:1px solid #ffd54f;">💡 PDFの余白を最小にするには、印刷ダイアログで<b>「余白：なし」</b>を選択してください</div>
     </div>
   </div>
 
