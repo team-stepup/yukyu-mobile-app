@@ -8408,6 +8408,134 @@ function fmtDateJa(v) {
 function valOr(v, fallback) { return (v === null || v === undefined || v === '') ? (fallback || '') : v; }
 
 // 労働契約書③ レンダリング (シンプル版・A4縦)
+// ===== 派遣先 / 業務内容 翻訳辞書 (PT 版で使用) =====
+// 新規派遣先を追加するときは下の HAKENSAKI_TRANSLATIONS にエントリーを追加してください。
+// 業務内容に新パターンが出たら GYOUMU_TRANSLATIONS_PT に追加してください。
+var HAKENSAKI_TRANSLATIONS = {
+  'ASTI株式会社　掛川工場':                  { nameEn:'ASTI Co., Ltd. - Kakegawa Plant',         addressEn:'180 Hatsuma, Kakegawa-shi, Shizuoka' },
+  'ASTI株式会社　本社工場':                  { nameEn:'ASTI Co., Ltd. - Head Office Plant',      addressEn:'2804 Yonezu-cho, Minami-ku, Hamamatsu-shi, Shizuoka' },
+  'ASTI株式会社　浜松工場':                  { nameEn:'ASTI Co., Ltd. - Hamamatsu Plant',        addressEn:'4-1 Ohara-cho, Chuo-ku, Hamamatsu-shi, Shizuoka' },
+  'ASTI株式会社　袋井工場':                  { nameEn:'ASTI Co., Ltd. - Fukuroi Plant',          addressEn:'2754 Oono, Fukuroi-shi, Shizuoka' },
+  'ASTI株式会社都田工場':                    { nameEn:'ASTI Co., Ltd. - Miyakoda Plant',         addressEn:'1-5-1 Shin-Miyakoda, Hamana-ku, Hamamatsu-shi, Shizuoka' },
+  'IMTエンジニアリング株式会社':               { nameEn:'IMT Engineering Co., Ltd.',               addressEn:'776-6 Konakase, Iwata-shi, Shizuoka' },
+  'ミツワ株式会社 ホクト事業部':                { nameEn:'Mitsuwa Co., Ltd. - Hokuto Division',     addressEn:'1107 Niiike, Fukuroi-shi, Shizuoka' },
+  'ヤマトエスロン株式会社静岡工場':              { nameEn:'Yamato Esulon Co., Ltd. - Shizuoka Plant', addressEn:'270-1 Takata, Nobuhisa, Fukuroi-shi, Shizuoka' },
+  'ラッキーコール産業':                       { nameEn:'Lucky Call Industries',                   addressEn:'' },
+  '三和電子サーキット株式会社東海工場':           { nameEn:'Sanwa Denshi Circuit Co., Ltd. - Tokai Plant', addressEn:'793-1 Ebizuka, Iwata-shi, Shizuoka' },
+  '和興フィルタテクノロジー株式会社静岡事業所　第一工場': { nameEn:'Wakoh Filter Technology Co., Ltd. - Shizuoka Office, 1st Plant', addressEn:'867 Nagamizo, Fukuroi-shi, Shizuoka' },
+  '和興フィルタテクノロジー株式会社静岡工場':       { nameEn:'Wakoh Filter Technology Co., Ltd. - Shizuoka Plant', addressEn:'2134-80 Asana, Fukuroi-shi, Shizuoka' },
+  '天龍産業株式会社':                         { nameEn:'Tenryu Sangyo Co., Ltd.',                addressEn:'1550-1 Takagi, Iwata-shi, Shizuoka' },
+  '平岡ボデー株式会社・浜松工場':                { nameEn:'Hiraoka Body Co., Ltd. - Hamamatsu Plant', addressEn:'1-14-1 Sakuradai, Nishi-ku, Hamamatsu-shi, Shizuoka' },
+  '平岡ボデー株式会社・菊川工場':                { nameEn:'Hiraoka Body Co., Ltd. - Kikugawa Plant',  addressEn:'1300-5 Kamo, Kikugawa-shi, Shizuoka' },
+  '日本ペットフード株式会社':                   { nameEn:'Nihon Pet Food Co., Ltd.',                addressEn:'2020-1 Umeyama, Fukuroi-shi, Shizuoka' },
+  '有限会社　松井塗装':                       { nameEn:'Matsui Tosou Ltd.',                       addressEn:'252 Tobihira-Matsu, Iwata-shi, Shizuoka' },
+  '有限会社カミヤ工業':                       { nameEn:'Kamiya Kogyo Ltd.',                       addressEn:'6048-2 Toyooka, Iwata-shi, Shizuoka' },
+  '有限会社ステップ・アップ':                  { nameEn:'Step Up Ltd.',                            addressEn:'1006-7 Kamihongo, Iwata-shi, Shizuoka' },
+  '東絶工業株式会社　袋井工場':                 { nameEn:'Tozetsu Kogyo Co., Ltd. - Fukuroi Plant', addressEn:'1980 Takao, Fukuroi-shi, Shizuoka' },
+  '株式会社SK化成':                          { nameEn:'SK Kasei Co., Ltd.',                      addressEn:'900 Minato, Fukuroi-shi, Shizuoka' },
+  '株式会社エスティー':                       { nameEn:'ST Co., Ltd.',                            addressEn:'747-1 Ebizuka, Iwata-shi, Shizuoka' },
+  '株式会社オキソ':                           { nameEn:'Oxo Co., Ltd.',                           addressEn:'110-1 Shimo-Okada, Iwata-shi, Shizuoka' },
+  '株式会社サンエー化研　袋井工場':              { nameEn:'San-A Kaken Co., Ltd. - Fukuroi Plant',   addressEn:'3030 Yamashina, Fukuroi-shi, Shizuoka' },
+  '株式会社サンワ':                           { nameEn:'Sanwa Co., Ltd.',                         addressEn:'3175 Hitokoto, Iwata-shi, Shizuoka' },
+  '株式会社ニコカ':                           { nameEn:'Nicoca Co., Ltd.',                        addressEn:'101-1 Ryuyo-Nakajima, Iwata-shi, Shizuoka' },
+  '株式会社ピー・エム・オー　貴布祢工場':          { nameEn:'PMO Co., Ltd. - Kifune Plant',           addressEn:'147-3 Kifune, Hamakita-ku, Hamamatsu-shi, Shizuoka' },
+  '株式会社フタバ製作所':                      { nameEn:'Futaba Seisakusho Co., Ltd.',             addressEn:'2055-1 Kaketsuka, Iwata-shi, Shizuoka' },
+  '株式会社ユーシン・浜松工場':                 { nameEn:'Yushin Co., Ltd. - Hamamatsu Plant',     addressEn:'5217 Nakase, Hamana-ku, Hamamatsu-shi, Shizuoka' },
+  '株式会社レイズ・CWP':                      { nameEn:'Raise Co., Ltd. - CWP',                  addressEn:'5584-13 Hiraguchi, Hamana-ku, Hamamatsu-shi, Shizuoka' },
+  '株式会社大村総業':                          { nameEn:'Omura Sogyo Co., Ltd.',                  addressEn:'208-1 Morioka, Iwata-shi, Shizuoka' },
+  '株式会社浜名プラスチック':                   { nameEn:'Hamana Plastics Co., Ltd.',               addressEn:'3424 Kibi, Kosai-shi, Shizuoka' },
+  '株式会社福井洋樽製作所':                    { nameEn:'Fukui Yodaru Seisakusho Co., Ltd.',       addressEn:'758 Nakaniida, Fukuroi-shi, Shizuoka' },
+  '積水テクノ成型株式会社':                    { nameEn:'Sekisui Techno Molding Co., Ltd.',        addressEn:'2-9-46 Takaoka-Nishi, Chuo-ku, Hamamatsu-shi, Shizuoka' },
+  '電化工業株式会社':                          { nameEn:'Denka Kogyo Co., Ltd.',                  addressEn:'5490-620 Fukude, Iwata-shi, Shizuoka' }
+};
+
+// 業務内容のポルトガル語翻訳
+var GYOUMU_TRANSLATIONS_PT = {
+  'ペットフードの梱包、包装ライン作業、オペレーター、フォークリフト作業及び付帯作業': 'Embalagem de ração para animais, trabalho em linha de embalagem, operador, operação de empilhadeira e serviços relacionados',
+  'ペットフードの梱包、包装ライン作業、オペレーター及び付帯作業': 'Embalagem de ração para animais, trabalho em linha de embalagem, operador e serviços relacionados',
+  'ペットフードの梱包、包装ライン作業、フォークリフト作業及び付帯作業': 'Embalagem de ração para animais, trabalho em linha de embalagem, operação de empilhadeira e serviços relacionados',
+  'ペットフードの梱包、包装ライン作業及び付帯作業': 'Embalagem de ração para animais, trabalho em linha de embalagem e serviços relacionados',
+  'FRP成形品の塗装および仕上作業 ①塗装設備オペレーター ②塗装品外観仕上げ ③部品組付け': 'Pintura e acabamento de produtos moldados em FRP: ① Operador de equipamento de pintura, ② Acabamento externo de itens pintados, ③ Montagem de peças',
+  'GP内装部品の加工作業': 'Trabalho de processamento de peças de interior GP',
+  'SR形成': 'Formação SR',
+  'エッチング': 'Gravação química (etching)',
+  'ゴムモールド製品の製造、梱包業務': 'Fabricação e embalagem de produtos moldados em borracha',
+  'トライウォールの組立・加工・梱包及び付帯作業': 'Montagem, processamento e embalagem de Tri-Wall e serviços relacionados',
+  'ハーネスの組立・検査業務<br>及び付随業務': 'Montagem e inspeção de chicotes elétricos e serviços auxiliares',
+  'ハーネスの組立・検査業務 及び付随業務': 'Montagem e inspeção de chicotes elétricos e serviços auxiliares',
+  'パターン形成': 'Formação de padrões',
+  'パネルメッキ': 'Galvanização de painéis',
+  'プラスチック製品の成型・裁断・検査及び付帯作業': 'Moldagem, corte e inspeção de produtos plásticos e serviços relacionados',
+  'プラスチック製品の検査・梱包': 'Inspeção e embalagem de produtos plásticos',
+  'プリント基板穴あけ加工': 'Perfuração de placas de circuito impresso',
+  'モビリティ部品の加工、ASSY部材準備、梱包資材整理、簡単なパソコン作業': 'Processamento de peças de mobilidade, preparação de componentes ASSY, organização de materiais de embalagem e trabalhos básicos de computador',
+  'ワイヤーハーネス組立・検査及び付随業務': 'Montagem e inspeção de chicotes elétricos e serviços auxiliares',
+  'ワイヤーハーネス製造及び付随業務': 'Fabricação de chicotes elétricos e serviços auxiliares',
+  '二輪・四輪汎用機部品の機械加工・検査梱包及びそれに付随する業務': 'Usinagem, inspeção e embalagem de peças de motocicletas, automóveis e máquinas de uso geral, e serviços relacionados',
+  '出荷検査': 'Inspeção de envio',
+  '出荷準備': 'Preparação para envio',
+  '切圧工程に付随する業務': 'Serviços relacionados ao processo de corte e prensagem',
+  '基板の組立検査': 'Montagem e inspeção de placas de circuito',
+  '基板実装機械オペレーター及び附帯業務': 'Operador de máquina de montagem de placas e serviços relacionados',
+  '基板生産': 'Produção de placas de circuito',
+  '外形加工': 'Processamento de forma externa',
+  '外形加工<p><br></p>': 'Processamento de forma externa',
+  '小型キャビネットの検査・組立及び付帯作業': 'Inspeção e montagem de pequenos gabinetes e serviços relacionados',
+  '工場内清掃・雑務': 'Limpeza da fábrica e serviços gerais',
+  '工程検査': 'Inspeção de processo',
+  '機械オペレーター及び付随業務': 'Operador de máquinas e serviços auxiliares',
+  '機械加工オペレーター 他 関連業務': 'Operador de usinagem e demais serviços relacionados',
+  '水槽でのエビ飼育実験の日常作業': 'Trabalhos diários em experimentos de criação de camarões em tanques',
+  '発注及び受入業務、在庫管理、工場内配達': 'Pedidos, recebimentos, gestão de estoque e entregas internas na fábrica',
+  '紙及びプラスチックフィルム加工の業務全般': 'Processamento geral de papel e filme plástico',
+  '自動車樹脂製品の成形・検査及び付帯業務': 'Moldagem e inspeção de produtos automotivos de resina e serviços relacionados',
+  '自動車樹脂製品の成形及び付帯業務': 'Moldagem de produtos automotivos de resina e serviços relacionados',
+  '自動車樹脂製品の組立及び付帯業務': 'Montagem de produtos automotivos de resina e serviços relacionados',
+  '自動車車体部品の金属加工溶接加工及び付帯する作業': 'Usinagem e soldagem de peças metálicas de carrocerias automotivas e serviços relacionados',
+  '自動車部品の組立・検査及び附帯作業': 'Montagem e inspeção de peças automotivas e serviços relacionados',
+  '自動車部品の金属プレス加工及びその付帯業務': 'Prensagem de peças metálicas automotivas e serviços relacionados',
+  '自動車部品製造': 'Fabricação de peças automotivas',
+  '自動車部品鋳造': 'Fundição de peças automotivas',
+  '袋詰め・シール貼り及び付帯作業': 'Empacotamento em sacos, colagem de selos e serviços relacionados',
+  '製品の検査・出荷準備及び付帯業務': 'Inspeção, preparação de envio e serviços relacionados',
+  '製品の準備・引っ掛け取り外し・検査・出荷作業': 'Preparação de produtos, fixação/remoção, inspeção e envio',
+  '車両オイルフィルタの部品組立・梱包及び付帯業務': 'Montagem e embalagem de peças de filtros de óleo veicular e serviços relacionados',
+  '車載センサ・ECUの 組立・検査業務及び附帯作業': 'Montagem e inspeção de sensores veiculares e ECUs e serviços relacionados',
+  '輸送用機器の製造業務及び付随業務': 'Fabricação de equipamentos de transporte e serviços relacionados',
+  '部品供給作業及び附帯作業': 'Fornecimento de peças e serviços relacionados',
+  '部品段取り作業': 'Preparação de peças',
+  '部給・組立・検査及び付帯業務': 'Fornecimento de peças, montagem, inspeção e serviços relacionados',
+  '金属製品のスポット溶接・加工及び付帯作業': 'Soldagem por pontos, processamento de produtos metálicos e serviços relacionados',
+  '金属製品の加工・仕上げ業務及び付帯業務': 'Processamento e acabamento de produtos metálicos e serviços relacionados',
+  '金属部品のプレス加工業務': 'Prensagem de peças metálicas',
+  '電着塗装': 'Pintura eletroforética (e-coating)'
+};
+
+// 派遣先名 → 英語/PT 訳 を取得 (見つからなければ null)
+function lookupHakensakiTranslation(jpName) {
+  if (!jpName) return null;
+  var key = String(jpName).trim();
+  if (HAKENSAKI_TRANSLATIONS[key]) return HAKENSAKI_TRANSLATIONS[key];
+  // 部分一致 (空白違いなど)
+  for (var k in HAKENSAKI_TRANSLATIONS) {
+    var kn = k.replace(/[\s　]+/g, '');
+    var kn2 = key.replace(/[\s　]+/g, '');
+    if (kn === kn2) return HAKENSAKI_TRANSLATIONS[k];
+  }
+  return null;
+}
+
+// 業務内容 → PT 訳。見つからなければ日本語のまま返す。
+function translateGyoumuPt(jp) {
+  if (!jp) return '';
+  var key = String(jp).trim();
+  if (GYOUMU_TRANSLATIONS_PT[key]) return GYOUMU_TRANSLATIONS_PT[key];
+  // HTML タグ除去版でも探す
+  var cleaned = key.replace(/<[^>]+>/g, '').trim();
+  if (GYOUMU_TRANSLATIONS_PT[cleaned]) return GYOUMU_TRANSLATIONS_PT[cleaned];
+  return jp; // フォールバック: 日本語のまま
+}
+
 // カタカナ → ローマ字 変換 (ヘボン式)
 function kanaToRomaji(s) {
   if (!s) return '';
@@ -8861,18 +8989,24 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '</td>' +
         '</tr>' +
 
-        // Local de Trabalho (Logo após ser contratado)
-        '<tr>' +
-          '<th>Local de Trabalho<br>(Logo após ser<br>contratado)</th>' +
-          '<td class="hd-cell-no-pad">' +
-            '<table class="hd-inner">' +
-              '<tr><td class="hd-inner-l">(Empresa)</td><td class="hd-inner-v">' + escHtml(hkName) + '</td>' +
-                  '<td class="hd-inner-l">(Tel)</td><td class="hd-inner-v">' + escHtml(kinmuTel) + '</td></tr>' +
-              '<tr><td class="hd-inner-l">(Endereço)</td><td class="hd-inner-v" colspan="3">' + escHtml(kinmuJusho) + '</td></tr>' +
-              '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v" colspan="3">' + escHtml(hkBuka || hkName) + '</td></tr>' +
-            '</table>' +
-          '</td>' +
-        '</tr>' +
+        // Local de Trabalho — 辞書があれば英訳を使う、無ければ日本語のまま
+        (function(){
+          var t = lookupHakensakiTranslation(hkName);
+          var nameOut = t && t.nameEn ? t.nameEn : hkName;
+          var addrOut = t && t.addressEn ? t.addressEn : kinmuJusho;
+          var setorOut = hkBuka || hkName;
+          return '<tr>' +
+            '<th>Local de Trabalho<br>(Logo após ser<br>contratado)</th>' +
+            '<td class="hd-cell-no-pad">' +
+              '<table class="hd-inner">' +
+                '<tr><td class="hd-inner-l">(Empresa)</td><td class="hd-inner-v">' + escHtml(nameOut) + '</td>' +
+                    '<td class="hd-inner-l">(Tel)</td><td class="hd-inner-v">' + escHtml(kinmuTel) + '</td></tr>' +
+                '<tr><td class="hd-inner-l">(Endereço)</td><td class="hd-inner-v" colspan="3">' + escHtml(addrOut) + '</td></tr>' +
+                '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v" colspan="3">' + escHtml(setorOut) + '</td></tr>' +
+              '</table>' +
+            '</td>' +
+          '</tr>';
+        })() +
 
         // Local de trabalho (Âmbito da mudança)
         '<tr>' +
@@ -8880,10 +9014,10 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '<td>Um estabelecimento comercial com o qual a empresa celebrou um contrato individual para o envio de trabalhadores (região oeste de Shizuoka).</td>' +
         '</tr>' +
 
-        // Especificação sobre o Trabalho (Logo após ser contratado)
+        // Especificação sobre o Trabalho — 業務内容を辞書で PT 翻訳
         '<tr>' +
           '<th>Especificação sobre<br>o Trabalho<br>(Logo após ser<br>contratado)</th>' +
-          '<td>' + escHtml(gyoumu) + '</td>' +
+          '<td>' + escHtml(translateGyoumuPt(gyoumu)) + '</td>' +
         '</tr>' +
 
         // Atividades exercidas (Âmbito da mudança)
