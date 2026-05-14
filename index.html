@@ -2474,6 +2474,8 @@ select.sankyu-edit-input {
   html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
   /* body はモバイルUI用に max-width:500px が設定されているので、印刷時は解除 */
   body { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; display: block !important; }
+  /* Safari/Chrome 共通: 背景色を確実に印刷 (色帯ヘッダー, ○マーク 等) */
+  *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .main-content { overflow: visible !important; height: auto !important; max-height: none !important; padding: 0 !important; width: 100% !important; max-width: none !important; }
   .app-container, #appContainer { overflow: visible !important; height: auto !important; width: 100% !important; max-width: none !important; }
   /* UI チラ要素は完全に非表示 */
@@ -8337,20 +8339,20 @@ function openHaisenDocInNewWindow() {
         '  .doc-wrapper { padding:0 !important; background:#fff !important; min-height:0 !important; }',
         '  body { background:#fff !important; }',
         '  .haisen-doc-page { box-shadow:none !important; padding:2mm 2mm 2mm !important; }',
+        '  /* 背景色を Chrome/Safari/Firefox 共通で確実に印刷 */',
+        '  *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }',
         '}',
-        // @page で URL/日付などのブラウザ自動ヘッダー/フッターを抑制、
-        // ページ番号だけを @bottom-right に CSS で描画
-        '@page { size: A4 portrait; margin: 2mm 2mm 6mm 2mm; }',
-        '@page { @top-left { content: ""; } @top-center { content: ""; } @top-right { content: ""; } }',
-        '@page { @bottom-left { content: ""; } @bottom-center { content: ""; } }',
-        '@page { @bottom-right { content: counter(page) " / " counter(pages); font-size: 9pt; color: #555; } }',
+        // @page を 1 ブロックに統一 (Safari は分割した @page を一部無視する)
+        // ページ番号は Safari で動作しないため CSS では描画せず、
+        // ユーザーが印刷ダイアログの「ヘッダーとフッター」で表示制御
+        '@page { size: A4 portrait; margin: 2mm; }',
       '</style>',
     '</head>',
     '<body>',
       '<div class="print-toolbar">',
         '<button onclick="window.close()" class="btn-close">← 閉じる</button>',
         '<button onclick="window.print()">🖨 印刷 / PDF 保存</button>',
-        '<span class="hint">💡 印刷ダイアログで<b>「ヘッダーとフッター」のチェックを外す</b>とURL・日付が消えます<br>📱 iOSは<b>共有 → 印刷</b>でも可</span>',
+        '<span class="hint">💡 推奨設定 (Chrome/Safari共通):<br>　・<b>ヘッダーとフッター: OFF</b> (URL/日付を消す)<br>　・<b>背景のグラフィック: ON</b> (色帯・○マークを印刷)</span>',
       '</div>',
       '<div class="doc-wrapper">',
         clonedHtml,
