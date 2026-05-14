@@ -8302,14 +8302,29 @@ async function listKalendarFiles() {
   }
 }
 
-// 文字列正規化 (株式会社/有限会社/空白/カッコ/中黒等を除去, 拡張子除去, lowercase)
+// 漢数字/全角数字/丸囲み数字 → 半角アラビア数字に統一
+// 例: 「生産三課」「生産３課」「生産③課」→ いずれも「生産3課」になる
+var _KALENDAR_NUM_MAP = {
+  '〇':'0','零':'0',
+  '一':'1','二':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9','十':'10',
+  '０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9',
+  '①':'1','②':'2','③':'3','④':'4','⑤':'5','⑥':'6','⑦':'7','⑧':'8','⑨':'9','⑩':'10',
+  '➀':'1','➁':'2','➂':'3','➃':'4','➄':'5','➅':'6','➆':'7','➇':'8','➈':'9'
+};
+function _normalizeNumerals(s) {
+  return String(s || '').replace(/[〇零一二三四五六七八九十０-９①-⑩➀-➈]/g, function(c) {
+    return _KALENDAR_NUM_MAP[c] || c;
+  });
+}
+
+// 文字列正規化 (株式会社/有限会社/空白/カッコ/中黒等を除去, 拡張子除去, 数字統一, lowercase)
 function _kalendarNorm(s) {
-  return String(s || '')
+  var t = String(s || '')
     .replace(/\.[^.]+$/, '')
     .replace(/^(株式会社|有限会社|合同会社|有)/, '')
     .replace(/(株式会社|有限会社|合同会社|㈱|㈲)/g, '')
-    .replace(/[\s　\(\)（）・\-－‐_,、。\.]+/g, '')
-    .toLowerCase();
+    .replace(/[\s　\(\)（）・\-－‐_,、。\.]+/g, '');
+  return _normalizeNumerals(t).toLowerCase();
 }
 
 // 最長共通部分文字列 (Longest Common Substring) の長さを返す
@@ -8973,6 +8988,76 @@ var SECTOR_TRANSLATIONS_PT = {
   '浜松製造部 製造課 製造係 組立二グループ（エアSW組立）':    'Hamamatsu Seizoubu, Seizouka, Seizougakari, Kumitate-Ni Group (Air SW Kumitate)',
   '浜松製造部　製造課　製造係　組立二グループ（エアSW組立）':  'Hamamatsu Seizoubu, Seizouka, Seizougakari, Kumitate-Ni Group (Air SW Kumitate)',
   '業務管理部':                                              'Gyoumu Kanribu',
+  // 部署/組織単位 (ローマ字表記)
+  '製造課':              'Seizou-ka',
+  '製造係':              'Seizou-gakari',
+  '生産課':              'Seisan-ka',
+  '生産1課':             'Seisan 1-ka',
+  '生産２課':             'Seisan 2-ka',
+  '生産2課':             'Seisan 2-ka',
+  '生産１課':             'Seisan 1-ka',
+  '生産３課':             'Seisan 3-ka',
+  '生産3課':             'Seisan 3-ka',
+  '生産一課':             'Seisan 1-ka',
+  '生産二課':             'Seisan 2-ka',
+  '生産三課':             'Seisan 3-ka',
+  '生産四課':             'Seisan 4-ka',
+  '生産五課':             'Seisan 5-ka',
+  '生産1課1係':           'Seisan 1-ka 1-gakari',
+  '生産1課2係':           'Seisan 1-ka 2-gakari',
+  '生産2課1係':           'Seisan 2-ka 1-gakari',
+  '生産2課2係':           'Seisan 2-ka 2-gakari',
+  '生産3課1係':           'Seisan 3-ka 1-gakari',
+  '生産3課2係':           'Seisan 3-ka 2-gakari',
+  '検査課':              'Kensa-ka',
+  '出荷検査':             'Shukka Kensa',
+  '出荷検査係':            'Shukka Kensa-gakari',
+  '検査課出荷検査':         'Kensa-ka Shukka Kensa',
+  '工程検査':             'Kotei Kensa',
+  '工程検査係':            'Kotei Kensa-gakari',
+  '工程管理係':            'Kotei Kanri-gakari',
+  '組立':                'Kumitate',
+  '組立一グループ':         'Kumitate 1-Group',
+  '組立二グループ':         'Kumitate 2-Group',
+  '組立三グループ':         'Kumitate 3-Group',
+  '組立1G':              'Kumitate 1-Group',
+  '組立2G':              'Kumitate 2-Group',
+  '組立3G':              'Kumitate 3-Group',
+  '製造1G':              'Seizou 1-Group',
+  '製造2G':              'Seizou 2-Group',
+  '製造3G':              'Seizou 3-Group',
+  '製造4G':              'Seizou 4-Group',
+  '製造部':              'Seizou-bu',
+  '生産管理部':            'Seisan Kanri-bu',
+  '生産管理部生産管理課':     'Seisan Kanri-bu Seisan Kanri-ka',
+  '生産管理部購買課':        'Seisan Kanri-bu Kouba-i-ka',
+  '生産管理課':            'Seisan Kanri-ka',
+  '購買課':              'Koubai-ka',
+  '技術部':              'Gijutsu-bu',
+  '技術研究所':            'Gijutsu Kenkyu-jo',
+  '品質管理課':            'Hinshitsu Kanri-ka',
+  '品質保証課':            'Hinshitsu Hoshou-ka',
+  '管理課':              'Kanri-ka',
+  '管理部':              'Kanri-bu',
+  '人事課':              'Jinji-ka',
+  '総務課':              'Soumu-ka',
+  '営業課':              'Eigyou-ka',
+  '営業部':              'Eigyou-bu',
+  '機械課':              'Kikai-ka',
+  '製造部　機械課':         'Seizou-bu Kikai-ka',
+  '製造部 機械課':          'Seizou-bu Kikai-ka',
+  'プレス':              'Press',
+  'メッキ':              'Plating (Mekki)',
+  '塗装':                'Tosou (Pintura)',
+  '塗装グループ':           'Tosou Group',
+  '袋井塗装グループ':         'Fukuroi Tosou Group',
+  '本社工場':             'Honsha Plant',
+  '掛川工場':             'Kakegawa Plant',
+  '浜松工場':             'Hamamatsu Plant',
+  '浜北製造課':            'Hamakita Seizou-ka',
+  '都田工場':             'Miyakoda Plant',
+  '袋井工場':             'Fukuroi Plant',
+  '袋井センター':           'Fukuroi Center',
   '浜松製造部　生産課':       'Departamento de Manufatura Hamamatsu, Seção de Produção',
   '浜松製造部 生産課':         'Departamento de Manufatura Hamamatsu, Seção de Produção',
   '検査課出荷検査':            'Seção de Inspeção - Inspeção de Envio',
