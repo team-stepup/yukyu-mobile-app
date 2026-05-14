@@ -8208,6 +8208,176 @@ const HF = {
 
 const LIST_HAKENSAKI_GUID = '2a2ab839-9dcd-4385-a72b-f20449ceddc4';
 
+// ============================================================
+// 取引先カレンダー (SharePoint TeamStepup サイトの共有ドキュメント)
+// 派遣先のカレンダー画像/PDFを就業条件明示書の最終ページに自動添付
+// ============================================================
+var KALENDAR_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
+var KALENDAR_FOLDER_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-';
+var _kalendarFilesCache = null;
+
+// 取引先カレンダー フォルダのファイル一覧を取得 (キャッシュあり)
+async function listKalendarFiles() {
+  if (_kalendarFilesCache) return _kalendarFilesCache;
+  try {
+    var token = await getToken();
+    if (!token) return [];
+    var folderArg = encodeURIComponent(KALENDAR_FOLDER_PATH.replace(/'/g, "''"));
+    var url = KALENDAR_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + folderArg + "')/Files?$select=Name,ServerRelativeUrl,Length&$top=200";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) {
+      console.warn('listKalendarFiles failed:', resp.status, await resp.text().catch(function(){return '';}));
+      return [];
+    }
+    var data = await resp.json();
+    var files = (data.d && data.d.results) || [];
+    _kalendarFilesCache = files;
+    return files;
+  } catch (e) {
+    console.error('listKalendarFiles error:', e);
+    return [];
+  }
+}
+
+// 派遣先名と最も一致するカレンダーファイルを返す
+function pickKalendarFileForHakensaki(files, hkName) {
+  if (!files || !files.length || !hkName) return null;
+  function norm(s) {
+    return String(s || '')
+      .replace(/\.[^.]+$/, '')                                 // 拡張子除去
+      .replace(/^(株式会社|有限会社|合同会社|有)/, '')
+      .replace(/(株式会社|有限会社|合同会社|㈱|㈲)/g, '')
+      .replace(/[\s　\(\)（）・\-－‐_]+/g, '')
+      .toLowerCase();
+  }
+  var keyN = norm(hkName);
+  if (!keyN) return null;
+  // 1. 完全一致 (normalized)
+  for (var i = 0; i < files.length; i++) {
+    if (norm(files[i].Name) === keyN) return files[i];
+  }
+  // 2. 部分一致 (どちらかが他方を含む)
+  var partial = null, partialLen = 0;
+  for (var j = 0; j < files.length; j++) {
+    var fn = norm(files[j].Name);
+    if (!fn) continue;
+    if (keyN.indexOf(fn) >= 0 || fn.indexOf(keyN) >= 0) {
+      // 最も長い一致を優先 (より具体的な工場名など)
+      var overlap = Math.min(fn.length, keyN.length);
+      if (overlap > partialLen) { partial = files[j]; partialLen = overlap; }
+    }
+  }
+  if (partial) return partial;
+  // 3. 主要トークン (3 文字以上の部分文字列) 単位での一致
+  // 例: hkName="株式会社ユーシン 浜松工場" → "ユーシン"/"浜松" などのいずれかが含まれる
+  for (var k = 0; k < files.length; k++) {
+    var fn2 = norm(files[k].Name);
+    if (!fn2) continue;
+    for (var s = 0; s <= keyN.length - 3; s++) {
+      var sub = keyN.substring(s, s + 3);
+      if (fn2.indexOf(sub) >= 0) return files[k];
+    }
+  }
+  return null;
+}
+
+// SharePoint File を Data URL として取得
+async function fetchKalendarFileAsDataUrl(serverRelativeUrl) {
+  var token = await getToken();
+  if (!token) return null;
+  var pathArg = encodeURIComponent(serverRelativeUrl.replace(/'/g, "''"));
+  var url = KALENDAR_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + pathArg + "')/$value";
+  var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!resp.ok) {
+    console.warn('fetchKalendarFileAsDataUrl failed:', resp.status);
+    return null;
+  }
+  var blob = await resp.blob();
+  return await new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload = function() { resolve(r.result); };
+    r.onerror = function() { reject(r.error); };
+    r.readAsDataURL(blob);
+  });
+}
+
+// 取引先カレンダー ページを wrapper の最後に追加 (非同期)
+async function appendKalendarPage(hkName) {
+  var body = document.getElementById('haisenDocBody');
+  if (!body) return;
+  var wrapper = body.querySelector('.haisen-doc-wrapper');
+  if (!wrapper) return;
+
+  // プレースホルダ
+  var placeholder = document.createElement('div');
+  placeholder.className = 'haisen-doc-page haisen-kalendar-page';
+  placeholder.style.cssText = 'page-break-before:always;margin-top:14mm;min-height:240mm;';
+  placeholder.innerHTML =
+    '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
+    '<div style="text-align:center;color:#666;padding:60px;font-size:11pt;">カレンダーファイルを検索中…</div>';
+  wrapper.appendChild(placeholder);
+
+  try {
+    var files = await listKalendarFiles();
+    if (!files.length) {
+      placeholder.innerHTML =
+        '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
+        '<div style="text-align:center;color:#c62828;padding:60px;background:#ffebee;border-radius:8px;font-size:11pt;">' +
+        '⚠ SharePoint「取引先カレンダー okyakusan karenda-」フォルダへのアクセスに失敗、または空のフォルダです。' +
+        '<br><br>アクセス権限/フォルダパスを確認してください。' +
+        '</div>';
+      return;
+    }
+    var file = pickKalendarFileForHakensaki(files, hkName);
+    if (!file) {
+      placeholder.innerHTML =
+        '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
+        '<div style="text-align:center;color:#c62828;padding:40px 20px;background:#fff8e1;border:1px solid #ffd54f;border-radius:8px;font-size:11pt;">' +
+        '⚠ 派遣先「<b>' + escHtml(hkName) + '</b>」に該当するカレンダーファイルが見つかりませんでした。' +
+        '<br><br><span style="font-size:9.5pt;color:#666;">フォルダ内の ' + files.length + ' 件のファイルから自動マッチング → 不一致。<br>' +
+        'SharePoint「取引先カレンダー okyakusan karenda-」フォルダに対応ファイルを配置してください。</span>' +
+        '</div>';
+      return;
+    }
+    var ext = (file.Name.split('.').pop() || '').toLowerCase();
+    var isImage = ['png','jpg','jpeg','gif','webp','bmp'].indexOf(ext) >= 0;
+    var isPdf = ext === 'pdf';
+
+    var dataUrl = await fetchKalendarFileAsDataUrl(file.ServerRelativeUrl);
+    if (!dataUrl) {
+      placeholder.innerHTML =
+        '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
+        '<div style="color:#c62828;text-align:center;padding:40px;">読み込み失敗: ' + escHtml(file.Name) + '</div>';
+      return;
+    }
+
+    var header =
+      '<h2 style="text-align:center;font-size:14pt;margin:0 0 4px;">📅 派遣先カレンダー</h2>' +
+      '<div style="text-align:center;font-size:10pt;color:#333;margin-bottom:8px;"><b>' + escHtml(hkName) + '</b></div>' +
+      '<div style="text-align:center;font-size:8.5pt;color:#999;margin-bottom:8px;">出典: ' + escHtml(file.Name) + '</div>';
+
+    if (isImage) {
+      placeholder.innerHTML = header +
+        '<div style="text-align:center;"><img src="' + dataUrl + '" alt="' + escHtml(file.Name) + '" style="max-width:100%;max-height:240mm;object-fit:contain;" /></div>';
+    } else if (isPdf) {
+      // PDFは <embed> で表示 (画面確認用)。印刷時はブラウザ依存
+      placeholder.innerHTML = header +
+        '<embed src="' + dataUrl + '" type="application/pdf" style="width:100%;height:230mm;border:1px solid #ddd;" />' +
+        '<div class="no-print" style="text-align:center;font-size:9.5pt;color:#e65100;background:#fff8e1;padding:8px;margin-top:8px;border-radius:4px;">' +
+        '💡 PDFファイルです。印刷時に正しく出力されない場合は、別途PDFを添付して印刷してください。' +
+        '</div>';
+    } else {
+      placeholder.innerHTML = header +
+        '<div style="text-align:center;color:#666;padding:60px;">対応していないファイル形式: ' + escHtml(ext) + '</div>';
+    }
+  } catch (e) {
+    console.error('appendKalendarPage error:', e);
+    placeholder.innerHTML =
+      '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
+      '<div style="color:#c62828;text-align:center;padding:40px;">エラー: ' + escHtml(e.message || String(e)) + '</div>';
+  }
+}
+
 // 社員データの「部課」 (例: "071:三和電子サーキット㈱") から派遣先番号を抽出
 function extractHakenBango(emp) {
   if (!emp) return '';
@@ -9819,6 +9989,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
     '<div class="haisen-doc-wrapper">' + html + htmlPt + htmlShikJp + htmlShikPt + '</div>';
   // 未入力検出 → 通知 UI 描画
   renderMissingFieldsNotice(h);
+  // 取引先カレンダー (SharePoint) を最終ページに非同期添付
+  appendKalendarPage(hkName);
 }
 
 // ============================================================
