@@ -8386,16 +8386,21 @@ function arrayBufferToDataUrl(ab, mimeType) {
 }
 
 // PDF.js ライブラリの遅延ロード
+// cross-origin worker は new Worker(crossOriginUrl) が一部環境で
+// ブロックされるため、Blob URL でラップして same-origin 化する
 var _pdfjsLoadPromise = null;
+var PDFJS_VERSION = '3.11.174';
+var PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/build/';
 function loadPdfJsIfNeeded() {
   if (_pdfjsLoadPromise) return _pdfjsLoadPromise;
   _pdfjsLoadPromise = new Promise(function(resolve, reject) {
-    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+    if (window.pdfjsLib) { _setupPdfjsWorker(window.pdfjsLib); resolve(window.pdfjsLib); return; }
     var s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.src = PDFJS_BASE + 'pdf.min.js';
+    s.crossOrigin = 'anonymous';
     s.onload = function() {
       if (window.pdfjsLib) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        try { _setupPdfjsWorker(window.pdfjsLib); } catch(e) { console.warn('worker setup error', e); }
         resolve(window.pdfjsLib);
       } else {
         reject(new Error('pdfjsLib not found after load'));
@@ -8403,28 +8408,60 @@ function loadPdfJsIfNeeded() {
     };
     s.onerror = function() {
       _pdfjsLoadPromise = null;
-      reject(new Error('pdf.js のロードに失敗しました'));
+      reject(new Error('pdf.js のロードに失敗しました (CDN到達不可)'));
     };
     document.head.appendChild(s);
   });
   return _pdfjsLoadPromise;
 }
 
+// pdf.js worker を Blob URL 経由で設定 (CORS Worker 制限の回避)
+function _setupPdfjsWorker(pdfjsLib) {
+  var workerUrl = PDFJS_BASE + 'pdf.worker.min.js';
+  try {
+    var workerCode = "importScripts('" + workerUrl + "');";
+    var blob = new Blob([workerCode], { type: 'application/javascript' });
+    var blobUrl = URL.createObjectURL(blob);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = blobUrl;
+  } catch (e) {
+    // Blob 経由が失敗したら直接 URL を試す
+    console.warn('Blob worker setup failed, falling back to direct URL:', e);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+  }
+}
+
+// Promise にタイムアウトを付与
+function _withTimeout(p, ms, label) {
+  return Promise.race([
+    p,
+    new Promise(function(_, reject) {
+      setTimeout(function() { reject(new Error((label || 'タイムアウト') + ' (' + ms + 'ms)')); }, ms);
+    })
+  ]);
+}
+
 // PDF ArrayBuffer → 各ページを PNG dataURL の配列で返す
 async function renderPdfPagesToImages(arrayBuffer, onProgress) {
   var pdfjsLib = await loadPdfJsIfNeeded();
-  var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  // getDocument 自体に 20秒タイムアウト
+  var pdf = await _withTimeout(
+    pdfjsLib.getDocument({ data: arrayBuffer }).promise,
+    20000, 'PDF読み込みタイムアウト'
+  );
   var images = [];
   for (var i = 1; i <= pdf.numPages; i++) {
     if (onProgress) onProgress(i, pdf.numPages);
-    var page = await pdf.getPage(i);
+    var page = await _withTimeout(pdf.getPage(i), 15000, 'getPage タイムアウト');
     // 印刷品質: scale 1.5 (A4 で約 1240×1750 px, ~150dpi 相当)
     var viewport = page.getViewport({ scale: 1.5 });
     var canvas = document.createElement('canvas');
     var ctx = canvas.getContext('2d');
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+    await _withTimeout(
+      page.render({ canvasContext: ctx, viewport: viewport }).promise,
+      30000, 'ページレンダリングタイムアウト'
+    );
     images.push(canvas.toDataURL('image/png'));
     canvas.width = canvas.height = 0;  // メモリ開放
   }
