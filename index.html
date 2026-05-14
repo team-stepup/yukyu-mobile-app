@@ -2367,7 +2367,7 @@ select.sankyu-edit-input {
 .haisen-doc-page table.hd-shift-table th { background:#fafafa; font-weight:600; }
 .haisen-doc-page table.hd-shift-table td.hd-shift-no { background:#f3f3f3; font-weight:600; }
 .haisen-doc-page table.hd-shift-table td.hd-shift-time { white-space:nowrap; }
-.haisen-doc-page table.hd-shift-table td.hd-shift-slots { white-space:nowrap; font-size:8.5pt; letter-spacing:0; }
+.haisen-doc-page table.hd-shift-table td.hd-shift-slots { font-size:9pt; letter-spacing:0; line-height:1.45; white-space:nowrap; }
 
 /* 賃金欄 */
 .haisen-doc-page td.hd-chingin { line-height:1.85; }
@@ -8481,15 +8481,18 @@ function renderRoudouKeiyakushoSan(emp, h) {
   var kyuujitsuUmu = hkm ? '有' : '無';
 
   // 始業・終業4行（データは①②③のみ。④は常に空）
-  // 休憩時間帯(s1/s2/s3)は1セルに「/」区切りで結合表示
+  // 休憩時間帯(s1/s2/s3)は1セル内に改行で縦並び表示 (狭い列でも全文表示)
   function shiftRow(idx, jikan, jisu, total, s1, s2, s3) {
-    var slots = [s1, s2, s3].filter(function(v){ return v; }).join(' / ');
+    var slotsHtml = [s1, s2, s3]
+      .filter(function(v){ return v; })
+      .map(function(v){ return escHtml(v); })
+      .join('<br>');
     return '<tr>' +
       '<td class="hd-shift-no">' + idx + '</td>' +
       '<td class="hd-shift-time">' + (jikan ? escHtml(jikan) : '-') + '</td>' +
       '<td class="hd-shift-time">' + (jisu ? escHtml(jisu) : '-') + '</td>' +
       '<td class="hd-shift-time">' + (total ? escHtml(total) : '-') + '</td>' +
-      '<td class="hd-shift-slots">' + (slots ? escHtml(slots) : '-') + '</td>' +
+      '<td class="hd-shift-slots">' + (slotsHtml || '-') + '</td>' +
     '</tr>';
   }
 
