@@ -26005,6 +26005,13 @@ async function renderAddEmployeeForm() {
       if (field.key === 'address') {
         addInput += '<div style="margin-top:4px;"><button type="button" onclick="openYubinSearchFromAddress()" style="background:#fff;border:1px solid #1976d2;color:#1976d2;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📮 郵便番号を検索 (新タブ)</button></div>';
       }
+      // 通勤手当欄: 自宅→派遣先 の運転距離から自動計算ボタン併記
+      if (field.key === 'tsukinTeate') {
+        addInput += '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+          '<button type="button" onclick="autoCalcCommuteForAddForm()" style="background:#fff;border:1px solid #2e7d32;color:#2e7d32;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📍 距離から自動計算</button>' +
+          '<span id="addField_tsukinCalcStatus" style="font-size:10.5px;color:#666;flex:1;min-width:0;word-break:break-all;">車/バイクの場合、住所と派遣先から距離を計測 (2km以上で 1km×12円)</span>' +
+          '</div>';
+      }
       html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
     });
     // 勤務情報の末尾に 雇用保険番号 + 雇用保険氏名 を追加表示
@@ -26043,6 +26050,209 @@ function onAddTsukinChange() {
     const el = document.querySelector('.add-cat-section[data-cat-id="' + id + '"]');
     if (el) el.style.display = isCar ? '' : 'none';
   });
+  // 車/バイクへ切り替わり、住所+派遣先も埋まっていれば自動で距離計算を発火
+  if (isCar) {
+    var addrEl = document.getElementById('addField_address');
+    var bukaEl = document.getElementById('addField_buka');
+    if (addrEl && addrEl.value && addrEl.value.length >= 5 && bukaEl && bukaEl.value) {
+      // すぐ計算は連打防止のため少し待つ
+      setTimeout(function(){ autoCalcCommuteForAddForm(); }, 200);
+    }
+  }
+}
+
+// ============================================================
+// 通勤距離 → 通勤手当 自動計算
+// 仕様: 自宅住所 → 派遣先住所 の運転距離 (km)
+//   2km 未満: 0円 (支給なし)
+//   2km 以上: round(km) × 12円  ※ユーザー設定 (1kmあたり12円)
+// 距離取得: Nominatim (OSM) で geocode → OSRM public で運転距離
+// すべて無料、APIキー不要。地理院/Google Maps へ差し替え可能。
+// ============================================================
+var _geocodeCache = {};   // address → {lat, lng}
+var _routeCache = {};     // "lat,lng→lat,lng" → meters
+var _hakensakiByBuka = null; // 派遣先名 → 住所 のキャッシュ
+
+// Nominatim で日本国内住所を geocode
+async function geocodeAddressJp(address) {
+  if (!address) return null;
+  var key = String(address).replace(/\s+/g, '').trim();
+  if (_geocodeCache[key]) return _geocodeCache[key];
+  try {
+    var url = 'https://nominatim.openstreetmap.org/search?format=json&q=' +
+              encodeURIComponent(address) + '&countrycodes=jp&limit=1&accept-language=ja';
+    var resp = await fetch(url, {
+      headers: { 'Accept-Language': 'ja' }
+    });
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    if (!data || !data.length) return null;
+    var result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), display: data[0].display_name };
+    _geocodeCache[key] = result;
+    return result;
+  } catch (e) {
+    console.warn('geocodeAddressJp error:', e);
+    return null;
+  }
+}
+
+// OSRM 公開デモで運転距離 (m) を取得
+async function osrmDrivingDistance(from, to) {
+  if (!from || !to) return null;
+  var key = from.lat.toFixed(5) + ',' + from.lng.toFixed(5) + '→' + to.lat.toFixed(5) + ',' + to.lng.toFixed(5);
+  if (_routeCache[key]) return _routeCache[key];
+  try {
+    var url = 'https://router.project-osrm.org/route/v1/driving/' +
+              from.lng + ',' + from.lat + ';' + to.lng + ',' + to.lat + '?overview=false';
+    var resp = await fetch(url);
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    if (!data.routes || !data.routes.length) return null;
+    var meters = data.routes[0].distance;
+    _routeCache[key] = meters;
+    return meters;
+  } catch (e) {
+    console.warn('osrmDrivingDistance error:', e);
+    return null;
+  }
+}
+
+// 派遣先(部課) → 派遣先住所 のマップを構築 (一度だけ取得・キャッシュ)
+async function loadHakensakiByBukaMap() {
+  if (_hakensakiByBuka) return _hakensakiByBuka;
+  try {
+    var token = await getToken();
+    if (!token) return null;
+    var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    _hakensakiByBuka = {};
+    items.forEach(function(it) {
+      // buka フィールドは Title (派遣先(部課))
+      var b = String(it.Title || '').trim();
+      if (!b) return;
+      // 就業場所住所 > 派遣先住所 の優先順
+      var addr = it[HF.kinmu_jusho] || it[HF.haken_jusho] || '';
+      addr = String(addr).trim();
+      if (!addr) return;
+      // 同じ buka に複数あれば最初を採用
+      if (!_hakensakiByBuka[b]) _hakensakiByBuka[b] = addr;
+    });
+    return _hakensakiByBuka;
+  } catch (e) {
+    console.warn('loadHakensakiByBukaMap error:', e);
+    return null;
+  }
+}
+
+// 計算結果: { km, teate, error, homeFound, workFound }
+async function computeCommuteAllowance(homeAddress, workAddress) {
+  if (!homeAddress || !homeAddress.trim()) return { error: '自宅住所が空です' };
+  if (!workAddress || !workAddress.trim()) return { error: '派遣先住所が取得できません' };
+  var home = await geocodeAddressJp(homeAddress);
+  if (!home) return { error: '自宅住所のジオコーディングに失敗: ' + homeAddress };
+  var work = await geocodeAddressJp(workAddress);
+  if (!work) return { error: '派遣先住所のジオコーディングに失敗: ' + workAddress, homeFound: true };
+  var meters = await osrmDrivingDistance(home, work);
+  if (meters === null) return { error: '運転距離の計算に失敗 (OSRM)', homeFound: true, workFound: true };
+  var km = meters / 1000;
+  var teate;
+  var note;
+  if (km < 2) {
+    teate = 0;
+    note = '2km未満のため通勤手当なし';
+  } else {
+    teate = Math.round(km) * 12;
+    note = '約 ' + km.toFixed(1) + ' km × 12円 = ' + teate.toLocaleString() + '円';
+  }
+  return { km: km, teate: teate, note: note, home: home, work: work, workAddress: workAddress };
+}
+
+// 新規入社フォームから自動計算
+async function autoCalcCommuteForAddForm() {
+  var statusEl = document.getElementById('addField_tsukinCalcStatus');
+  var teateEl = document.getElementById('addField_tsukinTeate');
+  if (!teateEl) { if (statusEl) statusEl.textContent = '通勤手当 入力欄が見つかりません'; return; }
+  if (statusEl) statusEl.textContent = '📍 距離計算中…';
+
+  var homeAddr = (document.getElementById('addField_address') || {}).value || '';
+  var bukaVal = (document.getElementById('addField_buka') || {}).value || '';
+  var method = (document.getElementById('addField_tsukinHouhou') || {}).value || '';
+  var isCar = method.indexOf('車') >= 0 || method.indexOf('バイク') >= 0 || method.indexOf('原付') >= 0;
+
+  if (!isCar) { if (statusEl) statusEl.textContent = '通勤方法が車/バイクの場合のみ計算します'; return; }
+  if (!homeAddr.trim()) { if (statusEl) statusEl.textContent = '⚠ 自宅住所を入力してください'; return; }
+  if (!bukaVal) { if (statusEl) statusEl.textContent = '⚠ 派遣先を選択してください'; return; }
+
+  // 派遣先住所を取得
+  var map = await loadHakensakiByBukaMap();
+  if (!map) { if (statusEl) statusEl.textContent = '⚠ 派遣先リスト取得失敗'; return; }
+  // バリエーション吸収: そのまま / startsWith / 番号一致
+  var workAddr = map[bukaVal];
+  if (!workAddr) {
+    // 番号で部分一致
+    var num = (bukaVal.match(/^(\d+)/) || [])[1];
+    if (num) {
+      var fallbackKey = Object.keys(map).find(function(k){ return k.indexOf(num) === 0; });
+      if (fallbackKey) workAddr = map[fallbackKey];
+    }
+  }
+  if (!workAddr) { if (statusEl) statusEl.textContent = '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません'; return; }
+
+  var r = await computeCommuteAllowance(homeAddr, workAddr);
+  if (r.error) { if (statusEl) statusEl.textContent = '❌ ' + r.error; return; }
+
+  teateEl.value = r.teate;
+  if (statusEl) statusEl.innerHTML = '✓ ' + escHtml(r.note) + ' <span style="color:#999;">(派遣先: ' + escHtml(workAddr) + ')</span>';
+}
+
+// 移動入社フォームから自動計算
+async function autoCalcCommuteForIdouForm() {
+  var statusEl = document.getElementById('idou_tsukinCalcStatus');
+  var teateEl = document.getElementById('idou_tsukinTeate');
+  if (!teateEl) { if (statusEl) statusEl.textContent = '通勤手当 入力欄が見つかりません'; return; }
+  if (statusEl) statusEl.textContent = '📍 距離計算中…';
+
+  // 既存社員の住所を取得 (currentEmployee から)
+  var emp = (typeof currentEmployee !== 'undefined') ? currentEmployee : null;
+  var homeAddr = '';
+  if (emp) {
+    for (var k in emp) {
+      if (k.indexOf('x4f4f__x6240') >= 0 || k.indexOf('jusho') >= 0 || k === 'OData__x4f4f__x6240_') {
+        var v = String(emp[k] || '').trim();
+        if (v && v.length > 4) { homeAddr = v; break; }
+      }
+    }
+  }
+  if (!homeAddr) {
+    // 住所欄が画面に有れば使う
+    var hi = document.getElementById('idou_address') || document.getElementById('idou_jusho');
+    if (hi) homeAddr = hi.value || '';
+  }
+  if (!homeAddr) { if (statusEl) statusEl.textContent = '⚠ 自宅住所が取得できません'; return; }
+
+  var bukaVal = (document.getElementById('idou_buka') || {}).value || '';
+  if (!bukaVal) { if (statusEl) statusEl.textContent = '⚠ 新派遣先を選択してください'; return; }
+
+  var map = await loadHakensakiByBukaMap();
+  if (!map) { if (statusEl) statusEl.textContent = '⚠ 派遣先リスト取得失敗'; return; }
+  var workAddr = map[bukaVal];
+  if (!workAddr) {
+    var num = (bukaVal.match(/^(\d+)/) || [])[1];
+    if (num) {
+      var fallbackKey = Object.keys(map).find(function(k){ return k.indexOf(num) === 0; });
+      if (fallbackKey) workAddr = map[fallbackKey];
+    }
+  }
+  if (!workAddr) { if (statusEl) statusEl.textContent = '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません'; return; }
+
+  var r = await computeCommuteAllowance(homeAddr, workAddr);
+  if (r.error) { if (statusEl) statusEl.textContent = '❌ ' + r.error; return; }
+
+  teateEl.value = r.teate;
+  if (statusEl) statusEl.innerHTML = '✓ ' + escHtml(r.note) + ' <span style="color:#999;">(派遣先: ' + escHtml(workAddr) + ')</span>';
 }
 
 // 派遣先変更 → 組織単位/職種を絞り込み + 社員番号自動採番
@@ -30004,6 +30214,10 @@ async function openIdouForm() {
       '<div class="taisha-field">' +
         '<label>通勤手当</label>' +
         '<input type="number" id="idou_tsukinTeate" placeholder="例: 5000">' +
+        '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+          '<button type="button" onclick="autoCalcCommuteForIdouForm()" style="background:#fff;border:1px solid #2e7d32;color:#2e7d32;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📍 距離から自動計算</button>' +
+          '<span id="idou_tsukinCalcStatus" style="font-size:10.5px;color:#666;flex:1;min-width:0;word-break:break-all;">既存住所と新派遣先から距離を計測 (2km以上で 1km×12円)</span>' +
+        '</div>' +
       '</div>' +
 
       // ───── 作業服・靴 ─────
