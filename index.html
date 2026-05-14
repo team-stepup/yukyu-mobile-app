@@ -8800,13 +8800,19 @@ function renderRoudouKeiyakushoSan(emp, h) {
     '</tr>';
   }
   // 就業時間データがあるシフトのみ抽出してHTMLを返す (最低1行)
+  // 「空」「空白」「-」「－」「ハイフン」など実質データなしも除外
+  function isShiftEmpty(v) {
+    if (v == null) return true;
+    var s = String(v).replace(/[\s　]/g, '');
+    return s === '' || s === '-' || s === '－' || s === 'ー' || s === '0';
+  }
   function buildShiftRowsHtml() {
     var shifts = [
       { jikan: h[HF.syuugyou_time1], jisu: h[HF.jitsudou_time1], total: h[HF.kyuukei_total1], s1: h[HF.kyuukei1_1], s2: h[HF.kyuukei1_2], s3: h[HF.kyuukei1_3] },
       { jikan: h[HF.syuugyou_time2], jisu: h[HF.jitsudou_time2], total: h[HF.kyuukei_total2], s1: h[HF.kyuukei2_1], s2: h[HF.kyuukei2_2], s3: h[HF.kyuukei2_3] },
       { jikan: h[HF.syuugyou_time3], jisu: h[HF.jitsudou_time3], total: h[HF.kyuukei_total3], s1: h[HF.kyuukei3_1], s2: h[HF.kyuukei3_2], s3: h[HF.kyuukei3_3] }
     ];
-    var active = shifts.filter(function(s){ return s.jikan; });
+    var active = shifts.filter(function(s){ return !isShiftEmpty(s.jikan); });
     if (active.length === 0) active = [shifts[0]]; // データが無い場合も1行は描画
     return active.map(function(s, i){
       return shiftRow(i+1, s.jikan, s.jisu, s.total, s.s1, s.s2, s.s3);
