@@ -8302,58 +8302,84 @@ async function listKalendarFiles() {
   }
 }
 
-// 派遣先名と最も一致するカレンダーファイルを返す (ファイル名 + 親フォルダ名 で照合)
-function pickKalendarFileForHakensaki(files, hkName) {
-  if (!files || !files.length || !hkName) return null;
-  function norm(s) {
-    return String(s || '')
-      .replace(/\.[^.]+$/, '')                                 // 拡張子除去
-      .replace(/^(株式会社|有限会社|合同会社|有)/, '')
-      .replace(/(株式会社|有限会社|合同会社|㈱|㈲)/g, '')
-      .replace(/[\s　\(\)（）・\-－‐_]+/g, '')
-      .toLowerCase();
-  }
-  var keyN = norm(hkName);
-  if (!keyN) return null;
+// 文字列正規化 (株式会社/有限会社/空白/カッコ/中黒等を除去, 拡張子除去, lowercase)
+function _kalendarNorm(s) {
+  return String(s || '')
+    .replace(/\.[^.]+$/, '')
+    .replace(/^(株式会社|有限会社|合同会社|有)/, '')
+    .replace(/(株式会社|有限会社|合同会社|㈱|㈲)/g, '')
+    .replace(/[\s　\(\)（）・\-－‐_,、。\.]+/g, '')
+    .toLowerCase();
+}
 
-  // 各ファイルに対するスコア = (ファイル名 or 親フォルダ名 の正規化後と keyN の重なり度)
-  // 親フォルダ名一致を優先 (派遣先 = フォルダ単位で管理されている前提)
-  var candidates = files.map(function(f) {
-    var fnN = norm(f.Name);
-    var dirN = norm(f._folder || '');
-    // 完全一致
-    var exact = (dirN && dirN === keyN) || fnN === keyN;
-    // どちらかが他方を含む
-    var contains = (dirN && (keyN.indexOf(dirN) >= 0 || dirN.indexOf(keyN) >= 0)) ||
-                   (keyN.indexOf(fnN) >= 0 || fnN.indexOf(keyN) >= 0);
-    // 重なり長 (ファイル名/フォルダ名のうち長い方)
-    var overlap = 0;
-    if (contains) overlap = Math.max(
-      dirN ? Math.min(dirN.length, keyN.length) : 0,
-      fnN ? Math.min(fnN.length, keyN.length) : 0
-    );
-    // 3文字部分文字列マッチ (フォールバック)
-    var sub3 = false;
-    if (!exact && !contains) {
-      for (var s = 0; s <= keyN.length - 3; s++) {
-        var ss = keyN.substring(s, s + 3);
-        if ((dirN && dirN.indexOf(ss) >= 0) || (fnN && fnN.indexOf(ss) >= 0)) { sub3 = true; break; }
+// 最長共通部分文字列 (Longest Common Substring) の長さを返す
+function _lcsLen(a, b) {
+  if (!a || !b) return 0;
+  var m = a.length, n = b.length;
+  // 全 0 初期化
+  var prev = new Array(n + 1);
+  for (var k = 0; k <= n; k++) prev[k] = 0;
+  var max = 0;
+  for (var i = 1; i <= m; i++) {
+    var cur = new Array(n + 1);
+    cur[0] = 0;
+    for (var j = 1; j <= n; j++) {
+      if (a.charAt(i - 1) === b.charAt(j - 1)) {
+        cur[j] = prev[j - 1] + 1;
+        if (cur[j] > max) max = cur[j];
+      } else {
+        cur[j] = 0;
       }
     }
-    return { f: f, exact: exact, contains: contains, overlap: overlap, sub3: sub3, dirN: dirN, fnN: fnN };
+    prev = cur;
+  }
+  return max;
+}
+
+// 派遣先名 + 補助情報 (組織単位/部署等) に最も一致するカレンダーファイルを返す
+// primaryName: 派遣先名 (必須)
+// secondaryHints: [部署, 組織単位, ...] 補助文字列 (任意, 上位タイブレイカー用)
+function pickKalendarFileForHakensaki(files, primaryName, secondaryHints) {
+  if (!files || !files.length || !primaryName) return null;
+  var keyN = _kalendarNorm(primaryName);
+  if (!keyN) return null;
+  var hintsN = (secondaryHints || []).map(_kalendarNorm).filter(function(s) { return s.length >= 2; });
+
+  // 各候補をスコアリング:
+  //   primaryScore = LCS(候補, primary) (主スコア)
+  //   secondaryScore = sum of LCS(候補, hint) for each hint (タイブレイカー)
+  //   候補のテキスト = 親フォルダ名 ＋ ファイル名 (両方を結合)
+  // 親フォルダ名と ファイル名 の双方で個別に LCS を取り、最大値を採用
+  var scored = files.map(function(f) {
+    var fnN = _kalendarNorm(f.Name);
+    var dirN = _kalendarNorm(f._folder || '');
+    var lcsKeyDir = _lcsLen(dirN, keyN);
+    var lcsKeyFn  = _lcsLen(fnN, keyN);
+    var primary = Math.max(lcsKeyDir, lcsKeyFn);
+    var secondary = 0;
+    hintsN.forEach(function(h) {
+      // フォルダ名/ファイル名どちらでも一致してOK
+      var lcsHintDir = _lcsLen(dirN, h);
+      var lcsHintFn  = _lcsLen(fnN, h);
+      secondary += Math.max(lcsHintDir, lcsHintFn);
+    });
+    return { f: f, primary: primary, secondary: secondary, dirN: dirN, fnN: fnN };
   });
 
-  // ソート: exact > contains(overlap降順) > sub3
-  candidates.sort(function(a, b) {
-    if (a.exact !== b.exact) return a.exact ? -1 : 1;
-    if (a.contains !== b.contains) return a.contains ? -1 : 1;
-    if (a.overlap !== b.overlap) return b.overlap - a.overlap;
-    if (a.sub3 !== b.sub3) return a.sub3 ? -1 : 1;
+  scored.sort(function(a, b) {
+    if (a.primary !== b.primary) return b.primary - a.primary;
+    if (a.secondary !== b.secondary) return b.secondary - a.secondary;
     return 0;
   });
-  var top = candidates[0];
-  if (top && (top.exact || top.contains || top.sub3)) return top.f;
-  return null;
+
+  console.log('[kalendar] match scoring (top 5):', scored.slice(0, 5).map(function(c) {
+    return c.dirN + '/' + c.fnN + ' p=' + c.primary + ' s=' + c.secondary;
+  }));
+
+  var top = scored[0];
+  // primary が 2 未満 (ほぼ無関係) なら一致なしと判定
+  if (!top || top.primary < 2) return null;
+  return top.f;
 }
 
 // SharePoint File を取得 (ArrayBuffer)
@@ -8469,7 +8495,8 @@ async function renderPdfPagesToImages(arrayBuffer, onProgress) {
 }
 
 // 取引先カレンダー ページを wrapper の最後に追加 (非同期)
-async function appendKalendarPage(hkName) {
+// hkName: 派遣先名 / secondaryHints: 部署や組織単位など補助検索語 (タイブレイカー)
+async function appendKalendarPage(hkName, secondaryHints) {
   var body = document.getElementById('haisenDocBody');
   if (!body) return;
   var wrapper = body.querySelector('.haisen-doc-wrapper');
@@ -8511,7 +8538,7 @@ async function appendKalendarPage(hkName) {
         '</div>';
       return;
     }
-    var file = pickKalendarFileForHakensaki(files, hkName);
+    var file = pickKalendarFileForHakensaki(files, hkName, secondaryHints || []);
     if (!file) {
       // 利用可能なフォルダ/ファイル一覧を表示してユーザが該当を判断できるようにする
       var foldersList = (listResult.folders || []).map(function(f) {
@@ -10228,7 +10255,9 @@ function renderRoudouKeiyakushoSan(emp, h) {
   // 未入力検出 → 通知 UI 描画
   renderMissingFieldsNotice(h);
   // 取引先カレンダー (SharePoint) を最終ページに非同期添付
-  appendKalendarPage(hkName);
+  // 派遣先名 + 部署 + 組織単位 を渡して、同じ派遣先で複数フォルダがある場合の
+  // タイブレイカーに使う (例: ASTI浜松-生産一課・二課 vs ASTI浜松-生産三課)
+  appendKalendarPage(hkName, [hkBuka, hkSoshiki, gyoumu]);
 }
 
 // ============================================================
