@@ -8159,6 +8159,27 @@ const HF = {
   kyujitsu_1month:      'OData__x4f11__x65e5__x52b4__x50cd__x00',   // Number 休日労働 1か月
   sankyou_text:         'OData__x0033_6_x5354__x5b9a_',              // Text 36協定
   sankyou_1month_text:  'OData__x0033_6_x5354__x5b9a__xff08_1_x',   // Text 36協定(1か月)
+  // 就業条件明示書 用 追加フィールド
+  shikiBusho:           'OData__x6307__x63ee__x547d__x4ee4__x80',   // 指揮命令者 部署
+  shikiYakushoku:       'OData__x6307__x63ee__x547d__x4ee4__x800',  // 指揮命令者 役職
+  shikiName:            'OData__x6307__x63ee__x547d__x4ee4__x801',  // 指揮命令者 氏名
+  hakensakiSekBusho:    'OData__x6d3e__x9063__x5148__x3000__x8c',   // 派遣先責任者 部署
+  hakensakiSekYakushoku:'OData__x6d3e__x9063__x5148__x3000__x8c0',  // 派遣先責任者 役職
+  hakensakiSekName:     'OData__x6d3e__x9063__x5148__x000a__x30',   // 派遣先責任者 氏名
+  hakengenSekBusho:     'OData__x6d3e__x9063__x5143__x8cac__x4e',   // 派遣元責任者 部署
+  hakengenSekYakushoku: 'OData__x6d3e__x9063__x5143__x8cac__x4e0',  // 派遣元責任者 役職
+  hakengenSekName:      'OData__x6d3e__x9063__x5143__x8cac__x4e1',  // 派遣元責任者 氏名
+  kujouSakiBusho:       'OData__x82e6__x60c5__x306e__x7533__x51',   // 苦情申出 派遣先 部署
+  kujouSakiYakushoku:   'OData__x82e6__x60c5__x306e__x7533__x510',  // 苦情申出 派遣先 役職
+  kujouSakiName:        'OData__x82e6__x60c5__x306e__x7533__x511',  // 苦情申出 派遣先 氏名
+  kujouGenBusho:        'OData__x82e6__x60c5__x306e__x7533__x512',  // 苦情申出 派遣元 部署
+  kujouGenYakushoku:    'OData__x82e6__x60c5__x306e__x7533__x513',  // 苦情申出 派遣元 役職
+  kujouGenName:         'OData__x82e6__x60c5__x306e__x7533__x514',  // 苦情申出 派遣元 氏名
+  hakenRyokin:          'OData__x6d3e__x9063__x6599__x91d1__x00',   // 派遣料金 通常勤務 Number
+  keisanTani:           'OData__x8a08__x7b97__x5358__x4f4d__x00',   // 計算単位
+  soshikiNoCho:         'OData__x7d44__x7e54__x306e__x9577_',       // 組織の長
+  jigyousyoTeishokuDay: 'OData__x4e8b__x696d__x6240__x5358__x4f',   // 事業所単位抵触日
+  calendar:             'OData__x30ab__x30ec__x30f3__x30c0__x30',   // カレンダー
 };
 
 const LIST_HAKENSAKI_GUID = '2a2ab839-9dcd-4385-a72b-f20449ceddc4';
@@ -9276,9 +9297,391 @@ function renderRoudouKeiyakushoSan(emp, h) {
       '</div>' +
     '</div>';
 
-  // 日本語版 + ポルトガル語版 を単一の wrapper で包む (zoomHaisenDoc が一括でスケール)
+  // ============================================
+  // 就業条件明示書 (日本語版 + ポルトガル語版)
+  // ============================================
+  var shikiBusho = _clean(h[HF.shikiBusho] || '');
+  var shikiYakushoku = _clean(h[HF.shikiYakushoku] || '');
+  var shikiName = _clean(h[HF.shikiName] || '');
+  var hsSekBusho = _clean(h[HF.hakensakiSekBusho] || '');
+  var hsSekYakushoku = _clean(h[HF.hakensakiSekYakushoku] || '');
+  var hsSekName = _clean(h[HF.hakensakiSekName] || '');
+  var hgSekBusho = _clean(h[HF.hakengenSekBusho] || '');
+  var hgSekYakushoku = _clean(h[HF.hakengenSekYakushoku] || '');
+  var hgSekName = _clean(h[HF.hakengenSekName] || '');
+  var kujouSakiBusho = _clean(h[HF.kujouSakiBusho] || hsSekBusho);
+  var kujouSakiYakushoku = _clean(h[HF.kujouSakiYakushoku] || hsSekYakushoku);
+  var kujouSakiName = _clean(h[HF.kujouSakiName] || hsSekName);
+  var kujouGenBusho = _clean(h[HF.kujouGenBusho] || hgSekBusho);
+  var kujouGenYakushoku = _clean(h[HF.kujouGenYakushoku] || hgSekYakushoku);
+  var kujouGenName = _clean(h[HF.kujouGenName] || hgSekName);
+  var hakenRyokin = h[HF.hakenRyokin];
+  var keisanTani = _clean(h[HF.keisanTani] || '日');
+  var soshikiNoCho = _clean(h[HF.soshikiNoCho] || '');
+  var jigyousyoTeishokuRaw = _clean(h[HF.jigyousyoTeishokuDay] || '');
+  var calendarText = _clean(h[HF.calendar] || '別添カレンダーによる');
+  // 個人単位抵触日 = 派遣開始日 + 3年 で算出 (フォールバック)
+  function _calcKojinTeishoku(startDate) {
+    if (!startDate) return '';
+    var d = new Date(startDate);
+    if (isNaN(d)) return '';
+    d.setFullYear(d.getFullYear() + 3);
+    return fmtDateCompact(d);
+  }
+  var kojinTeishoku = _calcKojinTeishoku(koyouStart);
+
+  // 製造業務専門派遣先電話 (派遣先電話を流用)
+  var sekininTel = kinmuTel;
+
+  // 苦情処理方法の長文 (日本語)
+  var KUJOU_JP_1 = '派遣先における上記記載の者が苦情の申出を受けた時は、直ちに派遣先責任者へ連絡することとし、当該派遣先責任者が中心となり、誠意をもって遅滞無く当該苦情の適切かつ迅速な処置を図ることとし、その結果について派遣労働者に通知します。';
+  var KUJOU_JP_2 = '派遣元における上記記載の者が苦情の申出を受けた時は、直ちに派遣元責任者へ連絡することとし、当該派遣元責任者が中心となり、誠意をもって遅滞無く当該苦情の適切かつ迅速な処置を図ることとし、その結果について派遣労働者に通知します。';
+  var KUJOU_JP_3 = '派遣先及び派遣元は、自らでその解決が容易であり、即時に処理した苦情の他は、相互に遅滞無く通知するとともに、密接に連絡調整を行いつつ、その解決を図ることとする。';
+  var ANZEN_JP = '派遣先及び派遣元は労働者派遣法第44条から47条の２までの規定により課せられた各法令を遵守し、自己に課せられた法令上の責任を負う。なお派遣就業中の安全及び衛生については、派遣先の安全衛生に関する規定を適用することとし、その他については、派遣元の安全衛生に関する規定を適用する。';
+  var BENGI_JP = '食堂・レクレーションルーム・休憩室・ロッカー等の利用ができる。';
+  var FUNSO_JP = '労働者派遣の役務の提供の終了後、当該派遣労働を派遣先が雇用する場合にはあらかじめ相当の猶予期間をもって派遣元へ示すこととする。';
+  var KOYOU_ANTEI_JP = '派遣元事業主は、労働者派遣契約の契約期間が満了する前に派遣労働者の責に帰すべき事由以外の事由によって労働者派遣契約の解除が行われた場合には、当該労働者派遣契約に係る派遣先と連携して、当該派遣先からその関連会社での就業のあっせんを受けること、当該派遣元事業主において他の派遣先を確保すること等により、当該労働者派遣契約に係る派遣労働者の新たな就業機会の確保を図ることとする。また、当該労働者派遣契約の解除に当たって、新たな就業機会の確保ができない場合は、まず休業等を行い、当該派遣労働者の雇用の維持を図るようにするとともに、休業手当の支払の労働基準法等に基づく責任を果たすこととする。さらにやむを得ない事由によりこれができない場合において、当該派遣労働者を解雇しようとするときでも、労働契約法の規定を遵守することはもとより、少なくとも30日前に予告することとし、30日前に予告しないときは労働基準法第20条第1項にもとづく解雇予告手当を支払うこと、休業させる場合には労働基準法第26条に基づく休業手当を支払うこと等、雇用主に係る労働基準法等の責任を負うこととする。';
+  var TEISHOKU_NOTE_JP = 'なお、派遣先の事業所単位の派遣可能期間の延長について、当該手続を適正に行っていない場合や組織（個人）単位の期間制限に抵触する最初の日以降労働者派遣の役務の提供を受けた場合は、派遣先は労働契約申込みみなし制度の対象となる。';
+
+  // 就業条件明示書 — 日本語版
+  var htmlShikJp =
+    '<div class="haisen-doc-page" style="page-break-before:always;margin-top:14mm;">' +
+      '<div style="text-align:right;font-size:9pt;color:#1976d2;font-weight:600;letter-spacing:2px;margin-bottom:2px;">[ 日本語 ]</div>' +
+      '<h1 style="font-size:18pt;letter-spacing:6px;">就業条件明示書</h1>' +
+      '<div style="text-align:right;font-size:10pt;margin:4px 0;">作成日: ' + escHtml(todayStr) + '</div>' +
+
+      '<table class="hd-header">' +
+        '<tr>' +
+          '<td class="hd-h-name" rowspan="2">' + escHtml(name) + ' 様</td>' +
+          '<td class="hd-h-l">事業所名</td>' +
+          '<td class="hd-h-r">有限会社ステップ・アップ</td>' +
+        '</tr>' +
+        '<tr>' +
+          '<td class="hd-h-l">許可番号</td>' +
+          '<td class="hd-h-r">(派)22-300880</td>' +
+        '</tr>' +
+      '</table>' +
+
+      '<div class="hd-intro">次の条件で労働者派遣を行います。</div>' +
+
+      '<table class="hd-main">' +
+        // 派遣先事業所
+        '<tr>' +
+          '<th>派遣先事業所</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr><td class="hd-inner-l">（名称）</td><td class="hd-inner-v">' + escHtml(hkName) + '</td>' +
+                  '<td class="hd-inner-l">（電話）</td><td class="hd-inner-v">' + escHtml(kinmuTel) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">（所在地）</td><td class="hd-inner-v" colspan="3">' + escHtml(kinmuJusho) + '</td></tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+        // 就業場所
+        '<tr>' +
+          '<th>就業場所</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr><td class="hd-inner-l">（名称）</td><td class="hd-inner-v">' + escHtml(hkName) + '</td>' +
+                  '<td class="hd-inner-l">（電話）</td><td class="hd-inner-v">' + escHtml(kinmuTel) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">（所在地）</td><td class="hd-inner-v" colspan="3">' + escHtml(kinmuJusho) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">（部署）</td><td class="hd-inner-v" colspan="3">' + escHtml(hkBuka || hkName) + '</td></tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+        // 業務内容 + 組織単位
+        '<tr>' +
+          '<th>業務内容</th>' +
+          '<td>' + escHtml(gyoumu) + '&nbsp;&nbsp;&nbsp;&nbsp;<b>組織単位:</b> ' + escHtml(hkSoshiki || '-') + '</td>' +
+        '</tr>' +
+        // 業務に伴う責任の程度
+        '<tr>' +
+          '<th>業務に伴う<br>責任の程度</th>' +
+          '<td>' +
+            '<div>' + chk(!sekinin || sekinin.indexOf('なし') >= 0) + ' 付与される権限なし</div>' +
+            '<div>' + chk(sekinin && sekinin.indexOf('なし') < 0) + ' 付与される権限あり' + (sekinin && sekinin.indexOf('なし') < 0 ? '（' + escHtml(sekinin) + '）' : '') + '</div>' +
+          '</td>' +
+        '</tr>' +
+        // 指揮命令者
+        '<tr>' +
+          '<th>指揮命令者</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr><td class="hd-inner-l">（部署）</td><td class="hd-inner-v">' + escHtml(shikiBusho || '-') + '</td>' +
+                  '<td class="hd-inner-l">（役職）</td><td class="hd-inner-v">' + escHtml(shikiYakushoku || '-') + '</td>' +
+                  '<td class="hd-inner-l">（氏名）</td><td class="hd-inner-v">' + escHtml(shikiName || '-') + '</td></tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+        // 派遣期間 + 就業日
+        '<tr>' +
+          '<th>派遣期間</th>' +
+          '<td>' + escHtml(fmtDateJa(koyouStart) || '-') + ' から ' + escHtml(fmtDateJa(koyouEnd) || '-') +
+              '<br><b>就業日:</b> ' + escHtml(calendarText) + '</td>' +
+        '</tr>' +
+        // 就業時間及び休憩時間
+        '<tr>' +
+          '<th>就業時間<br>及び休憩時間</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-shift-table">' +
+              '<colgroup><col class="hs-c-no"><col class="hs-c-jikan"><col class="hs-c-jisu"><col class="hs-c-total"><col class="hs-c-slots"></colgroup>' +
+              '<tr><th></th><th>就業時間</th><th>実働時間</th><th>休憩時間</th><th>休憩時間帯</th></tr>' +
+              buildShiftRowsHtml() +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+        // 就業日外労働及び時間外労働
+        '<tr>' +
+          '<th>就業日外労働<br>及び時間外労働</th>' +
+          '<td>' +
+            '<b>時間外労働:</b> ' + dash(oh1d) + '時間／日　' + dash(oh1m) + '時間／月　' + dash(oh1y) + '時間／年 の範囲内とする。<br>' +
+            '<b>就業日外労働:</b> 月 ' + dash(hkm) + ' 日 までとする ※36協定の範囲内とする。' +
+          '</td>' +
+        '</tr>' +
+        // 派遣先責任者
+        '<tr>' +
+          '<th>製造業務専門<br>派遣先責任者</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr><th>部署</th><th>役職</th><th>氏名</th><th>電話</th></tr>' +
+              '<tr><td class="hd-inner-v">' + escHtml(hsSekBusho || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hsSekYakushoku || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hsSekName || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+        // 派遣元責任者
+        '<tr>' +
+          '<th>製造業務専門<br>派遣元責任者</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr><th>部署</th><th>役職</th><th>氏名</th><th>電話</th></tr>' +
+              '<tr><td class="hd-inner-v">' + escHtml(hgSekBusho || '業務管理部') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hgSekYakushoku || '課長') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hgSekName || '森 ゆうじ') + '</td>' +
+                  '<td class="hd-inner-v">0538-36-6968</td></tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+        // 安全及び衛生
+        '<tr><th>安全及び衛生</th><td>' + escHtml(ANZEN_JP) + '</td></tr>' +
+        // 便宜供与
+        '<tr><th>便宜供与</th><td>' + escHtml(BENGI_JP) + '</td></tr>' +
+        // 紛争防止措置
+        '<tr><th>派遣先が派遣労働者を<br>雇用する場合の<br>紛争防止措置</th><td>' + escHtml(FUNSO_JP) + '</td></tr>' +
+        // 派遣労働者の雇用の安定
+        '<tr><th>派遣労働者の<br>雇用の安定を図る<br>ために必要な措置</th><td style="font-size:9pt;line-height:1.6;">' + escHtml(KOYOU_ANTEI_JP) + '</td></tr>' +
+        // 苦情の申出先
+        '<tr>' +
+          '<th>派遣労働者からの<br>苦情の申出先</th>' +
+          '<td class="hd-cell-no-pad">' +
+            '<table class="hd-inner">' +
+              '<tr><th></th><th>部署</th><th>役職</th><th>氏名</th><th>電話</th></tr>' +
+              '<tr><td class="hd-inner-l">派遣先</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiBusho || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiYakushoku || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiName || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
+              '<tr><td class="hd-inner-l">派遣元</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouGenBusho || '業務管理部') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouGenYakushoku || '課長') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouGenName || '森 ゆうじ') + '</td>' +
+                  '<td class="hd-inner-v">0538-36-6968</td></tr>' +
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+        // 苦情の処理方法
+        '<tr>' +
+          '<th>苦情の処理方法、<br>連携体制等</th>' +
+          '<td style="font-size:9pt;line-height:1.6;">' +
+            '①&nbsp;' + escHtml(KUJOU_JP_1) + '<br>' +
+            '②&nbsp;' + escHtml(KUJOU_JP_2) + '<br>' +
+            '③&nbsp;' + escHtml(KUJOU_JP_3) +
+          '</td>' +
+        '</tr>' +
+        // 派遣受入期間制限
+        '<tr>' +
+          '<th>派遣受入<br>期間制限</th>' +
+          '<td style="font-size:9pt;line-height:1.6;">' +
+            '組織（個人）単位の期間制限に抵触する最初の日&nbsp;&nbsp;' +
+              chk(!isMuki) + ' 有（ ' + escHtml(kojinTeishoku || '-') + ' ）&nbsp;&nbsp;' + chk(isMuki) + ' 無（無期雇用派遣労働のため）<br>' +
+            '派遣先事業所単位の期間制限に抵触する最初の日&nbsp;&nbsp;' +
+              chk(!isMuki) + ' 有（ ' + escHtml(jigyousyoTeishokuRaw || '-') + ' ）&nbsp;&nbsp;' + chk(isMuki) + ' 無（無期雇用派遣労働のため）<br>' +
+            '<span style="font-size:8.5pt;color:#444;">' + escHtml(TEISHOKU_NOTE_JP) + '</span>' +
+          '</td>' +
+        '</tr>' +
+        // 派遣料金
+        '<tr>' +
+          '<th>労働者派遣に<br>関する料金の額</th>' +
+          '<td>派遣元事業主の事業所における全派遣先派遣料金の平均日額&nbsp;&nbsp;<b>' +
+            (hakenRyokin ? escHtml(Number(hakenRyokin).toLocaleString()) : '-') + ' 円／' + escHtml(keisanTani) +
+          '</b></td>' +
+        '</tr>' +
+        // 労働社会保険
+        '<tr>' +
+          '<th>労働・社会保険の<br>取得届を提出されて<br>ない場合の理由</th>' +
+          '<td>' +
+            '健康保険・厚生年金: <span class="hd-circle">加入</span> ・ 未加入（理由：　　　　　　　　　）<br>' +
+            '雇用保険: <span class="hd-circle">加入</span> ・ 未加入（理由：　　　　　　　　　）' +
+          '</td>' +
+        '</tr>' +
+        // 協定対象
+        '<tr>' +
+          '<th>次の条件で<br>労働者派遣を行います</th>' +
+          '<td>' +
+            '協定対象派遣労働者であるか否か：<b>協定対象派遣労働者である</b><br>' +
+            '当該協定の有効期間の終了日：2027年3月31日' +
+          '</td>' +
+        '</tr>' +
+      '</table>' +
+    '</div>';
+
+  // 就業条件明示書 — ポルトガル語版
+  var htmlShikPt =
+    '<div class="haisen-doc-page" style="page-break-before:always;margin-top:14mm;">' +
+      '<div style="text-align:right;font-size:9pt;color:#1976d2;font-weight:600;letter-spacing:1px;margin-bottom:2px;">[ Português ]</div>' +
+      '<h1 style="font-size:14pt;letter-spacing:1px;">NOTIFICAÇÃO DOS TERMOS E DAS CONDIÇÕES DE TRABALHO</h1>' +
+      '<div style="text-align:right;font-size:10pt;margin:4px 0;">Data: ' + escHtml(todayStr) + '</div>' +
+
+      '<table class="hd-header">' +
+        '<tr>' +
+          '<td class="hd-h-name" rowspan="2">Sr.(a) : ' + escHtml(romajiName) + '</td>' +
+          '<td class="hd-h-l">Nome da Empresa</td>' +
+          '<td class="hd-h-r">Step Up Co., Ltd</td>' +
+        '</tr>' +
+        '<tr>' +
+          '<td class="hd-h-l">Licença №</td>' +
+          '<td class="hd-h-r">(派)22-300880</td>' +
+        '</tr>' +
+      '</table>' +
+
+      '<div class="hd-intro">Termos e condições para o envio de mão de obra.</div>' +
+
+      (function(){
+        var t = lookupHakensakiTranslation(hkName);
+        var nameOut = t && t.nameEn ? t.nameEn : hkName;
+        var addrOut = t && t.addressEn ? t.addressEn : kinmuJusho;
+        var setorOut = translateSectorPt(hkBuka || hkName);
+        if (setorOut === hkName && t && t.nameEn) setorOut = t.nameEn;
+        return '<table class="hd-main">' +
+          '<tr><th>Empresa<br>receptora</th>' +
+            '<td class="hd-cell-no-pad"><table class="hd-inner">' +
+              '<tr><td class="hd-inner-l">(Nome)</td><td class="hd-inner-v">' + escHtml(nameOut) + '</td>' +
+                  '<td class="hd-inner-l">(Tel)</td><td class="hd-inner-v">' + escHtml(kinmuTel) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">(Endereço)</td><td class="hd-inner-v" colspan="3">' + escHtml(addrOut) + '</td></tr>' +
+            '</table></td>' +
+          '</tr>' +
+          '<tr><th>Local do<br>Trabalho</th>' +
+            '<td class="hd-cell-no-pad"><table class="hd-inner">' +
+              '<tr><td class="hd-inner-l">(Nome)</td><td class="hd-inner-v">' + escHtml(nameOut) + '</td>' +
+                  '<td class="hd-inner-l">(Tel)</td><td class="hd-inner-v">' + escHtml(kinmuTel) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">(Endereço)</td><td class="hd-inner-v" colspan="3">' + escHtml(addrOut) + '</td></tr>' +
+              '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v" colspan="3">' + escHtml(setorOut) + '</td></tr>' +
+            '</table></td>' +
+          '</tr>' +
+          '<tr><th>Especificação<br>do Trabalho</th>' +
+            '<td>' + escHtml(translateGyoumuPt(gyoumu)) + '&nbsp;&nbsp;<b>Setor:</b> ' + escHtml(translateSectorPt(hkSoshiki || hkBuka || '-')) + '</td>' +
+          '</tr>' +
+          '<tr><th>Grau de<br>responsabilidade</th>' +
+            '<td>' +
+              '<div>' + chk(!sekinin || sekinin.indexOf('なし') >= 0) + ' Nenhuma autoridade concedida</div>' +
+              '<div>' + chk(sekinin && sekinin.indexOf('なし') < 0) + ' Possui autoridade</div>' +
+            '</td>' +
+          '</tr>' +
+          '<tr><th>Responsável</th>' +
+            '<td class="hd-cell-no-pad"><table class="hd-inner">' +
+              '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v">' + escHtml(translateSectorPt(shikiBusho || '-')) + '</td>' +
+                  '<td class="hd-inner-l">(Ocupação)</td><td class="hd-inner-v">' + escHtml(shikiYakushoku || '-') + '</td>' +
+                  '<td class="hd-inner-l">(Nome)</td><td class="hd-inner-v">' + escHtml(shikiName || '-') + '</td></tr>' +
+            '</table></td>' +
+          '</tr>' +
+          '<tr><th>Período</th>' +
+            '<td>' + escHtml(fmtDateCompact(koyouStart) || '-') + ' até ' + escHtml(fmtDateCompact(koyouEnd) || '-') +
+                '<br><b>Dias de trabalho:</b> Conforme calendário da Empresa receptora</td>' +
+          '</tr>' +
+          '<tr><th>Horário do<br>expediente<br>e intervalos</th>' +
+            '<td class="hd-cell-no-pad">' +
+              '<table class="hd-shift-table">' +
+                '<colgroup><col class="hs-c-no"><col class="hs-c-jikan"><col class="hs-c-jisu"><col class="hs-c-total"><col class="hs-c-slots"></colgroup>' +
+                '<tr><th></th><th>Horário</th><th>Trabalhadas</th><th>Intervalo</th><th>Horário do intervalo</th></tr>' +
+                buildShiftRowsHtml() +
+              '</table>' +
+            '</td>' +
+          '</tr>' +
+          '<tr><th>Hora extra e<br>dias não estatuários</th>' +
+            '<td>' +
+              '<b>Horas extras:</b> ' + dash(oh1d) + ' hrs/dia&nbsp; ' + dash(oh1m) + ' hrs/mês&nbsp; ' + dash(oh1y) + ' hrs/ano como limite<br>' +
+              '<b>Dias não estatuários:</b> até ' + dash(hkm) + ' dia(s)/mês ※conforme acordo laboral' +
+            '</td>' +
+          '</tr>' +
+          '<tr><th>Responsável da<br>Empresa receptora<br>(setor Produção)</th>' +
+            '<td class="hd-cell-no-pad"><table class="hd-inner">' +
+              '<tr><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
+              '<tr><td class="hd-inner-v">' + escHtml(translateSectorPt(hsSekBusho || '-')) + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hsSekYakushoku || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hsSekName || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
+            '</table></td>' +
+          '</tr>' +
+          '<tr><th>Responsável da<br>Empresa Expedidora<br>(setor Produção)</th>' +
+            '<td class="hd-cell-no-pad"><table class="hd-inner">' +
+              '<tr><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
+              '<tr><td class="hd-inner-v">' + escHtml(hgSekBusho || 'Departamento de Gestão') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hgSekYakushoku || 'Gerente') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hgSekName || 'Yuji Mori') + '</td>' +
+                  '<td class="hd-inner-v">0538-36-6968</td></tr>' +
+            '</table></td>' +
+          '</tr>' +
+          '<tr><th>Segurança<br>e Bem-estar</th><td style="font-size:8.5pt;line-height:1.55;">Tanto a Empresa Fornecedora como a receptora de R.H., baseado nas Leis de Expedição de R.H., deverão arcar com os deveres e responsabilidades que são impostas no artigo 44 a 47-2 no seu cumprimento. No que se refere à segurança e bem-estar durante o período do expediente, serão aplicados os Critérios disponibilizados pela Empresa receptora de R.H.. Ademais, irá seguir os Critérios da Empresa Expedidora de R.H..</td></tr>' +
+          '<tr><th>Benefícios</th><td>Poderá fazer uso por igual, das instalações recreativas da Empresa receptora.</td></tr>' +
+          '<tr><th>Medidas de prevenção<br>de conflitos</th><td style="font-size:9pt;">Após a conclusão da prestação dos serviços de expedição de R.H., e a Empresa receptora vier a contratar efetivamente o Funcionário, a Empresa Expedidora deverá ser comunicada com um prazo de carência razoável.</td></tr>' +
+          '<tr><th>Medidas para<br>estabilidade de<br>emprego</th><td style="font-size:8pt;line-height:1.55;">No caso de término do contrato com a Empresa receptora antes do término contratual do Empregado, não sendo pelo motivo próprio, ambas as Empresas deverão empenhar-se na realocação do Funcionário entre as Empresas coligadas. Quando não houver um local para a realocação do Trabalhador em caso de rescisão contratual, deverá permanecer em estado de folga, mantendo a estabilidade do Funcionário, baseando-se nas Leis Regidas pelo Ministério do Trabalho. Caso a rescisão contratual seja inevitável, deverá estar em conformidade com as Leis Empregatícias, avisando com 30 dias de antecedência. Caso o aviso de 30 dias não for dado, deverá pagar o aviso prévio, baseado no Artigo 20-1 da Legislação Trabalhista, e no caso do Trabalhador ter que ficar de folga, aplica-se o Artigo 26 da Legislação Trabalhista.</td></tr>' +
+          '<tr><th>Onde recorrer<br>em caso de queixas</th>' +
+            '<td class="hd-cell-no-pad"><table class="hd-inner">' +
+              '<tr><th></th><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
+              '<tr><td class="hd-inner-l">Empresa receptora</td>' +
+                  '<td class="hd-inner-v">' + escHtml(translateSectorPt(kujouSakiBusho || '-')) + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiYakushoku || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiName || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
+              '<tr><td class="hd-inner-l">Empresa expedidora</td>' +
+                  '<td class="hd-inner-v">Departamento de Gestão</td>' +
+                  '<td class="hd-inner-v">Gerente</td>' +
+                  '<td class="hd-inner-v">Yuji Mori</td>' +
+                  '<td class="hd-inner-v">0538-36-6968</td></tr>' +
+            '</table></td>' +
+          '</tr>' +
+          '<tr><th>Procedimentos<br>para queixas</th><td style="font-size:8.5pt;line-height:1.5;">' +
+            '① Caso o Responsável da Empresa receptora acima descrito receba uma queixa, o Responsável deverá ser comunicado sem demoras, e este deve agir de boa fé em relação à queixa apresentada, reportando ao Funcionário sobre a resolução da questão.<br>' +
+            '② Caso o Responsável da Empresa Expedidora receba uma queixa, deverá ser comunicado sem demoras, e este deve agir de boa fé em relação à queixa apresentada, reportando ao Funcionário sobre a resolução da questão.<br>' +
+            '③ Tanto a Empresa Expedidora como a Receptora terão competência em resolver as questões apresentadas sem demoras, notificando-se detalhadamente para processar e resolver a questão apresentada.' +
+          '</td></tr>' +
+          '<tr><th>Período de<br>Expedição de R.H.<br>e restrições</th><td style="font-size:8.5pt;line-height:1.5;">' +
+            'O primeiro dia em que conflita com o tempo de expedição por unidade individual do Trabalhador: ' +
+              chk(!isMuki) + ' Sim ( ' + escHtml(kojinTeishoku || '-') + ' )&nbsp;&nbsp;' + chk(isMuki) + ' Não (trabalhador temporário por tempo indeterminado)<br>' +
+            'O primeiro dia em que conflita com o tempo de expedição por unidade de Empresa receptora: ' +
+              chk(!isMuki) + ' Sim ( ' + escHtml(jigyousyoTeishokuRaw || '-') + ' )&nbsp;&nbsp;' + chk(isMuki) + ' Não (trabalhador temporário por tempo indeterminado)<br>' +
+            '<span style="font-size:8pt;color:#444;">No que se refere à extensão do prazo de expedição para cada estabelecimento comercial, se o procedimento não for devidamente executado ou se for violado o prazo limite, o trabalhador expedido estará sujeito ao sistema de aplicação presumida de contrato de trabalho.</span>' +
+          '</td></tr>' +
+          '<tr><th>Valor médio<br>da Expedição</th><td><b>' +
+            (hakenRyokin ? escHtml(Number(hakenRyokin).toLocaleString()) : '-') + ' ienes/' +
+            (keisanTani === '日' ? 'dia' : escHtml(keisanTani)) +
+          '</b> — média do valor diário de Expedição de R.H..</td></tr>' +
+          '<tr><th>Seguros<br>(se não inscrito)</th><td>' +
+            'Seguro Saúde・Aposentadoria: <span class="hd-circle">Inscrito</span> ・ Não inscrito (motivo:　　　　　　)<br>' +
+            'Seguro desemprego: <span class="hd-circle">Inscrito</span> ・ Não inscrito (motivo:　　　　　　)' +
+          '</td></tr>' +
+          '<tr><th>Acordo trabalhista</th>' +
+            '<td>Trabalhador temporário sujeito ao acordo? <b>Sim, é um trabalhador temporário sujeito ao acordo.</b><br>' +
+            'Data de término da vigência do acordo: 31/3/2027</td>' +
+          '</tr>' +
+        '</table>';
+      })() +
+    '</div>';
+
+  // 日本語版 + ポルトガル語版 + 就業条件明示書(JP+PT) を単一の wrapper で包む
   document.getElementById('haisenDocBody').innerHTML =
-    '<div class="haisen-doc-wrapper">' + html + htmlPt + '</div>';
+    '<div class="haisen-doc-wrapper">' + html + htmlPt + htmlShikJp + htmlShikPt + '</div>';
 }
 
 // ============================================================
