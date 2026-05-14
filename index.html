@@ -5557,7 +5557,7 @@ select.sankyu-edit-input {
         <button onclick="zoomHaisenDoc(0)" id="haisenZoomReset" style="flex:1;background:#fff;color:#555;padding:10px;border:1px solid #ddd;border-radius:8px;font-weight:700;font-size:13px;">100%</button>
         <button onclick="zoomHaisenDoc(0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍＋</button>
       </div>
-      <button onclick="window.print()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存</button>
+      <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
     </div>
   </div>
 
@@ -8253,6 +8253,71 @@ function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
 
   var label = document.getElementById('haisenZoomReset');
   if (label) label.textContent = Math.round(_haisenDocZoom * 100) + '%';
+}
+
+// 派遣書類を新規ウィンドウで開く (iOS Safari の「印刷許可」ダイアログ回避)
+// 新規タブで開けば、ユーザーは Safari の共有 → 印刷 → PDFとして保存 で
+// アプリ側から window.print() を呼ばずに済む。
+function openHaisenDocInNewWindow() {
+  var body = document.getElementById('haisenDocBody');
+  if (!body) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
+  var page = body.querySelector('.haisen-doc-page');
+  if (!page) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
+
+  // ページをクローンして、インライン transform/zoom を解除 (新タブでは等倍表示)
+  var clone = page.cloneNode(true);
+  clone.style.transform = '';
+  clone.style.transformOrigin = '';
+  clone.style.zoom = '';
+
+  // すべての <style> タグをコピー (haisen-doc / kanribo CSS を含む)
+  var stylesHtml = '';
+  document.querySelectorAll('style').forEach(function(s) { stylesHtml += s.outerHTML; });
+
+  var html = [
+    '<!DOCTYPE html>',
+    '<html lang="ja">',
+    '<head>',
+      '<meta charset="UTF-8">',
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.2, maximum-scale=5.0, user-scalable=yes">',
+      '<title>派遣書類 - ステップ・アップ</title>',
+      stylesHtml,
+      '<style>',
+        'html, body { margin:0 !important; padding:0 !important; max-width:none !important; width:100% !important; background:#e0e0e0; font-family:"Yu Gothic UI","Yu Gothic","メイリオ",sans-serif; }',
+        '.print-toolbar { position:sticky; top:0; background:linear-gradient(135deg,#1976d2,#1565c0); color:#fff; padding:10px 14px; box-shadow:0 2px 8px rgba(0,0,0,0.15); z-index:100; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }',
+        '.print-toolbar button { padding:9px 18px; background:#fff; color:#1565c0; border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; }',
+        '.print-toolbar .hint { font-size:11px; color:rgba(255,255,255,0.95); line-height:1.5; flex:1; min-width:200px; }',
+        '.doc-wrapper { padding:12px; background:#e0e0e0; min-height:calc(100vh - 50px); }',
+        '.haisen-doc-page { margin:0 auto !important; max-width:820px !important; transform:none !important; zoom:1 !important; min-width:0 !important; }',
+        '@media print {',
+        '  .print-toolbar { display:none !important; }',
+        '  .doc-wrapper { padding:0 !important; background:#fff !important; min-height:0 !important; }',
+        '  body { background:#fff !important; }',
+        '  .haisen-doc-page { box-shadow:none !important; padding:0 !important; }',
+        '  @page { size: A4 portrait; }',
+        '}',
+      '</style>',
+    '</head>',
+    '<body>',
+      '<div class="print-toolbar">',
+        '<button onclick="window.print()">🖨 印刷 / PDF 保存</button>',
+        '<span class="hint">📱 iOSは右上の<b>共有 → 印刷 → PDFとして保存</b>でも可</span>',
+      '</div>',
+      '<div class="doc-wrapper">',
+        clone.outerHTML,
+      '</div>',
+    '</body>',
+    '</html>'
+  ].join('');
+
+  var w = window.open('', '_blank');
+  if (!w) {
+    if (typeof showToast === 'function') showToast('ポップアップがブロックされました。ブラウザ設定で許可してください。', 'error');
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 
 // 派遣書類作成画面を開く（docType: 'roudouKeiyaku' / 'syuugyouJouken'）
