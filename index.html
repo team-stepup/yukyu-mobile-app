@@ -9235,6 +9235,150 @@ function translateTitlePt(jp) {
   var s = String(jp).trim();
   return TITLE_PT[s] || s;
 }
+
+// ============================================================
+// toRomaji(jp) — 派遣情報リスト由来のテキストをローマ字化
+// 就業条件明示書 ポルトガル語版で SharePoint Lists のデータを
+// ポルトガル語翻訳ではなくローマ字で表示するために使用。
+// 戦略:
+//   1. SECTOR_TRANSLATIONS_PT に「ローマ字らしい」エントリがあれば採用
+//   2. KANJI_ROMAJI_DICT で漢字熟語を最長一致で置換
+//   3. カナは kanaToRomaji で変換
+//   4. ASCII/数字/記号はそのまま
+// 値が "-" / 空 のときは "-" を返す。
+// ============================================================
+var KANJI_ROMAJI_DICT = {
+  // 法人格
+  '株式会社':'K.K.','有限会社':'Yuugengaisha','合同会社':'GoudoGaisha',
+  // 工場・拠点
+  '本社工場':'Honsha Plant','本社':'Honsha','本部':'Honbu','支社':'Shisha','工場':'Plant','事業所':'Jigyousho','営業所':'Eigyousho',
+  '浜松':'Hamamatsu','浜北':'Hamakita','都田':'Miyakoda','袋井':'Fukuroi','掛川':'Kakegawa','磐田':'Iwata','湖西':'Kosai','菊川':'Kikugawa',
+  '静岡':'Shizuoka','愛知':'Aichi','東京':'Tokyo','大阪':'Osaka','名古屋':'Nagoya',
+  // 部門・課・係 (suffix '-' で前にスペース無し連結)
+  '製造部':'-Seizoubu','製造課':'-Seizouka','製造係':'-Seizougakari','製造':'Seizou',
+  '生産管理部':'Seisan Kanribu','生産管理課':'Seisan Kanrika','生産管理':'Seisan Kanri',
+  '生産部':'-Seisanbu','生産課':'-Seisanka','生産':'Seisan',
+  '品質管理':'Hinshitsu Kanri','品質保証':'Hinshitsu Hoshou','品質':'Hinshitsu',
+  '検査課':'-Kensaka','検査':'Kensa',
+  '出荷検査':'Shukka Kensa','出荷':'Shukka',
+  '工程検査':'Kotei Kensa','工程管理':'Kotei Kanri','工程':'Kotei',
+  '管理部':'-Kanribu','管理課':'-Kanrika','管理':'Kanri',
+  '業務管理':'Gyoumu Kanri','業務':'Gyoumu',
+  '営業部':'-Eigyoubu','営業課':'-Eigyouka','営業':'Eigyou',
+  '総務部':'-Soumubu','総務課':'-Soumuka','総務':'Soumu',
+  '人事部':'-Jinjibu','人事課':'-Jinjika','人事':'Jinji',
+  '経理部':'-Keiribu','経理課':'-Keirika','経理':'Keiri',
+  '技術部':'-Gijutsubu','技術課':'-Gijutsuka','技術':'Gijutsu',
+  '研究所':'-Kenkyuujo','研究':'Kenkyuu','開発':'Kaihatsu',
+  '購買部':'-Koubaibu','購買課':'-Koubaika','購買':'Koubai',
+  '機械課':'-Kikaika','機械':'Kikai','装置':'Souchi','設備':'Setsubi',
+  '部品':'Buhin','製品':'Seihin','資材':'Shizai',
+  '組立':'Kumitate','加工':'Kakou','成型':'Seikei','成形':'Seikei','塗装':'Tosou','塗料':'Tosou','切削':'Sessaku','溶接':'Yousetsu','板金':'Bankin',
+  '自動車':'Jidousha','車輌':'Sharyou','樹脂':'Jushi','金属':'Kinzoku','化成':'Kasei','化学':'Kagaku',
+  'グループ':'Group','チーム':'Team','センター':'Center',
+  // ホワイトカラー職位
+  '副社長':'Vice President','社長':'President','専務':'Senmu','常務':'Joumu','取締役':'Director',
+  '部長':'-Buchou','課長':'-Kachou','係長':'-Kakarichou','主任':'Shunin','主席':'Shuseki','班長':'Hanchou','主管':'Shukan','室長':'-Shitsuchou','所長':'-Shochou',
+  // 一般
+  '所':'-jo','室':'-shitsu','部':'-bu','課':'-ka','係':'-gakari','員':'-in','長':'-chou','者':'-sha',
+  // 数詞
+  '第一':'1st ','第二':'2nd ','第三':'3rd ','第四':'4th ','第五':'5th ','第六':'6th ','第七':'7th ','第八':'8th ','第九':'9th ','第十':'10th ',
+  '一':'1','二':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9','十':'10','〇':'0','零':'0',
+  // 業務関連
+  'ペットフード':'Pet Food','フォークリフト':'Forklift','オペレーター':'Operator','ライン':'Line','ハーネス':'Harness','モビリティ':'Mobility',
+  'プラスチック':'Plastic','プレス':'Press','メッキ':'Plating','エッチング':'Etching','スプレー':'Spray','テスト':'Test',
+  'パターン':'Pattern','コーティング':'Coating','レジスト':'Resist','フィルム':'Film',
+  '梱包':'Konpou','包装':'Housou','検品':'Kenpin','選別':'Senbetsu','仕分':'Shiwake','仕上':'Shiage','作業':'Sagyou','付帯':'Futai','準備':'Junbi',
+  '清掃':'Seisou','雑務':'Zatsumu','配達':'Haitatsu','在庫':'Zaiko','受入':'Ukeire','発注':'Hatchuu','物流':'Butsuryuu','倉庫':'Souko',
+  // ＳＷ / 全角英字
+  'ＳＷ':'SW','ＡＳＳＹ':'ASSY','ＰＡ':'PA','ＴＰＳ':'TPS',
+  'エア':'Air','SW':'SW',
+  // 接続/補助
+  '及び':'oyobi','付随':'fuzui','並びに':'narabini','他':'hoka','等':'tou','他関連':'hoka kanren','関連':'Kanren'
+};
+function _romajiNoPortugueseDiacritics(s) {
+  return !/[ãáâàéêèíìóôòõúûùçñ]/i.test(s);
+}
+function toRomaji(jp) {
+  if (jp === null || jp === undefined) return '';
+  var src = String(jp).trim();
+  if (!src || src === '-') return '-';
+  // 1. SECTOR_TRANSLATIONS_PT の完全一致 (ローマ字エントリのみ)
+  try {
+    if (typeof SECTOR_TRANSLATIONS_PT !== 'undefined') {
+      var direct = SECTOR_TRANSLATIONS_PT[src] || SECTOR_TRANSLATIONS_PT[src.replace(/[\s　]+/g, ' ')];
+      if (direct && _romajiNoPortugueseDiacritics(direct)) return direct;
+    }
+  } catch (_) {}
+  // 2. トークナイズ
+  return tokenizeKanjiToRomaji(src);
+}
+function tokenizeKanjiToRomaji(src) {
+  // 全角英数 → 半角に正規化 (ＳＷ → SW)
+  src = src.replace(/[Ａ-Ｚａ-ｚ０-９]/g, function(c) {
+    return String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+  });
+  // 漢字辞書のキーを長い順にソート (最長一致)
+  var keys = Object.keys(KANJI_ROMAJI_DICT).sort(function(a, b) { return b.length - a.length; });
+  // ピース配列: {text, glueLeft (前にスペース無し)}
+  var pieces = [];
+  var i = 0;
+  while (i < src.length) {
+    var matched = false;
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      if (src.substr(i, key.length) === key) {
+        var val = KANJI_ROMAJI_DICT[key];
+        var glueLeft = false;
+        if (val.charAt(0) === '-') {
+          val = val.substring(1);
+          glueLeft = true;
+        }
+        pieces.push({ text: val, glueLeft: glueLeft });
+        i += key.length;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    var ch = src.charAt(i);
+    if (/[぀-ゟ゠-ヿ]/.test(ch)) {
+      // 連続カナ → kanaToRomaji
+      var j = i;
+      while (j < src.length && /[぀-ゟ゠-ヿ]/.test(src.charAt(j))) j++;
+      var kanaChunk = src.substring(i, j);
+      var roma = (typeof kanaToRomaji === 'function') ? kanaToRomaji(kanaChunk) : kanaChunk;
+      // 先頭大文字化
+      if (roma) roma = roma.charAt(0).toUpperCase() + roma.substring(1);
+      pieces.push({ text: roma, glueLeft: false });
+      i = j;
+    } else if (/[\s　]/.test(ch)) {
+      pieces.push({ text: ' ', glueLeft: false, isSpace: true });
+      i++;
+    } else {
+      // ASCII/記号/未知漢字 → そのまま (記号系はくっつける)
+      var glueLeft2 = /[,.\-()\[\]（）「」、。!?:：]/.test(ch);
+      pieces.push({ text: ch, glueLeft: glueLeft2 });
+      i++;
+    }
+  }
+  // 連結
+  var result = '';
+  for (var p = 0; p < pieces.length; p++) {
+    var piece = pieces[p];
+    if (piece.isSpace) {
+      if (result && !/\s$/.test(result)) result += ' ';
+      continue;
+    }
+    if (!piece.text) continue;
+    if (!result || piece.glueLeft || /\s$/.test(result) || /[\(\[「]$/.test(result)) {
+      result += piece.text;
+    } else {
+      result += ' ' + piece.text;
+    }
+  }
+  return result.replace(/\s+/g, ' ').trim();
+}
 // 派遣料金表示フォーマット (1550, "15" → "1,550円／時間 (15分単位)")
 function formatHakenRyokinJp(ryokin, tani) {
   if (!ryokin) return '-';
@@ -10212,10 +10356,11 @@ function renderRoudouKeiyakushoSan(emp, h) {
 
       (function(){
         var t = lookupHakensakiTranslation(hkName);
-        var nameOut = t && t.nameEn ? t.nameEn : hkName;
-        var addrOut = t && t.addressEn ? t.addressEn : kinmuJusho;
-        var setorOut = translateSectorPt(hkBuka || hkName);
-        if (setorOut === hkName && t && t.nameEn) setorOut = t.nameEn;
+        // 派遣情報リスト由来データは全てローマ字化 (toRomaji)
+        // 派遣先名/住所: 英訳辞書があればそれ (既に半角ローマ字)、無ければローマ字化
+        var nameOut = (t && t.nameEn) ? t.nameEn : toRomaji(hkName);
+        var addrOut = (t && t.addressEn) ? t.addressEn : toRomaji(kinmuJusho);
+        var setorOut = toRomaji(hkBuka || hkName);
         return '<table class="hd-main">' +
           '<tr><th>Empresa<br>receptora</th>' +
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
@@ -10233,21 +10378,21 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '</table></td>' +
           '</tr>' +
           '<tr><th>Especificação<br>do Trabalho</th>' +
-            '<td>' + escHtml(translateGyoumuPt(gyoumu)) + '</td>' +
+            '<td>' + escHtml(toRomaji(gyoumu)) + '</td>' +
           '</tr>' +
           '<tr><th>Unidade<br>organizacional</th>' +
-            '<td>' + escHtml(translateSectorPt(hkSoshiki || hkBuka || '-')) + '</td>' +
+            '<td>' + escHtml(toRomaji(hkSoshiki || hkBuka || '-')) + '</td>' +
           '</tr>' +
           '<tr><th>Grau de<br>responsabilidade</th>' +
             '<td>' +
               '<div>' + chk(!sekinin || sekinin.indexOf('なし') >= 0) + ' Nenhuma autoridade concedida</div>' +
-              '<div>' + chk(sekinin && sekinin.indexOf('なし') < 0) + ' Possui autoridade</div>' +
+              '<div>' + chk(sekinin && sekinin.indexOf('なし') < 0) + ' Possui autoridade' + (sekinin && sekinin.indexOf('なし') < 0 ? ' (' + escHtml(toRomaji(sekinin)) + ')' : '') + '</div>' +
             '</td>' +
           '</tr>' +
           '<tr><th>Responsável</th>' +
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
-              '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v">' + escHtml(shikiBusho ? translateSectorPt(shikiBusho) : '-') + '</td>' +
-                  '<td class="hd-inner-l">(Ocupação)</td><td class="hd-inner-v">' + escHtml(shikiYakushoku ? translateTitlePt(shikiYakushoku) : '-') + '</td>' +
+              '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v">' + escHtml(shikiBusho ? toRomaji(shikiBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-l">(Ocupação)</td><td class="hd-inner-v">' + escHtml(shikiYakushoku ? toRomaji(shikiYakushoku) : '-') + '</td>' +
                   '<td class="hd-inner-l">(Nome)</td><td class="hd-inner-v">' + escHtml(shikiName ? translateNameRomaji(shikiName) : '-') + '</td></tr>' +
             '</table></td>' +
           '</tr>' +
@@ -10273,8 +10418,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '<tr><th>Responsável da<br>Empresa receptora<br>(setor Produção)</th>' +
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
               '<tr><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
-              '<tr><td class="hd-inner-v">' + escHtml(hsSekBusho ? translateSectorPt(hsSekBusho) : '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(hsSekYakushoku ? translateTitlePt(hsSekYakushoku) : '-') + '</td>' +
+              '<tr><td class="hd-inner-v">' + escHtml(hsSekBusho ? toRomaji(hsSekBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hsSekYakushoku ? toRomaji(hsSekYakushoku) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml(hsSekName ? translateNameRomaji(hsSekName) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
             '</table></td>' +
@@ -10282,8 +10427,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '<tr><th>Responsável da<br>Empresa Expedidora<br>(setor Produção)</th>' +
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
               '<tr><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
-              '<tr><td class="hd-inner-v">' + escHtml(hgSekBusho ? translateSectorPt(hgSekBusho) : '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(hgSekYakushoku ? translateTitlePt(hgSekYakushoku) : '-') + '</td>' +
+              '<tr><td class="hd-inner-v">' + escHtml(hgSekBusho ? toRomaji(hgSekBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hgSekYakushoku ? toRomaji(hgSekYakushoku) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml(hgSekName ? translateNameRomaji(hgSekName) : '-') + '</td>' +
                   '<td class="hd-inner-v">0538-36-6968</td></tr>' +
             '</table></td>' +
@@ -10296,13 +10441,13 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
               '<tr><th></th><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
               '<tr><td class="hd-inner-l">Empresa receptora</td>' +
-                  '<td class="hd-inner-v">' + escHtml(kujouSakiBusho ? translateSectorPt(kujouSakiBusho) : '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(kujouSakiYakushoku ? translateTitlePt(kujouSakiYakushoku) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiBusho ? toRomaji(kujouSakiBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiYakushoku ? toRomaji(kujouSakiYakushoku) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml(kujouSakiName ? translateNameRomaji(kujouSakiName) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
               '<tr><td class="hd-inner-l">Empresa expedidora</td>' +
-                  '<td class="hd-inner-v">' + escHtml((kujouGenBusho || hgSekBusho) ? translateSectorPt(kujouGenBusho || hgSekBusho) : '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml((kujouGenYakushoku || hgSekYakushoku) ? translateTitlePt(kujouGenYakushoku || hgSekYakushoku) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml((kujouGenBusho || hgSekBusho) ? toRomaji(kujouGenBusho || hgSekBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml((kujouGenYakushoku || hgSekYakushoku) ? toRomaji(kujouGenYakushoku || hgSekYakushoku) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml((kujouGenName || hgSekName) ? translateNameRomaji(kujouGenName || hgSekName) : '-') + '</td>' +
                   '<td class="hd-inner-v">0538-36-6968</td></tr>' +
             '</table></td>' +
