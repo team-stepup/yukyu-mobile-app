@@ -2335,10 +2335,12 @@ select.sankyu-edit-input {
 
 /* === Excelテンプレ準拠 労働契約書③ === */
 .haisen-doc-page table.hd-header { width:100%; border-collapse:collapse; margin-bottom:10px; table-layout:fixed; }
-.haisen-doc-page table.hd-header td { border:0.8pt solid #000; padding:5px 8px; vertical-align:middle; font-size:9.5pt; word-break:break-word; overflow-wrap:break-word; }
-.haisen-doc-page table.hd-header .hd-h-name { width:38%; font-size:13pt; font-weight:600; text-align:center; word-break:break-all; }
-.haisen-doc-page table.hd-header .hd-h-l { width:16%; background:#f3f3f3; font-weight:600; text-align:center; white-space:nowrap; font-size:9pt; }
-.haisen-doc-page table.hd-header .hd-h-r { font-size:9pt; line-height:1.5; }
+.haisen-doc-page table.hd-header td { border:0.8pt solid #000; padding:4px 6px; vertical-align:middle; font-size:9pt; word-break:break-all; overflow-wrap:anywhere; }
+.haisen-doc-page table.hd-header .hd-h-name { width:30%; font-size:12pt; font-weight:600; text-align:center; word-break:break-all; }
+.haisen-doc-page table.hd-header .hd-h-l { width:22%; background:#f3f3f3; font-weight:600; text-align:center; font-size:8.5pt; word-break:break-word; white-space:normal; line-height:1.3; }
+.haisen-doc-page table.hd-header .hd-h-r { font-size:8.5pt; line-height:1.45; word-break:break-word; overflow-wrap:anywhere; }
+/* 汎用: 全テーブルセルにはみ出し防止 (まだ未指定の hd-shift-table 等 catch-all) */
+.haisen-doc-page table th, .haisen-doc-page table td { word-break:break-word; overflow-wrap:anywhere; }
 
 .haisen-doc-page table.hd-main { width:100%; border-collapse:collapse; margin-bottom:6px; table-layout:fixed; }
 .haisen-doc-page table.hd-main th, .haisen-doc-page table.hd-main td {
@@ -8621,6 +8623,72 @@ function translateGyoumuPt(jp) {
   return jp; // フォールバック: 日本語のまま
 }
 
+// 漢字氏名 → ローマ字 (派遣先 Lists の責任者・指揮命令者用)
+var NAME_ROMAJI = {
+  '松本淳': 'Matsumoto Atsushi',
+  '柳迫英和': 'Yanagisako Hidekazu',
+  '中野浩一': 'Nakano Koichi',
+  '森まこと': 'Mori Makoto',
+  '森ユウジ': 'Mori Yuji',
+  '森ゆうじ': 'Mori Yuji',
+  '吉浦マルセロ': 'Yoshiura Marcelo',
+  '山本裕也': 'Yamamoto Yuya',
+  '立田邦俊': 'Tatsuta Kunitoshi',
+  '山下浩俊': 'Yamashita Hirotoshi'
+};
+function translateNameRomaji(jp) {
+  if (!jp) return '';
+  var s = String(jp).trim();
+  var k = s.replace(/[\s　]/g, '');
+  if (NAME_ROMAJI[k]) return NAME_ROMAJI[k];
+  if (/^[ァ-ヶーぁ-ゖ\s　]+$/.test(s)) return kanaToRomaji(s);
+  return s;
+}
+// 役職 → PT
+var TITLE_PT = {
+  'アシスタントチーフ': 'Assistente Chefe',
+  'ゼネラルマネージャー': 'Gerente Geral',
+  'セクションマネージャー': 'Gerente de Seção',
+  '課長': 'Gerente', '係長': 'Líder de Seção', '部長': 'Diretor',
+  '工場長': 'Gerente de Fábrica', '主任': 'Chefe',
+  '代表取締役': 'Diretor Representativo', '常務取締役': 'Diretor Executivo',
+  '班長': 'Chefe de Equipe', 'リーダー': 'Líder',
+  'グループリーダー': 'Líder de Grupo', 'グループ長': 'Líder de Grupo',
+  'シニアエキスパート': 'Especialista Sênior',
+  'チームリーダー': 'Líder de Equipe', 'ﾁｰﾑﾘｰﾀﾞｰ': 'Líder de Equipe',
+  '所長': 'Diretor', '一般': 'Geral', '専任職': 'Especialista',
+  '製造部長': 'Diretor de Manufatura',
+  '課長代理': 'Sub-Gerente', '係長代理': 'Sub-Líder',
+  '総務係': 'Seção Geral', 'Grリーダー': 'Líder de Grupo'
+};
+function translateTitlePt(jp) {
+  if (!jp) return '';
+  var s = String(jp).trim();
+  return TITLE_PT[s] || s;
+}
+// 派遣料金表示フォーマット (1550, "15" → "1,550円／時間 (15分単位)")
+function formatHakenRyokinJp(ryokin, tani) {
+  if (!ryokin) return '-';
+  var amount = Number(ryokin).toLocaleString();
+  if (!tani) return amount + '円／時間';
+  var taniStr = String(tani).trim();
+  if (taniStr.indexOf('分') >= 0) return amount + '円／時間（' + taniStr + '単位）';
+  if (/^\d+$/.test(taniStr)) return amount + '円／時間（' + taniStr + '分単位）';
+  return amount + '円／' + taniStr;
+}
+function formatHakenRyokinPt(ryokin, tani) {
+  if (!ryokin) return '-';
+  var amount = Number(ryokin).toLocaleString();
+  if (!tani) return amount + ' ienes/hora';
+  var taniStr = String(tani).trim();
+  if (taniStr.indexOf('分') >= 0) {
+    var min = taniStr.match(/(\d+)/);
+    return amount + ' ienes/hora (em incrementos de ' + (min ? min[1] : taniStr) + ' min)';
+  }
+  if (/^\d+$/.test(taniStr)) return amount + ' ienes/hora (em incrementos de ' + taniStr + ' min)';
+  return amount + ' ienes/' + taniStr;
+}
+
 // 日付のコンパクト表示 (例: 2021/1/13) — 派遣書類で共通使用
 function fmtDateCompact(d){
   if (!d) return '';
@@ -9388,10 +9456,15 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '</table>' +
           '</td>' +
         '</tr>' +
-        // 業務内容 + 組織単位
+        // 業務内容
         '<tr>' +
           '<th>業務内容</th>' +
-          '<td>' + escHtml(gyoumu) + '&nbsp;&nbsp;&nbsp;&nbsp;<b>組織単位:</b> ' + escHtml(hkSoshiki || '-') + '</td>' +
+          '<td>' + escHtml(gyoumu) + '</td>' +
+        '</tr>' +
+        // 組織単位
+        '<tr>' +
+          '<th>組織単位</th>' +
+          '<td>' + escHtml(hkSoshiki || '-') + '</td>' +
         '</tr>' +
         // 業務に伴う責任の程度
         '<tr>' +
@@ -9513,8 +9586,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
         // 派遣料金
         '<tr>' +
           '<th>労働者派遣に<br>関する料金の額</th>' +
-          '<td>派遣元事業主の事業所における全派遣先派遣料金の平均日額&nbsp;&nbsp;<b>' +
-            (hakenRyokin ? escHtml(Number(hakenRyokin).toLocaleString()) : '-') + ' 円／' + escHtml(keisanTani) +
+          '<td>派遣元事業主の事業所における全派遣先派遣料金の平均&nbsp;&nbsp;<b>' +
+            escHtml(formatHakenRyokinJp(hakenRyokin, keisanTani)) +
           '</b></td>' +
         '</tr>' +
         // 労働社会保険
@@ -9580,7 +9653,10 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '</table></td>' +
           '</tr>' +
           '<tr><th>Especificação<br>do Trabalho</th>' +
-            '<td>' + escHtml(translateGyoumuPt(gyoumu)) + '&nbsp;&nbsp;<b>Setor:</b> ' + escHtml(translateSectorPt(hkSoshiki || hkBuka || '-')) + '</td>' +
+            '<td>' + escHtml(translateGyoumuPt(gyoumu)) + '</td>' +
+          '</tr>' +
+          '<tr><th>Unidade<br>organizacional</th>' +
+            '<td>' + escHtml(translateSectorPt(hkSoshiki || hkBuka || '-')) + '</td>' +
           '</tr>' +
           '<tr><th>Grau de<br>responsabilidade</th>' +
             '<td>' +
@@ -9590,9 +9666,9 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '</tr>' +
           '<tr><th>Responsável</th>' +
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
-              '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v">' + escHtml(translateSectorPt(shikiBusho || '-')) + '</td>' +
-                  '<td class="hd-inner-l">(Ocupação)</td><td class="hd-inner-v">' + escHtml(shikiYakushoku || '-') + '</td>' +
-                  '<td class="hd-inner-l">(Nome)</td><td class="hd-inner-v">' + escHtml(shikiName || '-') + '</td></tr>' +
+              '<tr><td class="hd-inner-l">(Setor)</td><td class="hd-inner-v">' + escHtml(shikiBusho ? translateSectorPt(shikiBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-l">(Ocupação)</td><td class="hd-inner-v">' + escHtml(shikiYakushoku ? translateTitlePt(shikiYakushoku) : '-') + '</td>' +
+                  '<td class="hd-inner-l">(Nome)</td><td class="hd-inner-v">' + escHtml(shikiName ? translateNameRomaji(shikiName) : '-') + '</td></tr>' +
             '</table></td>' +
           '</tr>' +
           '<tr><th>Período</th>' +
@@ -9617,18 +9693,18 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '<tr><th>Responsável da<br>Empresa receptora<br>(setor Produção)</th>' +
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
               '<tr><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
-              '<tr><td class="hd-inner-v">' + escHtml(translateSectorPt(hsSekBusho || '-')) + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(hsSekYakushoku || '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(hsSekName || '-') + '</td>' +
+              '<tr><td class="hd-inner-v">' + escHtml(hsSekBusho ? translateSectorPt(hsSekBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hsSekYakushoku ? translateTitlePt(hsSekYakushoku) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hsSekName ? translateNameRomaji(hsSekName) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
             '</table></td>' +
           '</tr>' +
           '<tr><th>Responsável da<br>Empresa Expedidora<br>(setor Produção)</th>' +
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
               '<tr><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
-              '<tr><td class="hd-inner-v">' + escHtml(hgSekBusho || '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(hgSekYakushoku || '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(hgSekName || '-') + '</td>' +
+              '<tr><td class="hd-inner-v">' + escHtml(hgSekBusho ? translateSectorPt(hgSekBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hgSekYakushoku ? translateTitlePt(hgSekYakushoku) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(hgSekName ? translateNameRomaji(hgSekName) : '-') + '</td>' +
                   '<td class="hd-inner-v">0538-36-6968</td></tr>' +
             '</table></td>' +
           '</tr>' +
@@ -9640,14 +9716,14 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '<td class="hd-cell-no-pad"><table class="hd-inner">' +
               '<tr><th></th><th>Setor</th><th>Encargo</th><th>Nome</th><th>Telefone</th></tr>' +
               '<tr><td class="hd-inner-l">Empresa receptora</td>' +
-                  '<td class="hd-inner-v">' + escHtml(translateSectorPt(kujouSakiBusho || '-')) + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(kujouSakiYakushoku || '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(kujouSakiName || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiBusho ? translateSectorPt(kujouSakiBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiYakushoku ? translateTitlePt(kujouSakiYakushoku) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml(kujouSakiName ? translateNameRomaji(kujouSakiName) : '-') + '</td>' +
                   '<td class="hd-inner-v">' + escHtml(sekininTel || '-') + '</td></tr>' +
               '<tr><td class="hd-inner-l">Empresa expedidora</td>' +
-                  '<td class="hd-inner-v">' + escHtml(kujouGenBusho || hgSekBusho || '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(kujouGenYakushoku || hgSekYakushoku || '-') + '</td>' +
-                  '<td class="hd-inner-v">' + escHtml(kujouGenName || hgSekName || '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml((kujouGenBusho || hgSekBusho) ? translateSectorPt(kujouGenBusho || hgSekBusho) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml((kujouGenYakushoku || hgSekYakushoku) ? translateTitlePt(kujouGenYakushoku || hgSekYakushoku) : '-') + '</td>' +
+                  '<td class="hd-inner-v">' + escHtml((kujouGenName || hgSekName) ? translateNameRomaji(kujouGenName || hgSekName) : '-') + '</td>' +
                   '<td class="hd-inner-v">0538-36-6968</td></tr>' +
             '</table></td>' +
           '</tr>' +
@@ -9664,9 +9740,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '<span style="font-size:8pt;color:#444;">No que se refere à extensão do prazo de expedição para cada estabelecimento comercial, se o procedimento não for devidamente executado ou se for violado o prazo limite, o trabalhador expedido estará sujeito ao sistema de aplicação presumida de contrato de trabalho.</span>' +
           '</td></tr>' +
           '<tr><th>Valor médio<br>da Expedição</th><td><b>' +
-            (hakenRyokin ? escHtml(Number(hakenRyokin).toLocaleString()) : '-') + ' ienes/' +
-            (keisanTani === '日' ? 'dia' : escHtml(keisanTani)) +
-          '</b> — média do valor diário de Expedição de R.H..</td></tr>' +
+            escHtml(formatHakenRyokinPt(hakenRyokin, keisanTani)) +
+          '</b> — média do valor de Expedição de R.H..</td></tr>' +
           '<tr><th>Seguros<br>(se não inscrito)</th><td>' +
             'Seguro Saúde・Aposentadoria: <span class="hd-circle">Inscrito</span> ・ Não inscrito (motivo:　　　　　　)<br>' +
             'Seguro desemprego: <span class="hd-circle">Inscrito</span> ・ Não inscrito (motivo:　　　　　　)' +
