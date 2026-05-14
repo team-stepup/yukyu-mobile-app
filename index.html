@@ -8268,14 +8268,18 @@ function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
 function openHaisenDocInNewWindow() {
   var body = document.getElementById('haisenDocBody');
   if (!body) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
-  var page = body.querySelector('.haisen-doc-page');
-  if (!page) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
+  var pages = body.querySelectorAll('.haisen-doc-page');
+  if (!pages || pages.length === 0) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
 
-  // ページをクローンして、インライン transform/zoom を解除 (新タブでは等倍表示)
-  var clone = page.cloneNode(true);
-  clone.style.transform = '';
-  clone.style.transformOrigin = '';
-  clone.style.zoom = '';
+  // 全ページ (日本語版 + ポルトガル語版 等) をクローンして、インライン transform/zoom を解除
+  var clonedHtml = '';
+  pages.forEach(function(p) {
+    var clone = p.cloneNode(true);
+    clone.style.transform = '';
+    clone.style.transformOrigin = '';
+    clone.style.zoom = '';
+    clonedHtml += clone.outerHTML;
+  });
 
   // すべての <style> タグをコピー (haisen-doc / kanribo CSS を含む)
   var stylesHtml = '';
@@ -8316,7 +8320,7 @@ function openHaisenDocInNewWindow() {
         '<span class="hint">📱 iOSは右上の<b>共有 → 印刷 → PDFとして保存</b>でも可</span>',
       '</div>',
       '<div class="doc-wrapper">',
-        clone.outerHTML,
+        clonedHtml,
       '</div>',
     '</body>',
     '</html>'
