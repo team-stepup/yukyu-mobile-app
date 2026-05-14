@@ -8265,27 +8265,29 @@ async function listKalendarFiles() {
     }
     _kalendarRootCache = { files: root.files, folders: root.folders };
 
-    // 2. 各サブフォルダの中の files を集める (フォルダ名タグ付き)
+    // 2. 各サブフォルダの中の files を並列取得 (Promise.all で高速化)
     var allFiles = root.files.map(function(f) {
       return { Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, Length: f.Length, _folder: '(ルート)' };
     });
 
-    for (var i = 0; i < root.folders.length; i++) {
-      var sub = root.folders[i];
-      var subPath = sub.ServerRelativeUrl;
-      try {
-        var subResp = await _spListFolderContents(token, subPath);
-        attempts.push({ path: '└ ' + sub.Name, status: subResp.error ? 'ERR' : 'OK',
-                        body: subResp.error || ('files=' + subResp.files.length) });
-        if (!subResp.error) {
-          subResp.files.forEach(function(f) {
-            allFiles.push({ Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, Length: f.Length, _folder: sub.Name });
-          });
-        }
-      } catch (subErr) {
-        attempts.push({ path: '└ ' + sub.Name, status: 'NetErr', body: String(subErr.message || subErr) });
+    var subPromises = root.folders.map(function(sub) {
+      return _spListFolderContents(token, sub.ServerRelativeUrl)
+        .then(function(r) { return { sub: sub, result: r }; })
+        .catch(function(err) { return { sub: sub, result: { error: String(err && err.message || err), files: [], folders: [] } }; });
+    });
+    var subResults = await Promise.all(subPromises);
+
+    subResults.forEach(function(item) {
+      var sub = item.sub;
+      var r = item.result;
+      attempts.push({ path: '└ ' + sub.Name, status: r.error ? 'ERR' : 'OK',
+                      body: r.error || ('files=' + r.files.length) });
+      if (!r.error) {
+        r.files.forEach(function(f) {
+          allFiles.push({ Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, Length: f.Length, _folder: sub.Name });
+        });
       }
-    }
+    });
 
     if (allFiles.length === 0) {
       return { files: [], folders: root.folders, error: 'ルート/サブフォルダ共に対応ファイルなし', attempts: attempts };
