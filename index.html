@@ -25866,8 +25866,20 @@ function showAddEmployeeForm() {
 
 async function renderAddEmployeeForm() {
   const container = document.getElementById('addEmployeeBody');
+  // ローディング表示
+  if (container) container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-light);"><div style="font-size:20px;margin-bottom:8px;">⏳</div>派遣先データを読み込み中…</div>';
   const meta = await fetchEmployeeFields();
   if (!meta) { container.innerHTML = '<p>フィールド情報の取得に失敗しました</p>'; return; }
+
+  // 派遣先(部課)ドロップダウン用に #hakenSelect が populate されているか確認
+  // 未 populate なら populateHakenDropdown を await してから続行
+  // (新規社員登録を populate 完了前に開いた場合の空ドロップダウン問題対策)
+  const hakenOptsCheck = document.getElementById('hakenSelect');
+  const realOptCount = hakenOptsCheck ? Array.from(hakenOptsCheck.options).filter(function(o){ return o.value; }).length : 0;
+  if (realOptCount === 0) {
+    try { await populateHakenDropdown(); } catch (e) { console.warn('populateHakenDropdown failed in add form:', e); }
+  }
+
   const keyMap = buildFieldKeyMap(meta);
   editKeyMap = keyMap;
 
