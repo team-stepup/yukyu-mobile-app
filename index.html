@@ -5564,7 +5564,7 @@ select.sankyu-edit-input {
         <button onclick="zoomHaisenDoc(0)" id="haisenZoomReset" style="flex:1;background:#fff;color:#555;padding:10px;border:1px solid #ddd;border-radius:8px;font-weight:700;font-size:13px;">100%</button>
         <button onclick="zoomHaisenDoc(0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍＋</button>
       </div>
-      <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
+      <button onclick="window.print()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存</button>
     </div>
   </div>
 
@@ -8232,6 +8232,12 @@ function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
   if (!target) return;
   var firstPage = body.querySelector('.haisen-doc-page');
 
+  // wrapper を inline-block にして子コンテンツに合わせて自然なサイズを取得
+  if (target.classList.contains('haisen-doc-wrapper')) {
+    target.style.display = 'inline-block';
+    target.style.verticalAlign = 'top';
+  }
+
   if (delta === 0) {
     if (isMobileForZoom()) {
       // スマホは画面幅に自動フィット (PDFビューアの "fit to width" と同じ)
@@ -8252,13 +8258,21 @@ function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
   target.style.transform = 'scale(' + _haisenDocZoom + ')';
 
   // 親コンテナを scale 後の見かけサイズに合わせる (両ページの合計高さ)
-  requestAnimationFrame(function() {
+  // requestAnimationFrame でレイアウト完了後に測定、0なら再試行
+  var retries = 0;
+  function applyContainerSize() {
     var w = target.offsetWidth * _haisenDocZoom;
     var h = target.offsetHeight * _haisenDocZoom;
+    if ((w === 0 || h === 0) && retries < 10) {
+      retries++;
+      setTimeout(applyContainerSize, 50);
+      return;
+    }
     body.style.width = w + 'px';
     body.style.height = h + 'px';
     body.style.maxWidth = 'none';
-  });
+  }
+  requestAnimationFrame(applyContainerSize);
 
   var label = document.getElementById('haisenZoomReset');
   if (label) label.textContent = Math.round(_haisenDocZoom * 100) + '%';
