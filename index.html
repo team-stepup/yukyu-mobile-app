@@ -5614,6 +5614,30 @@ select.sankyu-edit-input {
         <button onclick="zoomHaisenDoc(0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍＋</button>
       </div>
       <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
+      <button onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
+    </div>
+  </div>
+
+  <!-- 電子サインモーダル -->
+  <div id="esignOverlay" class="no-print" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:95vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+      <div style="padding:16px 20px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;">
+        <h3 style="margin:0;font-size:16px;color:#2e7d32;">✍ 電子サイン</h3>
+        <button onclick="closeEsignModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>
+      </div>
+      <div style="padding:14px 20px;">
+        <div id="esignTarget" style="font-size:12px;color:#666;margin-bottom:8px;"></div>
+        <div style="font-size:11px;color:#666;background:#f5f5f5;padding:8px 10px;border-radius:6px;margin-bottom:10px;">📝 マウス／タッチでサインしてください。サイン後「保存」を押すと PDF が生成され、SharePoint 社員フォルダに保存されます。</div>
+        <div style="border:1.5px dashed #43a047;border-radius:8px;background:#fafffa;position:relative;">
+          <canvas id="esignCanvas" width="480" height="180" style="display:block;width:100%;height:180px;background:#fff;border-radius:8px;touch-action:none;"></canvas>
+          <span style="position:absolute;left:8px;bottom:6px;font-size:10px;color:#aaa;pointer-events:none;">↓ ここに署名 ↓</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button onclick="clearEsignCanvas()" style="flex:1;background:#fff;color:#555;border:1px solid #ddd;border-radius:6px;padding:10px;font-weight:600;cursor:pointer;">🗑 クリア</button>
+          <button onclick="confirmEsignAndSavePdf()" id="esignConfirmBtn" style="flex:2;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:6px;padding:10px;font-weight:700;cursor:pointer;">✓ 保存して SharePoint へアップロード</button>
+        </div>
+        <div id="esignProgress" style="margin-top:10px;font-size:11.5px;color:#1976d2;display:none;"></div>
+      </div>
     </div>
   </div>
 
@@ -8816,6 +8840,236 @@ function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
 
 // 派遣書類を新規ウィンドウで開く (iOS Safari の「印刷許可」ダイアログ回避)
 // 新規タブで開けば、ユーザーは Safari の共有 → 印刷 → PDFとして保存 で
+// ============================================================
+// 電子サイン + PDF 最終保存 (SharePoint 社員フォルダへ自動アップロード)
+// 流れ:
+//  1. 電子サインモーダル表示
+//  2. ユーザー署名 → DataURL を取得
+//  3. .haisen-doc-page の各「氏名」サイン欄に署名画像を挿入
+//  4. html2canvas で各ページを画像化
+//  5. pdf-lib で 1つの PDF にまとめる (A4 縦)
+//  6. 社員フォルダ (社員番号_氏名) をパスから取得 / なければ ensureSpFolder
+//  7. uploadFileToSp で PDF をアップロード
+//  8. 署名画像の DOM 挿入をクリーンアップ
+// ============================================================
+var _esignSignaturePadInstance = null;
+var _esignLibsLoadPromise = null;
+var _esignCurrentEmp = null;
+
+function _loadScriptOnce(src) {
+  return new Promise(function(resolve, reject) {
+    var existing = Array.from(document.scripts).find(function(s){ return s.src === src; });
+    if (existing) { existing.addEventListener('load', function(){ resolve(); }); if (existing.readyState === 'complete' || (window.html2canvas && src.indexOf('html2canvas') >= 0) || (window.SignaturePad && src.indexOf('signature_pad') >= 0)) resolve(); return; }
+    var s = document.createElement('script');
+    s.src = src;
+    s.onload = function(){ resolve(); };
+    s.onerror = function(){ reject(new Error('failed to load: ' + src)); };
+    document.head.appendChild(s);
+  });
+}
+
+async function loadEsignLibsIfNeeded() {
+  if (_esignLibsLoadPromise) return _esignLibsLoadPromise;
+  _esignLibsLoadPromise = (async function() {
+    if (!window.SignaturePad) {
+      await _loadScriptOnce('https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js');
+    }
+    if (!window.html2canvas) {
+      await _loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    }
+    if (!window.PDFLib) {
+      await _loadScriptOnce('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js');
+    }
+  })();
+  return _esignLibsLoadPromise;
+}
+
+// メインエントリ: 電子サインモーダルを開く
+async function saveHaisenDocFinal() {
+  if (!currentEmployee) { showToast('社員データが見つかりません', 'error'); return; }
+  _esignCurrentEmp = currentEmployee;
+  var overlay = document.getElementById('esignOverlay');
+  var targetEl = document.getElementById('esignTarget');
+  if (targetEl) {
+    var name = _esignCurrentEmp.Title || '';
+    var sn = _esignCurrentEmp[F.syainNo] || '';
+    targetEl.innerHTML = '<b>' + escHtml(name) + '</b> 様 (社員番号 №' + escHtml(String(sn)) + ') の労働契約書/就業条件明示書';
+  }
+  overlay.style.display = 'flex';
+  document.getElementById('esignProgress').style.display = 'none';
+  try {
+    await loadEsignLibsIfNeeded();
+    var canvas = document.getElementById('esignCanvas');
+    if (_esignSignaturePadInstance) { _esignSignaturePadInstance.off(); _esignSignaturePadInstance = null; }
+    // Canvas の DPI 調整
+    var ratio = Math.max(window.devicePixelRatio || 1, 1);
+    canvas.width = canvas.offsetWidth * ratio;
+    canvas.height = canvas.offsetHeight * ratio;
+    canvas.getContext('2d').scale(ratio, ratio);
+    _esignSignaturePadInstance = new window.SignaturePad(canvas, {
+      penColor: '#1565c0',
+      backgroundColor: 'rgba(255,255,255,0)',
+      minWidth: 1.2,
+      maxWidth: 3.0
+    });
+  } catch (e) {
+    showToast('サインパッド読込失敗: ' + e.message, 'error');
+    closeEsignModal();
+  }
+}
+
+function closeEsignModal() {
+  var overlay = document.getElementById('esignOverlay');
+  if (overlay) overlay.style.display = 'none';
+  if (_esignSignaturePadInstance) { _esignSignaturePadInstance.off(); _esignSignaturePadInstance = null; }
+}
+
+function clearEsignCanvas() {
+  if (_esignSignaturePadInstance) _esignSignaturePadInstance.clear();
+}
+
+// 署名 → PDF 生成 → アップロード
+async function confirmEsignAndSavePdf() {
+  var btn = document.getElementById('esignConfirmBtn');
+  var prog = document.getElementById('esignProgress');
+  if (!_esignSignaturePadInstance || _esignSignaturePadInstance.isEmpty()) {
+    showToast('サインしてください', 'error'); return;
+  }
+  btn.disabled = true;
+  function setProg(msg) {
+    if (prog) { prog.style.display = 'block'; prog.innerHTML = msg; }
+  }
+  try {
+    setProg('① 署名取得中...');
+    var sigDataUrl = _esignSignaturePadInstance.toDataURL('image/png');
+    var todayStr = (new Date()).getFullYear() + '/' + ((new Date()).getMonth()+1) + '/' + (new Date()).getDate();
+
+    setProg('② サインを書類に埋め込み中...');
+    var injectedNodes = injectSignatureIntoHaisenDoc(sigDataUrl, todayStr);
+
+    setProg('③ ページを画像化中... (高解像度キャプチャ)');
+    // 一旦ズームをリセットして印刷時と同じレイアウトでキャプチャ
+    var prevTransform = _captureAndResetZoom();
+    var pdfBlob = await generateHaisenDocAsPdf();
+    _restoreZoom(prevTransform);
+
+    // 署名 DOM をクリーンアップ
+    injectedNodes.forEach(function(n){ if (n && n.parentNode) n.parentNode.removeChild(n); });
+
+    setProg('④ 社員フォルダを検索中...');
+    var folderPath = await getEmpFolderPath(_esignCurrentEmp);
+    if (!folderPath) throw new Error('社員フォルダのパス特定に失敗。部課/社員番号/氏名 を確認してください。');
+    try { await ensureSpFolder(folderPath); } catch (e) { console.warn('ensureSpFolder warning:', e); }
+
+    var nm = (_esignCurrentEmp.Title || '').replace(/[\s　\/\\:*?"<>|]/g, '');
+    var sn = _esignCurrentEmp[F.syainNo] || '';
+    var stamp = (new Date()).toISOString().substring(0,10).replace(/-/g,'');
+    var fileName = '労働契約書_' + sn + '_' + nm + '_' + stamp + '_署名済.pdf';
+
+    setProg('⑤ SharePoint にアップロード中: ' + escHtml(fileName) + ' ...');
+    var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+    await uploadFileToSp(folderPath, fileName, file);
+
+    setProg('✅ 保存完了: <b>' + escHtml(fileName) + '</b><br>📂 ' + escHtml(folderPath));
+    showToast('✓ SharePoint 社員フォルダに保存しました', 'success');
+    btn.disabled = false;
+    setTimeout(function(){ closeEsignModal(); }, 1800);
+  } catch (e) {
+    console.error('confirmEsignAndSavePdf error:', e);
+    setProg('❌ エラー: ' + escHtml(e.message || String(e)));
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    btn.disabled = false;
+  }
+}
+
+// 派遣書類内の「氏名」サイン欄に署名画像を挿入し、挿入した要素配列を返す
+function injectSignatureIntoHaisenDoc(dataUrl, dateStr) {
+  var nodes = [];
+  // .hd-footer-sign-line (氏名サイン行) を全て探す
+  var lines = document.querySelectorAll('.hd-footer-sign-line, .hd-footer');
+  lines.forEach(function(line) {
+    // 既に挿入済みならスキップ
+    if (line.querySelector('.esign-injected')) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'esign-injected';
+    wrap.style.cssText = 'display:inline-block;vertical-align:middle;margin-left:8px;';
+    wrap.innerHTML = '<img src="' + dataUrl + '" alt="signature" style="height:34px;vertical-align:middle;">' +
+                     '<span style="font-size:9pt;color:#1565c0;margin-left:6px;">(' + escHtml(dateStr) + ' 電子サイン)</span>';
+    line.appendChild(wrap);
+    nodes.push(wrap);
+  });
+  // .hd-footer-date があれば日付も埋める (空なら入れる)
+  return nodes;
+}
+
+// ズーム解除 / 復元 (キャプチャ時に印刷レイアウトに戻す)
+function _captureAndResetZoom() {
+  var body = document.getElementById('haisenDocBody');
+  if (!body) return null;
+  var wrapper = body.querySelector('.haisen-doc-wrapper');
+  if (!wrapper) return null;
+  var save = {
+    wrapperTransform: wrapper.style.transform,
+    wrapperDisplay: wrapper.style.display,
+    wrapperWidth: wrapper.style.width
+  };
+  wrapper.style.transform = 'none';
+  wrapper.style.display = 'block';
+  wrapper.style.width = 'auto';
+  return save;
+}
+function _restoreZoom(save) {
+  if (!save) return;
+  var wrapper = document.querySelector('#haisenDocBody .haisen-doc-wrapper');
+  if (!wrapper) return;
+  wrapper.style.transform = save.wrapperTransform;
+  wrapper.style.display = save.wrapperDisplay;
+  wrapper.style.width = save.wrapperWidth;
+}
+
+// 派遣書類の各 .haisen-doc-page を html2canvas で画像化 → pdf-lib で結合
+async function generateHaisenDocAsPdf() {
+  if (!window.PDFLib || !window.html2canvas) throw new Error('PDF生成ライブラリが未ロード');
+  var pages = document.querySelectorAll('#haisenDocBody .haisen-doc-page');
+  if (!pages.length) throw new Error('派遣書類ページが見つかりません');
+  var pdfDoc = await window.PDFLib.PDFDocument.create();
+  for (var i = 0; i < pages.length; i++) {
+    var pageEl = pages[i];
+    // 高解像度キャプチャ (scale 2)
+    var canvas = await window.html2canvas(pageEl, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false
+    });
+    var pngBytes = await new Promise(function(resolve, reject){
+      canvas.toBlob(function(blob){
+        if (!blob) { reject(new Error('canvas.toBlob 失敗')); return; }
+        blob.arrayBuffer().then(resolve, reject);
+      }, 'image/png');
+    });
+    var img = await pdfDoc.embedPng(pngBytes);
+    // A4 縦 (595 x 842 pt) にフィット
+    var pageW = 595, pageH = 842;
+    var imgRatio = canvas.width / canvas.height;
+    var pageRatio = pageW / pageH;
+    var drawW, drawH;
+    if (imgRatio > pageRatio) {
+      drawW = pageW;
+      drawH = pageW / imgRatio;
+    } else {
+      drawH = pageH;
+      drawW = pageH * imgRatio;
+    }
+    var x = (pageW - drawW) / 2;
+    var y = (pageH - drawH) / 2;
+    var pdfPage = pdfDoc.addPage([pageW, pageH]);
+    pdfPage.drawImage(img, { x: x, y: y, width: drawW, height: drawH });
+  }
+  var pdfBytes = await pdfDoc.save();
+  return new Blob([pdfBytes], { type: 'application/pdf' });
+}
+
 // アプリ側から window.print() を呼ばずに済む。
 function openHaisenDocInNewWindow() {
   var body = document.getElementById('haisenDocBody');
