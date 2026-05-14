@@ -2356,11 +2356,18 @@ select.sankyu-edit-input {
 .haisen-doc-page table.hd-inner td.hd-inner-v { background:#fff; }
 
 /* 就業時間テーブル */
-.haisen-doc-page table.hd-shift-table { width:100%; border-collapse:collapse; }
+.haisen-doc-page table.hd-shift-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+.haisen-doc-page table.hd-shift-table col.hs-c-no    { width:6%; }
+.haisen-doc-page table.hd-shift-table col.hs-c-jikan { width:24%; }
+.haisen-doc-page table.hd-shift-table col.hs-c-jisu  { width:14%; }
+.haisen-doc-page table.hd-shift-table col.hs-c-total { width:12%; }
+.haisen-doc-page table.hd-shift-table col.hs-c-slots { width:44%; }
 .haisen-doc-page table.hd-shift-table th,
-.haisen-doc-page table.hd-shift-table td { border:0.5pt solid #888; padding:4px 6px; font-size:9.5pt; text-align:center; }
+.haisen-doc-page table.hd-shift-table td { border:0.5pt solid #888; padding:4px 6px; font-size:9pt; text-align:center; vertical-align:middle; }
 .haisen-doc-page table.hd-shift-table th { background:#fafafa; font-weight:600; }
-.haisen-doc-page table.hd-shift-table td.hd-shift-no { background:#f3f3f3; font-weight:600; width:6%; }
+.haisen-doc-page table.hd-shift-table td.hd-shift-no { background:#f3f3f3; font-weight:600; }
+.haisen-doc-page table.hd-shift-table td.hd-shift-time { white-space:nowrap; }
+.haisen-doc-page table.hd-shift-table td.hd-shift-slots { white-space:nowrap; font-size:8.5pt; letter-spacing:0; }
 
 /* 賃金欄 */
 .haisen-doc-page td.hd-chingin { line-height:1.85; }
@@ -8474,15 +8481,15 @@ function renderRoudouKeiyakushoSan(emp, h) {
   var kyuujitsuUmu = hkm ? '有' : '無';
 
   // 始業・終業4行（データは①②③のみ。④は常に空）
+  // 休憩時間帯(s1/s2/s3)は1セルに「/」区切りで結合表示
   function shiftRow(idx, jikan, jisu, total, s1, s2, s3) {
+    var slots = [s1, s2, s3].filter(function(v){ return v; }).join(' / ');
     return '<tr>' +
       '<td class="hd-shift-no">' + idx + '</td>' +
-      '<td>' + (jikan ? escHtml(jikan) : '-') + '</td>' +
-      '<td>' + (jisu ? escHtml(jisu) : '-') + '</td>' +
-      '<td>' + (total ? escHtml(total) : '-') + '</td>' +
-      '<td>' + (s1 ? escHtml(s1) : '-') + '</td>' +
-      '<td>' + (s2 ? escHtml(s2) : '-') + '</td>' +
-      '<td>' + (s3 ? escHtml(s3) : '-') + '</td>' +
+      '<td class="hd-shift-time">' + (jikan ? escHtml(jikan) : '-') + '</td>' +
+      '<td class="hd-shift-time">' + (jisu ? escHtml(jisu) : '-') + '</td>' +
+      '<td class="hd-shift-time">' + (total ? escHtml(total) : '-') + '</td>' +
+      '<td class="hd-shift-slots">' + (slots ? escHtml(slots) : '-') + '</td>' +
     '</tr>';
   }
 
@@ -8562,7 +8569,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '<th>始業、終業の時刻、<br>休憩時間</th>' +
           '<td class="hd-cell-no-pad">' +
             '<table class="hd-shift-table">' +
-              '<tr><th></th><th>就業時間</th><th>実働時間</th><th>休憩時間</th><th colspan="3">休憩時間帯</th></tr>' +
+              '<colgroup><col class="hs-c-no"><col class="hs-c-jikan"><col class="hs-c-jisu"><col class="hs-c-total"><col class="hs-c-slots"></colgroup>' +
+              '<tr><th></th><th>就業時間</th><th>実働時間</th><th>休憩時間</th><th>休憩時間帯</th></tr>' +
               shiftRow(1, h[HF.syuugyou_time1], h[HF.jitsudou_time1], h[HF.kyuukei_total1], h[HF.kyuukei1_1], h[HF.kyuukei1_2], h[HF.kyuukei1_3]) +
               shiftRow(2, h[HF.syuugyou_time2], h[HF.jitsudou_time2], h[HF.kyuukei_total2], h[HF.kyuukei2_1], h[HF.kyuukei2_2], h[HF.kyuukei2_3]) +
               shiftRow(3, h[HF.syuugyou_time3], h[HF.jitsudou_time3], h[HF.kyuukei_total3], h[HF.kyuukei3_1], h[HF.kyuukei3_2], h[HF.kyuukei3_3]) +
