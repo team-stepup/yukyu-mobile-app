@@ -8213,29 +8213,61 @@ const LIST_HAKENSAKI_GUID = '2a2ab839-9dcd-4385-a72b-f20449ceddc4';
 // 派遣先のカレンダー画像/PDFを就業条件明示書の最終ページに自動添付
 // ============================================================
 var KALENDAR_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
-var KALENDAR_FOLDER_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-';
+// フォルダパスの候補 (Shared Documents の表記揺れ・サブフォルダ名の揺れ対応)
+var KALENDAR_FOLDER_PATH_CANDIDATES = [
+  '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-',
+  '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー　okyakusan karenda-', // 全角空白
+  '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda',
+  '/sites/TeamStepup/Shared Documents/社員ファイル/その他/取引先カレンダー okyakusan karenda-',
+  '/sites/TeamStepup/Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-',
+  '/sites/TeamStepup/Shared%20Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-'
+];
 var _kalendarFilesCache = null;
+var _kalendarMeta = { matchedPath: null, attempts: [] };
 
 // 取引先カレンダー フォルダのファイル一覧を取得 (キャッシュあり)
+// 戻り値: { files: [...], error: '' | 'detail', attempts: [{path,status,body}] }
 async function listKalendarFiles() {
-  if (_kalendarFilesCache) return _kalendarFilesCache;
+  if (_kalendarFilesCache) return { files: _kalendarFilesCache, error: '', attempts: _kalendarMeta.attempts };
+  var attempts = [];
   try {
     var token = await getToken();
-    if (!token) return [];
-    var folderArg = encodeURIComponent(KALENDAR_FOLDER_PATH.replace(/'/g, "''"));
-    var url = KALENDAR_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + folderArg + "')/Files?$select=Name,ServerRelativeUrl,Length&$top=200";
-    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-    if (!resp.ok) {
-      console.warn('listKalendarFiles failed:', resp.status, await resp.text().catch(function(){return '';}));
-      return [];
+    if (!token) return { files: [], error: 'トークン取得失敗', attempts: [] };
+
+    for (var i = 0; i < KALENDAR_FOLDER_PATH_CANDIDATES.length; i++) {
+      var path = KALENDAR_FOLDER_PATH_CANDIDATES[i];
+      var folderArg = encodeURIComponent(path.replace(/'/g, "''"));
+      var url = KALENDAR_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + folderArg + "')/Files?$select=Name,ServerRelativeUrl,Length&$top=200";
+      try {
+        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+        if (resp.ok) {
+          var data = await resp.json();
+          var files = (data.d && data.d.results) || [];
+          attempts.push({ path: path, status: resp.status, body: '(' + files.length + '件)' });
+          if (files.length === 0) {
+            // 空フォルダ → 別候補も試す (★ なしのパス等で見つかるかも)
+            continue;
+          }
+          _kalendarFilesCache = files;
+          _kalendarMeta = { matchedPath: path, attempts: attempts };
+          return { files: files, error: '', attempts: attempts };
+        } else {
+          var errBody = '';
+          try { errBody = await resp.text(); } catch(_) {}
+          attempts.push({ path: path, status: resp.status, body: errBody.substring(0, 200) });
+          // 404/400 はパス違いの可能性 → 次の候補へ。401/403 は権限なので終了。
+          if (resp.status === 401 || resp.status === 403) {
+            return { files: [], error: '権限不足 (HTTP ' + resp.status + ')', attempts: attempts };
+          }
+        }
+      } catch (fetchErr) {
+        attempts.push({ path: path, status: 'NetErr', body: String(fetchErr && fetchErr.message || fetchErr) });
+      }
     }
-    var data = await resp.json();
-    var files = (data.d && data.d.results) || [];
-    _kalendarFilesCache = files;
-    return files;
+    return { files: [], error: 'すべての候補パスでフォルダが見つかりませんでした', attempts: attempts };
   } catch (e) {
-    console.error('listKalendarFiles error:', e);
-    return [];
+    console.error('listKalendarFiles fatal:', e);
+    return { files: [], error: '例外: ' + (e.message || String(e)), attempts: attempts };
   }
 }
 
@@ -8318,13 +8350,29 @@ async function appendKalendarPage(hkName) {
   wrapper.appendChild(placeholder);
 
   try {
-    var files = await listKalendarFiles();
+    var listResult = await listKalendarFiles();
+    var files = listResult.files;
     if (!files.length) {
+      // 失敗詳細を表示 (どのパスが失敗したか / HTTP ステータス)
+      var attemptsHtml = (listResult.attempts || []).map(function(a) {
+        return '<div style="font-family:monospace;font-size:9pt;color:#555;border-left:3px solid #ffd54f;padding:4px 8px;margin:4px 0;background:#fff;word-break:break-all;">' +
+               '<b>HTTP ' + escHtml(String(a.status)) + '</b>: ' + escHtml(a.path) +
+               (a.body ? '<br><span style="color:#888;">→ ' + escHtml(String(a.body).substring(0, 300)) + '</span>' : '') +
+               '</div>';
+      }).join('');
       placeholder.innerHTML =
         '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
-        '<div style="text-align:center;color:#c62828;padding:60px;background:#ffebee;border-radius:8px;font-size:11pt;">' +
-        '⚠ SharePoint「取引先カレンダー okyakusan karenda-」フォルダへのアクセスに失敗、または空のフォルダです。' +
-        '<br><br>アクセス権限/フォルダパスを確認してください。' +
+        '<div style="color:#c62828;padding:20px;background:#ffebee;border-radius:8px;font-size:11pt;">' +
+        '<div style="text-align:center;margin-bottom:12px;">⚠ カレンダーフォルダの読み込みに失敗しました</div>' +
+        '<div style="font-size:10pt;color:#444;margin-bottom:8px;"><b>エラー:</b> ' + escHtml(listResult.error || '不明') + '</div>' +
+        '<div style="font-size:10pt;color:#444;margin-bottom:8px;"><b>試行したパス:</b></div>' +
+        attemptsHtml +
+        '<div style="margin-top:12px;font-size:9.5pt;color:#666;background:#fff8e1;padding:8px;border-radius:4px;">' +
+        '💡 確認事項:<br>' +
+        '・SharePoint TeamStepup サイトの「Shared Documents」配下に該当フォルダが存在するか<br>' +
+        '・ログインユーザーがそのフォルダにアクセス権を持っているか<br>' +
+        '・フォルダ名が正確に「取引先カレンダー okyakusan karenda-」になっているか (★やハイフンの有無も含めて)' +
+        '</div>' +
         '</div>';
       return;
     }
