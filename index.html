@@ -8213,65 +8213,94 @@ const LIST_HAKENSAKI_GUID = '2a2ab839-9dcd-4385-a72b-f20449ceddc4';
 // 派遣先のカレンダー画像/PDFを就業条件明示書の最終ページに自動添付
 // ============================================================
 var KALENDAR_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
-// フォルダパスの候補 (Shared Documents の表記揺れ・サブフォルダ名の揺れ対応)
-var KALENDAR_FOLDER_PATH_CANDIDATES = [
-  '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-',
-  '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー　okyakusan karenda-', // 全角空白
-  '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda',
-  '/sites/TeamStepup/Shared Documents/社員ファイル/その他/取引先カレンダー okyakusan karenda-',
-  '/sites/TeamStepup/Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-',
-  '/sites/TeamStepup/Shared%20Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-'
-];
-var _kalendarFilesCache = null;
-var _kalendarMeta = { matchedPath: null, attempts: [] };
+var KALENDAR_ROOT_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル/★その他/取引先カレンダー okyakusan karenda-';
+var _kalendarRootCache = null;   // { files: [], folders: [] }
+var _kalendarFilesCache = null;  // 全ファイル (root + 全サブフォルダ)
+var _kalendarMeta = { attempts: [] };
 
-// 取引先カレンダー フォルダのファイル一覧を取得 (キャッシュあり)
-// 戻り値: { files: [...], error: '' | 'detail', attempts: [{path,status,body}] }
+// SharePoint フォルダの中身 (Files + Folders) を取得
+async function _spListFolderContents(token, path) {
+  var folderArg = encodeURIComponent(path.replace(/'/g, "''"));
+  var base = KALENDAR_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + folderArg + "')";
+  // Files
+  var filesResp = await fetch(base + "/Files?$select=Name,ServerRelativeUrl,Length&$top=500",
+    { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  var foldersResp = await fetch(base + "/Folders?$select=Name,ServerRelativeUrl&$top=200",
+    { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!filesResp.ok) {
+    var bodyF = ''; try { bodyF = await filesResp.text(); } catch(_) {}
+    return { error: 'Files HTTP ' + filesResp.status + ': ' + bodyF.substring(0, 200), files: [], folders: [] };
+  }
+  if (!foldersResp.ok) {
+    var bodyD = ''; try { bodyD = await foldersResp.text(); } catch(_) {}
+    return { error: 'Folders HTTP ' + foldersResp.status + ': ' + bodyD.substring(0, 200), files: [], folders: [] };
+  }
+  var filesJson = await filesResp.json();
+  var foldersJson = await foldersResp.json();
+  var files = (filesJson.d && filesJson.d.results) || [];
+  var folders = (foldersJson.d && foldersJson.d.results) || [];
+  // システム/隠しフォルダを除外
+  folders = folders.filter(function(f) {
+    var n = String(f.Name || '');
+    return n && n !== 'Forms' && n.indexOf('_') !== 0;
+  });
+  return { error: '', files: files, folders: folders };
+}
+
+// 取引先カレンダー フォルダの中身 (root files + 全サブフォルダの files をフラット化) を取得
+// 戻り値: { files: [...], folders: [...], error: '', attempts: [...] }
 async function listKalendarFiles() {
-  if (_kalendarFilesCache) return { files: _kalendarFilesCache, error: '', attempts: _kalendarMeta.attempts };
+  if (_kalendarFilesCache) return { files: _kalendarFilesCache, folders: (_kalendarRootCache && _kalendarRootCache.folders) || [], error: '', attempts: _kalendarMeta.attempts };
   var attempts = [];
   try {
     var token = await getToken();
-    if (!token) return { files: [], error: 'トークン取得失敗', attempts: [] };
+    if (!token) return { files: [], folders: [], error: 'トークン取得失敗', attempts: [] };
 
-    for (var i = 0; i < KALENDAR_FOLDER_PATH_CANDIDATES.length; i++) {
-      var path = KALENDAR_FOLDER_PATH_CANDIDATES[i];
-      var folderArg = encodeURIComponent(path.replace(/'/g, "''"));
-      var url = KALENDAR_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + folderArg + "')/Files?$select=Name,ServerRelativeUrl,Length&$top=200";
+    // 1. ルートフォルダの中身
+    var root = await _spListFolderContents(token, KALENDAR_ROOT_PATH);
+    attempts.push({ path: KALENDAR_ROOT_PATH, status: root.error ? 'ERR' : 'OK',
+                    body: root.error || ('files=' + root.files.length + ' folders=' + root.folders.length) });
+    if (root.error) {
+      return { files: [], folders: [], error: 'ルートフォルダ取得失敗: ' + root.error, attempts: attempts };
+    }
+    _kalendarRootCache = { files: root.files, folders: root.folders };
+
+    // 2. 各サブフォルダの中の files を集める (フォルダ名タグ付き)
+    var allFiles = root.files.map(function(f) {
+      return { Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, Length: f.Length, _folder: '(ルート)' };
+    });
+
+    for (var i = 0; i < root.folders.length; i++) {
+      var sub = root.folders[i];
+      var subPath = sub.ServerRelativeUrl;
       try {
-        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-        if (resp.ok) {
-          var data = await resp.json();
-          var files = (data.d && data.d.results) || [];
-          attempts.push({ path: path, status: resp.status, body: '(' + files.length + '件)' });
-          if (files.length === 0) {
-            // 空フォルダ → 別候補も試す (★ なしのパス等で見つかるかも)
-            continue;
-          }
-          _kalendarFilesCache = files;
-          _kalendarMeta = { matchedPath: path, attempts: attempts };
-          return { files: files, error: '', attempts: attempts };
-        } else {
-          var errBody = '';
-          try { errBody = await resp.text(); } catch(_) {}
-          attempts.push({ path: path, status: resp.status, body: errBody.substring(0, 200) });
-          // 404/400 はパス違いの可能性 → 次の候補へ。401/403 は権限なので終了。
-          if (resp.status === 401 || resp.status === 403) {
-            return { files: [], error: '権限不足 (HTTP ' + resp.status + ')', attempts: attempts };
-          }
+        var subResp = await _spListFolderContents(token, subPath);
+        attempts.push({ path: '└ ' + sub.Name, status: subResp.error ? 'ERR' : 'OK',
+                        body: subResp.error || ('files=' + subResp.files.length) });
+        if (!subResp.error) {
+          subResp.files.forEach(function(f) {
+            allFiles.push({ Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, Length: f.Length, _folder: sub.Name });
+          });
         }
-      } catch (fetchErr) {
-        attempts.push({ path: path, status: 'NetErr', body: String(fetchErr && fetchErr.message || fetchErr) });
+      } catch (subErr) {
+        attempts.push({ path: '└ ' + sub.Name, status: 'NetErr', body: String(subErr.message || subErr) });
       }
     }
-    return { files: [], error: 'すべての候補パスでフォルダが見つかりませんでした', attempts: attempts };
+
+    if (allFiles.length === 0) {
+      return { files: [], folders: root.folders, error: 'ルート/サブフォルダ共に対応ファイルなし', attempts: attempts };
+    }
+
+    _kalendarFilesCache = allFiles;
+    _kalendarMeta = { attempts: attempts };
+    return { files: allFiles, folders: root.folders, error: '', attempts: attempts };
   } catch (e) {
     console.error('listKalendarFiles fatal:', e);
-    return { files: [], error: '例外: ' + (e.message || String(e)), attempts: attempts };
+    return { files: [], folders: [], error: '例外: ' + (e.message || String(e)), attempts: attempts };
   }
 }
 
-// 派遣先名と最も一致するカレンダーファイルを返す
+// 派遣先名と最も一致するカレンダーファイルを返す (ファイル名 + 親フォルダ名 で照合)
 function pickKalendarFileForHakensaki(files, hkName) {
   if (!files || !files.length || !hkName) return null;
   function norm(s) {
@@ -8284,32 +8313,44 @@ function pickKalendarFileForHakensaki(files, hkName) {
   }
   var keyN = norm(hkName);
   if (!keyN) return null;
-  // 1. 完全一致 (normalized)
-  for (var i = 0; i < files.length; i++) {
-    if (norm(files[i].Name) === keyN) return files[i];
-  }
-  // 2. 部分一致 (どちらかが他方を含む)
-  var partial = null, partialLen = 0;
-  for (var j = 0; j < files.length; j++) {
-    var fn = norm(files[j].Name);
-    if (!fn) continue;
-    if (keyN.indexOf(fn) >= 0 || fn.indexOf(keyN) >= 0) {
-      // 最も長い一致を優先 (より具体的な工場名など)
-      var overlap = Math.min(fn.length, keyN.length);
-      if (overlap > partialLen) { partial = files[j]; partialLen = overlap; }
+
+  // 各ファイルに対するスコア = (ファイル名 or 親フォルダ名 の正規化後と keyN の重なり度)
+  // 親フォルダ名一致を優先 (派遣先 = フォルダ単位で管理されている前提)
+  var candidates = files.map(function(f) {
+    var fnN = norm(f.Name);
+    var dirN = norm(f._folder || '');
+    // 完全一致
+    var exact = (dirN && dirN === keyN) || fnN === keyN;
+    // どちらかが他方を含む
+    var contains = (dirN && (keyN.indexOf(dirN) >= 0 || dirN.indexOf(keyN) >= 0)) ||
+                   (keyN.indexOf(fnN) >= 0 || fnN.indexOf(keyN) >= 0);
+    // 重なり長 (ファイル名/フォルダ名のうち長い方)
+    var overlap = 0;
+    if (contains) overlap = Math.max(
+      dirN ? Math.min(dirN.length, keyN.length) : 0,
+      fnN ? Math.min(fnN.length, keyN.length) : 0
+    );
+    // 3文字部分文字列マッチ (フォールバック)
+    var sub3 = false;
+    if (!exact && !contains) {
+      for (var s = 0; s <= keyN.length - 3; s++) {
+        var ss = keyN.substring(s, s + 3);
+        if ((dirN && dirN.indexOf(ss) >= 0) || (fnN && fnN.indexOf(ss) >= 0)) { sub3 = true; break; }
+      }
     }
-  }
-  if (partial) return partial;
-  // 3. 主要トークン (3 文字以上の部分文字列) 単位での一致
-  // 例: hkName="株式会社ユーシン 浜松工場" → "ユーシン"/"浜松" などのいずれかが含まれる
-  for (var k = 0; k < files.length; k++) {
-    var fn2 = norm(files[k].Name);
-    if (!fn2) continue;
-    for (var s = 0; s <= keyN.length - 3; s++) {
-      var sub = keyN.substring(s, s + 3);
-      if (fn2.indexOf(sub) >= 0) return files[k];
-    }
-  }
+    return { f: f, exact: exact, contains: contains, overlap: overlap, sub3: sub3, dirN: dirN, fnN: fnN };
+  });
+
+  // ソート: exact > contains(overlap降順) > sub3
+  candidates.sort(function(a, b) {
+    if (a.exact !== b.exact) return a.exact ? -1 : 1;
+    if (a.contains !== b.contains) return a.contains ? -1 : 1;
+    if (a.overlap !== b.overlap) return b.overlap - a.overlap;
+    if (a.sub3 !== b.sub3) return a.sub3 ? -1 : 1;
+    return 0;
+  });
+  var top = candidates[0];
+  if (top && (top.exact || top.contains || top.sub3)) return top.f;
   return null;
 }
 
@@ -8378,12 +8419,36 @@ async function appendKalendarPage(hkName) {
     }
     var file = pickKalendarFileForHakensaki(files, hkName);
     if (!file) {
+      // 利用可能なフォルダ/ファイル一覧を表示してユーザが該当を判断できるようにする
+      var foldersList = (listResult.folders || []).map(function(f) {
+        return '<li style="margin:2px 0;">' + escHtml(f.Name) + '</li>';
+      }).join('');
+      var filesByFolder = {};
+      files.forEach(function(f) {
+        var k = f._folder || '(ルート)';
+        if (!filesByFolder[k]) filesByFolder[k] = [];
+        filesByFolder[k].push(f.Name);
+      });
+      var filesListHtml = Object.keys(filesByFolder).map(function(folder) {
+        return '<div style="margin:6px 0;"><b style="color:#1976d2;">📁 ' + escHtml(folder) + '</b>' +
+          '<ul style="margin:2px 0 0 20px;padding:0;font-size:9.5pt;color:#444;">' +
+          filesByFolder[folder].map(function(n) { return '<li>' + escHtml(n) + '</li>'; }).join('') +
+          '</ul></div>';
+      }).join('');
       placeholder.innerHTML =
         '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
-        '<div style="text-align:center;color:#c62828;padding:40px 20px;background:#fff8e1;border:1px solid #ffd54f;border-radius:8px;font-size:11pt;">' +
-        '⚠ 派遣先「<b>' + escHtml(hkName) + '</b>」に該当するカレンダーファイルが見つかりませんでした。' +
-        '<br><br><span style="font-size:9.5pt;color:#666;">フォルダ内の ' + files.length + ' 件のファイルから自動マッチング → 不一致。<br>' +
-        'SharePoint「取引先カレンダー okyakusan karenda-」フォルダに対応ファイルを配置してください。</span>' +
+        '<div style="color:#c62828;padding:20px;background:#fff8e1;border:1px solid #ffd54f;border-radius:8px;font-size:11pt;">' +
+        '<div style="text-align:center;margin-bottom:8px;">⚠ 派遣先「<b>' + escHtml(hkName) + '</b>」に該当するカレンダーファイルが見つかりませんでした</div>' +
+        '<div style="font-size:9.5pt;color:#666;text-align:center;margin-bottom:12px;">' +
+        'サブフォルダ ' + (listResult.folders || []).length + '件 / ファイル ' + files.length + '件 をスキャンしました' +
+        '</div>' +
+        '<div style="background:#fff;padding:10px 14px;border-radius:6px;max-height:160mm;overflow-y:auto;">' +
+        '<div style="font-size:10pt;color:#333;margin-bottom:6px;"><b>📂 利用可能なファイル:</b></div>' +
+        (filesListHtml || '<div style="color:#999;">(なし)</div>') +
+        '</div>' +
+        '<div style="margin-top:10px;font-size:9.5pt;color:#666;">' +
+        '💡 該当するファイルがある場合は、サブフォルダ名 or ファイル名に派遣先名(<b>' + escHtml(hkName) + '</b>)の一部を含めてください。' +
+        '</div>' +
         '</div>';
       return;
     }
