@@ -8248,18 +8248,31 @@ async function fetchHakensakiByEmp(emp) {
   }
   if (candidates.length === 1) return candidates[0];
 
-  // 複数候補 → 組織単位で絞り込み
+  // 複数候補 → 組織単位で絞り込み → さらに同一組織単位の中で「派遣期間」が最新のものを選択
+  function _pickLatestByHakenPeriod(list) {
+    // haken_period_start が最も新しい (= 最新) ものを優先。無い場合は haken_period_end、それも無ければ先頭を維持。
+    var sorted = list.slice().sort(function(a, b){
+      var as = a[HF.haken_period_start] || a[HF.haken_period_end] || '';
+      var bs = b[HF.haken_period_start] || b[HF.haken_period_end] || '';
+      if (as && bs) return (new Date(bs)) - (new Date(as));
+      if (as) return -1;
+      if (bs) return 1;
+      return 0;
+    });
+    return sorted[0];
+  }
+
   if (empSoshiki) {
     var byOrg = candidates.filter(function(it) {
       var org = String(it[HF.soshiki] || '').trim();
       if (!org) return false;
       return org === empSoshiki || org.indexOf(empSoshiki) >= 0 || empSoshiki.indexOf(org) >= 0;
     });
-    if (byOrg.length > 0) return byOrg[0];
+    if (byOrg.length > 0) return _pickLatestByHakenPeriod(byOrg);
   }
 
-  console.warn('[fetchHakensakiByEmp] 複数候補(' + candidates.length + '件)、組織単位で絞り込めず最初を使用:', candidates.map(function(c){return c[HF.bango];}));
-  return candidates[0];
+  console.warn('[fetchHakensakiByEmp] 複数候補(' + candidates.length + '件)、組織単位で絞り込めず最新の派遣期間で選択:', candidates.map(function(c){return c[HF.bango];}));
+  return _pickLatestByHakenPeriod(candidates);
 }
 
 // 派遣書類/管理簿のズーム制御 (transform: scale を使用、iOS Safari の text inflation を回避)
@@ -9388,6 +9401,15 @@ function renderRoudouKeiyakushoSan(emp, h) {
   var soshikiNoCho = _clean(h[HF.soshikiNoCho] || '');
   var jigyousyoTeishokuRaw = _clean(h[HF.jigyousyoTeishokuDay] || '');
   var calendarText = _clean(h[HF.calendar] || '別添カレンダーによる');
+  // 派遣期間 (同じ派遣先・同じ組織単位の最新レコードから取得 — fetchHakensakiByEmp が選択済み)
+  // 雇用契約期間(koyouStart/koyouEnd)が空 or 派遣期間Listsに値があればそちらを優先。
+  var hakenPeriodStartRaw = h[HF.haken_period_start] || '';
+  var hakenPeriodEndRaw   = h[HF.haken_period_end] || '';
+  var shukugyoPeriodStart = hakenPeriodStartRaw || koyouStart;
+  var shukugyoPeriodEnd   = hakenPeriodEndRaw   || koyouEnd;
+  // 就業日 = 派遣契約書(労働契約書)の「休日」と同じ文面を流用
+  var SHUKUGYOBI_TEXT_JP = '定例日：毎週　土曜日　日曜日（一部土曜日除く）　その他就業先カレンダーによる';
+  var SHUKUGYOBI_TEXT_PT = 'Dias regulares de folga: sábados e domingos toda semana (alguns sábados não inclusos). Demais dias conforme calendário da Empresa receptora.';
   // 個人単位抵触日 = 派遣開始日 + 3年 で算出 (フォールバック)
   function _calcKojinTeishoku(startDate) {
     if (!startDate) return '';
@@ -9486,10 +9508,12 @@ function renderRoudouKeiyakushoSan(emp, h) {
           '</td>' +
         '</tr>' +
         // 派遣期間 + 就業日
+        // 派遣期間: 同じ派遣先・同じ組織単位の最新レコードを採用
+        // 就業日: 派遣契約書(労働契約書)の「休日」と同じ文面
         '<tr>' +
           '<th>派遣期間</th>' +
-          '<td>' + escHtml(fmtDateJa(koyouStart) || '-') + ' から ' + escHtml(fmtDateJa(koyouEnd) || '-') +
-              '<br><b>就業日:</b> ' + escHtml(calendarText) + '</td>' +
+          '<td>' + escHtml(fmtDateJa(shukugyoPeriodStart) || '-') + ' から ' + escHtml(fmtDateJa(shukugyoPeriodEnd) || '-') +
+              '<br><b>就業日:</b> ' + escHtml(SHUKUGYOBI_TEXT_JP) + '</td>' +
         '</tr>' +
         // 就業時間及び休憩時間
         '<tr>' +
@@ -9672,8 +9696,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '</table></td>' +
           '</tr>' +
           '<tr><th>Período</th>' +
-            '<td>' + escHtml(fmtDateCompact(koyouStart) || '-') + ' até ' + escHtml(fmtDateCompact(koyouEnd) || '-') +
-                '<br><b>Dias de trabalho:</b> Conforme calendário da Empresa receptora</td>' +
+            '<td>' + escHtml(fmtDateCompact(shukugyoPeriodStart) || '-') + ' até ' + escHtml(fmtDateCompact(shukugyoPeriodEnd) || '-') +
+                '<br><b>Dias de trabalho:</b> ' + escHtml(SHUKUGYOBI_TEXT_PT) + '</td>' +
           '</tr>' +
           '<tr><th>Horário do<br>expediente<br>e intervalos</th>' +
             '<td class="hd-cell-no-pad">' +
