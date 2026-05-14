@@ -8356,24 +8356,79 @@ function pickKalendarFileForHakensaki(files, hkName) {
   return null;
 }
 
-// SharePoint File を Data URL として取得
-async function fetchKalendarFileAsDataUrl(serverRelativeUrl) {
+// SharePoint File を取得 (ArrayBuffer)
+var _kalendarFileBufCache = {};  // serverRelativeUrl → ArrayBuffer (セッション内キャッシュ)
+async function fetchKalendarFileAsArrayBuffer(serverRelativeUrl) {
+  if (_kalendarFileBufCache[serverRelativeUrl]) return _kalendarFileBufCache[serverRelativeUrl];
   var token = await getToken();
   if (!token) return null;
   var pathArg = encodeURIComponent(serverRelativeUrl.replace(/'/g, "''"));
   var url = KALENDAR_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + pathArg + "')/$value";
   var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
   if (!resp.ok) {
-    console.warn('fetchKalendarFileAsDataUrl failed:', resp.status);
+    console.warn('fetchKalendarFileAsArrayBuffer failed:', resp.status);
     return null;
   }
-  var blob = await resp.blob();
-  return await new Promise(function(resolve, reject) {
+  var ab = await resp.arrayBuffer();
+  _kalendarFileBufCache[serverRelativeUrl] = ab;
+  return ab;
+}
+
+// ArrayBuffer → Data URL (画像用)
+function arrayBufferToDataUrl(ab, mimeType) {
+  return new Promise(function(resolve, reject) {
+    var blob = new Blob([ab], { type: mimeType || 'application/octet-stream' });
     var r = new FileReader();
     r.onload = function() { resolve(r.result); };
     r.onerror = function() { reject(r.error); };
     r.readAsDataURL(blob);
   });
+}
+
+// PDF.js ライブラリの遅延ロード
+var _pdfjsLoadPromise = null;
+function loadPdfJsIfNeeded() {
+  if (_pdfjsLoadPromise) return _pdfjsLoadPromise;
+  _pdfjsLoadPromise = new Promise(function(resolve, reject) {
+    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload = function() {
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        resolve(window.pdfjsLib);
+      } else {
+        reject(new Error('pdfjsLib not found after load'));
+      }
+    };
+    s.onerror = function() {
+      _pdfjsLoadPromise = null;
+      reject(new Error('pdf.js のロードに失敗しました'));
+    };
+    document.head.appendChild(s);
+  });
+  return _pdfjsLoadPromise;
+}
+
+// PDF ArrayBuffer → 各ページを PNG dataURL の配列で返す
+async function renderPdfPagesToImages(arrayBuffer, onProgress) {
+  var pdfjsLib = await loadPdfJsIfNeeded();
+  var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  var images = [];
+  for (var i = 1; i <= pdf.numPages; i++) {
+    if (onProgress) onProgress(i, pdf.numPages);
+    var page = await pdf.getPage(i);
+    // 印刷品質: scale 1.5 (A4 で約 1240×1750 px, ~150dpi 相当)
+    var viewport = page.getViewport({ scale: 1.5 });
+    var canvas = document.createElement('canvas');
+    var ctx = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+    images.push(canvas.toDataURL('image/png'));
+    canvas.width = canvas.height = 0;  // メモリ開放
+  }
+  return images;
 }
 
 // 取引先カレンダー ページを wrapper の最後に追加 (非同期)
@@ -8458,14 +8513,6 @@ async function appendKalendarPage(hkName) {
     var isImage = ['png','jpg','jpeg','gif','webp','bmp'].indexOf(ext) >= 0;
     var isPdf = ext === 'pdf';
 
-    var dataUrl = await fetchKalendarFileAsDataUrl(file.ServerRelativeUrl);
-    if (!dataUrl) {
-      placeholder.innerHTML =
-        '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
-        '<div style="color:#c62828;text-align:center;padding:40px;">読み込み失敗: ' + escHtml(file.Name) + '</div>';
-      return;
-    }
-
     var header =
       '<h2 style="text-align:center;font-size:14pt;margin:0 0 4px;">📅 派遣先カレンダー</h2>' +
       '<div style="text-align:center;font-size:10pt;color:#333;margin-bottom:8px;"><b>' + escHtml(hkName) + '</b></div>' +
@@ -8473,14 +8520,53 @@ async function appendKalendarPage(hkName) {
 
     if (isImage) {
       placeholder.innerHTML = header +
-        '<div style="text-align:center;"><img src="' + dataUrl + '" alt="' + escHtml(file.Name) + '" style="max-width:100%;max-height:240mm;object-fit:contain;" /></div>';
-    } else if (isPdf) {
-      // PDFは <embed> で表示 (画面確認用)。印刷時はブラウザ依存
+        '<div style="text-align:center;color:#666;padding:40px;">📥 画像を読み込み中…</div>';
+      var ab = await fetchKalendarFileAsArrayBuffer(file.ServerRelativeUrl);
+      if (!ab) {
+        placeholder.innerHTML = header +
+          '<div style="color:#c62828;text-align:center;padding:40px;">画像読み込み失敗: ' + escHtml(file.Name) + '</div>';
+        return;
+      }
+      var mime = (ext === 'jpg' ? 'image/jpeg' : 'image/' + ext);
+      var imgDataUrl = await arrayBufferToDataUrl(ab, mime);
       placeholder.innerHTML = header +
-        '<embed src="' + dataUrl + '" type="application/pdf" style="width:100%;height:230mm;border:1px solid #ddd;" />' +
-        '<div class="no-print" style="text-align:center;font-size:9.5pt;color:#e65100;background:#fff8e1;padding:8px;margin-top:8px;border-radius:4px;">' +
-        '💡 PDFファイルです。印刷時に正しく出力されない場合は、別途PDFを添付して印刷してください。' +
-        '</div>';
+        '<div style="text-align:center;"><img src="' + imgDataUrl + '" alt="' + escHtml(file.Name) + '" style="max-width:100%;max-height:240mm;object-fit:contain;" /></div>';
+    } else if (isPdf) {
+      // PDF.js でページを画像にレンダリング (印刷耐性 ◎)
+      placeholder.innerHTML = header +
+        '<div style="text-align:center;color:#666;padding:40px;">📥 PDFを読み込み中…</div>';
+      var pdfAb = await fetchKalendarFileAsArrayBuffer(file.ServerRelativeUrl);
+      if (!pdfAb) {
+        placeholder.innerHTML = header +
+          '<div style="color:#c62828;text-align:center;padding:40px;">PDF読み込み失敗: ' + escHtml(file.Name) + '</div>';
+        return;
+      }
+      placeholder.innerHTML = header +
+        '<div id="kalendarProgress" style="text-align:center;color:#666;padding:40px;">🖼 PDFをページ画像に変換中…</div>';
+      var progressEl = placeholder.querySelector('#kalendarProgress');
+      try {
+        var imgUrls = await renderPdfPagesToImages(pdfAb, function(cur, total) {
+          if (progressEl) progressEl.textContent = '🖼 PDFをページ画像に変換中… (' + cur + '/' + total + ')';
+        });
+        if (!imgUrls.length) {
+          placeholder.innerHTML = header + '<div style="color:#c62828;text-align:center;padding:40px;">PDFのページが0でした</div>';
+          return;
+        }
+        var pagesHtml = imgUrls.map(function(u, i) {
+          return '<div style="text-align:center;' + (i > 0 ? 'page-break-before:always;margin-top:14mm;' : '') + '">' +
+                 (imgUrls.length > 1 ? '<div style="font-size:9pt;color:#999;margin-bottom:4px;">ページ ' + (i+1) + ' / ' + imgUrls.length + '</div>' : '') +
+                 '<img src="' + u + '" style="max-width:100%;max-height:240mm;object-fit:contain;" />' +
+                 '</div>';
+        }).join('');
+        placeholder.innerHTML = header + pagesHtml;
+      } catch (pdfErr) {
+        console.error('PDF render error:', pdfErr);
+        placeholder.innerHTML = header +
+          '<div style="color:#c62828;text-align:center;padding:40px;">' +
+          'PDF描画エラー: ' + escHtml(pdfErr.message || String(pdfErr)) + '<br>' +
+          '<span style="font-size:9.5pt;color:#666;">ネットワーク未接続時は CDN ロード失敗の可能性</span>' +
+          '</div>';
+      }
     } else {
       placeholder.innerHTML = header +
         '<div style="text-align:center;color:#666;padding:60px;">対応していないファイル形式: ' + escHtml(ext) + '</div>';
