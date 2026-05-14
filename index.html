@@ -8903,56 +8903,182 @@ async function loadEsignLibsIfNeeded() {
 }
 
 // メインエントリ: 電子サインモーダルを開く
+// メインエントリ: 新規タブを開き、書類を最初から確認 + 末尾でサインできる UI を表示
 async function saveHaisenDocFinal() {
   console.log('[esign] saveHaisenDocFinal start');
   try {
     if (typeof currentEmployee === 'undefined' || !currentEmployee) {
-      console.warn('[esign] currentEmployee is null/undefined');
       if (typeof showToast === 'function') showToast('社員データが見つかりません', 'error');
-      else alert('社員データが見つかりません');
+      return;
+    }
+    var body = document.getElementById('haisenDocBody');
+    if (!body || !body.querySelector('.haisen-doc-page')) {
+      if (typeof showToast === 'function') showToast('書類を先に作成してください', 'error');
       return;
     }
     _esignCurrentEmp = currentEmployee;
-    var overlay = document.getElementById('esignOverlay');
-    if (!overlay) {
-      console.error('[esign] #esignOverlay element not found in DOM');
-      alert('電子サインモーダルが見つかりません。ハードリフレッシュ(Ctrl+Shift+R)を試してください。');
+    // ライブラリは先に読み込み開始 (バックグラウンド)
+    loadEsignLibsIfNeeded().catch(function(){});
+
+    var emp = _esignCurrentEmp;
+    var name = emp.Title || '';
+    var sn = emp[F.syainNo] || '';
+    var wrapper = body.querySelector('.haisen-doc-wrapper');
+    var docHtml = wrapper ? wrapper.outerHTML : body.innerHTML;
+
+    // メインドキュメントの CSS を全部抽出して新規ウィンドウに継承
+    var styles = '';
+    try {
+      styles = Array.from(document.styleSheets).map(function(ss) {
+        try { return Array.from(ss.cssRules).map(function(r){ return r.cssText; }).join('\n'); }
+        catch (e) { return ''; }
+      }).filter(function(s){ return s.length > 0; }).join('\n');
+    } catch (e) { console.warn('[esign] CSS extract:', e); }
+
+    var w = window.open('', '_blank');
+    if (!w) {
+      if (typeof showToast === 'function') showToast('ポップアップがブロックされました。ブラウザ設定で許可してください。', 'error');
       return;
     }
-    var targetEl = document.getElementById('esignTarget');
-    if (targetEl) {
-      var name = _esignCurrentEmp.Title || '';
-      var sn = _esignCurrentEmp[F.syainNo] || '';
-      targetEl.innerHTML = '<b>' + escHtml(name) + '</b> 様 (社員番号 №' + escHtml(String(sn)) + ') の労働契約書/就業条件明示書';
-    }
-    console.log('[esign] showing overlay');
-    overlay.style.display = 'flex';
-    var prog = document.getElementById('esignProgress');
-    if (prog) prog.style.display = 'none';
-    console.log('[esign] loading libs...');
-    await loadEsignLibsIfNeeded();
-    console.log('[esign] libs loaded:', { SignaturePad: !!window.SignaturePad, html2canvas: !!window.html2canvas, PDFLib: !!window.PDFLib });
-    var canvas = document.getElementById('esignCanvas');
-    if (!canvas) { console.error('[esign] #esignCanvas not found'); return; }
-    if (_esignSignaturePadInstance) { _esignSignaturePadInstance.off(); _esignSignaturePadInstance = null; }
-    // Canvas の DPI 調整
-    var ratio = Math.max(window.devicePixelRatio || 1, 1);
-    canvas.width = (canvas.offsetWidth || 480) * ratio;
-    canvas.height = (canvas.offsetHeight || 180) * ratio;
-    canvas.getContext('2d').scale(ratio, ratio);
-    _esignSignaturePadInstance = new window.SignaturePad(canvas, {
-      penColor: '#1565c0',
-      backgroundColor: 'rgba(255,255,255,0)',
-      minWidth: 1.2,
-      maxWidth: 3.0
-    });
-    console.log('[esign] SignaturePad initialized');
+
+    var pageTitle = '電子サイン - ' + name + ' (No.' + sn + ')';
+    var html = [
+      '<!doctype html><html lang="ja"><head><meta charset="utf-8">',
+      '<title>' + escHtml(pageTitle) + '</title>',
+      '<meta name="viewport" content="width=device-width,initial-scale=1">',
+      '<style>' + styles + '</style>',
+      '<style>',
+      '  html, body { background:#f0f2f5; margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif; padding-bottom:260px; }',
+      '  .esh { background:linear-gradient(135deg,#1976d2,#1565c0); color:#fff; padding:14px 18px; position:sticky; top:0; z-index:100; box-shadow:0 2px 6px rgba(0,0,0,0.18); }',
+      '  .esh h1 { margin:0; font-size:16px; font-weight:600; letter-spacing:0.5px; }',
+      '  .esh .sub { font-size:12px; opacity:0.92; margin-top:2px; }',
+      '  .esh-pill { display:inline-block; background:rgba(255,255,255,0.18); padding:1px 8px; border-radius:10px; font-size:11px; margin-right:6px; }',
+      '  .doc-area { background:#fff; max-width:860px; margin:18px auto; padding:0; box-shadow:0 2px 14px rgba(0,0,0,0.1); border-radius:6px; overflow:hidden; }',
+      '  /* キャプチャ時と同じく、ズーム/印刷専用 transform を解除 */',
+      '  .haisen-doc-wrapper { transform:none !important; display:block !important; width:auto !important; padding:0 !important; }',
+      '  .haisen-doc-page { width:auto !important; min-height:auto !important; margin:0 !important; padding:24px !important; box-shadow:none !important; page-break-before:auto !important; }',
+      '  .haisen-doc-page + .haisen-doc-page { border-top:1px dashed #ddd; }',
+      '  /* 印刷時 UI チラ要素は隠す */',
+      '  .no-print, #haisenDocMissingNotice, .haisen-doc-warning, .hd-missing-box { display:none !important; }',
+      '  /* サインバー */',
+      '  .sign-bar { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:3px solid #43a047; padding:12px 16px; box-shadow:0 -3px 14px rgba(0,0,0,0.15); display:flex; gap:14px; align-items:center; z-index:200; flex-wrap:wrap; }',
+      '  .sign-canvas-wrap { flex:1; min-width:260px; border:1.5px dashed #43a047; background:#fafffa; border-radius:8px; position:relative; height:120px; }',
+      '  .sign-canvas-wrap canvas { width:100%; height:100%; display:block; touch-action:none; }',
+      '  .sign-canvas-wrap .hint { position:absolute; left:8px; bottom:4px; color:#bbb; font-size:10px; pointer-events:none; }',
+      '  .sign-actions { display:flex; flex-direction:column; gap:6px; min-width:200px; }',
+      '  .sign-actions button { padding:11px; border:none; border-radius:8px; font-weight:700; cursor:pointer; font-size:13px; line-height:1.2; }',
+      '  .sign-save { background:linear-gradient(135deg,#43a047,#2e7d32); color:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.15); }',
+      '  .sign-save:disabled { opacity:0.6; cursor:not-allowed; }',
+      '  .sign-clear { background:#fff; color:#555; border:1px solid #ddd !important; }',
+      '  .sign-progress { font-size:11.5px; color:#1976d2; min-height:14px; }',
+      '  .sign-progress.error { color:#c62828; }',
+      '  .sign-progress.success { color:#2e7d32; font-weight:600; }',
+      '  @media (max-width:600px) { .sign-bar { flex-direction:column; align-items:stretch; } .sign-canvas-wrap { width:100%; height:110px; } .sign-actions { width:100%; } }',
+      '</style></head><body>',
+      '<div class="esh">',
+      '  <h1>✍ 電子サイン: 労働契約書 兼 労働条件通知書 (派遣) ／ 就業条件明示書</h1>',
+      '  <div class="sub"><span class="esh-pill">№' + escHtml(String(sn)) + '</span><b>' + escHtml(name) + '</b> 様 — 上から内容をご確認のうえ、ページ下部のキャンバスにサインしてください</div>',
+      '</div>',
+      '<div class="doc-area">' + docHtml + '</div>',
+      '<div class="sign-bar">',
+      '  <div class="sign-canvas-wrap">',
+      '    <canvas id="signCanvas"></canvas>',
+      '    <span class="hint">↓ 指 or マウスでサイン ↓</span>',
+      '  </div>',
+      '  <div class="sign-actions">',
+      '    <button class="sign-clear" onclick="clearSig()">🗑 クリア</button>',
+      '    <button class="sign-save" id="signSaveBtn" onclick="doSave()">✓ 保存して SharePoint へ</button>',
+      '    <div id="signProgress" class="sign-progress"></div>',
+      '  </div>',
+      '</div>',
+      '<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"><\/script>',
+      '<script>',
+      '  var pad = null;',
+      '  function initPad() {',
+      '    var c = document.getElementById("signCanvas");',
+      '    if (!c || !window.SignaturePad) return;',
+      '    var ratio = Math.max(window.devicePixelRatio || 1, 1);',
+      '    c.width = c.offsetWidth * ratio; c.height = c.offsetHeight * ratio;',
+      '    c.getContext("2d").scale(ratio, ratio);',
+      '    pad = new SignaturePad(c, { penColor:"#1565c0", backgroundColor:"rgba(255,255,255,0)", minWidth:1.2, maxWidth:3.0 });',
+      '  }',
+      '  if (document.readyState === "complete") initPad();',
+      '  else window.addEventListener("load", initPad);',
+      '  function clearSig() { if (pad) pad.clear(); }',
+      '  function doSave() {',
+      '    if (!pad || pad.isEmpty()) { alert("サインしてください"); return; }',
+      '    var btn = document.getElementById("signSaveBtn");',
+      '    var prog = document.getElementById("signProgress");',
+      '    btn.disabled = true;',
+      '    prog.className = "sign-progress"; prog.textContent = "送信中...";',
+      '    if (!window.opener || window.opener.closed) {',
+      '      prog.className = "sign-progress error"; prog.textContent = "❌ 元のタブが閉じています。元のタブを開いて再実行してください。";',
+      '      btn.disabled = false; return;',
+      '    }',
+      '    var dataUrl = pad.toDataURL("image/png");',
+      '    function onMsg(e) {',
+      '      if (!e.data || e.data.type !== "esign-result") return;',
+      '      window.removeEventListener("message", onMsg);',
+      '      if (e.data.ok) {',
+      '        prog.className = "sign-progress success";',
+      '        prog.innerHTML = "✅ 保存完了<br>" + (e.data.fileName || "");',
+      '        setTimeout(function(){ try { window.close(); } catch(_){} }, 2500);',
+      '      } else {',
+      '        prog.className = "sign-progress error";',
+      '        prog.textContent = "❌ " + (e.data.error || "失敗");',
+      '        btn.disabled = false;',
+      '      }',
+      '    }',
+      '    window.addEventListener("message", onMsg);',
+      '    window.opener.postMessage({ type:"esign-signed", dataUrl: dataUrl }, "*");',
+      '  }',
+      '<\/script>',
+      '</body></html>'
+    ].join('');
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
   } catch (e) {
     console.error('[esign] saveHaisenDocFinal exception:', e);
     if (typeof showToast === 'function') showToast('エラー: ' + (e.message || String(e)), 'error');
     else alert('エラー: ' + (e.message || String(e)));
-    try { closeEsignModal(); } catch(_) {}
   }
+}
+
+// メインウィンドウ側: 新規ウィンドウからの署名 dataURL を受け取って PDF 生成 + アップロード
+if (!window._esignMessageInstalled) {
+  window._esignMessageInstalled = true;
+  window.addEventListener('message', async function(e) {
+    if (!e.data || e.data.type !== 'esign-signed') return;
+    var src = e.source;
+    try {
+      if (!_esignCurrentEmp) throw new Error('社員データ未設定');
+      await loadEsignLibsIfNeeded();
+      var sigDataUrl = e.data.dataUrl;
+      var todayStr = (new Date()).getFullYear() + '/' + ((new Date()).getMonth()+1) + '/' + (new Date()).getDate();
+      var injectedNodes = injectSignatureIntoHaisenDoc(sigDataUrl, todayStr);
+      var prevTransform = _captureAndResetZoom();
+      var pdfBlob = await generateHaisenDocAsPdf();
+      _restoreZoom(prevTransform);
+      injectedNodes.forEach(function(n){ if (n && n.parentNode) n.parentNode.removeChild(n); });
+      var folderPath = await getEmpFolderPath(_esignCurrentEmp);
+      if (!folderPath) throw new Error('社員フォルダのパス特定失敗');
+      try { await ensureSpFolder(folderPath); } catch (eFolder) { console.warn('ensureSpFolder warn:', eFolder); }
+      var nm = (_esignCurrentEmp.Title || '').replace(/[\s　\/\\:*?"<>|]/g, '');
+      var sn2 = _esignCurrentEmp[F.syainNo] || '';
+      var stamp = (new Date()).toISOString().substring(0,10).replace(/-/g,'');
+      var fileName = '労働契約書_' + sn2 + '_' + nm + '_' + stamp + '_署名済.pdf';
+      var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+      await uploadFileToSp(folderPath, fileName, file);
+      if (src) src.postMessage({ type: 'esign-result', ok: true, fileName: fileName, folderPath: folderPath }, '*');
+      if (typeof showToast === 'function') showToast('✓ ' + fileName + ' を保存しました', 'success');
+    } catch (err) {
+      console.error('[esign] message handler error:', err);
+      if (src) src.postMessage({ type: 'esign-result', ok: false, error: err.message || String(err) }, '*');
+      if (typeof showToast === 'function') showToast('保存失敗: ' + (err.message || String(err)), 'error');
+    }
+  });
 }
 
 function closeEsignModal() {
