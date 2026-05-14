@@ -8227,13 +8227,15 @@ function isMobileForZoom() {
 function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
   var body = document.getElementById('haisenDocBody');
   if (!body) return;
-  var page = body.querySelector('.haisen-doc-page');
-  if (!page) return;
+  // 全ページを包む wrapper を優先、無ければ最初のページにフォールバック
+  var target = body.querySelector('.haisen-doc-wrapper') || body.querySelector('.haisen-doc-page');
+  if (!target) return;
+  var firstPage = body.querySelector('.haisen-doc-page');
 
   if (delta === 0) {
     if (isMobileForZoom()) {
       // スマホは画面幅に自動フィット (PDFビューアの "fit to width" と同じ)
-      var pageW = page.classList.contains('kanribo-page') ? 680 : 720;
+      var pageW = (firstPage && firstPage.classList.contains('kanribo-page')) ? 680 : 720;
       var fit = (window.innerWidth - 16) / pageW;
       _haisenDocZoom = Math.max(0.2, Math.min(1.0, +fit.toFixed(2)));
     } else {
@@ -8244,15 +8246,15 @@ function zoomHaisenDoc(delta, mobileDefault, desktopDefault) {
   }
 
   // 旧 zoom スタイルを除去し transform: scale に統一 (text inflation 回避)
-  page.style.zoom = '';
+  target.style.zoom = '';
   body.style.zoom = '';
-  page.style.transformOrigin = 'top left';
-  page.style.transform = 'scale(' + _haisenDocZoom + ')';
+  target.style.transformOrigin = 'top left';
+  target.style.transform = 'scale(' + _haisenDocZoom + ')';
 
-  // 親コンテナを scale 後の見かけサイズに合わせる (空白防止/横スクロール調整)
+  // 親コンテナを scale 後の見かけサイズに合わせる (両ページの合計高さ)
   requestAnimationFrame(function() {
-    var w = page.offsetWidth * _haisenDocZoom;
-    var h = page.offsetHeight * _haisenDocZoom;
+    var w = target.offsetWidth * _haisenDocZoom;
+    var h = target.offsetHeight * _haisenDocZoom;
     body.style.width = w + 'px';
     body.style.height = h + 'px';
     body.style.maxWidth = 'none';
@@ -8955,7 +8957,9 @@ function renderRoudouKeiyakushoSan(emp, h) {
       '</div>' +
     '</div>';
 
-  document.getElementById('haisenDocBody').innerHTML = html + htmlPt;
+  // 日本語版 + ポルトガル語版 を単一の wrapper で包む (zoomHaisenDoc が一括でスケール)
+  document.getElementById('haisenDocBody').innerHTML =
+    '<div class="haisen-doc-wrapper">' + html + htmlPt + '</div>';
 }
 
 // ============================================================
@@ -22441,7 +22445,8 @@ function renderYukyuKanribo(emp, grants, records) {
   }).join('');
 
   var html = '<div class="haisen-doc-page kanribo-page">' + sections + '</div>';
-  document.getElementById('haisenDocBody').innerHTML = html;
+  // wrapper で包んで zoomHaisenDoc と互換
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + html + '</div>';
 }
 
 async function deleteLeaveRecord(itemId, dateStr) {
