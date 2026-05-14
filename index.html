@@ -8551,6 +8551,17 @@ function renderRoudouKeiyakushoSan(emp, h) {
   }
   var katamichiKm = tsukin1day ? Math.round((tsukin1day / 12 / 2) * 10) / 10 : 0;  // 1km=12円・往復
   var tsukin21day = tsukin1day ? tsukin1day * 21 : 0;
+  // 在留カードのローマ字氏名 (社員リストの「特記事項１」フィールドに格納)
+  // 例: "TAIRA DA CRUZ LOMBARDO BRUNO", "KASHIYAMA FERREIRA LETICIA MARY"
+  var romajiName = '';
+  for (var k6 in emp) {
+    if (k6.indexOf('x7279__x8a18__x4e8b__x9805') >= 0) {
+      var v = emp[k6];
+      if (v && typeof v === 'string' && v.trim()) { romajiName = v.trim(); break; }
+    }
+  }
+  // フォールバック: 特記事項１ が空ならカタカナ氏名から変換
+  if (!romajiName) romajiName = kanaToRomaji(name);
 
   var today = new Date();
   var todayStr = today.getFullYear() + '年' + (today.getMonth() + 1) + '月' + today.getDate() + '日';
@@ -8825,7 +8836,7 @@ function renderRoudouKeiyakushoSan(emp, h) {
 
       '<table class="hd-header">' +
         '<tr>' +
-          '<td class="hd-h-name" rowspan="2">Sr.(a) : ' + escHtml(kanaToRomaji(name)) + '</td>' +
+          '<td class="hd-h-name" rowspan="2">Sr.(a) : ' + escHtml(romajiName) + '</td>' +
           '<td class="hd-h-l">Nome/Endereço</td>' +
           '<td class="hd-h-r">(Nome da Empresa)&nbsp;&nbsp;Step Up Co., Ltd<br>Shizuoka-ken, Iwata-shi, Kamihongo, 1006-7</td>' +
         '</tr>' +
@@ -8836,7 +8847,7 @@ function renderRoudouKeiyakushoSan(emp, h) {
       '</table>' +
 
       '<div class="hd-intro">' +
-        'Este documento diz respeito ao contrato de trabalho celebrado entre a Step Up Co., Ltd. e <strong>' + escHtml(kanaToRomaji(name)) + '</strong>, e também serve como um aviso de condições de trabalho de acordo com o Artigo 15 da Lei de Normas Trabalhistas, e foi preparado de acordo com um acordo entre trabalhadores e administração.' +
+        'Este documento diz respeito ao contrato de trabalho celebrado entre a Step Up Co., Ltd. e <strong>' + escHtml(romajiName) + '</strong>, e também serve como um aviso de condições de trabalho de acordo com o Artigo 15 da Lei de Normas Trabalhistas, e foi preparado de acordo com um acordo entre trabalhadores e administração.' +
       '</div>' +
 
       '<table class="hd-main">' +
