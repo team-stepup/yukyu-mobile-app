@@ -8778,8 +8778,8 @@ function renderRoudouKeiyakushoSan(emp, h) {
   var jikangaiUmu = (oh1d || oh1m || oh1y) ? '有' : '無';
   var kyuujitsuUmu = hkm ? '有' : '無';
 
-  // 始業・終業4行（データは①②③のみ。④は常に空）
-  // 休憩時間帯(s1/s2/s3)は1セル内に改行で縦並び表示 (狭い列でも全文表示)
+  // 始業・終業の時刻、休憩時間 — 就業時間があるシフトのみ表示 (1〜3)
+  // 休憩時間帯(s1/s2/s3)は1セル内に改行で縦並び表示
   function shiftRow(idx, jikan, jisu, total, s1, s2, s3) {
     var slotsHtml = [s1, s2, s3]
       .filter(function(v){ return v; })
@@ -8792,6 +8792,19 @@ function renderRoudouKeiyakushoSan(emp, h) {
       '<td class="hd-shift-time">' + (total ? escHtml(total) : '-') + '</td>' +
       '<td class="hd-shift-slots">' + (slotsHtml || '-') + '</td>' +
     '</tr>';
+  }
+  // 就業時間データがあるシフトのみ抽出してHTMLを返す (最低1行)
+  function buildShiftRowsHtml() {
+    var shifts = [
+      { jikan: h[HF.syuugyou_time1], jisu: h[HF.jitsudou_time1], total: h[HF.kyuukei_total1], s1: h[HF.kyuukei1_1], s2: h[HF.kyuukei1_2], s3: h[HF.kyuukei1_3] },
+      { jikan: h[HF.syuugyou_time2], jisu: h[HF.jitsudou_time2], total: h[HF.kyuukei_total2], s1: h[HF.kyuukei2_1], s2: h[HF.kyuukei2_2], s3: h[HF.kyuukei2_3] },
+      { jikan: h[HF.syuugyou_time3], jisu: h[HF.jitsudou_time3], total: h[HF.kyuukei_total3], s1: h[HF.kyuukei3_1], s2: h[HF.kyuukei3_2], s3: h[HF.kyuukei3_3] }
+    ];
+    var active = shifts.filter(function(s){ return s.jikan; });
+    if (active.length === 0) active = [shifts[0]]; // データが無い場合も1行は描画
+    return active.map(function(s, i){
+      return shiftRow(i+1, s.jikan, s.jisu, s.total, s.s1, s.s2, s.s3);
+    }).join('');
   }
 
   var html =
@@ -8873,10 +8886,7 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '<table class="hd-shift-table">' +
               '<colgroup><col class="hs-c-no"><col class="hs-c-jikan"><col class="hs-c-jisu"><col class="hs-c-total"><col class="hs-c-slots"></colgroup>' +
               '<tr><th></th><th>就業時間</th><th>実働時間</th><th>休憩時間</th><th>休憩時間帯</th></tr>' +
-              shiftRow(1, h[HF.syuugyou_time1], h[HF.jitsudou_time1], h[HF.kyuukei_total1], h[HF.kyuukei1_1], h[HF.kyuukei1_2], h[HF.kyuukei1_3]) +
-              shiftRow(2, h[HF.syuugyou_time2], h[HF.jitsudou_time2], h[HF.kyuukei_total2], h[HF.kyuukei2_1], h[HF.kyuukei2_2], h[HF.kyuukei2_3]) +
-              shiftRow(3, h[HF.syuugyou_time3], h[HF.jitsudou_time3], h[HF.kyuukei_total3], h[HF.kyuukei3_1], h[HF.kyuukei3_2], h[HF.kyuukei3_3]) +
-              shiftRow(4, '', '', '', '', '', '') +
+              buildShiftRowsHtml() +
             '</table>' +
           '</td>' +
         '</tr>' +
@@ -9109,10 +9119,7 @@ function renderRoudouKeiyakushoSan(emp, h) {
             '<table class="hd-shift-table">' +
               '<colgroup><col class="hs-c-no"><col class="hs-c-jikan"><col class="hs-c-jisu"><col class="hs-c-total"><col class="hs-c-slots"></colgroup>' +
               '<tr><th></th><th>Horário</th><th>Trabalhadas</th><th>Intervalo</th><th>Horário do intervalo</th></tr>' +
-              shiftRow(1, h[HF.syuugyou_time1], h[HF.jitsudou_time1], h[HF.kyuukei_total1], h[HF.kyuukei1_1], h[HF.kyuukei1_2], h[HF.kyuukei1_3]) +
-              shiftRow(2, h[HF.syuugyou_time2], h[HF.jitsudou_time2], h[HF.kyuukei_total2], h[HF.kyuukei2_1], h[HF.kyuukei2_2], h[HF.kyuukei2_3]) +
-              shiftRow(3, h[HF.syuugyou_time3], h[HF.jitsudou_time3], h[HF.kyuukei_total3], h[HF.kyuukei3_1], h[HF.kyuukei3_2], h[HF.kyuukei3_3]) +
-              shiftRow(4, '', '', '', '', '', '') +
+              buildShiftRowsHtml() +
             '</table>' +
           '</td>' +
         '</tr>' +
