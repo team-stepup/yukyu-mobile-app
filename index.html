@@ -2476,6 +2476,27 @@ select.sankyu-edit-input {
 .haisen-doc-actions { position:sticky; bottom:0; background:#fff; padding:10px 12px; box-shadow:0 -2px 8px rgba(0,0,0,0.06); display:flex; gap:8px; }
 .haisen-doc-actions button { flex:1; }
 .haisen-doc-warning { background:#fff8e1; border:1px solid #ffd54f; color:#e65100; padding:8px 10px; border-radius:6px; font-size:11px; margin-bottom:8px; }
+/* 未入力フィールド通知 + インライン入力 UI */
+#haisenDocMissingNotice { padding:10px 12px 0; }
+.hd-missing-box { background:#fff8e1; border:1px solid #ffd54f; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+.hd-missing-head { padding:10px 12px; color:#e65100; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px; user-select:none; }
+.hd-missing-head:hover { background:#fff3c0; }
+.hd-missing-head b { color:#bf360c; font-size:14px; }
+.hd-missing-panel { padding:8px 12px 12px; background:#fffdf6; border-top:1px solid #ffd54f; max-height:60vh; overflow-y:auto; }
+.hd-missing-hint { font-size:11px; color:#7a5b00; margin-bottom:8px; padding:6px 8px; background:#fff8d4; border-radius:4px; border-left:3px solid #ffb300; }
+.hd-missing-row { display:flex; align-items:center; gap:10px; padding:5px 0; border-bottom:1px dashed #f0e0a8; }
+.hd-missing-row:last-of-type { border-bottom:none; }
+.hd-missing-row label { flex:0 0 160px; font-size:12px; color:#444; font-weight:500; }
+.hd-missing-row input { flex:1; padding:6px 8px; border:1px solid #ddd; border-radius:4px; font-size:13px; background:#fff; }
+.hd-missing-row input:focus { outline:none; border-color:#ff9800; box-shadow:0 0 0 2px rgba(255,152,0,0.15); }
+.hd-missing-actions { text-align:right; margin-top:10px; padding-top:8px; border-top:1px solid #f0e0a8; }
+.hd-missing-save { background:#43a047; color:#fff; border:none; padding:8px 18px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,0.1); }
+.hd-missing-save:hover { background:#388e3c; box-shadow:0 2px 4px rgba(0,0,0,0.15); }
+.hd-missing-save:active { transform:translateY(1px); }
+@media (max-width:600px) {
+  .hd-missing-row { flex-direction:column; align-items:stretch; gap:4px; }
+  .hd-missing-row label { flex:0 0 auto; }
+}
 
 @media print {
   /* スクロールコンテナの上限を解除（印刷時にビューポート外まで全部出力するため） */
@@ -2490,6 +2511,7 @@ select.sankyu-edit-input {
   .header, .fab-btn, .haisen-doc-actions, .toast-container, .update-badge,
   .teams-btn, .header-cache-btn, .header-refresh-btn, .haisen-doc-warning,
   .header-refresh-btn, .header-cache-btn, .header-logout-sm,
+  #haisenDocMissingNotice, .hd-missing-box, .no-print,
   .ssb, .detail-sticky-bar, .quick-links { display: none !important; }
   .screen:not(.active) { display: none !important; }
   .haisen-doc-body { padding: 0 !important; background: #fff !important; min-height: 0 !important; height: auto !important; overflow: visible !important;
@@ -8923,7 +8945,6 @@ function renderRoudouKeiyakushoSan(emp, h) {
 
   var html =
     '<div class="haisen-doc-page">' +
-      '<div class="haisen-doc-warning no-print">⚠ Excelテンプレ準拠版です。データ未設定箇所は「-」表示。</div>' +
       '<div style="text-align:right;font-size:9pt;color:#1976d2;font-weight:600;letter-spacing:2px;margin-bottom:2px;">[ 日本語 ]</div>' +
       '<h1>労働契約書 兼 労働条件通知書（派遣）</h1>' +
 
@@ -9775,8 +9796,148 @@ function renderRoudouKeiyakushoSan(emp, h) {
     '</div>';
 
   // 日本語版 + ポルトガル語版 + 就業条件明示書(JP+PT) を単一の wrapper で包む
+  // 未入力フィールド通知 (no-print) を wrapper の外に配置 → スケーリング非対象 & 印刷時は非表示
   document.getElementById('haisenDocBody').innerHTML =
+    '<div id="haisenDocMissingNotice" class="no-print"></div>' +
     '<div class="haisen-doc-wrapper">' + html + htmlPt + htmlShikJp + htmlShikPt + '</div>';
+  // 未入力検出 → 通知 UI 描画
+  renderMissingFieldsNotice(h);
+}
+
+// ============================================================
+// 未入力フィールド検出 / 入力 UI / SharePoint 保存
+// ============================================================
+// 派遣先情報リストに対する「未入力(空 or '-')」フィールドを検出し、
+// 入力 → 保存できるパネルを #haisenDocMissingNotice に描画する。
+function renderMissingFieldsNotice(h) {
+  if (!h || !h.Id) return;
+  var notice = document.getElementById('haisenDocMissingNotice');
+  if (!notice) return;
+
+  // チェック対象フィールド (派遣先情報 List のみ対象)
+  var FIELDS = [
+    ['業務内容',                  HF.gyoumu,                 'text'],
+    ['組織単位',                  HF.soshiki,                'text'],
+    ['責任の程度',                HF.sekinin_teido,          'text'],
+    ['組織の長',                  HF.soshikiNoCho,           'text'],
+    ['事業所単位抵触日',          HF.jigyousyoTeishokuDay,   'text'],
+    ['カレンダー',                HF.calendar,               'text'],
+    ['派遣期間 開始',             HF.haken_period_start,     'date'],
+    ['派遣期間 終了',             HF.haken_period_end,       'date'],
+    ['就業場所 住所',             HF.kinmu_jusho,            'text'],
+    ['就業場所 電話',             HF.kinmu_tel,              'text'],
+    ['指揮命令者 部署',           HF.shikiBusho,             'text'],
+    ['指揮命令者 役職',           HF.shikiYakushoku,         'text'],
+    ['指揮命令者 氏名',           HF.shikiName,              'text'],
+    ['派遣先責任者 部署',         HF.hakensakiSekBusho,      'text'],
+    ['派遣先責任者 役職',         HF.hakensakiSekYakushoku,  'text'],
+    ['派遣先責任者 氏名',         HF.hakensakiSekName,       'text'],
+    ['派遣元責任者 部署',         HF.hakengenSekBusho,       'text'],
+    ['派遣元責任者 役職',         HF.hakengenSekYakushoku,   'text'],
+    ['派遣元責任者 氏名',         HF.hakengenSekName,        'text'],
+    ['苦情の申出先(派遣先) 部署', HF.kujouSakiBusho,         'text'],
+    ['苦情の申出先(派遣先) 役職', HF.kujouSakiYakushoku,     'text'],
+    ['苦情の申出先(派遣先) 氏名', HF.kujouSakiName,          'text'],
+    ['苦情の申出先(派遣元) 部署', HF.kujouGenBusho,          'text'],
+    ['苦情の申出先(派遣元) 役職', HF.kujouGenYakushoku,      'text'],
+    ['苦情の申出先(派遣元) 氏名', HF.kujouGenName,           'text']
+  ];
+
+  var missing = FIELDS.filter(function(f) {
+    var raw = h[f[1]];
+    var s = (raw === null || raw === undefined) ? '' : String(raw).trim();
+    return s === '' || s === '-';
+  });
+
+  if (missing.length === 0) {
+    notice.innerHTML = '';
+    return;
+  }
+
+  var rows = missing.map(function(f) {
+    var inputType = (f[2] === 'date') ? 'date' : 'text';
+    return '<div class="hd-missing-row">' +
+      '<label>' + escHtml(f[0]) + '</label>' +
+      '<input type="' + inputType + '" data-od="' + escHtml(f[1]) + '" data-type="' + escHtml(f[2]) + '" placeholder="未入力" />' +
+    '</div>';
+  }).join('');
+
+  notice.innerHTML =
+    '<div class="hd-missing-box">' +
+      '<div class="hd-missing-head" onclick="toggleMissingPanel()">' +
+        '<span>⚠ 未入力の項目が <b>' + missing.length + '</b> 件あります。クリックして入力 → 保存</span>' +
+        '<span id="hdMissingToggle">▼</span>' +
+      '</div>' +
+      '<div id="hdMissingPanel" class="hd-missing-panel" style="display:none;">' +
+        '<div class="hd-missing-hint">入力した項目のみ SharePoint「派遣先情報」リストに保存されます。空欄のままの行はスキップされます。</div>' +
+        rows +
+        '<div class="hd-missing-actions">' +
+          '<button class="hd-missing-save" onclick="saveMissingFields(' + h.Id + ')">💾 入力した項目を保存</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+function toggleMissingPanel() {
+  var p = document.getElementById('hdMissingPanel');
+  var t = document.getElementById('hdMissingToggle');
+  if (!p) return;
+  if (p.style.display === 'none') { p.style.display = 'block'; if (t) t.textContent = '▲'; }
+  else { p.style.display = 'none'; if (t) t.textContent = '▼'; }
+}
+
+async function saveMissingFields(itemId) {
+  var inputs = document.querySelectorAll('#hdMissingPanel input[data-od]');
+  var body = { };
+  var savedKeys = [];
+  inputs.forEach(function(el) {
+    var v = (el.value || '').trim();
+    if (!v) return;
+    var key = el.getAttribute('data-od');
+    if (key.indexOf('OData_') === 0) key = key.substring(6);
+    body[key] = v;
+    savedKeys.push(key);
+  });
+  if (savedKeys.length === 0) {
+    showToast('入力された値がありません', 'info');
+    return;
+  }
+  try {
+    showToast('保存中...', 'success');
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var entityType = await getHakensakiEntityType();
+    if (!entityType) throw new Error('リスト型取得失敗');
+    body['__metadata'] = { type: entityType };
+    var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items(" + itemId + ")";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      var errText = '';
+      try { errText = await resp.text(); } catch(_) {}
+      console.error('saveMissingFields PATCH error:', errText);
+      throw new Error('保存失敗 (' + resp.status + ')');
+    }
+    showToast('✓ ' + savedKeys.length + ' 件保存しました。再読込中...', 'success');
+    if (typeof _hakensakiLoaded !== 'undefined') _hakensakiLoaded = false;
+    // 派遣書類を再描画 (最新の派遣先データで)
+    setTimeout(function() {
+      var emp = currentEmployee;
+      if (emp && typeof openHaisenDocScreen === 'function') openHaisenDocScreen('roudouKeiyaku');
+    }, 700);
+  } catch (e) {
+    console.error('saveMissingFields error:', e);
+    showToast('保存エラー: ' + (e.message || String(e)), 'error');
+  }
 }
 
 // ============================================================
