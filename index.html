@@ -5715,7 +5715,12 @@ select.sankyu-edit-input {
       </button>
       <button class="action-sheet-item" onclick="openHaisenDocScreen('roudouKeiyaku')">
         <span class="asi-icon" style="background:#e8eaf6;color:#3949ab;">📝</span>
-        <span class="asi-text">労働契約書・労働条件通知書 作成</span>
+        <span class="asi-text">新規雇用契約書兼就業条件通知書 作成</span>
+        <span class="asi-arrow">›</span>
+      </button>
+      <button class="action-sheet-item" onclick="openHaisenDocScreen('koushin')">
+        <span class="asi-icon" style="background:#fff3e0;color:#e65100;">🔄</span>
+        <span class="asi-text">更新用就業条件通知書 作成</span>
         <span class="asi-arrow">›</span>
       </button>
     </div>
@@ -9212,7 +9217,8 @@ if (!window._esignMessageInstalled) {
       var nm = (_esignCurrentEmp.Title || '').replace(/[\s　\/\\:*?"<>|]/g, '');
       var sn2 = _esignCurrentEmp[F.syainNo] || '';
       var stamp = (new Date()).toISOString().substring(0,10).replace(/-/g,'');
-      var fileName = '労働契約書_' + sn2 + '_' + nm + '_' + stamp + '_署名済.pdf';
+      var docLabel = (window._currentHaisenDocMode === 'renewal') ? '更新用就業条件通知書' : '新規雇用契約書兼就業条件通知書';
+      var fileName = docLabel + '_' + sn2 + '_' + nm + '_' + stamp + '_署名済.pdf';
       var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
       await uploadFileToSp(folderPath, fileName, file);
       if (src) src.postMessage({ type: 'esign-result', ok: true, fileName: fileName, folderPath: folderPath }, '*');
@@ -9466,7 +9472,11 @@ async function openHaisenDocScreen(docType) {
   try {
     var h = await fetchHakensakiByEmp(emp);
     if (docType === 'roudouKeiyaku') {
-      renderRoudouKeiyakushoSan(emp, h);
+      // 新規雇用契約書兼就業条件通知書 (カレンダー + 確認事項ページ あり)
+      renderRoudouKeiyakushoSan(emp, h, 'new');
+    } else if (docType === 'koushin') {
+      // 更新用就業条件通知書 (カレンダー・確認事項ページ なし)
+      renderRoudouKeiyakushoSan(emp, h, 'renewal');
     } else {
       body.innerHTML = '<div style="padding:20px;color:#c62828;">未実装の書類タイプ: ' + escHtml(docType) + '</div>';
       return;
@@ -10227,7 +10237,11 @@ function kanaToRomaji(s) {
   }).join(' ');
 }
 
-function renderRoudouKeiyakushoSan(emp, h) {
+// mode: 'new' = 新規雇用契約書兼就業条件通知書 (カレンダー+確認事項ページあり)
+//       'renewal' = 更新用就業条件通知書 (カレンダー・確認事項ページなし)
+function renderRoudouKeiyakushoSan(emp, h, mode) {
+  mode = mode || 'new';
+  window._currentHaisenDocMode = mode;
   // 派遣先データ中の <br> や HTML タグをクリーンアップ
   function _clean(s) {
     if (!s) return '';
@@ -11255,13 +11269,17 @@ function renderRoudouKeiyakushoSan(emp, h) {
     '<div class="haisen-doc-wrapper">' + html + htmlPt + htmlShikJp + htmlShikPt + '</div>';
   // 未入力検出 → 通知 UI 描画
   renderMissingFieldsNotice(h);
-  // 取引先カレンダー (SharePoint) を最終ページに非同期添付
-  // 派遣先名 + 部署 + 組織単位 を渡して、同じ派遣先で複数フォルダがある場合の
-  // タイブレイカーに使う (例: ASTI浜松-生産一課・二課 vs ASTI浜松-生産三課)
-  appendKalendarPage(hkName, [hkBuka, hkSoshiki, gyoumu]);
-  // カレンダーの後に「確認事項 兼 電磁的方法による書類交付の希望確認」ページを追加
-  // (appendKalendarPage がプレースホルダを同期で append 済みなので、その後ろに来る)
-  appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt);
+  // 新規 (mode='new') のみ: 取引先カレンダー + 確認事項ページを追加
+  // 更新用 (mode='renewal') では カレンダー・確認事項ページ ともに付けない
+  if (mode !== 'renewal') {
+    // 取引先カレンダー (SharePoint) を最終ページに非同期添付
+    // 派遣先名 + 部署 + 組織単位 を渡して、同じ派遣先で複数フォルダがある場合の
+    // タイブレイカーに使う (例: ASTI浜松-生産一課・二課 vs ASTI浜松-生産三課)
+    appendKalendarPage(hkName, [hkBuka, hkSoshiki, gyoumu]);
+    // カレンダーの後に「確認事項 兼 電磁的方法による書類交付の希望確認」ページを追加
+    // (appendKalendarPage がプレースホルダを同期で append 済みなので、その後ろに来る)
+    appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt);
+  }
 }
 
 // ============================================================
