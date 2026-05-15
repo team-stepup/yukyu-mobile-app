@@ -36962,6 +36962,25 @@ function getYukiMukiValue(emp) {
   return key ? String(emp[key] || '') : '';
 }
 
+// 雇用契約期間 (開始日 〜 終了日) を整形して返す
+// 開始日 Field: _x96c7__x7528__x5951__x7d04__x95 / 終了日 Field: _x96c7__x7528__x5951__x7d04__x7d
+function getKoyouKikanValue(emp) {
+  var start = emp[F.koyoStart];
+  var end = emp[F.koyoEnd];
+  if (!start) {
+    var sk = Object.keys(emp).find(k => k.indexOf('x5951__x7d04__x95') >= 0);
+    if (sk) start = emp[sk];
+  }
+  if (!end) {
+    var ek = Object.keys(emp).find(k => k.indexOf('x5951__x7d04__x7d') >= 0);
+    if (ek) end = emp[ek];
+  }
+  var s = start ? fmtDateCompact(start) : '';
+  var e = end ? fmtDateCompact(end) : '';
+  if (!s && !e) return '';
+  return s + ' 〜 ' + e;
+}
+
 function renderHakenList(hakensaki, employees) {
   const header = document.getElementById('hakenListHeader');
   const filterDiv = document.getElementById('hakenFilterBtns');
@@ -37242,9 +37261,12 @@ function renderHakenTable(employees, container) {
     return (a.Title || '').localeCompare(b.Title || '', 'ja');
   });
 
-  // Column order: 社員番号 → 氏名 → 通勤方法 → 在職
+  // 有期フィルタ時は「通勤方法」列の代わりに「雇用期間」列を表示
+  var isYukiMode = (typeof hakenCurrentFilter !== 'undefined' && hakenCurrentFilter === 'yuki');
+
+  // Column order: 社員番号 → 氏名 → 通勤方法(or 雇用期間) → 在職
   let html = '<table class="haken-table"><thead><tr>' +
-    '<th>社番</th><th>氏名</th><th>通勤方法</th><th>在職</th>';
+    '<th>社番</th><th>氏名</th><th>' + (isYukiMode ? '雇用期間' : '通勤方法') + '</th><th>在職</th>';
   extraCols.forEach(col => {
     html += '<th>' + escHtml(col.field.label) + '</th>';
   });
@@ -37262,10 +37284,20 @@ function renderHakenTable(employees, container) {
     const tsukinClean = stripTsukinRomaji(tsukin);
     const tsukinDisplay = tsukinClean ? escHtml(tsukinClean) : '<span style="color:var(--warning);font-weight:600;">⚠未登録</span>';
     const statusDisplay = resigned ? '<span style="color:var(--danger);">退社</span>' : '<span style="color:var(--success);">在職</span>';
+    // 3列目: 有期モードなら雇用期間、それ以外は通勤方法
+    let col3Display;
+    if (isYukiMode) {
+      const kikan = getKoyouKikanValue(emp);
+      col3Display = kikan
+        ? '<span style="font-size:11px;white-space:nowrap;">' + escHtml(kikan) + '</span>'
+        : '<span style="color:var(--warning);font-weight:600;">⚠未設定</span>';
+    } else {
+      col3Display = tsukinDisplay;
+    }
     html += '<tr onclick=\'selectEmployee(' + JSON.stringify(emp).replace(/'/g, "&#39;") + ')\' style="cursor:pointer;">' +
       '<td>' + (emp[F.syainNo] || '') + '</td>' +
       '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
-      '<td>' + tsukinDisplay + '</td>' +
+      '<td>' + col3Display + '</td>' +
       '<td>' + statusDisplay + '</td>';
     extraCols.forEach(col => {
       html += '<td>' + escHtml(getFieldValueForTable(emp, col.field, hakenKeyMap)) + '</td>';
