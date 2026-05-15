@@ -8688,6 +8688,61 @@ async function appendKalendarPage(hkName, secondaryHints) {
   }
 }
 
+// 確認事項 兼 電磁的方法による書類交付の希望確認ページ (JP + PT) を wrapper 末尾に追加
+function appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt) {
+  var body = document.getElementById('haisenDocBody');
+  if (!body) return;
+  var wrapper = body.querySelector('.haisen-doc-wrapper');
+  if (!wrapper) return;
+
+  var jpParas = [
+    '私は、会社より労働条件通知書、雇用契約書、就業条件明示書その他労働関係書類について説明を受け、その内容を確認・理解したうえで、本契約を締結します。',
+    'また、就業に必要な入社時安全衛生教育、服務規律、就業上の注意事項その他必要な説明を受け、安全衛生教育動画を視聴し、その内容を理解しました。',
+    '私は、今後の労働条件通知書、雇用契約書、更新契約書、就業条件明示書その他労働関係書類について、LINE、WhatsApp、電子メールその他の電磁的方法による交付を希望します。',
+    '会社はPDFその他保存可能な形式で交付するものとし、私は送付された書類を自己の責任において保存します。',
+    'また、会社が更新後の労働条件を書類または電磁的方法により通知した後、異議を述べず就業を開始した場合は、当該労働条件に同意したものとして取り扱われることを確認しました。'
+  ];
+  var ptParas = [
+    'Recebi da empresa as explicações sobre a Notificação das Condições de Trabalho, o Contrato de Trabalho, a Notificação dos Termos e Condições de Trabalho e demais documentos relacionados ao trabalho e, após confirmar e compreender o seu conteúdo, celebro o presente contrato.',
+    'Ademais, recebi a educação de segurança e saúde ocupacional no momento da admissão necessária para o trabalho, as normas de conduta, as instruções sobre os cuidados no trabalho e demais explicações necessárias, assisti ao vídeo de educação de segurança e saúde e compreendi o seu conteúdo.',
+    'Desejo que, doravante, a Notificação das Condições de Trabalho, o Contrato de Trabalho, o Contrato de Renovação, a Notificação dos Termos e Condições de Trabalho e demais documentos relacionados ao trabalho sejam entregues por meios eletrônicos, tais como LINE, WhatsApp, e-mail ou outros.',
+    'A empresa entregará os documentos em PDF ou em outro formato que permita o armazenamento, e eu me responsabilizarei pela guarda dos documentos enviados.',
+    'Confirmo, ainda, que se eu iniciar o trabalho sem manifestar objeção após a empresa notificar as condições de trabalho renovadas por meio de documento ou meio eletrônico, serei considerado como tendo concordado com tais condições de trabalho.'
+  ];
+
+  var paraStyle = 'font-size:10.5pt;line-height:1.85;margin:0 0 12px;text-align:justify;';
+  var jpBody = jpParas.map(function(t){ return '<p style="' + paraStyle + '">' + escHtml(t) + '</p>'; }).join('');
+  var ptBody = ptParas.map(function(t){ return '<p style="' + paraStyle + '">' + escHtml(t) + '</p>'; }).join('');
+
+  var html =
+    // 日本語版
+    '<div class="haisen-doc-page" style="page-break-before:always;margin-top:14mm;">' +
+      '<div style="text-align:right;font-size:9pt;color:#1976d2;font-weight:600;letter-spacing:2px;margin-bottom:2px;">[ 日本語 ]</div>' +
+      '<h1 style="font-size:15pt;letter-spacing:1px;">【確認事項 兼 電磁的方法による書類交付の希望確認】</h1>' +
+      '<div style="margin-top:20px;">' + jpBody + '</div>' +
+      '<div class="hd-footer" style="margin-top:32px;">' +
+        '<div class="hd-footer-date">' + escHtml(todayStr || '') + '</div>' +
+        '<div class="hd-footer-sign">上記の内容を確認し、同意します。</div>' +
+        '<div class="hd-footer-sign-line">氏名：<span style="margin-left:14px;border-bottom:0.5pt solid #555;display:inline-block;min-width:260px;">　' + escHtml(name || '') + '　</span></div>' +
+      '</div>' +
+    '</div>' +
+    // ポルトガル語版
+    '<div class="haisen-doc-page" style="page-break-before:always;margin-top:14mm;">' +
+      '<div style="text-align:right;font-size:9pt;color:#1976d2;font-weight:600;letter-spacing:1px;margin-bottom:2px;">[ Português ]</div>' +
+      '<h1 style="font-size:13pt;letter-spacing:0.5px;">【Itens de Confirmação e Verificação do Desejo de Entrega de Documentos por Meio Eletrônico】</h1>' +
+      '<div style="margin-top:20px;">' + ptBody + '</div>' +
+      '<div class="hd-footer" style="margin-top:32px;">' +
+        '<div class="hd-footer-date">' + escHtml(todayStrPt || '') + '</div>' +
+        '<div class="hd-footer-sign">Confirmo e concordo com o conteúdo acima.</div>' +
+        '<div class="hd-footer-sign-line">Nome: <span style="margin-left:14px;border-bottom:0.5pt solid #555;display:inline-block;min-width:260px;">　' + escHtml(romajiName || '') + '　</span></div>' +
+      '</div>' +
+    '</div>';
+
+  var tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  while (tmp.firstChild) wrapper.appendChild(tmp.firstChild);
+}
+
 // 社員データの「部課」 (例: "071:三和電子サーキット㈱") から派遣先番号を抽出
 function extractHakenBango(emp) {
   if (!emp) return '';
@@ -11204,6 +11259,9 @@ function renderRoudouKeiyakushoSan(emp, h) {
   // 派遣先名 + 部署 + 組織単位 を渡して、同じ派遣先で複数フォルダがある場合の
   // タイブレイカーに使う (例: ASTI浜松-生産一課・二課 vs ASTI浜松-生産三課)
   appendKalendarPage(hkName, [hkBuka, hkSoshiki, gyoumu]);
+  // カレンダーの後に「確認事項 兼 電磁的方法による書類交付の希望確認」ページを追加
+  // (appendKalendarPage がプレースホルダを同期で append 済みなので、その後ろに来る)
+  appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt);
 }
 
 // ============================================================
