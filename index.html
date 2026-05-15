@@ -36953,6 +36953,15 @@ function getTsukinValue(emp) {
   return key ? (emp[key] || '') : '';
 }
 
+// 有期/無期 雇用区分の値を取得 (Field InternalName: _x6709__x671f_yuuki_x7121__x671f)
+function getYukiMukiValue(emp) {
+  const key = Object.keys(emp).find(k =>
+    k.indexOf('yuuki_x7121') >= 0 ||
+    (k.indexOf('x6709__x671f') >= 0 && k.indexOf('x7121__x671f') >= 0)
+  );
+  return key ? String(emp[key] || '') : '';
+}
+
 function renderHakenList(hakensaki, employees) {
   const header = document.getElementById('hakenListHeader');
   const filterDiv = document.getElementById('hakenFilterBtns');
@@ -36960,11 +36969,16 @@ function renderHakenList(hakensaki, employees) {
 
   // Count by tsukin category
   let countSougei = 0, countOther = 0, countEmpty = 0;
+  // Count by 有期/無期 雇用区分
+  let countYuki = 0, countMuki = 0;
   employees.forEach(emp => {
     const t = getTsukinValue(emp);
     if (!t) countEmpty++;
     else if (t.indexOf('送迎') >= 0) countSougei++;
     else countOther++;
+    const ym = getYukiMukiValue(emp);
+    if (ym.indexOf('無') >= 0) countMuki++;
+    else if (ym.indexOf('有') >= 0) countYuki++;
   });
 
   header.innerHTML = '<div style="font-size:16px;font-weight:700;color:var(--primary);">' + escHtml(hakensaki) + '</div>' +
@@ -36975,6 +36989,8 @@ function renderHakenList(hakensaki, employees) {
     '<button class="haken-sankyu-btn" id="hakenSankyuBtn" onclick="openSankyuFromHaken()">🌸 産休育休 (<span id="hakenSankyuCount">…</span>)</button>' +
     '<button class="haken-filter-btn" data-filter="sougei" onclick="applyHakenFilter(\'sougei\',this)">🚐 送迎 (' + countSougei + ')</button>' +
     '<button class="haken-filter-btn" data-filter="other" onclick="applyHakenFilter(\'other\',this)">🚗 送迎以外 (' + countOther + ')</button>' +
+    '<button class="haken-filter-btn" data-filter="yuki" onclick="applyHakenFilter(\'yuki\',this)">📄 有期 (' + countYuki + ')</button>' +
+    '<button class="haken-filter-btn" data-filter="muki" onclick="applyHakenFilter(\'muki\',this)">♾️ 無期 (' + countMuki + ')</button>' +
     '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
     '<button class="haken-dl-btn" onclick="downloadHakenExcel()" style="margin-left:auto;">📥 Excel</button>' +
     '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
@@ -37113,6 +37129,10 @@ function applyHakenFilter(filter, btn) {
     filtered = source.filter(emp => { const t = getTsukinValue(emp); return t && t.indexOf('送迎') < 0; });
   } else if (filter === 'empty') {
     filtered = source.filter(emp => !getTsukinValue(emp));
+  } else if (filter === 'yuki') {
+    filtered = source.filter(emp => getYukiMukiValue(emp).indexOf('有') >= 0);
+  } else if (filter === 'muki') {
+    filtered = source.filter(emp => getYukiMukiValue(emp).indexOf('無') >= 0);
   }
   renderHakenTable(filtered, document.getElementById('hakenListBody'));
 }
