@@ -12470,6 +12470,9 @@ function renderHakenTsuuchisho(h, emps, opts) {
     }
     var age60 = (age == null) ? '60歳未満　・　60歳以上' : (age >= 60 ? '60歳以上' : '60歳未満');
     var koyoS = _hkYmd(emp[F.koyoStart]), koyoE = _hkYmd(emp[F.koyoEnd]);
+    var yuki = (typeof getYukiMukiValue === 'function') ? String(getYukiMukiValue(emp) || '') : '';
+    if (!yuki) { for (var ky in emp) { if (ky.indexOf('x6709__x671f') >= 0 && ky.indexOf('x7121__x671f') >= 0) { yuki = String(emp[ky] || ''); break; } } }
+    var isMuki = yuki.indexOf('無') >= 0;
     var sh = shahoMap[i] || { kenpo: '有', kounen: '有', koyou: '有' };
     rows1 += '<tr><td style="' + TD + '">' + ev(nm) + '</td><td style="' + TD + 'text-align:center;">' + ev(sex) +
       '</td><td style="' + TD + 'text-align:center;">' + age60 + '</td></tr>';
@@ -12478,7 +12481,7 @@ function renderHakenTsuuchisho(h, emps, opts) {
       '<td style="' + TD + 'text-align:center;">' + escHtml(sh.kounen) + '</td>' +
       '<td style="' + TD + 'text-align:center;">' + escHtml(sh.koyou) + '</td></tr>';
     rows3 += '<tr><td style="' + TD + '">' + ev(nm) + '</td><td style="' + TD + 'text-align:center;">' +
-      (koyoS || '－') + '　～　' + (koyoE || '－') + '</td></tr>';
+      (isMuki ? '無期雇用（期間の定めなし）' : ((koyoS || '－') + '　～　' + (koyoE || '－'))) + '</td></tr>';
     rows4 += '<tr><td style="' + TD + '">' + ev(nm) + '</td><td style="' + TD + '">協定対象労働者（労使協定方式）</td></tr>';
   });
   var tblOpen = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:6px;">';
@@ -12558,21 +12561,35 @@ function _showHakenIsshikiModal(h, emps) {
   var empRows = emps.map(function(e, idx) {
     var nm = e.Title || '(無名)';
     var sn = e[F.syainNo] || '';
+    var yuki = (typeof getYukiMukiValue === 'function') ? String(getYukiMukiValue(e) || '') : '';
+    if (!yuki) { for (var ky in e) { if (ky.indexOf('x6709__x671f') >= 0 && ky.indexOf('x7121__x671f') >= 0) { yuki = String(e[ky] || ''); break; } } }
+    var isMuki = yuki.indexOf('無') >= 0;
     function ssel(id) {
       return '<select id="' + id + '" style="font-size:11px;padding:1px 3px;border:1px solid #ccc;border-radius:3px;">' +
         '<option value="有">有</option><option value="無">無</option></select>';
     }
+    var ks = (typeof _toDateInputVal === 'function') ? _toDateInputVal(e[F.koyoStart]) : '';
+    var ke = (typeof _toDateInputVal === 'function') ? _toDateInputVal(e[F.koyoEnd]) : '';
+    function dInp(id, val) {
+      return '<input type="date" id="' + id + '" value="' + (val || '') + '" ' +
+        'style="font-size:11px;padding:1px 3px;border:1px solid #ccc;border-radius:3px;">';
+    }
+    var kikanLine = isMuki
+      ? '<span style="color:#1565c0;font-weight:600;">無期雇用（期間の定めなし）</span>'
+      : ('雇用期間 ' + dInp('hkiss_kstart_' + idx, ks) + ' 〜 ' + dInp('hkiss_kend_' + idx, ke));
     return '<div style="padding:6px 7px;border-bottom:1px solid #f0f0f5;">' +
       '<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;">' +
         '<input type="checkbox" class="hkiss-emp" value="' + idx + '" checked>' +
         '<span style="font-weight:600;">' + escHtml(nm) + '</span>' +
         '<span style="color:#888;font-size:11px;">No.' + escHtml(String(sn)) + '</span>' +
+        '<span style="font-size:10px;color:' + (isMuki ? '#1565c0' : '#e65100') + ';">' + (isMuki ? '無期' : '有期') + '</span>' +
       '</label>' +
-      '<div style="display:flex;gap:10px;margin-top:4px;padding-left:23px;font-size:11px;color:#555;align-items:center;">' +
+      '<div style="display:flex;gap:10px;margin-top:4px;padding-left:23px;font-size:11px;color:#555;align-items:center;flex-wrap:wrap;">' +
         '<span>健保 ' + ssel('hkiss_kenpo_' + idx) + '</span>' +
         '<span>厚生年金 ' + ssel('hkiss_kounen_' + idx) + '</span>' +
         '<span>雇用 ' + ssel('hkiss_koyou_' + idx) + '</span>' +
       '</div>' +
+      '<div style="margin-top:4px;padding-left:23px;font-size:11px;color:#555;">' + kikanLine + '</div>' +
     '</div>';
   }).join('');
   var ov = document.createElement('div');
@@ -12649,6 +12666,20 @@ async function _submitHakenIsshiki() {
     function gv(p) { var e = document.getElementById('hkiss_' + p + '_' + i); return e ? e.value : '有'; }
     shahoMap[i] = { kenpo: gv('kenpo'), kounen: gv('kounen'), koyou: gv('koyou') };
   });
+  // 雇用期間の編集を収集 (有期のみ・変更があったものだけ)
+  var kikanEdits = [];
+  selIdx.forEach(function(i) {
+    var emp = ctx.emps[i];
+    var sEl = document.getElementById('hkiss_kstart_' + i);
+    var eEl = document.getElementById('hkiss_kend_' + i);
+    if (!sEl && !eEl) return;  // 無期 (入力欄なし)
+    var ns = sEl ? sEl.value : '', ne = eEl ? eEl.value : '';
+    var cs = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoStart]) : '';
+    var ce = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoEnd]) : '';
+    if (ns !== cs || ne !== ce) {
+      kikanEdits.push({ emp: emp, start: ns, end: ne, curStart: cs, curEnd: ce });
+    }
+  });
   var otEl = document.querySelector('input[name="hkiss_ot"]:checked');
   var noOvertime = !!(otEl && otEl.value === 'no');
   var sakuseiDate = val('hkiss_date');
@@ -12670,6 +12701,48 @@ async function _submitHakenIsshiki() {
   var goBtn = document.getElementById('hkIsshikiGoBtn');
   if (goBtn) { goBtn.disabled = true; goBtn.textContent = '⏳ 生成中…'; }
   try {
+    // 雇用期間の変更を 社員データLists へ保存 (有期のみ)
+    if (kikanEdits.length) {
+      if (goBtn) goBtn.textContent = '⏳ 雇用期間を保存中…';
+      var token = await getToken();
+      var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+      var undoItems = [];
+      for (var ke = 0; ke < kikanEdits.length; ke++) {
+        var ed = kikanEdits[ke];
+        var body = { __metadata: { type: entityType } };
+        var orig = {};
+        if (ed.start !== ed.curStart) {
+          orig[F.koyoStart] = (ed.emp[F.koyoStart] === undefined ? null : ed.emp[F.koyoStart]);
+          body[F.koyoStart] = ed.start ? (ed.start + 'T00:00:00Z') : null;
+        }
+        if (ed.end !== ed.curEnd) {
+          orig[F.koyoEnd] = (ed.emp[F.koyoEnd] === undefined ? null : ed.emp[F.koyoEnd]);
+          body[F.koyoEnd] = ed.end ? (ed.end + 'T00:00:00Z') : null;
+        }
+        try {
+          var purl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + ed.emp.Id + ")";
+          var presp = await fetch(purl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+              'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+            },
+            body: JSON.stringify(body)
+          });
+          if (!presp.ok) throw new Error('HTTP ' + presp.status);
+          if (F.koyoStart in body) ed.emp[F.koyoStart] = body[F.koyoStart];
+          if (F.koyoEnd in body) ed.emp[F.koyoEnd] = body[F.koyoEnd];
+          undoItems.push({ empId: ed.emp.Id, empNo: String(ed.emp[F.syainNo] || ''), name: ed.emp.Title || '', orig: orig });
+        } catch (pe) {
+          console.warn('雇用期間保存失敗:', ed.emp.Title, pe);
+        }
+        await new Promise(function(r) { setTimeout(r, 150); });
+      }
+      if (undoItems.length && typeof _recordKoyouUndo === 'function') {
+        _recordKoyouUndo('派遣契約書類一式: 雇用期間', undoItems);
+      }
+    }
+    if (goBtn) goBtn.textContent = '⏳ 生成中…';
     // ① 個別契約書 (派遣人員 = 選択数, 1枚)
     var pages = renderHakenKobetsuKeiyakusho(h2, {
       count: sel.length, perPerson: false, noOvertime: noOvertime,
