@@ -12545,7 +12545,15 @@ async function openHakenIsshikiFlow(h) {
     }
     emps = emps.filter(function(e) { return !(typeof isResigned === 'function' && isResigned(e)); });
     if (!emps.length) { showToast('この派遣先に在職中の社員が見つかりません', 'error'); return; }
-    _hkIsshikiCtx = { h: h, emps: emps };
+    // 有期/無期 の選択肢の実値を社員データから取得 (書き戻し用)
+    var yY = '', yM = '';
+    _hkAllEmpsCache.forEach(function(e) {
+      var yv = '';
+      for (var k in e) { if (k.indexOf('x6709__x671f') >= 0 && k.indexOf('x7121__x671f') >= 0) { yv = String(e[k] || '').trim(); break; } }
+      if (yv) { if (yv.indexOf('無') >= 0) { if (!yM) yM = yv; } else { if (!yY) yY = yv; } }
+    });
+    _hkIsshikiCtx = { h: h, emps: emps,
+      yukiYuki: yY || '有期雇用派遣労働者', yukiMuki: yM || '無期雇用派遣労働者' };
     _showHakenIsshikiModal(h, emps);
   } catch (e) {
     console.error('openHakenIsshikiFlow error:', e);
@@ -12577,22 +12585,28 @@ function _showHakenIsshikiModal(h, emps) {
       return '<input type="date" id="' + id + '" value="' + (val || '') + '" ' +
         'style="font-size:11px;padding:1px 3px;border:1px solid #ccc;border-radius:3px;">';
     }
-    var kikanLine = isMuki
-      ? '<span style="color:#1565c0;font-weight:600;">無期雇用（期間の定めなし）</span>'
-      : ('雇用期間 ' + dInp('hkiss_kstart_' + idx, ks) + ' 〜 ' + dInp('hkiss_kend_' + idx, ke));
+    var yukiSel = '<select id="hkiss_yuki_' + idx + '" onchange="_hkIssYukiChange(' + idx + ')" ' +
+      'style="font-size:11px;padding:1px 3px;border:1px solid #ccc;border-radius:3px;">' +
+      '<option value="yuki"' + (isMuki ? '' : ' selected') + '>有期雇用</option>' +
+      '<option value="muki"' + (isMuki ? ' selected' : '') + '>無期雇用</option></select>';
     return '<div style="padding:6px 7px;border-bottom:1px solid #f0f0f5;">' +
       '<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;">' +
         '<input type="checkbox" class="hkiss-emp" value="' + idx + '" checked>' +
         '<span style="font-weight:600;">' + escHtml(nm) + '</span>' +
         '<span style="color:#888;font-size:11px;">No.' + escHtml(String(sn)) + '</span>' +
-        '<span style="font-size:10px;color:' + (isMuki ? '#1565c0' : '#e65100') + ';">' + (isMuki ? '無期' : '有期') + '</span>' +
       '</label>' +
       '<div style="display:flex;gap:10px;margin-top:4px;padding-left:23px;font-size:11px;color:#555;align-items:center;flex-wrap:wrap;">' +
+        '<span>区分 ' + yukiSel + '</span>' +
         '<span>健保 ' + ssel('hkiss_kenpo_' + idx) + '</span>' +
         '<span>厚生年金 ' + ssel('hkiss_kounen_' + idx) + '</span>' +
         '<span>雇用 ' + ssel('hkiss_koyou_' + idx) + '</span>' +
       '</div>' +
-      '<div style="margin-top:4px;padding-left:23px;font-size:11px;color:#555;">' + kikanLine + '</div>' +
+      '<div style="margin-top:4px;padding-left:23px;font-size:11px;color:#555;">' +
+        '<span id="hkiss_kikanY_' + idx + '" style="' + (isMuki ? 'display:none;' : '') + '">' +
+          '雇用期間 ' + dInp('hkiss_kstart_' + idx, ks) + ' 〜 ' + dInp('hkiss_kend_' + idx, ke) + '</span>' +
+        '<span id="hkiss_kikanM_' + idx + '" style="' + (isMuki ? '' : 'display:none;') +
+          'color:#1565c0;font-weight:600;">期間の定めなし</span>' +
+      '</div>' +
     '</div>';
   }).join('');
   var ov = document.createElement('div');
@@ -12654,6 +12668,15 @@ function _showHakenIsshikiModal(h, emps) {
 function _hkIsshikiToggleAll(on) {
   document.querySelectorAll('.hkiss-emp').forEach(function(c) { c.checked = on; });
 }
+// 有期/無期 を切り替えたら雇用期間欄の表示を切替
+function _hkIssYukiChange(idx) {
+  var s = document.getElementById('hkiss_yuki_' + idx);
+  var isMuki = !!(s && s.value === 'muki');
+  var y = document.getElementById('hkiss_kikanY_' + idx);
+  var m = document.getElementById('hkiss_kikanM_' + idx);
+  if (y) y.style.display = isMuki ? 'none' : '';
+  if (m) m.style.display = isMuki ? '' : 'none';
+}
 
 async function _submitHakenIsshiki() {
   var ctx = _hkIsshikiCtx;
@@ -12669,18 +12692,33 @@ async function _submitHakenIsshiki() {
     function gv(p) { var e = document.getElementById('hkiss_' + p + '_' + i); return e ? e.value : '有'; }
     shahoMap[i] = { kenpo: gv('kenpo'), kounen: gv('kounen'), koyou: gv('koyou') };
   });
-  // 雇用期間の編集を収集 (有期のみ・変更があったものだけ)
-  var kikanEdits = [];
+  // 有期/無期 と 雇用期間 の編集を収集 (変更があったものだけ)
+  var empEdits = [];
   selIdx.forEach(function(i) {
     var emp = ctx.emps[i];
-    var sEl = document.getElementById('hkiss_kstart_' + i);
-    var eEl = document.getElementById('hkiss_kend_' + i);
-    if (!sEl && !eEl) return;  // 無期 (入力欄なし)
-    var ns = sEl ? sEl.value : '', ne = eEl ? eEl.value : '';
-    var cs = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoStart]) : '';
-    var ce = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoEnd]) : '';
-    if (ns !== cs || ne !== ce) {
-      kikanEdits.push({ emp: emp, start: ns, end: ne, curStart: cs, curEnd: ce });
+    // 有期/無期
+    var ySel = document.getElementById('hkiss_yuki_' + i);
+    var wantMuki = !!(ySel && ySel.value === 'muki');
+    var newYuki = wantMuki ? ctx.yukiMuki : ctx.yukiYuki;
+    var yukiKey = '', curYuki = '';
+    for (var k in emp) {
+      if (k.indexOf('x6709__x671f') >= 0 && k.indexOf('x7121__x671f') >= 0) {
+        yukiKey = k; curYuki = String(emp[k] == null ? '' : emp[k]); break;
+      }
+    }
+    var yukiChanged = !!(yukiKey && curYuki !== newYuki);
+    // 雇用期間 (無期にする場合は対象外)
+    var ns = '', ne = '', cs = '', ce = '';
+    if (!wantMuki) {
+      var sEl = document.getElementById('hkiss_kstart_' + i);
+      var eEl = document.getElementById('hkiss_kend_' + i);
+      ns = sEl ? sEl.value : ''; ne = eEl ? eEl.value : '';
+      cs = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoStart]) : '';
+      ce = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoEnd]) : '';
+    }
+    if (yukiChanged || ns !== cs || ne !== ce) {
+      empEdits.push({ emp: emp, yukiKey: yukiKey, yukiChanged: yukiChanged, newYuki: newYuki,
+        start: ns, end: ne, curStart: cs, curEnd: ce });
     }
   });
   var otEl = document.querySelector('input[name="hkiss_ot"]:checked');
@@ -12704,16 +12742,20 @@ async function _submitHakenIsshiki() {
   var goBtn = document.getElementById('hkIsshikiGoBtn');
   if (goBtn) { goBtn.disabled = true; goBtn.textContent = '⏳ 生成中…'; }
   try {
-    // 雇用期間の変更を 社員データLists へ保存 (有期のみ)
-    if (kikanEdits.length) {
-      if (goBtn) goBtn.textContent = '⏳ 雇用期間を保存中…';
+    // 有期/無期・雇用期間の変更を 社員データLists へ保存
+    if (empEdits.length) {
+      if (goBtn) goBtn.textContent = '⏳ 社員データを保存中…';
       var token = await getToken();
       var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
       var undoItems = [];
-      for (var ke = 0; ke < kikanEdits.length; ke++) {
-        var ed = kikanEdits[ke];
+      for (var ke = 0; ke < empEdits.length; ke++) {
+        var ed = empEdits[ke];
         var body = { __metadata: { type: entityType } };
         var orig = {};
+        if (ed.yukiChanged && ed.yukiKey) {
+          orig[ed.yukiKey] = (ed.emp[ed.yukiKey] === undefined ? null : ed.emp[ed.yukiKey]);
+          body[ed.yukiKey] = ed.newYuki;
+        }
         if (ed.start !== ed.curStart) {
           orig[F.koyoStart] = (ed.emp[F.koyoStart] === undefined ? null : ed.emp[F.koyoStart]);
           body[F.koyoStart] = ed.start ? (ed.start + 'T00:00:00Z') : null;
@@ -12735,14 +12777,15 @@ async function _submitHakenIsshiki() {
           if (!presp.ok) throw new Error('HTTP ' + presp.status);
           if (F.koyoStart in body) ed.emp[F.koyoStart] = body[F.koyoStart];
           if (F.koyoEnd in body) ed.emp[F.koyoEnd] = body[F.koyoEnd];
+          if (ed.yukiChanged && ed.yukiKey) ed.emp[ed.yukiKey] = body[ed.yukiKey];
           undoItems.push({ empId: ed.emp.Id, empNo: String(ed.emp[F.syainNo] || ''), name: ed.emp.Title || '', orig: orig });
         } catch (pe) {
-          console.warn('雇用期間保存失敗:', ed.emp.Title, pe);
+          console.warn('社員データ保存失敗:', ed.emp.Title, pe);
         }
         await new Promise(function(r) { setTimeout(r, 150); });
       }
       if (undoItems.length && typeof _recordKoyouUndo === 'function') {
-        _recordKoyouUndo('派遣契約書類一式: 雇用期間', undoItems);
+        _recordKoyouUndo('派遣契約書類一式: 有期無期・雇用期間', undoItems);
       }
     }
     if (goBtn) goBtn.textContent = '⏳ 生成中…';
