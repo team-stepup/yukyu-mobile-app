@@ -12451,7 +12451,7 @@ function renderHakenTsuuchisho(h, emps, opts) {
     return '<th style="border:0.8pt solid #000;background:#f0f0f0;padding:3px 6px;font-size:8.5pt;' +
       (w ? 'width:' + w + ';' : '') + '">' + escHtml(label) + '</th>';
   }
-  var rows1 = '', rows2 = '', rows3 = '', rows4 = '';
+  var rows1 = '', rows2 = '', rows3 = '', rows4 = '', hasMu = false;
   emps.forEach(function(emp, i) {
     var nm = emp.Title || '';
     var sex = '';
@@ -12474,6 +12474,7 @@ function renderHakenTsuuchisho(h, emps, opts) {
     if (!yuki) { for (var ky in emp) { if (ky.indexOf('x6709__x671f') >= 0 && ky.indexOf('x7121__x671f') >= 0) { yuki = String(emp[ky] || ''); break; } } }
     var isMuki = yuki.indexOf('無') >= 0;
     var sh = shahoMap[i] || { kenpo: '有', kounen: '有', koyou: '有' };
+    if (sh.kenpo === '無' || sh.kounen === '無' || sh.koyou === '無') hasMu = true;
     var yukiLabel = isMuki ? '無期雇用派遣労働者' : '有期雇用派遣労働者';
     var kikanLabel = isMuki ? '期間の定めなし' : ((koyoS || '－') + '　～　' + (koyoE || '－'));
     // ① 氏名・有期/無期の別・雇用契約期間・60歳以上か否か (①と③を統合)
@@ -12502,7 +12503,7 @@ function renderHakenTsuuchisho(h, emps, opts) {
         th('雇用契約期間', '30%') + th('60歳以上か否かの別', '18%') + '</tr>' + rows1 + '</table>' +
       '<div style="font-weight:600;margin:8px 0 3px;">②　社会保険・雇用保険の被保険者資格取得届の提出の有無は次のとおりです。</div>' +
       tblOpen + '<tr>' + th('氏名', '34%') + th('健康保険', '22%') + th('厚生年金保険', '22%') + th('雇用保険', '22%') + '</tr>' + rows2 + '</table>' +
-      '<div style="font-size:8.5pt;color:#444;margin:-2px 0 4px;">（無の場合理由：現在必要書類の準備中であり、　月　日には届出予定）</div>' +
+      (hasMu ? '<div style="font-size:8.5pt;color:#444;margin:-2px 0 4px;">（無の場合理由：週20時間未満のため）</div>' : '') +
       '<div style="font-weight:600;margin:8px 0 3px;">③　派遣労働者の協定対象派遣労働者であるか否かの別（待遇決定方式）は次のとおりです。</div>' +
       tblOpen + '<tr>' + th('氏名', '34%') + th('待遇決定方式', '66%') + '</tr>' + rows4 + '</table>' +
     '</div>';
