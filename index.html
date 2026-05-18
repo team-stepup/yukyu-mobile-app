@@ -37308,6 +37308,31 @@ function _koyouKikanForFilename(emp) {
   if (!s && !e) return '期間未設定';
   return (s || '開始未設定') + '〜' + (e || '終了未設定');
 }
+// Date → YYYY-MM-DD
+function _fmtYmd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+// 次回(更新後)の雇用期間を算出: 開始 = 現在の終了日の翌日 / 終了 = 開始 + 3ヶ月 - 1日
+function _computeNextKoyouKikan(emp) {
+  var start = null;
+  var curEnd = emp[F.koyoEnd];
+  if (curEnd) {
+    var d = new Date(curEnd);
+    if (!isNaN(d)) { d.setHours(0,0,0,0); d.setDate(d.getDate() + 1); start = d; }
+  }
+  if (!start) {
+    // 現終了日が無い場合: 現開始日 → なければ今日
+    var curStart = emp[F.koyoStart];
+    var sd = curStart ? new Date(curStart) : new Date();
+    if (isNaN(sd)) sd = new Date();
+    sd.setHours(0,0,0,0);
+    start = sd;
+  }
+  var end = new Date(start);
+  end.setMonth(end.getMonth() + 3);
+  end.setDate(end.getDate() - 1);  // 3ヶ月間 (開始日含む)
+  return { start: _fmtYmd(start), end: _fmtYmd(end) };
+}
 
 // 表示中の社員全員の「更新用就業条件通知書」を一括作成
 // ① 雇用期間の確認・編集画面 (給与の高い順) → ② 変更を社員データListsへ保存 → ③ PDF一括生成
@@ -37321,19 +37346,25 @@ async function bulkCreateRenewalDocs() {
   list = list.slice().sort(function(a, b){ return getEmpSalary(b) - getEmpSalary(a); });
 
   // ===== ① 雇用期間 確認・編集 オーバーレイ =====
+  // 雇用期間は「現在の雇用期間の続き」を初期値とする (開始=現終了日の翌日, 終了=開始+3ヶ月)
   var rowsHtml = list.map(function(emp) {
     var sn = emp[F.syainNo] || '';
     var nm = emp.Title || '';
     var sal = getEmpSalary(emp);
-    var salStr = sal > 0 ? ('¥' + sal.toLocaleString()) : '<span style="color:#bbb;">-</span>';
-    var st = _toDateInputVal(emp[F.koyoStart]);
-    var en = _toDateInputVal(emp[F.koyoEnd]);
+    var curS = _toDateInputVal(emp[F.koyoStart]);
+    var curE = _toDateInputVal(emp[F.koyoEnd]);
+    var curKikan = (curS || curE) ? ((curS || '?') + '〜' + (curE || '?')) : '(未設定)';
+    var next = _computeNextKoyouKikan(emp);
+    var dInputStyle = 'font-size:11px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:124px;';
     return '<tr style="border-bottom:1px solid #eee;">' +
       '<td style="padding:6px 4px;font-size:12px;white-space:nowrap;">' + escHtml(String(sn)) + '</td>' +
       '<td style="padding:6px 4px;font-size:12px;font-weight:600;">' + escHtml(nm) + '</td>' +
-      '<td style="padding:6px 4px;font-size:12px;text-align:right;white-space:nowrap;color:#2e7d32;font-weight:700;">' + salStr + '</td>' +
-      '<td style="padding:6px 4px;"><input type="date" id="bkStart_' + emp.Id + '" value="' + st + '" style="font-size:11px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:128px;"></td>' +
-      '<td style="padding:6px 4px;"><input type="date" id="bkEnd_' + emp.Id + '" value="' + en + '" style="font-size:11px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:128px;"></td>' +
+      '<td style="padding:6px 4px;white-space:nowrap;"><span style="color:#2e7d32;font-weight:700;font-size:11px;">¥</span>' +
+        '<input type="number" id="bkSal_' + emp.Id + '" value="' + (sal > 0 ? sal : '') + '" min="0" step="10" ' +
+        'style="font-size:12px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:72px;text-align:right;"></td>' +
+      '<td style="padding:6px 4px;font-size:10px;color:#999;white-space:nowrap;">' + escHtml(curKikan) + '</td>' +
+      '<td style="padding:6px 4px;"><input type="date" id="bkStart_' + emp.Id + '" value="' + next.start + '" style="' + dInputStyle + '"></td>' +
+      '<td style="padding:6px 4px;"><input type="date" id="bkEnd_' + emp.Id + '" value="' + next.end + '" style="' + dInputStyle + '"></td>' +
     '</tr>';
   }).join('');
 
@@ -37344,7 +37375,7 @@ async function bulkCreateRenewalDocs() {
     '<div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
       '<div style="padding:14px 18px;border-bottom:1px solid #eee;flex-shrink:0;">' +
         '<h3 style="margin:0;font-size:15px;color:#e65100;">📄 更新用就業条件通知書 一括作成 — 雇用期間の確認</h3>' +
-        '<div style="font-size:11.5px;color:#888;margin-top:3px;">「' + escHtml(filterLabel) + '」 ' + list.length + '名（給与の高い順）。雇用期間を確認・修正してください。</div>' +
+        '<div style="font-size:11.5px;color:#888;margin-top:3px;">「' + escHtml(filterLabel) + '」 ' + list.length + '名（給与の高い順）。雇用期間は<b>現在の続き(3ヶ月間)</b>を初期表示。給与・期間を確認・修正してください。</div>' +
       '</div>' +
       '<div id="bulkRenewalBody" style="padding:0;overflow-y:auto;flex:1;">' +
         '<table style="width:100%;border-collapse:collapse;">' +
@@ -37352,9 +37383,10 @@ async function bulkCreateRenewalDocs() {
             '<tr style="font-size:11px;color:#555;">' +
               '<th style="padding:8px 4px;text-align:left;">社番</th>' +
               '<th style="padding:8px 4px;text-align:left;">氏名</th>' +
-              '<th style="padding:8px 4px;text-align:right;">給与(時給)</th>' +
-              '<th style="padding:8px 4px;text-align:left;">雇用契約開始日</th>' +
-              '<th style="padding:8px 4px;text-align:left;">雇用契約終了日</th>' +
+              '<th style="padding:8px 4px;text-align:left;">給与(時給)</th>' +
+              '<th style="padding:8px 4px;text-align:left;">現雇用期間</th>' +
+              '<th style="padding:8px 4px;text-align:left;">新 雇用契約開始日</th>' +
+              '<th style="padding:8px 4px;text-align:left;">新 雇用契約終了日</th>' +
             '</tr>' +
           '</thead>' +
           '<tbody>' + rowsHtml + '</tbody>' +
@@ -37382,8 +37414,8 @@ async function bulkCreateRenewalDocs() {
   var bodyEl = ov.querySelector('#bulkRenewalBody');
   function setProg(html) { if (bodyEl) bodyEl.innerHTML = html; }
 
-  // ===== ② 変更された雇用期間を 社員データLists へ保存 =====
-  setProg('<div style="text-align:center;padding:20px;color:#666;"><div style="font-size:22px;">💾</div>雇用期間を社員データに保存中…</div>');
+  // ===== ② 変更された雇用期間・給与を 社員データLists へ保存 =====
+  setProg('<div style="text-align:center;padding:20px;color:#666;"><div style="font-size:22px;">💾</div>雇用期間・給与を社員データに保存中…</div>');
   var dateSaveErrors = [];
   var dateSavedCount = 0;
   try {
@@ -37391,19 +37423,31 @@ async function bulkCreateRenewalDocs() {
     var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
     var startKey = F.koyoStart.replace(/^OData_/, '');
     var endKey = F.koyoEnd.replace(/^OData_/, '');
+    var salaryODataKey = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap) ? hakenKeyMap['kyuyoTaikei'] : null;
+    var salaryWriteKey = salaryODataKey ? salaryODataKey.replace(/^OData_/, '') : null;
     for (var di = 0; di < list.length; di++) {
       var dEmp = list[di];
       var sEl = document.getElementById('bkStart_' + dEmp.Id);
       var eEl = document.getElementById('bkEnd_' + dEmp.Id);
+      var salEl = document.getElementById('bkSal_' + dEmp.Id);
       if (!sEl || !eEl) continue;
       var newStart = sEl.value || '';
       var newEnd = eEl.value || '';
       var curStart = _toDateInputVal(dEmp[F.koyoStart]);
       var curEnd = _toDateInputVal(dEmp[F.koyoEnd]);
-      if (newStart === curStart && newEnd === curEnd) continue;  // 変更なし
       var pBody = { __metadata: { type: entityType } };
-      pBody[startKey] = newStart ? (newStart + 'T00:00:00Z') : null;
-      pBody[endKey] = newEnd ? (newEnd + 'T00:00:00Z') : null;
+      var anyChange = false;
+      if (newStart !== curStart) { pBody[startKey] = newStart ? (newStart + 'T00:00:00Z') : null; anyChange = true; }
+      if (newEnd !== curEnd) { pBody[endKey] = newEnd ? (newEnd + 'T00:00:00Z') : null; anyChange = true; }
+      // 給与(時給) の変更
+      var newSalaryNum = null;
+      if (salEl && salaryWriteKey) {
+        var rawSal = (salEl.value || '').trim();
+        newSalaryNum = rawSal ? parseFloat(rawSal) : null;
+        var curSalaryNum = getEmpSalary(dEmp) || null;
+        if ((newSalaryNum || 0) !== (curSalaryNum || 0)) { pBody[salaryWriteKey] = newSalaryNum; anyChange = true; }
+      }
+      if (!anyChange) continue;  // 変更なし
       try {
         var pUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + dEmp.Id + ")";
         var pResp = await fetch(pUrl, {
@@ -37415,9 +37459,10 @@ async function bulkCreateRenewalDocs() {
           body: JSON.stringify(pBody)
         });
         if (!pResp.ok) throw new Error('HTTP ' + pResp.status);
-        // ローカルにも反映 (PDF生成で新しい日付を使う)
-        dEmp[F.koyoStart] = newStart ? (newStart + 'T00:00:00Z') : null;
-        dEmp[F.koyoEnd] = newEnd ? (newEnd + 'T00:00:00Z') : null;
+        // ローカルにも反映 (PDF生成で最新値を使う)
+        if (startKey in pBody) dEmp[F.koyoStart] = pBody[startKey];
+        if (endKey in pBody) dEmp[F.koyoEnd] = pBody[endKey];
+        if (salaryWriteKey && (salaryWriteKey in pBody)) dEmp[salaryODataKey] = newSalaryNum;
         dateSavedCount++;
       } catch (pe) {
         dateSaveErrors.push((dEmp.Title || '') + ': ' + (pe.message || String(pe)));
@@ -37491,7 +37536,7 @@ async function bulkCreateRenewalDocs() {
   var summary =
     '<div style="text-align:center;font-size:15px;font-weight:700;color:#2e7d32;margin-bottom:6px;">✅ 一括作成 完了</div>' +
     '<div style="font-size:13px;color:#444;text-align:center;margin-bottom:6px;">PDF: 成功 <b style="color:#2e7d32;">' + success.length + '</b> 名 / 失敗 <b style="color:#c62828;">' + failed.length + '</b> 名</div>' +
-    '<div style="font-size:12px;color:#666;text-align:center;margin-bottom:12px;">雇用期間の更新: <b>' + dateSavedCount + '</b> 件保存</div>';
+    '<div style="font-size:12px;color:#666;text-align:center;margin-bottom:12px;">雇用期間・給与の更新: <b>' + dateSavedCount + '</b> 件保存</div>';
   if (failed.length) {
     summary += '<div style="background:#ffebee;border-radius:6px;padding:8px 10px;max-height:140px;overflow-y:auto;font-size:11.5px;color:#c62828;margin-bottom:8px;">' +
       '<b>PDF失敗:</b><br>' + failed.map(function(x){ return '・' + escHtml(x); }).join('<br>') + '</div>';
