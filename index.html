@@ -8266,6 +8266,8 @@ const HF = {
   kujouGenName:         'OData__x82e6__x60c5__x306e__x7533__x514',  // 苦情申出 派遣元 氏名
   hakenRyokin:          'OData__x6d3e__x9063__x6599__x91d1__x00',   // 派遣料金 通常勤務 Number
   keisanTani:           'OData__x8a08__x7b97__x5358__x4f4d__x00',   // 計算単位
+  shimebi:              'OData__x8acb__x6c42__x000a__x7de0__x30',   // 支払 締日
+  shiharaibi:           'OData__x652f__x6255__x65e5_',              // 支払日
   soshikiNoCho:         'OData__x7d44__x7e54__x306e__x9577_',       // 組織の長
   jigyousyoTeishokuDay: 'OData__x4e8b__x696d__x6240__x5358__x4f',   // 事業所単位抵触日
   calendar:             'OData__x30ab__x30ec__x30f3__x30c0__x30',   // カレンダー
@@ -11917,6 +11919,8 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   function yen(n) { return n ? ('¥' + Math.round(n).toLocaleString()) : '－'; }
   var ryoNormal = ryokinBase, ryoNight = ryokinBase ? ryokinBase * 1.25 : 0;
   var ryoOver = ryokinBase ? ryokinBase * 1.25 : 0, ryoHoutei = ryokinBase ? ryokinBase * 1.35 : 0;
+  var ryoOver60 = ryokinBase ? ryokinBase * 1.5 : 0;   // 時間外労働 月60時間超 (通常の50%増)
+  var shimebi = c(HF.shimebi), shiharaibi = c(HF.shiharaibi);
 
   // 就業時間 3シフト
   var shifts = [
@@ -12001,9 +12005,11 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
                dash(jg1y) + '</b> 時間／年　の範囲内とする。')) + '</td></tr>' +
         '<tr><th>14　派遣料金</th><td class="hd-chingin">' +
           '通常勤務　<b>' + yen(ryoNormal) + '</b> 円／時間　　深夜時間勤務　<b>' + yen(ryoNight) + '</b> 円／時間<br>' +
-          '時間外・法定外休日勤務　<b>' + yen(ryoOver) + '</b> 円／時間　　法定休日　<b>' + yen(ryoHoutei) + '</b> 円／時間<br>' +
+          '時間外・法定外休日勤務　<b>' + yen(ryoOver) + '</b> 円／時間　　時間外労働(月60時間超)　<b>' + yen(ryoOver60) + '</b> 円／時間<br>' +
+          '法定休日　<b>' + yen(ryoHoutei) + '</b> 円／時間<br>' +
           '計算単位　' + (tani ? escHtml(tani) + ' 分' : '<span style="color:#bbb;">(未設定)</span>') + '</td></tr>' +
-        '<tr><th>15　支払い方法</th><td>毎月末日締め、翌月末日支払。※派遣元が指定した金融機関口座に振り込みとする。</td></tr>' +
+        '<tr><th>15　支払い方法</th><td>毎月 ' + escHtml(shimebi || '末日') + ' 締め、' +
+          escHtml(shiharaibi || '翌月末日') + ' 支払。※派遣元が指定した金融機関口座に振り込みとする。</td></tr>' +
         '<tr><th>16　製造業務専門<br>派遣先責任者</th><td class="hd-cell-no-pad">' +
           innerRespTable(hsBusho, hsYaku, hsName, hakenTel) + '</td></tr>' +
         '<tr><th>17　製造業務専門<br>派遣元責任者</th><td class="hd-cell-no-pad">' +
@@ -12023,7 +12029,7 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
           '</table>' +
           '<div style="padding:6px 8px;border:0.8pt solid #000;border-top:none;' + T_LONGSTYLE + '">' +
             escHtml(T_KUJOU) + '</div></td></tr>' +
-        '<tr><th>23　紹介予定派遣に<br>関する事項</th><td>☐ 該当あり　　<span class="hd-circle">☑ 該当なし</span></td></tr>' +
+        '<tr><th>23　紹介予定派遣に関する事項</th><td>☐ 該当あり　　<span class="hd-circle">☑ 該当なし</span></td></tr>' +
       '</table>' +
       '<div style="font-size:8.5pt;margin:8px 0 4px;">※本契約成立の証とするため、本書を2通作成し派遣先・派遣元記名捺印の上、各自1通を保持するものとする。</div>' +
       '<table class="hd-main" style="margin-top:4px;">' +
