@@ -37399,6 +37399,20 @@ async function bulkCreateRenewalDocs() {
   });
   if (!started) { closeOv(); return; }
 
+  // 【重要】モーダル内容を進捗表示に作り替える前に、入力欄の値をすべて収集しておく
+  // (作り替えると bkStart_/bkEnd_/bkSal_ 入力要素が DOM から消えるため)
+  var editedVals = {};
+  list.forEach(function(emp) {
+    var s = document.getElementById('bkStart_' + emp.Id);
+    var e = document.getElementById('bkEnd_' + emp.Id);
+    var sa = document.getElementById('bkSal_' + emp.Id);
+    editedVals[emp.Id] = {
+      start: s ? (s.value || '') : '',
+      end: e ? (e.value || '') : '',
+      salary: sa ? (sa.value || '').trim() : ''
+    };
+  });
+
   // モーダルを進捗表示用に作り替え
   var modalBox = ov.querySelector('div');
   modalBox.innerHTML =
@@ -37420,12 +37434,10 @@ async function bulkCreateRenewalDocs() {
     var salaryWriteKey = salaryODataKey ? salaryODataKey.replace(/^OData_/, '') : null;
     for (var di = 0; di < list.length; di++) {
       var dEmp = list[di];
-      var sEl = document.getElementById('bkStart_' + dEmp.Id);
-      var eEl = document.getElementById('bkEnd_' + dEmp.Id);
-      var salEl = document.getElementById('bkSal_' + dEmp.Id);
-      if (!sEl || !eEl) continue;
-      var newStart = sEl.value || '';
-      var newEnd = eEl.value || '';
+      var ev = editedVals[dEmp.Id];
+      if (!ev) continue;
+      var newStart = ev.start;
+      var newEnd = ev.end;
       var curStart = _toDateInputVal(dEmp[F.koyoStart]);
       var curEnd = _toDateInputVal(dEmp[F.koyoEnd]);
       var pBody = { __metadata: { type: entityType } };
@@ -37434,8 +37446,8 @@ async function bulkCreateRenewalDocs() {
       if (newEnd !== curEnd) { pBody[endKey] = newEnd ? (newEnd + 'T00:00:00Z') : null; anyChange = true; }
       // 給与(時給) の変更
       var newSalaryNum = null;
-      if (salEl && salaryWriteKey) {
-        var rawSal = (salEl.value || '').trim();
+      if (salaryWriteKey) {
+        var rawSal = ev.salary;
         newSalaryNum = rawSal ? parseFloat(rawSal) : null;
         var curSalaryNum = getEmpSalary(dEmp) || null;
         if ((newSalaryNum || 0) !== (curSalaryNum || 0)) { pBody[salaryWriteKey] = newSalaryNum; anyChange = true; }
