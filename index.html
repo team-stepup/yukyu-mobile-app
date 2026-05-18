@@ -11784,6 +11784,9 @@ function showHakenKobetsuConfirmModal(h) {
     defNinzu = Number(h[_hakensakiFields.ninzu]) || 1; } catch (_) {}
   var hsBusho = cc(HF.hakensakiSekBusho), hsYaku = cc(HF.hakensakiSekYakushoku), hsName = cc(HF.hakensakiSekName);
   var ksBusho = cc(HF.kujouSakiBusho), ksYaku = cc(HF.kujouSakiYakushoku), ksName = cc(HF.kujouSakiName);
+  var todayIso = (function(){ var d = new Date(); return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
+  var hasOT = !!(h[HF.jikangai_1day] || h[HF.jikangai_1month] || h[HF.jikangai_1year] || h[HF.kyujitsu_1month]);
   var old = document.getElementById('hkKobetsuConfirmOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
   ov.id = 'hkKobetsuConfirmOverlay'; ov.className = 'no-print';
@@ -11798,6 +11801,9 @@ function showHakenKobetsuConfirmModal(h) {
       '</div>' +
       '<div style="padding:14px 18px;font-size:12px;">' +
         '<div style="color:#888;margin-bottom:10px;">作成前に内容を確認・修正してください。</div>' +
+        '<div style="margin-bottom:8px;"><div style="color:#666;font-weight:600;margin-bottom:3px;">作成日</div>' +
+          '<input type="date" id="hkc_date" value="' + todayIso + '" ' +
+          'style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box;"></div>' +
         _hkcFld('派遣先名', _hkcInp('hkc_hkName', hkName)) +
         _hkcFld('組織単位', _hkcInp('hkc_soshiki', soshiki)) +
         _hkcFld('請求単価（円／時間）', _hkcInp('hkc_ryokin', ryokin, '例: 1900')) +
@@ -11812,6 +11818,13 @@ function showHakenKobetsuConfirmModal(h) {
           '<div style="flex:1;">' + _hkcLbl('部署') + _hkcInp('hkc_ksBusho', ksBusho) + '</div>' +
           '<div style="flex:1;">' + _hkcLbl('役職') + _hkcInp('hkc_ksYaku', ksYaku) + '</div>' +
           '<div style="flex:1;">' + _hkcLbl('氏名') + _hkcInp('hkc_ksName', ksName) + '</div>' +
+        '</div>' +
+        '<div style="font-weight:700;color:#283593;margin:12px 0 4px;">時間外・休日労働</div>' +
+        '<div style="background:#f5f6fa;border-radius:6px;padding:8px 10px;">' +
+          '<label style="display:block;margin-bottom:6px;cursor:pointer;">' +
+            '<input type="radio" name="hkc_ot" value="yes"' + (hasOT ? ' checked' : '') + '> あり（36協定の範囲内）</label>' +
+          '<label style="display:block;cursor:pointer;">' +
+            '<input type="radio" name="hkc_ot" value="no"' + (hasOT ? '' : ' checked') + '> なし（時間外・休日労働を行わない／36協定なし）</label>' +
         '</div>' +
         '<div style="border-top:1px solid #eee;margin:14px 0 10px;"></div>' +
         _hkcFld('人数（名）', _hkcInp('hkc_ninzu', defNinzu)) +
@@ -11838,6 +11851,8 @@ function _submitHakenKobetsuConfirm() {
   function val(id) { var e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; }
   var modeEl = document.querySelector('input[name="hkc_mode"]:checked');
   var perPerson = !!(modeEl && modeEl.value === 'each');
+  var otEl = document.querySelector('input[name="hkc_ot"]:checked');
+  var noOvertime = !!(otEl && otEl.value === 'no');
   var count = Math.max(1, parseInt(val('hkc_ninzu'), 10) || 1);
   var overrides = {
     hkName: val('hkc_hkName'), soshiki: val('hkc_soshiki'), ryokin: val('hkc_ryokin'),
@@ -11845,7 +11860,10 @@ function _submitHakenKobetsuConfirm() {
     ksBusho: val('hkc_ksBusho'), ksYaku: val('hkc_ksYaku'), ksName: val('hkc_ksName')
   };
   var ov = document.getElementById('hkKobetsuConfirmOverlay'); if (ov) ov.remove();
-  renderHakenKobetsuKeiyakusho(h, { overrides: overrides, count: count, perPerson: perPerson });
+  renderHakenKobetsuKeiyakusho(h, {
+    overrides: overrides, count: count, perPerson: perPerson,
+    noOvertime: noOvertime, sakuseiDate: val('hkc_date')
+  });
 }
 
 function renderHakenKobetsuKeiyakusho(h, opts) {
@@ -11879,6 +11897,7 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
 
   // 確認モーダルでの編集値を反映
   var opt = opts || {}, ovr = opt.overrides || {};
+  var noOT = !!opt.noOvertime;   // 時間外・休日労働なし
   if (ovr.hkName  != null) hkName  = ovr.hkName;
   if (ovr.soshiki != null) soshiki = ovr.soshiki;
   if (ovr.hsBusho != null) hsBusho = ovr.hsBusho;
@@ -11914,7 +11933,7 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
       '<td class="hd-shift-slots">' + (s.slots.length ? escHtml(s.slots.join('  ')) : '－') + '</td></tr>';
   }).join('');
 
-  var todayStr = _hkYmd(new Date());
+  var todayStr = opt.sakuseiDate ? _hkYmd(opt.sakuseiDate) : _hkYmd(new Date());
 
   // 法令長文
   var T_ANZEN = '派遣元は派遣する前に派遣労働者に安全衛生教育を実施する。派遣先は派遣業務に従事させる前に危険及び機械等設備の取扱い方法の安全衛生教育を実施する。また、作業内容を変更するときは、派遣先において必要な安全衛生教育を実施する。派遣労働者が労働災害に被災した場合は、派遣先は遅滞なく派遣元責任者へ連絡するとともに、労働者死傷病報告書の写しを送付する。派遣先及び派遣元は労働者派遣法第44条から第47条の４までの規定により課せられた各法令を遵守し、自己に課せられた法令上の責任を負う。なお派遣就業中の安全及び衛生については、派遣先の安全衛生に関する規定を適用することとし、その他については派遣元の安全衛生に関する規定を適用することとする。';
@@ -11972,9 +11991,11 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
             shiftRows +
           '</table></td></tr>' +
         '<tr><th>13　就業日外労働及び<br>就業時間外労働</th><td>' +
-          '休日労働: 月に <b>' + dash(kj1m) + '</b> 日まで　※36協定の範囲内とする<br>' +
-          '時間外労働: <b>' + dash(jg1d) + '</b> 時間／日　<b>' + dash(jg1m) + '</b> 時間／月　<b>' +
-            dash(jg1y) + '</b> 時間／年　の範囲内とする。</td></tr>' +
+          (noOT
+            ? '時間外労働・休日労働は行わない。（36協定の締結なし）'
+            : ('休日労働: 月に <b>' + dash(kj1m) + '</b> 日まで　※36協定の範囲内とする<br>' +
+               '時間外労働: <b>' + dash(jg1d) + '</b> 時間／日　<b>' + dash(jg1m) + '</b> 時間／月　<b>' +
+               dash(jg1y) + '</b> 時間／年　の範囲内とする。')) + '</td></tr>' +
         '<tr><th>14　派遣料金</th><td class="hd-chingin">' +
           '通常勤務　<b>' + yen(ryoNormal) + '</b> 円／時間　　深夜時間勤務　<b>' + yen(ryoNight) + '</b> 円／時間<br>' +
           '時間外・法定外休日勤務　<b>' + yen(ryoOver) + '</b> 円／時間　　法定休日　<b>' + yen(ryoHoutei) + '</b> 円／時間<br>' +
@@ -12004,10 +12025,10 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
       '<div style="font-size:8.5pt;margin:8px 0 4px;">※本契約成立の証とするため、本書を2通作成し派遣先・派遣元記名捺印の上、各自1通を保持するものとする。</div>' +
       '<table class="hd-main" style="margin-top:4px;">' +
         '<tr><th style="width:12%;">派遣先</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
-          '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v">' + v(hakenJusho) + '</td></tr>' +
-          '<tr><td class="hd-inner-l">(事業所名)</td><td class="hd-inner-v">' + v(hkName) +
+          '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v" style="height:18px;">　</td></tr>' +
+          '<tr><td class="hd-inner-l">(事業所名)</td><td class="hd-inner-v" style="height:18px;">　' +
             '<span class="hd-inkan">㊞</span></td></tr>' +
-          '<tr><td class="hd-inner-l">(代表者名)</td><td class="hd-inner-v">　<span class="hd-inkan">㊞</span></td></tr>' +
+          '<tr><td class="hd-inner-l">(代表者名)</td><td class="hd-inner-v" style="height:18px;">　</td></tr>' +
         '</table></td></tr>' +
         '<tr><th style="width:12%;">派遣元</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
           '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.jusho) + '</td></tr>' +
