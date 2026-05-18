@@ -7588,6 +7588,15 @@ async function loadLeaveDetails() {
   let _exitType = classifyExitEmp(emp, null);
   const _retRaw = emp[F.yukyuTaisha] || emp[F.hakenTaisha];
   const _isFuture = _retRaw ? (new Date(_retRaw) > new Date()) : false;
+  // 有給使用後退社日 (この日より後の有給取得は退社日矛盾 → 取得履歴で警告表示)
+  const _yukyuTaishaCutoff = (function(){
+    var raw = emp[F.yukyuTaisha];
+    if (!raw) return null;
+    var d = new Date(raw);
+    if (isNaN(d)) return null;
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })();
   const _nyushaDate = emp[F.nyushaDate] || '';
   const _retireStr = _retRaw ? formatDate(_retRaw) : '';
   // 入社日 と 起算日 が同じ日付なら1つのチップにまとめて表示
@@ -8038,10 +8047,14 @@ async function loadLeaveDetails() {
               const twoMonthsAgo = new Date(); twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
               const canDelete = new Date(r[F.leaveDate]) >= twoMonthsAgo;
               const cumMeta = cumByRecordId[r.Id] || { idx: '?', cum: 0 };
+              // 退社日矛盾チェック: 取得日 > 有給使用後退社日 なら警告
+              let _recD = new Date(r[F.leaveDate]); _recD.setHours(0,0,0,0);
+              const isAfterTaisha = _yukyuTaishaCutoff && _recD > _yukyuTaishaCutoff;
               return `
-              <div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;gap:6px;">
-                <span style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;background:#e8eaf6;color:#3949ab;border-radius:50%;font-size:11px;font-weight:700;flex-shrink:0;">${cumMeta.idx}</span>
-                <span style="font-weight:500;flex-shrink:0;">${formatDate(r[F.leaveDate])}</span>
+              <div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;gap:6px;${isAfterTaisha ? 'background:#ffebee;border-radius:6px;' : ''}">
+                <span style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;background:${isAfterTaisha ? '#ffcdd2' : '#e8eaf6'};color:${isAfterTaisha ? '#c62828' : '#3949ab'};border-radius:50%;font-size:11px;font-weight:700;flex-shrink:0;">${cumMeta.idx}</span>
+                <span style="font-weight:500;flex-shrink:0;${isAfterTaisha ? 'color:#c62828;' : ''}">${formatDate(r[F.leaveDate])}</span>
+                ${isAfterTaisha ? '<span title="有給使用後退社日より後の日付です" style="background:#c62828;color:#fff;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700;flex-shrink:0;">⚠退社日超過</span>' : ''}
                 <span style="background:${typeLabel==='1日'?'#e3f2fd':'#fff3e0'};color:${typeLabel==='1日'?'#1565c0':'#e65100'};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;min-width:55px;text-align:center;flex-shrink:0;">
                   ${typeLabel}
                 </span>
@@ -24394,6 +24407,28 @@ async function submitLeaveApplication() {
   if (duplicates.length > 0) {
     showToast('既に申請済みの日付があります: ' + duplicates.join(', '), 'error');
     return;
+  }
+
+  // 退社日チェック: 有給使用後退社日 が設定されている場合、それ以降の日付は申請不可
+  // (有給は退社日までに消化しきる前提。退社日より後の有給取得は日付矛盾)
+  const yukyuTaishaRaw = emp[F.yukyuTaisha];
+  if (yukyuTaishaRaw) {
+    const taishaD = new Date(yukyuTaishaRaw);
+    if (!isNaN(taishaD)) {
+      taishaD.setHours(0, 0, 0, 0);
+      const afterTaisha = selectedDates.filter(d => {
+        const dd = new Date(d); dd.setHours(0, 0, 0, 0);
+        return dd > taishaD;
+      });
+      if (afterTaisha.length > 0) {
+        const taishaJa = taishaD.getFullYear() + '年' + (taishaD.getMonth() + 1) + '月' + taishaD.getDate() + '日';
+        showLeaveAlertPopup('申請できません',
+          '有給使用後退社日（<strong style="color:#c62828;">' + taishaJa + '</strong>）より後の日付には有給を申請できません。<br><br>' +
+          '対象日: <strong style="color:#c62828;">' + afterTaisha.join(', ') + '</strong><br><br>' +
+          '退社日以前の日付に変更するか、退社日の設定を総務までご確認ください。');
+        return;
+      }
+    }
   }
 
   // Balance check (FIFO厳密検証)
