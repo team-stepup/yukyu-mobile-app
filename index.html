@@ -9375,22 +9375,15 @@ async function generateHaisenDocAsPdf() {
       }, 'image/png');
     });
     var img = await pdfDoc.embedPng(pngBytes);
-    // A4 縦 (595 x 842 pt) にフィット
-    var pageW = 595, pageH = 842;
+    // A4 幅 (595pt) いっぱいに描画し、ページ高さは内容のアスペクト比に合わせる
+    // → 左右の余白(レターボックス)が出ないようにする。書類ページ自身の内側余白が
+    //   そのまま適切なマージンになる
+    var pageW = 595;
     var imgRatio = canvas.width / canvas.height;
-    var pageRatio = pageW / pageH;
-    var drawW, drawH;
-    if (imgRatio > pageRatio) {
-      drawW = pageW;
-      drawH = pageW / imgRatio;
-    } else {
-      drawH = pageH;
-      drawW = pageH * imgRatio;
-    }
-    var x = (pageW - drawW) / 2;
-    var y = (pageH - drawH) / 2;
-    var pdfPage = pdfDoc.addPage([pageW, pageH]);
-    pdfPage.drawImage(img, { x: x, y: y, width: drawW, height: drawH });
+    var drawW = pageW;
+    var drawH = pageW / imgRatio;
+    var pdfPage = pdfDoc.addPage([pageW, drawH]);
+    pdfPage.drawImage(img, { x: 0, y: 0, width: drawW, height: drawH });
   }
   var pdfBytes = await pdfDoc.save();
   return new Blob([pdfBytes], { type: 'application/pdf' });
