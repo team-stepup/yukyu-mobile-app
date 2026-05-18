@@ -12184,7 +12184,7 @@ function renderHakenKanriboByIdx(idx) {
 
 // 派遣先管理台帳 兼 派遣通知書 を 1ページの haisen-doc-page として描画
 // returnHtml=true なら画面に出さずページHTML文字列を返す (一式作成用)
-function renderHakenSakiKanribo(h, emp, returnHtml, shaho) {
+function renderHakenSakiKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   window._currentHaisenDocMode = 'hakenKanribo';
   function c(k) { return _hkClean(h[k] || ''); }
   function v(s) { return s ? escHtml(s) : '<span style="color:#bbb;">(未設定)</span>'; }
@@ -12228,7 +12228,7 @@ function renderHakenSakiKanribo(h, emp, returnHtml, shaho) {
   var is60 = (age != null) ? (age >= 60) : null;
   var is45 = (age != null) && age >= 45;
   var under18 = (age != null) && age < 18;
-  var todayStr = _hkYmd(new Date());
+  var todayStr = sakuseiDate ? _hkYmd(sakuseiDate) : _hkYmd(new Date());
 
   function innerResp(busho, yaku, nm, tel) {
     return '<table class="hd-inner">' +
@@ -12307,7 +12307,7 @@ function renderHakenSakiKanribo(h, emp, returnHtml, shaho) {
 
 // 派遣元管理台帳 を 1ページの haisen-doc-page として描画
 // returnHtml=true なら画面に出さずページHTML文字列を返す (一式作成用)
-function renderHakenMotoKanribo(h, emp, returnHtml, shaho) {
+function renderHakenMotoKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   window._currentHaisenDocMode = 'hakenMotoKanribo';
   function c(k) { return _hkClean(h[k] || ''); }
   function v(s) { return s ? escHtml(s) : '<span style="color:#bbb;">(未設定)</span>'; }
@@ -12354,7 +12354,7 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho) {
   // 年齢区分: 18歳未満 / 18歳以上45歳未満 / 45歳以上60歳未満 / 60歳以上
   var ageCat = -1;
   if (age != null) ageCat = (age < 18) ? 0 : (age < 45) ? 1 : (age < 60) ? 2 : 3;
-  var todayStr = _hkYmd(new Date());
+  var todayStr = sakuseiDate ? _hkYmd(sakuseiDate) : _hkYmd(new Date());
 
   function innerResp(busho, yaku, nm, tel) {
     return '<table class="hd-inner">' +
@@ -12924,8 +12924,8 @@ async function _submitHakenIsshiki() {
       });
       pages += renderHakenTsuuchisho(hg, gEmps, { shahoMap: gShaho, sakuseiDate: sakuseiDate, returnHtml: true });
       gEmps.forEach(function(emp, j) {
-        pages += renderHakenSakiKanribo(hg, emp, true, gShaho[j]);
-        pages += renderHakenMotoKanribo(hg, emp, true, gShaho[j]);
+        pages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
+        pages += renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
       });
       // PDF生成のため一旦その群を描画
       switchScreen('haisenDocScreen');
