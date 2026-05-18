@@ -5615,6 +5615,7 @@ select.sankyu-edit-input {
       </div>
       <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
       <button onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
+      <button id="adobeSignBtn" onclick="sendNewHireToAdobeSign()" class="btn" style="display:none;background:linear-gradient(135deg,#d32f2f,#b71c1c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📤 Adobe Sign 署名へ送信</button>
       <button class="koyou-undo-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1.5px solid #e65100;border-radius:8px;padding:10px;font-weight:700;font-size:13px;">↩ 給与・雇用期間の変更を元に戻す</button>
     </div>
   </div>
@@ -9405,6 +9406,111 @@ async function generateHaisenDocAsPdf() {
   return new Blob([pdfBytes], { type: 'application/pdf' });
 }
 
+// === Adobe Sign 連携 ===
+// 新規雇用契約書の未署名PDFを生成し、
+//  ① 個人の社員フォルダ  ② 集約フォルダ 新規雇用契約書/{派遣先名}/
+//  ③ Power Automate トリガーフォルダ 新規雇用契約書/_Adobe署名待ち/ (PDF + メタJSON)
+// へ保存する。③ を検知した Power Automate が Adobe Sign へ署名依頼を送信し、
+// 署名完了後に署名済PDFを ①② へ保存し直す。
+async function sendNewHireToAdobeSign() {
+  var btn = document.getElementById('adobeSignBtn');
+  try {
+    if (typeof currentEmployee === 'undefined' || !currentEmployee) {
+      if (typeof showToast === 'function') showToast('社員データが見つかりません', 'error');
+      return;
+    }
+    var body = document.getElementById('haisenDocBody');
+    if (!body || !body.querySelector('.haisen-doc-page')) {
+      if (typeof showToast === 'function') showToast('書類を先に作成してください', 'error');
+      return;
+    }
+    if (!confirm('この内容で Adobe Sign の署名依頼を送信しますか？\n（未署名PDFを生成し、SharePoint へ保存します）')) return;
+
+    var emp = currentEmployee;
+    if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ 生成中...'; }
+    await loadEsignLibsIfNeeded();
+
+    // 未署名PDF生成 (ズームを解除して印刷レイアウトでキャプチャ)
+    var prevTransform = _captureAndResetZoom();
+    var pdfBlob = await generateHaisenDocAsPdf();
+    _restoreZoom(prevTransform);
+
+    var nm = (emp.Title || '').replace(/[\s　\/\\:*?"<>|]/g, '');
+    var sn = emp[F.syainNo] || '';
+    var kikan = _koyouKikanForFilename(emp);
+    var hkNm = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(emp)) : (getBukaValue(emp) || '');
+    var safeHk = String(hkNm || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
+
+    // 社員のメールアドレスを推定 (Adobe Sign の宛先)
+    var email = '';
+    try {
+      for (var k in emp) {
+        var v = emp[k];
+        if (typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())) { email = v.trim(); break; }
+      }
+    } catch (_) {}
+
+    var unsignedName = '新規雇用契約書兼就業条件通知書_' + sn + '_' + nm + '_' + kikan + '_未署名.pdf';
+    var unsignedFile = new File([pdfBlob], unsignedName, { type: 'application/pdf' });
+
+    // ① 個人の社員フォルダ
+    var personalPath = await getEmpFolderPath(emp);
+    if (personalPath) {
+      try { await ensureSpFolder(personalPath); } catch (e) { console.warn('社員フォルダ warn:', e); }
+      try { await uploadFileToSp(personalPath, unsignedName, unsignedFile); }
+      catch (e) { console.warn('社員フォルダ保存 warn:', e); }
+    }
+
+    // ② 集約フォルダ 新規雇用契約書/{派遣先名}/
+    var aggParent = SP_DOC_LIB_PATH + '/新規雇用契約書';
+    var aggFolder = aggParent + '/' + safeHk;
+    try { await ensureSpFolder(aggParent); } catch (e) {}
+    try { await ensureSpFolder(aggFolder); } catch (e) {}
+    try { await uploadFileToSp(aggFolder, unsignedName, unsignedFile); }
+    catch (e) { console.warn('集約保存 warn:', e); }
+
+    // ③ Power Automate トリガーフォルダ _Adobe署名待ち/ (PDF + メタJSON をペア保存)
+    var waitFolder = aggParent + '/_Adobe署名待ち';
+    try { await ensureSpFolder(waitFolder); } catch (e) {}
+    var stamp = (new Date()).toISOString().replace(/[-:T.]/g, '').substring(0, 14);
+    var baseName = sn + '_' + nm + '_' + stamp;
+    var triggerPdfName = baseName + '.pdf';
+    await uploadFileToSp(waitFolder, triggerPdfName, new File([pdfBlob], triggerPdfName, { type: 'application/pdf' }));
+
+    var meta = {
+      empNo: String(sn),
+      name: emp.Title || '',
+      email: email,
+      haken: hkNm || '',
+      koyouKikan: kikan,
+      personalFolder: personalPath || '',
+      aggFolder: aggFolder,
+      signedFileName: '新規雇用契約書兼就業条件通知書_' + sn + '_' + nm + '_' + kikan + '_署名済.pdf',
+      triggerPdf: triggerPdfName,
+      docType: '新規雇用契約書兼就業条件通知書',
+      createdAt: (new Date()).toISOString()
+    };
+    var metaName = baseName + '.json';
+    var metaBlob = new Blob([JSON.stringify(meta, null, 1)], { type: 'application/json' });
+    await uploadFileToSp(waitFolder, metaName, new File([metaBlob], metaName, { type: 'application/json' }));
+
+    if (typeof showToast === 'function') showToast('✓ Adobe Sign 署名待ちへ送信しました', 'success');
+    alert('✅ Adobe Sign への署名依頼を送信しました。\n\n' +
+          '対象: ' + (emp.Title || '') + ' (No.' + sn + ')\n' +
+          (email ? ('宛先メール: ' + email + '\n') : '⚠ メール未登録 — Power Automate 側で宛先を指定してください\n') +
+          '\n未署名PDFを以下へ保存しました:\n' +
+          (personalPath ? '・個人の社員フォルダ\n' : '') +
+          '・新規雇用契約書/' + safeHk + '/\n' +
+          '・_Adobe署名待ち/ (Power Automate が自動で Adobe Sign へ送信)');
+  } catch (e) {
+    console.error('sendNewHireToAdobeSign error:', e);
+    if (typeof showToast === 'function') showToast('Adobe Sign 送信失敗: ' + (e.message || String(e)), 'error');
+    alert('❌ エラー: ' + (e.message || String(e)));
+  } finally {
+    if (btn) { btn.disabled = false; if (btn.dataset.label) btn.textContent = btn.dataset.label; }
+  }
+}
+
 // アプリ側から window.print() を呼ばずに済む。
 function openHaisenDocInNewWindow() {
   var body = document.getElementById('haisenDocBody');
@@ -9722,6 +9828,9 @@ async function openHaisenDocScreen(docType) {
       return;
     }
     if (actions) actions.style.display = 'flex';
+    // Adobe Sign 送信ボタン: 新規雇用契約書 (roudouKeiyaku) のときのみ表示
+    var adobeBtn = document.getElementById('adobeSignBtn');
+    if (adobeBtn) adobeBtn.style.display = (docType === 'roudouKeiyaku') ? 'block' : 'none';
     // 「元に戻す」ボタンの表示制御 (直前に給与/雇用期間を変更していれば表示)
     if (typeof refreshUndoButtons === 'function') refreshUndoButtons();
     // 労働契約書③: スマホ50% / PC60%
