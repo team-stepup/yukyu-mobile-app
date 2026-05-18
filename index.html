@@ -37122,7 +37122,8 @@ function renderHakenList(hakensaki, employees) {
     '<button class="haken-filter-btn" data-filter="yuki" onclick="applyHakenFilter(\'yuki\',this)">📄 有期 (' + countYuki + ')</button>' +
     '<button class="haken-filter-btn" data-filter="muki" onclick="applyHakenFilter(\'muki\',this)">♾️ 無期 (' + countMuki + ')</button>' +
     '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
-    '<button class="haken-dl-btn" onclick="downloadHakenExcel()" style="margin-left:auto;">📥 Excel</button>' +
+    '<button class="haken-dl-btn" onclick="bulkCreateRenewalDocs()" style="background:#e65100;margin-left:auto;">📄 更新書類 一括作成</button>' +
+    '<button class="haken-dl-btn" onclick="downloadHakenExcel()">📥 Excel</button>' +
     '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
 
   renderHakenTable(employees, body);
@@ -37265,6 +37266,126 @@ function applyHakenFilter(filter, btn) {
     filtered = source.filter(emp => getYukiMukiValue(emp).indexOf('無') >= 0);
   }
   renderHakenTable(filtered, document.getElementById('hakenListBody'));
+}
+
+// 現在のフィルタで表示中の社員リストを返す (在職者のみ)
+function getHakenFilteredList() {
+  var source = (window._hakenWorkforceCache !== null && window._hakenWorkforceCache !== undefined)
+    ? window._hakenWorkforceCache : hakenEmployeesCache;
+  if (!source) return [];
+  var f = hakenCurrentFilter;
+  var list = source;
+  if (f === 'sougei') list = source.filter(e => getTsukinValue(e).indexOf('送迎') >= 0);
+  else if (f === 'other') list = source.filter(e => { var t = getTsukinValue(e); return t && t.indexOf('送迎') < 0; });
+  else if (f === 'empty') list = source.filter(e => !getTsukinValue(e));
+  else if (f === 'yuki') list = source.filter(e => getYukiMukiValue(e).indexOf('有') >= 0);
+  else if (f === 'muki') list = source.filter(e => getYukiMukiValue(e).indexOf('無') >= 0);
+  return list.filter(e => !isResigned(e));  // 在職者のみ
+}
+
+// 表示中の社員全員の「更新用就業条件通知書」を一括 PDF 生成し、各社員フォルダへ保存
+async function bulkCreateRenewalDocs() {
+  var list = getHakenFilteredList();
+  var FILTER_LABEL = { all:'全員', sougei:'送迎', other:'送迎以外', empty:'未登録', yuki:'有期', muki:'無期' };
+  var filterLabel = FILTER_LABEL[hakenCurrentFilter] || '表示中';
+  if (!list.length) { showToast('対象社員がいません (在職者のみ対象)', 'error'); return; }
+
+  // 確認 + 進捗 オーバーレイ
+  var ov = document.createElement('div');
+  ov.id = 'bulkRenewalOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid #eee;">' +
+        '<h3 style="margin:0;font-size:16px;color:#e65100;">📄 更新用就業条件通知書 一括作成</h3>' +
+      '</div>' +
+      '<div id="bulkRenewalBody" style="padding:18px 20px;">' +
+        '<div style="font-size:13px;color:#444;line-height:1.7;">' +
+          '<b>「' + escHtml(filterLabel) + '」</b> で表示中の在職者 <b style="color:#e65100;font-size:18px;">' + list.length + '</b> 名について、<br>' +
+          '「更新用就業条件通知書」(カレンダー・確認事項ページ無し) を PDF 化し、<br>' +
+          '各社員の SharePoint フォルダへ保存します。' +
+        '</div>' +
+        '<div style="font-size:11.5px;color:#888;margin-top:10px;background:#fff8e1;padding:8px 10px;border-radius:6px;">' +
+          '⚠ 1名あたり数秒かかります。完了まで画面を閉じないでください。' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:16px;">' +
+          '<button id="bulkRenewalCancel" style="flex:1;background:#fff;color:#555;border:1px solid #ddd;border-radius:8px;padding:11px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+          '<button id="bulkRenewalStart" style="flex:2;background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;border:none;border-radius:8px;padding:11px;font-weight:700;cursor:pointer;">▶ ' + list.length + '名分を作成開始</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+
+  function closeOv() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+
+  var started = await new Promise(function(resolve) {
+    ov.querySelector('#bulkRenewalCancel').onclick = function(){ resolve(false); };
+    ov.querySelector('#bulkRenewalStart').onclick = function(){ resolve(true); };
+  });
+  if (!started) { closeOv(); return; }
+
+  var bodyEl = ov.querySelector('#bulkRenewalBody');
+  function setProg(html) { if (bodyEl) bodyEl.innerHTML = html; }
+
+  setProg('<div style="text-align:center;padding:20px;color:#666;"><div style="font-size:22px;">⏳</div>PDF生成ライブラリを準備中…</div>');
+  try { await loadEsignLibsIfNeeded(); }
+  catch (e) {
+    setProg('<div style="color:#c62828;padding:20px;text-align:center;">ライブラリ読込失敗: ' + escHtml(e.message || String(e)) +
+      '</div><div style="text-align:center;"><button onclick="document.getElementById(\'bulkRenewalOverlay\').remove()" style="background:#888;color:#fff;border:none;border-radius:8px;padding:10px 20px;cursor:pointer;">閉じる</button></div>');
+    return;
+  }
+
+  // レイアウト計算のため haisenDocScreen に切替 (オーバーレイが上に被さるので画面遷移は見えない)
+  switchScreen('haisenDocScreen');
+
+  var success = [], failed = [];
+  var stamp = (new Date()).toISOString().substring(0, 10).replace(/-/g, '');
+
+  for (var i = 0; i < list.length; i++) {
+    var emp = list[i];
+    var nm = emp.Title || '(無名)';
+    var pct = Math.round(i / list.length * 100);
+    setProg(
+      '<div style="font-size:13px;color:#444;margin-bottom:10px;">作成中… <b>' + (i+1) + ' / ' + list.length + '</b></div>' +
+      '<div style="background:#eee;border-radius:6px;height:14px;overflow:hidden;"><div style="background:linear-gradient(90deg,#fb8c00,#e65100);height:100%;width:' + pct + '%;transition:width 0.3s;"></div></div>' +
+      '<div style="font-size:12px;color:#666;margin-top:8px;">📝 ' + escHtml(nm) + '</div>' +
+      '<div style="font-size:11px;color:#999;margin-top:8px;">✓ 成功 ' + success.length + ' / ✗ 失敗 ' + failed.length + '</div>'
+    );
+    try {
+      var h = await fetchHakensakiByEmp(emp);
+      renderRoudouKeiyakushoSan(emp, h, 'renewal');
+      await new Promise(function(r){ setTimeout(r, 380); });  // レイアウト確定待ち
+      var pdfBlob = await generateHaisenDocAsPdf();
+      var folderPath = await getEmpFolderPath(emp);
+      if (!folderPath) throw new Error('社員フォルダのパス特定失敗');
+      try { await ensureSpFolder(folderPath); } catch (eF) { console.warn('ensureSpFolder warn:', eF); }
+      var safeNm = nm.replace(/[\s　\/\\:*?"<>|]/g, '');
+      var sn = emp[F.syainNo] || '';
+      var fileName = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + stamp + '.pdf';
+      await uploadFileToSp(folderPath, fileName, new File([pdfBlob], fileName, { type: 'application/pdf' }));
+      success.push(nm);
+    } catch (e) {
+      console.error('bulkCreateRenewalDocs error for', nm, e);
+      failed.push(nm + ' — ' + (e.message || String(e)));
+    }
+    await new Promise(function(r){ setTimeout(r, 250); });  // スロットリング回避
+  }
+
+  // 完了サマリ
+  var summary =
+    '<div style="text-align:center;font-size:15px;font-weight:700;color:#2e7d32;margin-bottom:6px;">✅ 一括作成 完了</div>' +
+    '<div style="font-size:13px;color:#444;text-align:center;margin-bottom:12px;">成功 <b style="color:#2e7d32;">' + success.length + '</b> 名 / 失敗 <b style="color:#c62828;">' + failed.length + '</b> 名</div>';
+  if (failed.length) {
+    summary += '<div style="background:#ffebee;border-radius:6px;padding:8px 10px;max-height:180px;overflow-y:auto;font-size:11.5px;color:#c62828;">' +
+      '<b>失敗一覧:</b><br>' + failed.map(function(x){ return '・' + escHtml(x); }).join('<br>') + '</div>';
+  }
+  summary += '<div style="text-align:center;margin-top:14px;">' +
+    '<button onclick="document.getElementById(\'bulkRenewalOverlay\').remove()" style="background:#388e3c;color:#fff;border:none;border-radius:8px;padding:11px 28px;font-weight:700;cursor:pointer;">閉じる</button></div>';
+  setProg(summary);
+  showToast('一括作成完了: 成功 ' + success.length + ' / 失敗 ' + failed.length, success.length ? 'success' : 'error');
+
+  // 元の派遣先社員一覧に戻す
+  switchScreen('hakenListScreen');
 }
 
 function toggleHakenColumns() {
