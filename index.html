@@ -37301,6 +37301,13 @@ function _toDateInputVal(v) {
   if (isNaN(d)) return '';
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
+// 雇用期間をファイル名用文字列に (例: 2024-07-10〜2025-03-31)
+function _koyouKikanForFilename(emp) {
+  var s = _toDateInputVal(emp[F.koyoStart]);
+  var e = _toDateInputVal(emp[F.koyoEnd]);
+  if (!s && !e) return '期間未設定';
+  return (s || '開始未設定') + '〜' + (e || '終了未設定');
+}
 
 // 表示中の社員全員の「更新用就業条件通知書」を一括作成
 // ① 雇用期間の確認・編集画面 (給与の高い順) → ② 変更を社員データListsへ保存 → ③ PDF一括生成
@@ -37452,13 +37459,26 @@ async function bulkCreateRenewalDocs() {
       renderRoudouKeiyakushoSan(emp, h, 'renewal');
       await new Promise(function(r){ setTimeout(r, 380); });  // レイアウト確定待ち
       var pdfBlob = await generateHaisenDocAsPdf();
+      var safeNm = nm.replace(/[\s　\/\\:*?"<>|#%]/g, '');
+      var sn = emp[F.syainNo] || '';
+      var kikan = _koyouKikanForFilename(emp);
+
+      // ① 個人の社員フォルダへ保存 (ファイル名: 社員番号 + 雇用期間)
       var folderPath = await getEmpFolderPath(emp);
       if (!folderPath) throw new Error('社員フォルダのパス特定失敗');
       try { await ensureSpFolder(folderPath); } catch (eF) { console.warn('ensureSpFolder warn:', eF); }
-      var safeNm = nm.replace(/[\s　\/\\:*?"<>|]/g, '');
-      var sn = emp[F.syainNo] || '';
-      var fileName = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + stamp + '.pdf';
-      await uploadFileToSp(folderPath, fileName, new File([pdfBlob], fileName, { type: 'application/pdf' }));
+      var fileName1 = '更新用就業条件通知書_' + sn + '_' + kikan + '.pdf';
+      await uploadFileToSp(folderPath, fileName1, pdfBlob);
+
+      // ② 集約フォルダへ保存: 社員ファイル/雇用契約書作成/{派遣先名}/ (ファイル名: 社員番号_氏名_雇用期間)
+      var hkNm = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(emp)) : (getBukaValue(emp) || '');
+      var safeHk = String(hkNm || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
+      var aggParent = SP_DOC_LIB_PATH + '/雇用契約書作成';
+      var aggFolder = aggParent + '/' + safeHk;
+      try { await ensureSpFolder(aggParent); } catch (e1) { console.warn('agg parent warn:', e1); }
+      try { await ensureSpFolder(aggFolder); } catch (e2) { console.warn('agg folder warn:', e2); }
+      var fileName2 = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + kikan + '.pdf';
+      await uploadFileToSp(aggFolder, fileName2, pdfBlob);
       success.push(nm);
     } catch (e) {
       console.error('bulkCreateRenewalDocs error for', nm, e);
