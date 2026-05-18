@@ -9233,7 +9233,22 @@ if (!window._esignMessageInstalled) {
       var docLabel = (window._currentHaisenDocMode === 'renewal') ? '更新用就業条件通知書' : '新規雇用契約書兼就業条件通知書';
       var fileName = docLabel + '_' + sn2 + '_' + nm + '_' + stamp + '_署名済.pdf';
       var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+      // ① 個人の社員フォルダへ保存
       await uploadFileToSp(folderPath, fileName, file);
+      // ② 新規雇用契約書のときは 集約フォルダ (社員ファイル/新規雇用契約書/{派遣先名}/) にも保存
+      if (window._currentHaisenDocMode !== 'renewal') {
+        try {
+          var hkNm2 = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(_esignCurrentEmp)) : (getBukaValue(_esignCurrentEmp) || '');
+          var safeHk2 = String(hkNm2 || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
+          var aggP = SP_DOC_LIB_PATH + '/新規雇用契約書';
+          var aggF = aggP + '/' + safeHk2;
+          try { await ensureSpFolder(aggP); } catch (e1) { console.warn('新規雇用契約書 親フォルダ warn:', e1); }
+          try { await ensureSpFolder(aggF); } catch (e2) { console.warn('新規雇用契約書 派遣先フォルダ warn:', e2); }
+          var kikan2 = _koyouKikanForFilename(_esignCurrentEmp);
+          var aggName = '新規雇用契約書兼就業条件通知書_' + sn2 + '_' + nm + '_' + kikan2 + '.pdf';
+          await uploadFileToSp(aggF, aggName, file);
+        } catch (eAgg) { console.warn('新規雇用契約書 集約保存 warn:', eAgg); }
+      }
       if (src) src.postMessage({ type: 'esign-result', ok: true, fileName: fileName, folderPath: folderPath }, '*');
       if (typeof showToast === 'function') showToast('✓ ' + fileName + ' を保存しました', 'success');
     } catch (err) {
@@ -9464,11 +9479,132 @@ function openHaisenDocInNewWindow() {
   w.document.close();
 }
 
-// 派遣書類作成画面を開く（docType: 'roudouKeiyaku' / 'syuugyouJouken'）
+// 社員の通勤手当(通勤費) を数値で取得
+function getEmpTsukinTeate(emp) {
+  var k = Object.keys(emp).find(function(kk){ return kk.indexOf('x901a__x52e4__x624b__x5f53') >= 0; });
+  var v = k ? emp[k] : null;
+  var n = parseFloat(String(v == null ? '' : v).replace(/[,\s¥￥円]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+// 新規雇用契約書 作成前の 給与/通勤費/雇用期間 確認・編集モーダル
+// 戻り値: Promise<boolean> (true=作成へ進む / false=キャンセル)
+function showNewHireEditModal(emp) {
+  return new Promise(function(resolve) {
+    var sn = emp[F.syainNo] || '';
+    var nm = emp.Title || '';
+    var sal = getEmpSalary(emp);
+    var tsukin = getEmpTsukinTeate(emp);
+    var cs = _toDateInputVal(emp[F.koyoStart]);
+    var ce = _toDateInputVal(emp[F.koyoEnd]);
+    var inS = 'font-size:13px;padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box;';
+    function row(label, inner) {
+      return '<div style="margin-bottom:12px;">' +
+        '<div style="font-size:12px;color:#555;font-weight:600;margin-bottom:3px;">' + label + '</div>' + inner + '</div>';
+    }
+    var ov = document.createElement('div');
+    ov.id = 'newHireEditOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:12px;max-width:440px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+        '<div style="padding:14px 18px;border-bottom:1px solid #eee;">' +
+          '<h3 style="margin:0;font-size:15px;color:#3949ab;">📝 新規雇用契約書 — 内容確認</h3>' +
+          '<div style="font-size:11.5px;color:#888;margin-top:3px;"><b>' + escHtml(nm) + '</b> 様 (№' + escHtml(String(sn)) + ') ／ 給与・通勤費・雇用期間を確認・修正してください</div>' +
+        '</div>' +
+        '<div style="padding:16px 20px;">' +
+          row('給与（時給）', '<input type="number" id="nhSalary" min="0" step="10" value="' + (sal > 0 ? sal : '') + '" style="' + inS + '">') +
+          row('通勤費（通勤手当）', '<input type="number" id="nhTsukin" min="0" step="10" value="' + (tsukin > 0 ? tsukin : '') + '" style="' + inS + '">') +
+          row('雇用契約開始日', '<input type="date" id="nhStart" value="' + cs + '" style="' + inS + '">') +
+          row('雇用契約終了日', '<input type="date" id="nhEnd" value="' + ce + '" style="' + inS + '">') +
+          '<div id="nhStatus" style="font-size:11.5px;color:#1976d2;min-height:14px;"></div>' +
+        '</div>' +
+        '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;">' +
+          '<button id="nhCancel" style="flex:1;background:#fff;color:#555;border:1px solid #ddd;border-radius:8px;padding:11px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+          '<button id="nhOk" style="flex:2;background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:8px;padding:11px;font-weight:700;cursor:pointer;">✓ 保存して作成</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); }
+    ov.querySelector('#nhCancel').onclick = function(){ close(); resolve(false); };
+    ov.querySelector('#nhOk').onclick = async function() {
+      var btn = this;
+      var status = ov.querySelector('#nhStatus');
+      btn.disabled = true;
+      status.textContent = '保存中…';
+      try {
+        await saveNewHireFields(emp,
+          (ov.querySelector('#nhSalary').value || '').trim(),
+          (ov.querySelector('#nhTsukin').value || '').trim(),
+          ov.querySelector('#nhStart').value || '',
+          ov.querySelector('#nhEnd').value || '');
+        close();
+        resolve(true);
+      } catch (e) {
+        console.error('saveNewHireFields error:', e);
+        status.textContent = '❌ ' + (e.message || String(e));
+        btn.disabled = false;
+      }
+    };
+  });
+}
+
+// 新規雇用契約書の 給与/通勤費/雇用期間 を社員データListsへ保存 (変更分のみ)
+async function saveNewHireFields(emp, salaryStr, tsukinStr, startStr, endStr) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+  var body = { __metadata: { type: entityType } };
+  var changed = false;
+  // 給与体系(時給)
+  var salKey = Object.keys(emp).find(function(k){ return k.indexOf('x7d66__x6599__x6642__x7d66') >= 0; });
+  if (salKey) {
+    var newSal = salaryStr ? parseFloat(salaryStr) : null;
+    if ((newSal || 0) !== (getEmpSalary(emp) || 0)) { body[salKey.replace(/^OData_/, '')] = newSal; changed = true; }
+  }
+  // 通勤手当
+  var tsuKey = Object.keys(emp).find(function(k){ return k.indexOf('x901a__x52e4__x624b__x5f53') >= 0; });
+  if (tsuKey) {
+    var newTsu = tsukinStr ? parseFloat(tsukinStr) : null;
+    if ((newTsu || 0) !== (getEmpTsukinTeate(emp) || 0)) { body[tsuKey.replace(/^OData_/, '')] = newTsu; changed = true; }
+  }
+  // 雇用契約開始/終了日
+  var curS = _toDateInputVal(emp[F.koyoStart]);
+  var curE = _toDateInputVal(emp[F.koyoEnd]);
+  if (startStr !== curS) { body[F.koyoStart.replace(/^OData_/, '')] = startStr ? (startStr + 'T00:00:00Z') : null; changed = true; }
+  if (endStr !== curE) { body[F.koyoEnd.replace(/^OData_/, '')] = endStr ? (endStr + 'T00:00:00Z') : null; changed = true; }
+  if (!changed) return { changed: 0 };
+  var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + emp.Id + ")";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    var t = ''; try { t = await resp.text(); } catch(_) {}
+    throw new Error('保存失敗 ' + resp.status + ' ' + t.substring(0, 150));
+  }
+  // ローカル emp にも反映 (書類生成で最新値を使う)
+  Object.keys(body).forEach(function(bk){
+    if (bk === '__metadata') return;
+    var odk = (bk.charAt(0) === '_') ? ('OData_' + bk) : bk;
+    emp[odk] = body[bk];
+  });
+  return { changed: 1 };
+}
+
+// 派遣書類作成画面を開く（docType: 'roudouKeiyaku' / 'koushin'）
 async function openHaisenDocScreen(docType) {
   var emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
   closeActionSheet();
+  // 新規雇用契約書: 先に 給与/通勤費/雇用期間 の確認・編集モーダルを表示
+  if (docType === 'roudouKeiyaku') {
+    var proceed = await showNewHireEditModal(emp);
+    if (!proceed) return;  // キャンセル → 画面遷移しない
+  }
   switchScreen('haisenDocScreen');
   var body = document.getElementById('haisenDocBody');
   var actions = document.getElementById('haisenDocActions');
