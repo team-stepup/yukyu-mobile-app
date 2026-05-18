@@ -12601,7 +12601,7 @@ function _showHakenIsshikiModal(h, emps) {
       '<option value="muki"' + (isMuki ? ' selected' : '') + '>無期雇用</option></select>';
     return '<div style="padding:6px 7px;border-bottom:1px solid #f0f0f5;">' +
       '<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;">' +
-        '<input type="checkbox" class="hkiss-emp" value="' + idx + '" checked>' +
+        '<input type="checkbox" class="hkiss-emp" value="' + idx + '" checked onchange="_hkIssUpdateCount()">' +
         '<span style="font-weight:600;">' + escHtml(nm) + '</span>' +
         '<span style="color:#888;font-size:11px;">No.' + escHtml(String(sn)) + '</span>' +
       '</label>' +
@@ -12678,7 +12678,8 @@ function _showHakenIsshikiModal(h, emps) {
             '<input type="radio" name="hkiss_ot" value="no"' + (hasOT ? '' : ' checked') + '> なし（時間外・休日労働を行わない）</label>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 4px;">' +
-          '<span style="font-weight:700;color:#283593;">派遣労働者を選択（健保・厚生年金・雇用保険を確認）</span>' +
+          '<span style="font-weight:700;color:#283593;">派遣労働者を選択　' +
+            '<span id="hkissCount" style="color:#1976d2;font-size:11px;">(全' + emps.length + '名)</span></span>' +
           '<span style="font-size:11px;"><a href="javascript:void(0)" onclick="_hkIsshikiToggleAll(true)" style="color:#1976d2;">全選択</a>' +
           ' / <a href="javascript:void(0)" onclick="_hkIsshikiToggleAll(false)" style="color:#1976d2;">全解除</a></span>' +
         '</div>' +
@@ -12693,9 +12694,17 @@ function _showHakenIsshikiModal(h, emps) {
     '</div>';
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
+  _hkIssUpdateCount();
 }
 function _hkIsshikiToggleAll(on) {
   document.querySelectorAll('.hkiss-emp').forEach(function(c) { c.checked = on; });
+  _hkIssUpdateCount();
+}
+function _hkIssUpdateCount() {
+  var total = document.querySelectorAll('.hkiss-emp').length;
+  var checked = document.querySelectorAll('.hkiss-emp:checked').length;
+  var el = document.getElementById('hkissCount');
+  if (el) el.textContent = '(' + checked + ' / ' + total + '名 選択中)';
 }
 // 有期/無期 を切り替えたら雇用期間欄の表示を切替
 function _hkIssYukiChange(idx) {
@@ -12745,9 +12754,16 @@ async function _submitHakenIsshiki() {
       cs = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoStart]) : '';
       ce = (typeof _toDateInputVal === 'function') ? _toDateInputVal(emp[F.koyoEnd]) : '';
     }
-    if (yukiChanged || ns !== cs || ne !== ce) {
+    // 請求単価 (社員データListsへ反映)
+    var seikyuKey = (_hkIsshikiCtx && _hkIsshikiCtx.seikyuKey) || null;
+    var rEl = document.getElementById('hkiss_ryokin_' + i);
+    var newSeikyu = rEl ? (parseFloat(rEl.value) || 0) : 0;
+    var curSeikyu = seikyuKey ? (Number(emp[seikyuKey]) || 0) : 0;
+    var seikyuChanged = !!(seikyuKey && newSeikyu && newSeikyu !== curSeikyu);
+    if (yukiChanged || ns !== cs || ne !== ce || seikyuChanged) {
       empEdits.push({ emp: emp, yukiKey: yukiKey, yukiChanged: yukiChanged, newYuki: newYuki,
-        start: ns, end: ne, curStart: cs, curEnd: ce });
+        start: ns, end: ne, curStart: cs, curEnd: ce,
+        seikyuKey: seikyuKey, seikyuChanged: seikyuChanged, newSeikyu: newSeikyu });
     }
   });
   var otEl = document.querySelector('input[name="hkiss_ot"]:checked');
@@ -12808,6 +12824,10 @@ async function _submitHakenIsshiki() {
           orig[F.koyoEnd] = (ed.emp[F.koyoEnd] === undefined ? null : ed.emp[F.koyoEnd]);
           body[F.koyoEnd] = ed.end ? (ed.end + 'T00:00:00Z') : null;
         }
+        if (ed.seikyuChanged && ed.seikyuKey) {
+          orig[ed.seikyuKey] = (ed.emp[ed.seikyuKey] === undefined ? null : ed.emp[ed.seikyuKey]);
+          body[ed.seikyuKey] = ed.newSeikyu;
+        }
         try {
           var purl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + ed.emp.Id + ")";
           var presp = await fetch(purl, {
@@ -12822,6 +12842,7 @@ async function _submitHakenIsshiki() {
           if (F.koyoStart in body) ed.emp[F.koyoStart] = body[F.koyoStart];
           if (F.koyoEnd in body) ed.emp[F.koyoEnd] = body[F.koyoEnd];
           if (ed.yukiChanged && ed.yukiKey) ed.emp[ed.yukiKey] = body[ed.yukiKey];
+          if (ed.seikyuChanged && ed.seikyuKey) ed.emp[ed.seikyuKey] = body[ed.seikyuKey];
           undoItems.push({ empId: ed.emp.Id, empNo: String(ed.emp[F.syainNo] || ''), name: ed.emp.Title || '', orig: orig });
         } catch (pe) {
           console.warn('社員データ保存失敗:', ed.emp.Title, pe);
@@ -12832,35 +12853,54 @@ async function _submitHakenIsshiki() {
         _recordKoyouUndo('派遣契約書類一式: 有期無期・雇用期間', undoItems);
       }
     }
-    // 派遣期間を 派遣先情報Lists へ保存 (変更時)
-    var curPS = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_start]) : '';
-    var curPE = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_end]) : '';
-    if ((psV !== curPS || peV !== curPE) && ctx.h.Id) {
-      if (goBtn) goBtn.textContent = '⏳ 派遣期間を保存中…';
-      try {
-        var hToken = await getToken();
-        var hEntity = await getListItemEntityType(LIST_HAKENSAKI_GUID);
-        var hbody = { __metadata: { type: hEntity } };
-        if (psV !== curPS) hbody[HF.haken_period_start] = psV ? (psV + 'T00:00:00Z') : null;
-        if (peV !== curPE) hbody[HF.haken_period_end] = peV ? (peV + 'T00:00:00Z') : null;
-        var hurl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items(" + ctx.h.Id + ")";
-        var hresp = await fetch(hurl, {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + hToken, 'Accept': 'application/json;odata=verbose',
-            'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
-          },
-          body: JSON.stringify(hbody)
-        });
-        if (!hresp.ok) {
-          var ht = ''; try { ht = await hresp.text(); } catch (_) {}
-          throw new Error('HTTP ' + hresp.status + ' ' + ht.substring(0, 150));
+    // 派遣先情報Lists の更新 (派遣期間・派遣先責任者・苦情処理担当者・請求単価)
+    if (ctx.h.Id) {
+      var curPS = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_start]) : '';
+      var curPE = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_end]) : '';
+      var hbody = {};
+      function _hkSet(key, newV) {
+        var cur = ctx.h[key];
+        var curStr = (cur == null ? '' : String(cur));
+        var newStr = (newV == null ? '' : String(newV));
+        if (newStr !== curStr) hbody[key] = newV;
+      }
+      if (psV !== curPS) hbody[HF.haken_period_start] = psV ? (psV + 'T00:00:00Z') : null;
+      if (peV !== curPE) hbody[HF.haken_period_end] = peV ? (peV + 'T00:00:00Z') : null;
+      _hkSet(HF.hakensakiSekBusho, h2[HF.hakensakiSekBusho]);
+      _hkSet(HF.hakensakiSekYakushoku, h2[HF.hakensakiSekYakushoku]);
+      _hkSet(HF.hakensakiSekName, h2[HF.hakensakiSekName]);
+      _hkSet(HF.kujouSakiBusho, h2[HF.kujouSakiBusho]);
+      _hkSet(HF.kujouSakiYakushoku, h2[HF.kujouSakiYakushoku]);
+      _hkSet(HF.kujouSakiName, h2[HF.kujouSakiName]);
+      // 請求単価 — 選択社員が全員同一単価のときのみ派遣先情報へ反映
+      var _rateKeys = Object.keys(ryokinGroups);
+      if (_rateKeys.length === 1) {
+        var _oneRate = Number(_rateKeys[0]) || 0;
+        if (_oneRate) _hkSet(HF.hakenRyokin, _oneRate);
+      }
+      if (Object.keys(hbody).length) {
+        if (goBtn) goBtn.textContent = '⏳ 派遣先情報を保存中…';
+        try {
+          var hToken = await getToken();
+          hbody.__metadata = { type: await getListItemEntityType(LIST_HAKENSAKI_GUID) };
+          var hurl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items(" + ctx.h.Id + ")";
+          var hresp = await fetch(hurl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + hToken, 'Accept': 'application/json;odata=verbose',
+              'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+            },
+            body: JSON.stringify(hbody)
+          });
+          if (!hresp.ok) {
+            var ht = ''; try { ht = await hresp.text(); } catch (_) {}
+            throw new Error('HTTP ' + hresp.status + ' ' + ht.substring(0, 150));
+          }
+          Object.keys(hbody).forEach(function(k) { if (k !== '__metadata') ctx.h[k] = hbody[k]; });
+        } catch (he) {
+          console.warn('派遣先情報 保存失敗:', he);
+          showToast('派遣先情報の保存に失敗: ' + (he.message || he), 'error');
         }
-        if (HF.haken_period_start in hbody) ctx.h[HF.haken_period_start] = hbody[HF.haken_period_start];
-        if (HF.haken_period_end in hbody) ctx.h[HF.haken_period_end] = hbody[HF.haken_period_end];
-      } catch (he) {
-        console.warn('派遣期間 保存失敗:', he);
-        showToast('派遣期間の保存に失敗: ' + (he.message || he), 'error');
       }
     }
     if (goBtn) goBtn.textContent = '⏳ 書類を生成中…';
