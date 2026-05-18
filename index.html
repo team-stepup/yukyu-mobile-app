@@ -12611,7 +12611,11 @@ async function _saveIsshikiPdf(h, pdfBlob) {
   var safeHk = hkName.replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
   var ps = isoD(h[HF.haken_period_start]), pe = isoD(h[HF.haken_period_end]);
   var kikan = (ps || pe) ? (ps + '〜' + pe) : '派遣期間未設定';
-  var fileName = kikan + '.pdf';
+  // ファイル名 = 組織名_請求単価_派遣期間
+  var soshikiNm = _hkClean(h[HF.soshiki] || '').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '組織単位未設定';
+  var ryokinRaw = (h[HF.hakenRyokin] != null && h[HF.hakenRyokin] !== '') ? String(h[HF.hakenRyokin]).replace(/[^\d]/g, '') : '';
+  var ryokinNm = ryokinRaw ? (ryokinRaw + '円') : '単価未設定';
+  var fileName = soshikiNm + '_' + ryokinNm + '_' + kikan + '.pdf';
   var parent = SP_DOC_LIB_PATH + '/派遣契約書、派遣元・先台帳';
   var hkFolder = parent + '/' + safeHk;
   try { await ensureSpFolder(parent); } catch (e1) { console.warn('一式 親フォルダ warn:', e1); }
