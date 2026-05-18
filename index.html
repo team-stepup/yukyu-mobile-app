@@ -11759,7 +11759,96 @@ function renderHakenKobetsuKeiyakushoByIdx(idx) {
 }
 
 // 労働者派遣個別契約書 を 1ページの haisen-doc-page として描画
-function renderHakenKobetsuKeiyakusho(h) {
+// 個別契約書 作成前の確認・編集モーダル
+function _hkcFld(label, inner) {
+  return '<div style="margin-bottom:8px;"><div style="color:#666;font-weight:600;margin-bottom:3px;">' +
+    escHtml(label) + '</div>' + inner + '</div>';
+}
+function _hkcLbl(t) {
+  return '<div style="color:#999;font-size:10px;margin-bottom:2px;">' + escHtml(t) + '</div>';
+}
+function _hkcInp(id, val, ph) {
+  return '<input id="' + id + '" value="' + escHtml(String(val == null ? '' : val)) + '" ' +
+    'placeholder="' + escHtml(ph || '') + '" ' +
+    'style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box;">';
+}
+function showHakenKobetsuConfirmModal(h) {
+  if (!h) { showToast('派遣契約データが見つかりません', 'error'); return; }
+  window._hkConfirmH = h;
+  function cc(k) { return _hkClean(h[k] || ''); }
+  var hkName = cc(HF.hakensaki_name) || cc(HF.hakensaki_keiyaku);
+  var soshiki = cc(HF.soshiki);
+  var ryokin = (h[HF.hakenRyokin] != null && h[HF.hakenRyokin] !== '') ? h[HF.hakenRyokin] : '';
+  var defNinzu = 1;
+  try { if (typeof _hakensakiFields !== 'undefined' && _hakensakiFields && _hakensakiFields.ninzu)
+    defNinzu = Number(h[_hakensakiFields.ninzu]) || 1; } catch (_) {}
+  var hsBusho = cc(HF.hakensakiSekBusho), hsYaku = cc(HF.hakensakiSekYakushoku), hsName = cc(HF.hakensakiSekName);
+  var ksBusho = cc(HF.kujouSakiBusho), ksYaku = cc(HF.kujouSakiYakushoku), ksName = cc(HF.kujouSakiName);
+  var old = document.getElementById('hkKobetsuConfirmOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'hkKobetsuConfirmOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;' +
+    'align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:500px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
+        '<h3 style="margin:0;font-size:15px;color:#283593;">📑 労働者派遣個別契約書 — 内容確認</h3>' +
+        '<button onclick="document.getElementById(\'hkKobetsuConfirmOverlay\').remove()" ' +
+          'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:14px 18px;font-size:12px;">' +
+        '<div style="color:#888;margin-bottom:10px;">作成前に内容を確認・修正してください。</div>' +
+        _hkcFld('派遣先名', _hkcInp('hkc_hkName', hkName)) +
+        _hkcFld('組織単位', _hkcInp('hkc_soshiki', soshiki)) +
+        _hkcFld('請求単価（円／時間）', _hkcInp('hkc_ryokin', ryokin, '例: 1900')) +
+        '<div style="font-weight:700;color:#283593;margin:12px 0 4px;">派遣先責任者</div>' +
+        '<div style="display:flex;gap:6px;">' +
+          '<div style="flex:1;">' + _hkcLbl('部署') + _hkcInp('hkc_hsBusho', hsBusho) + '</div>' +
+          '<div style="flex:1;">' + _hkcLbl('役職') + _hkcInp('hkc_hsYaku', hsYaku) + '</div>' +
+          '<div style="flex:1;">' + _hkcLbl('氏名') + _hkcInp('hkc_hsName', hsName) + '</div>' +
+        '</div>' +
+        '<div style="font-weight:700;color:#283593;margin:12px 0 4px;">派遣先 苦情処理担当者</div>' +
+        '<div style="display:flex;gap:6px;">' +
+          '<div style="flex:1;">' + _hkcLbl('部署') + _hkcInp('hkc_ksBusho', ksBusho) + '</div>' +
+          '<div style="flex:1;">' + _hkcLbl('役職') + _hkcInp('hkc_ksYaku', ksYaku) + '</div>' +
+          '<div style="flex:1;">' + _hkcLbl('氏名') + _hkcInp('hkc_ksName', ksName) + '</div>' +
+        '</div>' +
+        '<div style="border-top:1px solid #eee;margin:14px 0 10px;"></div>' +
+        _hkcFld('人数（名）', _hkcInp('hkc_ninzu', defNinzu)) +
+        '<div style="margin-top:8px;background:#f5f6fa;border-radius:6px;padding:8px 10px;">' +
+          '<label style="display:block;margin-bottom:6px;cursor:pointer;">' +
+            '<input type="radio" name="hkc_mode" value="single" checked> 1枚にまとめる（派遣人員＝人数）</label>' +
+          '<label style="display:block;cursor:pointer;">' +
+            '<input type="radio" name="hkc_mode" value="each"> 1名ずつ作成（人数分の枚数／各 派遣人員1名）</label>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button onclick="document.getElementById(\'hkKobetsuConfirmOverlay\').remove()" ' +
+          'style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+        '<button onclick="_submitHakenKobetsuConfirm()" ' +
+          'style="background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">この内容で作成</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+function _submitHakenKobetsuConfirm() {
+  var h = window._hkConfirmH;
+  if (!h) { showToast('データが見つかりません', 'error'); return; }
+  function val(id) { var e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; }
+  var modeEl = document.querySelector('input[name="hkc_mode"]:checked');
+  var perPerson = !!(modeEl && modeEl.value === 'each');
+  var count = Math.max(1, parseInt(val('hkc_ninzu'), 10) || 1);
+  var overrides = {
+    hkName: val('hkc_hkName'), soshiki: val('hkc_soshiki'), ryokin: val('hkc_ryokin'),
+    hsBusho: val('hkc_hsBusho'), hsYaku: val('hkc_hsYaku'), hsName: val('hkc_hsName'),
+    ksBusho: val('hkc_ksBusho'), ksYaku: val('hkc_ksYaku'), ksName: val('hkc_ksName')
+  };
+  var ov = document.getElementById('hkKobetsuConfirmOverlay'); if (ov) ov.remove();
+  renderHakenKobetsuKeiyakusho(h, { overrides: overrides, count: count, perPerson: perPerson });
+}
+
+function renderHakenKobetsuKeiyakusho(h, opts) {
   window._currentHaisenDocMode = 'hakenKeiyaku';
   function c(k) { return _hkClean(h[k] || ''); }
   function chkb(b) { return b ? '☑' : '☐'; }
@@ -11788,8 +11877,20 @@ function renderHakenKobetsuKeiyakusho(h) {
   var kj1m = h[HF.kyujitsu_1month];
   function dash(x) { return (x === 0 || x) ? String(x) : '　'; }
 
+  // 確認モーダルでの編集値を反映
+  var opt = opts || {}, ovr = opt.overrides || {};
+  if (ovr.hkName  != null) hkName  = ovr.hkName;
+  if (ovr.soshiki != null) soshiki = ovr.soshiki;
+  if (ovr.hsBusho != null) hsBusho = ovr.hsBusho;
+  if (ovr.hsYaku  != null) hsYaku  = ovr.hsYaku;
+  if (ovr.hsName  != null) hsName  = ovr.hsName;
+  if (ovr.ksBusho != null) ksBusho = ovr.ksBusho;
+  if (ovr.ksYaku  != null) ksYaku  = ovr.ksYaku;
+  if (ovr.ksName  != null) ksName  = ovr.ksName;
+
   // 派遣料金 (通常勤務を基準に算出: 深夜 ×1.25 / 時間外・法定外休日 ×1.25 / 法定休日 ×1.35)
-  var ryokinBase = Number(h[HF.hakenRyokin]) || 0;
+  var ryokinBase = (ovr.ryokin != null && ovr.ryokin !== '')
+    ? (Number(ovr.ryokin) || 0) : (Number(h[HF.hakenRyokin]) || 0);
   var tani = c(HF.keisanTani);
   function yen(n) { return n ? ('¥' + Math.round(n).toLocaleString()) : '－'; }
   var ryoNormal = ryokinBase, ryoNight = ryokinBase ? ryokinBase * 1.25 : 0;
@@ -11832,10 +11933,11 @@ function renderHakenKobetsuKeiyakusho(h) {
     '</table>';
   }
 
-  var page =
-    '<div class="haisen-doc-page hd-kobetsu">' +
+  function buildOnePage(jinin, sheetLabel) {
+   return '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;">' +
       '<h1>労働者派遣個別契約書</h1>' +
-      '<div class="hd-meta">作成日: ' + escHtml(todayStr) + '</div>' +
+      '<div class="hd-meta">作成日: ' + escHtml(todayStr) +
+        (sheetLabel ? '　<span style="color:#283593;font-weight:600;">' + escHtml(sheetLabel) + '</span>' : '') + '</div>' +
       '<div class="hd-intro">' + escHtml(hkName || '（派遣先）') + '（以下「派遣先」という。）と' +
         escHtml(HAKEN_GEN_FIXED.name) + '（以下「派遣元」という。）（' + escHtml(HAKEN_GEN_FIXED.kyoka) +
         '）とは、次のとおり労働者派遣契約を締結する。</div>' +
@@ -11853,7 +11955,7 @@ function renderHakenKobetsuKeiyakusho(h) {
         '</table></td></tr>' +
         '<tr><th>3　無期雇用派遣労働者<br>又は60歳以上の派遣労働者<br>に限定するか否かの別</th><td>' +
           '☐ 無期雇用派遣労働者に限定　　☐ 60歳以上の派遣労働者に限定　　<span class="hd-circle">☑ 限定なし</span></td></tr>' +
-        '<tr><th>4　派遣人員</th><td>　　1　名</td></tr>' +
+        '<tr><th>4　派遣人員</th><td>　　' + jinin + '　名</td></tr>' +
         '<tr><th>5　協定対象派遣労働者に<br>限定するか否かの別</th><td>協定対象派遣労働者に限定する</td></tr>' +
         '<tr><th>6　業務内容</th><td>' + v(gyoumu) + '</td></tr>' +
         '<tr><th>7　責任の程度</th><td>' + v(sekinin) + '</td></tr>' +
@@ -11916,9 +12018,22 @@ function renderHakenKobetsuKeiyakusho(h) {
         '</table></td></tr>' +
       '</table>' +
     '</div>';
+  }
+
+  // 人数 / 作成方法 (1枚にまとめる or 1名ずつ複数枚)
+  var count = Math.max(1, parseInt(opt.count, 10) || 1);
+  var perPerson = !!opt.perPerson;
+  var pagesHtml = '';
+  if (perPerson) {
+    for (var pi = 1; pi <= count; pi++) {
+      pagesHtml += buildOnePage(1, '（' + count + '名中 ' + pi + '人目）');
+    }
+  } else {
+    pagesHtml += buildOnePage(count, '');
+  }
 
   switchScreen('haisenDocScreen');
-  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + pagesHtml + '</div>';
   // 操作ボタン: ズーム + 印刷のみ (電子サイン/Adobe/元に戻す は非表示)
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
@@ -14429,7 +14544,7 @@ function renderHakensakiDetail() {
   html += '</div>';
 
   // ===== 派遣契約書作成ボタン =====
-  html += '<button onclick="renderHakenKobetsuKeiyakusho(_hakensakiItems[_hakensakiCurrentItemIdx])" ' +
+  html += '<button onclick="showHakenKobetsuConfirmModal(_hakensakiItems[_hakensakiCurrentItemIdx])" ' +
     'style="width:100%;background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:12px;' +
     'padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:12px;box-shadow:0 2px 6px rgba(40,53,147,0.3);">' +
     '📑 派遣契約書作成（労働者派遣個別契約書）</button>';
