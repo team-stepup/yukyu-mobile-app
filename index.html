@@ -10374,6 +10374,7 @@ var KANJI_ROMAJI_DICT = {
   '本社工場':'Honsha Plant','本社':'Honsha','本部':'Honbu','支社':'Shisha','工場':'Plant','事業所':'Jigyousho','営業所':'Eigyousho',
   '浜松':'Hamamatsu','浜北':'Hamakita','都田':'Miyakoda','袋井':'Fukuroi','掛川':'Kakegawa','磐田':'Iwata','湖西':'Kosai','菊川':'Kikugawa',
   '静岡':'Shizuoka','愛知':'Aichi','東京':'Tokyo','大阪':'Osaka','名古屋':'Nagoya',
+  '日本':'Nihon','東日本':'Higashi-Nihon','西日本':'Nishi-Nihon',
   // 部門・課・係 (suffix '-' で前にスペース無し連結)
   '製造部':'-Seizoubu','製造課':'-Seizouka','製造係':'-Seizougakari','製造':'Seizou',
   '生産管理部':'Seisan Kanribu','生産管理課':'Seisan Kanrika','生産管理':'Seisan Kanri',
@@ -11012,15 +11013,14 @@ function renderRoudouKeiyakushoSan(emp, h, mode) {
           '</td>' +
         '</tr>' +
 
-        // Local de Trabalho — 辞書があれば英訳を使う、無ければ日本語のまま
+        // Local de Trabalho — 辞書があれば英訳、無ければローマ字化 (toRomaji)
         (function(){
           var t = lookupHakensakiTranslation(hkName);
-          var nameOut = t && t.nameEn ? t.nameEn : hkName;
-          var addrOut = t && t.addressEn ? t.addressEn : kinmuJusho;
-          var setorRaw = hkBuka || hkName;
-          var setorOut = translateSectorPt(setorRaw);
-          // 派遣先名が部署として使われている場合は英訳側も使う
-          if (setorOut === hkName && t && t.nameEn) setorOut = t.nameEn;
+          var nameOut = t && t.nameEn ? t.nameEn : toRomaji(hkName);
+          var addrOut = t && t.addressEn ? t.addressEn : toRomaji(kinmuJusho);
+          var setorOut = toRomaji(hkBuka || hkName);
+          // 部署が無く派遣先名を部署として使っている場合は英訳名を優先
+          if (!hkBuka && t && t.nameEn) setorOut = t.nameEn;
           return '<tr>' +
             '<th>Local de Trabalho<br>(Logo após ser<br>contratado)</th>' +
             '<td class="hd-cell-no-pad">' +
