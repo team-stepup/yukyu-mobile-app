@@ -12091,6 +12091,205 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
 }
 
 // ============================================================
+// 派遣先管理台帳 兼 派遣通知書 — 派遣労働者ごとに作成
+// 派遣先詳細画面のボタン → その派遣先の社員を選択 → 作成
+// ============================================================
+var _hkKanriboCtx = { h: null, emps: [] };
+var _hkAllEmpsCache = null;
+
+async function openHakenKanriboEmpPicker(h) {
+  try {
+    if (!h) { showToast('派遣契約データが見つかりません', 'error'); return; }
+    var bangoFull = String(h[HF.bango] || '').trim();
+    var bango = (bangoFull.match(/^\d+/) || [''])[0];
+    if (!bango) { showToast('派遣先番号が特定できません', 'error'); return; }
+    showToast('社員データを取得中…', 'info');
+    if (!_hkAllEmpsCache) {
+      _hkAllEmpsCache = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+    }
+    var soshiki = _hkClean(h[HF.soshiki] || '');
+    var emps = _hkAllEmpsCache.filter(function(e) { return extractHakenBango(e) === bango; });
+    if (soshiki) {
+      var byOrg = emps.filter(function(e) {
+        var o = '';
+        for (var k in e) { if (k.indexOf('x7d44') >= 0 && k.indexOf('x7e54') >= 0) { o = String(e[k] || '').trim(); break; } }
+        return o && (o === soshiki || o.indexOf(soshiki) >= 0 || soshiki.indexOf(o) >= 0);
+      });
+      if (byOrg.length) emps = byOrg;
+    }
+    if (!emps.length) { showToast('この派遣先に該当する社員が見つかりません', 'error'); return; }
+    emps.sort(function(a, b) {
+      var ra = (typeof isResigned === 'function' && isResigned(a)) ? 1 : 0;
+      var rb = (typeof isResigned === 'function' && isResigned(b)) ? 1 : 0;
+      return ra - rb;
+    });
+    _hkKanriboCtx = { h: h, emps: emps };
+    _showHakenKanriboEmpPicker(emps);
+  } catch (e) {
+    console.error('openHakenKanriboEmpPicker error:', e);
+    showToast('エラー: ' + (e.message || String(e)), 'error');
+  }
+}
+
+function _showHakenKanriboEmpPicker(emps) {
+  var old = document.getElementById('hkKanriboEmpOverlay'); if (old) old.remove();
+  var listHtml = emps.map(function(e, idx) {
+    var nm = e.Title || '(無名)';
+    var sn = e[F.syainNo] || '';
+    var resigned = (typeof isResigned === 'function' && isResigned(e));
+    return '<button onclick="renderHakenKanriboByIdx(' + idx + ')" ' +
+      'style="display:block;width:100%;text-align:left;background:' + (resigned ? '#fafafa' : '#fff') +
+      ';border:1px solid #c5cae9;border-radius:8px;padding:10px 13px;margin-bottom:7px;cursor:pointer;">' +
+      '<span style="font-size:13px;font-weight:700;color:' + (resigned ? '#999' : '#283593') + ';">' + escHtml(nm) + '</span>' +
+      '<span style="font-size:11px;color:#888;margin-left:8px;">No.' + escHtml(String(sn)) + '</span>' +
+      (resigned ? '<span style="font-size:10px;color:#c62828;margin-left:8px;">退職</span>' : '') +
+    '</button>';
+  }).join('');
+  var ov = document.createElement('div');
+  ov.id = 'hkKanriboEmpOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;' +
+    'align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
+        '<h3 style="margin:0;font-size:15px;color:#00695c;">📋 派遣労働者を選択</h3>' +
+        '<button onclick="document.getElementById(\'hkKanriboEmpOverlay\').remove()" ' +
+          'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:14px 18px;">' +
+        '<div style="font-size:11.5px;color:#888;margin-bottom:10px;">管理台帳を作成する派遣労働者を選んでください。</div>' +
+        listHtml +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+function renderHakenKanriboByIdx(idx) {
+  var ov = document.getElementById('hkKanriboEmpOverlay'); if (ov) ov.remove();
+  var emp = _hkKanriboCtx.emps[idx];
+  if (!emp || !_hkKanriboCtx.h) { showToast('データが見つかりません', 'error'); return; }
+  renderHakenSakiKanribo(_hkKanriboCtx.h, emp);
+}
+
+// 派遣先管理台帳 兼 派遣通知書 を 1ページの haisen-doc-page として描画
+function renderHakenSakiKanribo(h, emp) {
+  window._currentHaisenDocMode = 'hakenKanribo';
+  function c(k) { return _hkClean(h[k] || ''); }
+  function v(s) { return s ? escHtml(s) : '<span style="color:#bbb;">(未設定)</span>'; }
+  function circ(sel, text) { return sel ? '<span class="hd-circle">' + escHtml(text) + '</span>' : escHtml(text); }
+
+  // 派遣契約データ
+  var hkName = c(HF.hakensaki_name) || c(HF.hakensaki_keiyaku);
+  var hakenJusho = c(HF.haken_jusho);
+  var kinmuJusho = c(HF.kinmu_jusho) || hakenJusho;
+  var kinmuTel = c(HF.kinmu_tel) || c(HF.haken_tel);
+  var hkBuka = c(HF.syuugyou_busho);
+  var soshiki = c(HF.soshiki);
+  var gyoumu = c(HF.gyoumu5) || c(HF.gyoumu);
+  var sekinin = c(HF.sekinin_teido);
+  var pStart = _hkYmd(h[HF.haken_period_start]);
+  var pEnd = _hkYmd(h[HF.haken_period_end]);
+  var hsBusho = c(HF.hakensakiSekBusho), hsYaku = c(HF.hakensakiSekYakushoku), hsName = c(HF.hakensakiSekName);
+  var hgBusho = c(HF.hakengenSekBusho), hgYaku = c(HF.hakengenSekYakushoku), hgName = c(HF.hakengenSekName);
+
+  // 派遣労働者データ
+  var name = emp.Title || '';
+  var sex = '';
+  for (var k in emp) { if (k.indexOf('x6027__x5225') >= 0) { sex = _hkClean(emp[k]); break; } }
+  var yuki = (typeof getYukiMukiValue === 'function') ? String(getYukiMukiValue(emp) || '') : '';
+  if (!yuki) { for (var k2 in emp) { if (k2.indexOf('x6709__x671f') >= 0 && k2.indexOf('x7121__x671f') >= 0) { yuki = String(emp[k2] || ''); break; } } }
+  var isMuki = yuki.indexOf('無') >= 0;
+  var koyoS = _hkYmd(emp[F.koyoStart]);
+  var koyoE = _hkYmd(emp[F.koyoEnd]);
+  var bd = emp['OData__x751f__x5e74__x6708__x65e5_'];
+  if (!bd) { for (var k3 in emp) { if (k3.indexOf('x751f__x5e74__x6708__x65e5') >= 0) { bd = emp[k3]; break; } } }
+  var age = null;
+  if (bd) {
+    var bdt = new Date(bd);
+    if (!isNaN(bdt)) {
+      var nowt = new Date();
+      age = nowt.getFullYear() - bdt.getFullYear();
+      var mdiff = nowt.getMonth() - bdt.getMonth();
+      if (mdiff < 0 || (mdiff === 0 && nowt.getDate() < bdt.getDate())) age--;
+    }
+  }
+  var is60 = (age != null) ? (age >= 60) : null;
+  var todayStr = _hkYmd(new Date());
+
+  function innerResp(busho, yaku, nm, tel) {
+    return '<table class="hd-inner">' +
+      '<tr><td class="hd-inner-l">(部署)</td><td class="hd-inner-v">' + v(busho) + '</td>' +
+          '<td class="hd-inner-l">(役職)</td><td class="hd-inner-v">' + v(yaku) + '</td></tr>' +
+      '<tr><td class="hd-inner-l">(氏名)</td><td class="hd-inner-v">' + v(nm) + '</td>' +
+          '<td class="hd-inner-l">(電話)</td><td class="hd-inner-v">' + v(tel) + '</td></tr>' +
+    '</table>';
+  }
+
+  var page =
+    '<div class="haisen-doc-page hd-kobetsu">' +
+      '<h1>派遣先管理台帳　兼　派遣通知書</h1>' +
+      '<div class="hd-meta">作成日: ' + escHtml(todayStr) + '</div>' +
+      '<table class="hd-main">' +
+        '<tr><th>1　派遣労働者の氏名</th><td>' + v(name) + '</td>' +
+            '<th>2　性別</th><td>' + v(sex) + '</td></tr>' +
+        '<tr><th>3　派遣元事業主の名称</th><td colspan="3">' +
+          escHtml(HAKEN_GEN_FIXED.name) + '（' + escHtml(HAKEN_GEN_FIXED.kyoka) + '）</td></tr>' +
+        '<tr><th>4　派遣元事業主の事業所の<br>名称及び所在地</th><td colspan="3" class="hd-cell-no-pad">' +
+          '<table class="hd-inner">' +
+            '<tr><td class="hd-inner-l">(名称)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.name) + '</td>' +
+                '<td class="hd-inner-l">(電話)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.tel) + '</td></tr>' +
+            '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v" colspan="3">' + escHtml(HAKEN_GEN_FIXED.jusho) + '</td></tr>' +
+          '</table></td></tr>' +
+        '<tr><th>5　派遣先の事業所の名称</th><td colspan="3">' + v(hkName) + '</td></tr>' +
+        '<tr><th>6　就業の場所</th><td colspan="3" class="hd-cell-no-pad">' +
+          '<table class="hd-inner">' +
+            '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v" colspan="3">' + v(kinmuJusho) + '</td></tr>' +
+            '<tr><td class="hd-inner-l">(部署)</td><td class="hd-inner-v">' + v(hkBuka) + '</td>' +
+                '<td class="hd-inner-l">(電話)</td><td class="hd-inner-v">' + v(kinmuTel) + '</td></tr>' +
+          '</table></td></tr>' +
+        '<tr><th>7　組織単位</th><td colspan="3">' + v(soshiki) + '</td></tr>' +
+        '<tr><th>8　無期雇用か<br>有期雇用かの別</th><td>' +
+          circ(isMuki, '無期雇用') + '　・　' + circ(!isMuki, '有期雇用') +
+          (!isMuki && (koyoS || koyoE) ? '<br><span style="font-size:8pt;">' + escHtml(koyoS) + ' 〜 ' + escHtml(koyoE) + '</span>' : '') + '</td>' +
+          '<th>9　60歳以上か<br>否かの別</th><td>' +
+            (is60 == null ? '60歳未満　・　60歳以上'
+              : (circ(!is60, '60歳未満') + '　・　' + circ(is60, '60歳以上'))) +
+            (age != null ? '<br><span style="font-size:8pt;color:#666;">(' + age + '歳)</span>' : '') + '</td></tr>' +
+        '<tr><th>10　業務内容</th><td colspan="3">' + v(gyoumu) + '</td></tr>' +
+        '<tr><th>11　協定対象派遣<br>労働者かの別</th><td colspan="3">協定対象派遣労働者</td></tr>' +
+        '<tr><th>12　責任の程度</th><td colspan="3">' + v(sekinin) + '</td></tr>' +
+        '<tr><th>13　派遣期間</th><td>' + v(pStart) + ' 〜 ' + v(pEnd) + '</td>' +
+            '<th>14　就業日</th><td>月〜金曜日（年末年始・夏季休業を除く）（別添カレンダーによる）</td></tr>' +
+        '<tr><th>15　製造業務専門<br>派遣先責任者</th><td colspan="3" class="hd-cell-no-pad">' +
+          innerResp(hsBusho, hsYaku, hsName, c(HF.haken_tel)) + '</td></tr>' +
+        '<tr><th>16　製造業務専門<br>派遣元責任者</th><td colspan="3" class="hd-cell-no-pad">' +
+          innerResp(hgBusho, hgYaku, hgName, HAKEN_GEN_FIXED.tel) + '</td></tr>' +
+        '<tr><th>17　就業状況</th><td colspan="3">別添タイムシートのとおり</td></tr>' +
+        '<tr><th>18　社会保険・雇用保険の<br>被保険者資格取得届の<br>提出の有無</th><td colspan="3">' +
+          '健康保険　有　・　無　　　厚生年金保険　有　・　無　　　雇用保険　有　・　無<br>' +
+          '<span style="font-size:8.5pt;color:#444;">無の理由：</span></td></tr>' +
+        '<tr><th>19　派遣労働者からの<br>苦情処理状況</th>' +
+          '<td colspan="3" style="height:46px;font-size:8.5pt;color:#666;">（申出を受けた日）　　　　　（苦情内容、処理状況）</td></tr>' +
+        '<tr><th>20　教育訓練を<br>行った日時</th><td colspan="3">教育訓練を行った日時及び内容については、別紙に記載する。</td></tr>' +
+        '<tr><th>21　教育訓練を<br>行った内容</th><td colspan="3" style="height:40px;">　</td></tr>' +
+        '<tr><th>22　備考</th><td colspan="3" style="height:40px;">　</td></tr>' +
+      '</table>' +
+      '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;">【労働者派遣終了後３年間保存】</div>' +
+    '</div>';
+
+  switchScreen('haisenDocScreen');
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
+  var actions = document.getElementById('haisenDocActions');
+  if (actions) actions.style.display = 'flex';
+  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+    var b = document.getElementById(id); if (b) b.style.display = 'none';
+  });
+  document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
+  if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+}
+
+// ============================================================
 // 未入力フィールド検出 / 入力 UI / SharePoint 保存
 // ============================================================
 // 派遣先情報リストに対する「未入力(空 or '-')」フィールドを検出し、
@@ -14592,8 +14791,12 @@ function renderHakensakiDetail() {
   // ===== 派遣契約書作成ボタン =====
   html += '<button onclick="showHakenKobetsuConfirmModal(_hakensakiItems[_hakensakiCurrentItemIdx])" ' +
     'style="width:100%;background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:12px;' +
-    'padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:12px;box-shadow:0 2px 6px rgba(40,53,147,0.3);">' +
+    'padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px;box-shadow:0 2px 6px rgba(40,53,147,0.3);">' +
     '📑 派遣契約書作成（労働者派遣個別契約書）</button>';
+  html += '<button onclick="openHakenKanriboEmpPicker(_hakensakiItems[_hakensakiCurrentItemIdx])" ' +
+    'style="width:100%;background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:12px;' +
+    'padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,105,92,0.3);">' +
+    '📋 派遣先管理台帳 兼 派遣通知書</button>';
 
   // ===== サマリーカード =====
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
