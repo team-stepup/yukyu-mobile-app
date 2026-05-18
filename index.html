@@ -9748,23 +9748,23 @@ async function saveNewHireFields(emp, salaryStr, tsukinStr, startStr, endStr) {
   var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
   var body = { __metadata: { type: entityType } };
   var changed = false;
-  // 給与体系(時給)
+  // 給与体系(時給) — 書き込みキーは emp 上のキー(=EntityPropertyName, OData_付き)をそのまま使う
   var salKey = Object.keys(emp).find(function(k){ return k.indexOf('x7d66__x6599__x6642__x7d66') >= 0; });
   if (salKey) {
     var newSal = salaryStr ? parseFloat(salaryStr) : null;
-    if ((newSal || 0) !== (getEmpSalary(emp) || 0)) { body[salKey.replace(/^OData_/, '')] = newSal; changed = true; }
+    if ((newSal || 0) !== (getEmpSalary(emp) || 0)) { body[salKey] = newSal; changed = true; }
   }
   // 通勤手当
   var tsuKey = Object.keys(emp).find(function(k){ return k.indexOf('x901a__x52e4__x624b__x5f53') >= 0; });
   if (tsuKey) {
     var newTsu = tsukinStr ? parseFloat(tsukinStr) : null;
-    if ((newTsu || 0) !== (getEmpTsukinTeate(emp) || 0)) { body[tsuKey.replace(/^OData_/, '')] = newTsu; changed = true; }
+    if ((newTsu || 0) !== (getEmpTsukinTeate(emp) || 0)) { body[tsuKey] = newTsu; changed = true; }
   }
-  // 雇用契約開始/終了日
+  // 雇用契約開始/終了日 (F.koyoStart/End は EntityPropertyName = OData_付き)
   var curS = _toDateInputVal(emp[F.koyoStart]);
   var curE = _toDateInputVal(emp[F.koyoEnd]);
-  if (startStr !== curS) { body[F.koyoStart.replace(/^OData_/, '')] = startStr ? (startStr + 'T00:00:00Z') : null; changed = true; }
-  if (endStr !== curE) { body[F.koyoEnd.replace(/^OData_/, '')] = endStr ? (endStr + 'T00:00:00Z') : null; changed = true; }
+  if (startStr !== curS) { body[F.koyoStart] = startStr ? (startStr + 'T00:00:00Z') : null; changed = true; }
+  if (endStr !== curE) { body[F.koyoEnd] = endStr ? (endStr + 'T00:00:00Z') : null; changed = true; }
   if (!changed) return { changed: 0 };
   // 元に戻す用に変更前の値を記録
   var origVals = {};
@@ -37777,10 +37777,9 @@ async function bulkCreateRenewalDocs() {
   try {
     var token = await getToken();
     var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
-    var startKey = F.koyoStart.replace(/^OData_/, '');
-    var endKey = F.koyoEnd.replace(/^OData_/, '');
-    var salaryODataKey = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap) ? hakenKeyMap['kyuyoTaikei'] : null;
-    var salaryWriteKey = salaryODataKey ? salaryODataKey.replace(/^OData_/, '') : null;
+    // 書き込みキーは EntityPropertyName (OData_付き)。InternalName に変換しない。
+    var startKey = F.koyoStart;
+    var endKey = F.koyoEnd;
     for (var di = 0; di < list.length; di++) {
       var dEmp = list[di];
       var ev = editedVals[dEmp.Id];
@@ -37793,13 +37792,14 @@ async function bulkCreateRenewalDocs() {
       var anyChange = false;
       if (newStart !== curStart) { pBody[startKey] = newStart ? (newStart + 'T00:00:00Z') : null; anyChange = true; }
       if (newEnd !== curEnd) { pBody[endKey] = newEnd ? (newEnd + 'T00:00:00Z') : null; anyChange = true; }
-      // 給与(時給) の変更
+      // 給与(時給) の変更 — 書き込みキーは dEmp 上のキー(EntityPropertyName, OData_付き)
+      var salKey = Object.keys(dEmp).find(function(k){ return k.indexOf('x7d66__x6599__x6642__x7d66') >= 0; });
       var newSalaryNum = null;
-      if (salaryWriteKey) {
+      if (salKey) {
         var rawSal = ev.salary;
         newSalaryNum = rawSal ? parseFloat(rawSal) : null;
         var curSalaryNum = getEmpSalary(dEmp) || null;
-        if ((newSalaryNum || 0) !== (curSalaryNum || 0)) { pBody[salaryWriteKey] = newSalaryNum; anyChange = true; }
+        if ((newSalaryNum || 0) !== (curSalaryNum || 0)) { pBody[salKey] = newSalaryNum; anyChange = true; }
       }
       if (!anyChange) continue;  // 変更なし
       // 元に戻す用に変更前の値を記録
@@ -37819,11 +37819,16 @@ async function bulkCreateRenewalDocs() {
           },
           body: JSON.stringify(pBody)
         });
-        if (!pResp.ok) throw new Error('HTTP ' + pResp.status);
+        if (!pResp.ok) {
+          var pErrTxt = '';
+          try { pErrTxt = await pResp.text(); } catch (_) {}
+          try { var pj = JSON.parse(pErrTxt); pErrTxt = (pj.error && pj.error.message && pj.error.message.value) || pErrTxt; } catch (_) {}
+          throw new Error('HTTP ' + pResp.status + ' ' + String(pErrTxt).substring(0, 200));
+        }
         // ローカルにも反映 (PDF生成で最新値を使う)
         if (startKey in pBody) dEmp[F.koyoStart] = pBody[startKey];
         if (endKey in pBody) dEmp[F.koyoEnd] = pBody[endKey];
-        if (salaryWriteKey && (salaryWriteKey in pBody)) dEmp[salaryODataKey] = newSalaryNum;
+        if (salKey && (salKey in pBody)) dEmp[salKey] = newSalaryNum;
         dateSavedCount++;
         undoItems.push({ empId: dEmp.Id, empNo: String(dEmp[F.syainNo] || ''), name: dEmp.Title || '', orig: origVals });
       } catch (pe) {
