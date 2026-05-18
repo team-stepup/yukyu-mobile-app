@@ -5614,7 +5614,7 @@ select.sankyu-edit-input {
         <button onclick="zoomHaisenDoc(0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍＋</button>
       </div>
       <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
-      <button onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
+      <button id="haisenEsignBtn" onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
       <button id="adobeSignBtn" onclick="sendNewHireToAdobeSign()" class="btn" style="display:none;background:linear-gradient(135deg,#d32f2f,#b71c1c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📤 Adobe Sign 署名へ送信</button>
       <button class="koyou-undo-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1.5px solid #e65100;border-radius:8px;padding:10px;font-weight:700;font-size:13px;">↩ 給与・雇用期間の変更を元に戻す</button>
     </div>
@@ -9828,6 +9828,9 @@ async function openHaisenDocScreen(docType) {
       return;
     }
     if (actions) actions.style.display = 'flex';
+    // 電子サインボタンを再表示 (派遣契約書表示時に非表示にされている場合があるため)
+    var esignBtn = document.getElementById('haisenEsignBtn');
+    if (esignBtn) esignBtn.style.display = '';
     // Adobe Sign 送信ボタン: 新規雇用契約書 (roudouKeiyaku) のときのみ表示
     var adobeBtn = document.getElementById('adobeSignBtn');
     if (adobeBtn) adobeBtn.style.display = (docType === 'roudouKeiyaku') ? 'block' : 'none';
@@ -11631,6 +11634,284 @@ function renderRoudouKeiyakushoSan(emp, h, mode) {
     // (appendKalendarPage がプレースホルダを同期で append 済みなので、その後ろに来る)
     appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt);
   }
+}
+
+// ============================================================
+// 労働者派遣 個別契約書 — 派遣契約(業務・期間)単位で作成
+// 派遣先一覧ページの「📑 派遣契約書作成」ボタンから起動
+// ============================================================
+var _hakenKeiyakuRows = [];   // ピッカーで選択する派遣先情報の行
+
+// 派遣元(自社)の固定情報
+var HAKEN_GEN_FIXED = {
+  name: '有限会社ステップ・アップ',
+  jusho: '静岡県磐田市上本郷1006番地７',
+  daihyou: '代表取締役　山下　浩俊',
+  kyoka: '（派）22-300880',
+  tel: '0538-36-6968'
+};
+
+// 「📑 派遣契約書作成」: 現在の派遣先の派遣契約(派遣先情報の行)を取得しピッカー表示
+async function openHakenKeiyakuPicker() {
+  try {
+    var emps = (typeof hakenEmployeesCache !== 'undefined' && hakenEmployeesCache) ? hakenEmployeesCache : [];
+    if (!emps.length) { showToast('派遣先の社員一覧を先に開いてください', 'error'); return; }
+    var bango = '';
+    for (var i = 0; i < emps.length; i++) { bango = extractHakenBango(emps[i]); if (bango) break; }
+    if (!bango) { showToast('派遣先番号が特定できません', 'error'); return; }
+    showToast('派遣契約データを取得中…', 'info');
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=200";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('派遣先データ取得失敗 ' + resp.status);
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    var rows = items.filter(function(it) {
+      var v = String(it[HF.bango] || '').trim();
+      return v === bango || v.indexOf(bango + '-') === 0 ||
+             v.indexOf(bango + '（') === 0 || v.indexOf(bango + '(') === 0;
+    });
+    if (!rows.length) { showToast('この派遣先の派遣契約(派遣先情報)が見つかりません', 'error'); return; }
+    _hakenKeiyakuRows = rows;
+    _showHakenKeiyakuPickerModal(rows);
+  } catch (e) {
+    console.error('openHakenKeiyakuPicker error:', e);
+    showToast('エラー: ' + (e.message || String(e)), 'error');
+  }
+}
+
+function _hkClean(s) {
+  if (s == null) return '';
+  return String(s).replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '')
+    .replace(/[\r\n]+/g, ' ').replace(/[ 　\t]+/g, ' ').trim();
+}
+function _hkYmd(v) {
+  if (!v) return '';
+  var d = (v instanceof Date) ? v : new Date(v);
+  if (isNaN(d)) return _hkClean(v);
+  return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+}
+
+// 派遣契約ピッカー: 派遣先情報の行を一覧表示し、1件選択 → 個別契約書を作成
+function _showHakenKeiyakuPickerModal(rows) {
+  var old = document.getElementById('hakenKeiyakuPickerOverlay');
+  if (old) old.remove();
+  var listHtml = rows.map(function(r, idx) {
+    var no = _hkClean(r[HF.bango] || '');
+    var gyoumu = _hkClean(r[HF.gyoumu5] || r[HF.gyoumu] || '') || '(業務内容 未登録)';
+    var soshiki = _hkClean(r[HF.soshiki] || '');
+    var hkName = _hkClean(r[HF.hakensaki_name] || r[HF.hakensaki_keiyaku] || '');
+    var ps = _hkYmd(r[HF.haken_period_start]), pe = _hkYmd(r[HF.haken_period_end]);
+    var period = (ps || pe) ? (ps + ' 〜 ' + pe) : '派遣期間 未登録';
+    return '<button onclick="renderHakenKobetsuKeiyakushoByIdx(' + idx + ')" ' +
+      'style="display:block;width:100%;text-align:left;background:#fff;border:1px solid #c5cae9;border-radius:8px;' +
+      'padding:11px 13px;margin-bottom:8px;cursor:pointer;">' +
+      '<div style="font-size:13px;font-weight:700;color:#283593;">' + escHtml(gyoumu) + '</div>' +
+      '<div style="font-size:11px;color:#666;margin-top:3px;">No.' + escHtml(no) +
+        (soshiki ? ' ／ 組織単位: ' + escHtml(soshiki) : '') + '</div>' +
+      '<div style="font-size:11px;color:#888;margin-top:2px;">' + escHtml(hkName) + '</div>' +
+      '<div style="font-size:11px;color:#1976d2;margin-top:2px;">' + escHtml(period) + '</div>' +
+    '</button>';
+  }).join('');
+  var ov = document.createElement('div');
+  ov.id = 'hakenKeiyakuPickerOverlay';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;' +
+    'align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:15px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
+        '<h3 style="margin:0;font-size:15px;color:#283593;">📑 派遣契約を選択 — 個別契約書作成</h3>' +
+        '<button onclick="document.getElementById(\'hakenKeiyakuPickerOverlay\').remove()" ' +
+          'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:14px 18px;">' +
+        '<div style="font-size:11.5px;color:#888;margin-bottom:10px;">作成する派遣契約(業務・期間)を選んでください。</div>' +
+        listHtml +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+function renderHakenKobetsuKeiyakushoByIdx(idx) {
+  var ov = document.getElementById('hakenKeiyakuPickerOverlay');
+  if (ov) ov.remove();
+  var h = _hakenKeiyakuRows[idx];
+  if (!h) { showToast('派遣契約データが見つかりません', 'error'); return; }
+  renderHakenKobetsuKeiyakusho(h);
+}
+
+// 労働者派遣個別契約書 を 1ページの haisen-doc-page として描画
+function renderHakenKobetsuKeiyakusho(h) {
+  window._currentHaisenDocMode = 'hakenKeiyaku';
+  function c(k) { return _hkClean(h[k] || ''); }
+  function chkb(b) { return b ? '☑' : '☐'; }
+  function v(s) { return s ? escHtml(s) : '<span style="color:#bbb;">(未設定)</span>'; }
+
+  var hkName   = c(HF.hakensaki_name) || c(HF.hakensaki_keiyaku);
+  var hakenJusho = c(HF.haken_jusho);
+  var hakenTel = c(HF.haken_tel);
+  var kinmuJusho = c(HF.kinmu_jusho) || hakenJusho;
+  var kinmuTel = c(HF.kinmu_tel) || hakenTel;
+  var hkBuka   = c(HF.syuugyou_busho);
+  var soshiki  = c(HF.soshiki);
+  var soshikiCho = c(HF.soshikiNoCho);
+  var gyoumu   = c(HF.gyoumu5) || c(HF.gyoumu);
+  var sekinin  = c(HF.sekinin_teido);
+  var shikiBusho = c(HF.shikiBusho), shikiYaku = c(HF.shikiYakushoku), shikiName = c(HF.shikiName);
+  var pStart = _hkYmd(h[HF.haken_period_start]);
+  var pEnd   = _hkYmd(h[HF.haken_period_end]);
+  var hsBusho = c(HF.hakensakiSekBusho), hsYaku = c(HF.hakensakiSekYakushoku), hsName = c(HF.hakensakiSekName);
+  var hgBusho = c(HF.hakengenSekBusho), hgYaku = c(HF.hakengenSekYakushoku), hgName = c(HF.hakengenSekName);
+  var ksBusho = c(HF.kujouSakiBusho), ksYaku = c(HF.kujouSakiYakushoku), ksName = c(HF.kujouSakiName);
+  var kgBusho = c(HF.kujouGenBusho), kgYaku = c(HF.kujouGenYakushoku), kgName = c(HF.kujouGenName);
+
+  // 36協定
+  var jg1d = h[HF.jikangai_1day], jg1m = h[HF.jikangai_1month], jg1y = h[HF.jikangai_1year];
+  var kj1m = h[HF.kyujitsu_1month];
+  function dash(x) { return (x === 0 || x) ? String(x) : '　'; }
+
+  // 派遣料金 (通常勤務を基準に算出: 深夜 ×1.25 / 時間外・法定外休日 ×1.25 / 法定休日 ×1.35)
+  var ryokinBase = Number(h[HF.hakenRyokin]) || 0;
+  var tani = c(HF.keisanTani);
+  function yen(n) { return n ? ('¥' + Math.round(n).toLocaleString()) : '－'; }
+  var ryoNormal = ryokinBase, ryoNight = ryokinBase ? ryokinBase * 1.25 : 0;
+  var ryoOver = ryokinBase ? ryokinBase * 1.25 : 0, ryoHoutei = ryokinBase ? ryokinBase * 1.35 : 0;
+
+  // 就業時間 3シフト
+  var shifts = [
+    { n:'①', jikan:c(HF.syuugyou_time1), jisu:c(HF.jitsudou_time1), total:c(HF.kyuukei_total1),
+      slots:[c(HF.kyuukei1_1),c(HF.kyuukei1_2),c(HF.kyuukei1_3)].filter(Boolean) },
+    { n:'②', jikan:c(HF.syuugyou_time2), jisu:c(HF.jitsudou_time2), total:c(HF.kyuukei_total2),
+      slots:[c(HF.kyuukei2_1),c(HF.kyuukei2_2),c(HF.kyuukei2_3)].filter(Boolean) },
+    { n:'③', jikan:c(HF.syuugyou_time3), jisu:c(HF.jitsudou_time3), total:c(HF.kyuukei_total3),
+      slots:[c(HF.kyuukei3_1),c(HF.kyuukei3_2),c(HF.kyuukei3_3)].filter(Boolean) }
+  ].filter(function(s){ return s.jikan || s.jisu || s.total || s.slots.length; });
+  if (!shifts.length) shifts = [{ n:'①', jikan:'', jisu:'', total:'', slots:[] }];
+  var shiftRows = shifts.map(function(s) {
+    return '<tr><td class="hd-shift-no">' + s.n + '</td>' +
+      '<td class="hd-shift-time">' + (s.jikan ? escHtml(s.jikan) : '－') + '</td>' +
+      '<td>' + (s.jisu ? escHtml(s.jisu) : '－') + '</td>' +
+      '<td>' + (s.total ? escHtml(s.total) : '－') + '</td>' +
+      '<td class="hd-shift-slots">' + (s.slots.length ? escHtml(s.slots.join('  ')) : '－') + '</td></tr>';
+  }).join('');
+
+  var todayStr = _hkYmd(new Date());
+
+  // 法令長文
+  var T_ANZEN = '派遣元は派遣する前に派遣労働者に安全衛生教育を実施する。派遣先は派遣業務に従事させる前に危険及び機械等設備の取扱い方法の安全衛生教育を実施する。また、作業内容を変更するときは、派遣先において必要な安全衛生教育を実施する。派遣労働者が労働災害に被災した場合は、派遣先は遅滞なく派遣元責任者へ連絡するとともに、労働者死傷病報告書の写しを送付する。派遣先及び派遣元は労働者派遣法第44条から第47条の４までの規定により課せられた各法令を遵守し、自己に課せられた法令上の責任を負う。なお派遣就業中の安全及び衛生については、派遣先の安全衛生に関する規定を適用することとし、その他については派遣元の安全衛生に関する規定を適用することとする。';
+  var T_BENGI = '派遣先は、本契約に基づく労働者派遣に係る派遣労働者に対して、食堂、ロッカー、更衣室、休憩所、駐車場等の利用は便宜供与する。';
+  var T_FUNSO = '労働者派遣の役務の提供の終了後、当該派遣労働者を雇用する場合、あらかじめ猶予期間をもってその雇用意思を事前に派遣元へ示すこととする。';
+  var T_KOYOU = '①労働者派遣契約の解除の事前の申入れ：派遣先は、専ら派遣先に起因する事由により、労働者派遣契約の契約期間が満了する前の解除を行おうとする場合には、派遣元の合意を得ることはもとより、あらかじめ相当の猶予期間をもって派遣元に解除の申入れを行うこととする。②派遣先における就業機会の確保：派遣先及び派遣元は、労働者派遣契約の契約期間が満了する前に派遣労働者の責に帰すべき事由によらない労働者派遣契約の解除を行った場合には、派遣先の関連会社での就業をあっせんする等により、当該労働者派遣契約に係る派遣労働者の新たな就業機会の確保を図ることとする。③損害賠償等に係る適切な措置：派遣先は、派遣先の責に帰すべき事由により契約期間が満了する前に解除を行おうとする場合には、派遣労働者の新たな就業機会の確保を図ることとし、これができないときには、少なくとも休業手当に相当する額以上の額、また派遣元がやむを得ず当該派遣労働者を解雇する場合で解雇予告をしないときは少なくとも30日分以上の賃金に相当する額について損害の賠償を行うこととする。④労働者派遣契約の解除の理由の明示：派遣先は、契約期間が満了する前に解除を行おうとする場合であって派遣元から請求があったときは、解除を行った理由を派遣元に対して明らかにすることとする。';
+  var T_KUJOU = '①派遣先における上記(1)記載の者が苦情の申出を受けたときは、ただちに派遣先責任者へ連絡することとし、当該派遣先責任者が中心となって誠意をもって、遅滞なく、当該苦情の適切かつ迅速な処理を図ることとし、その結果について必ず派遣労働者に通知することとする。②派遣元における上記(1)記載の者が苦情の申出を受けたときは、ただちに派遣元責任者へ連絡することとし、当該派遣元責任者が中心となって誠意をもって、遅滞なく、当該苦情の適切かつ迅速な処理を図ることとし、その結果について必ず派遣労働者に通知することとする。③派遣先及び派遣元は、自らでその解決が容易であり即時に処理した苦情の他は、相互に遅滞なく通知するとともに、密接に連絡調整を行いつつ、その解決を図ることとする。';
+  var T_LONGSTYLE = 'font-size:8.2pt;line-height:1.6;text-align:justify;';
+
+  function innerRespTable(busho, yaku, name, tel) {
+    return '<table class="hd-inner">' +
+      '<tr><td class="hd-inner-l">(部署)</td><td class="hd-inner-v">' + v(busho) + '</td>' +
+          '<td class="hd-inner-l">(役職)</td><td class="hd-inner-v">' + v(yaku) + '</td></tr>' +
+      '<tr><td class="hd-inner-l">(氏名)</td><td class="hd-inner-v">' + v(name) + '</td>' +
+          '<td class="hd-inner-l">(電話)</td><td class="hd-inner-v">' + v(tel) + '</td></tr>' +
+    '</table>';
+  }
+
+  var page =
+    '<div class="haisen-doc-page">' +
+      '<h1 style="font-size:17pt;letter-spacing:4px;">労働者派遣個別契約書</h1>' +
+      '<div class="hd-meta">作成日: ' + escHtml(todayStr) + '</div>' +
+      '<div class="hd-intro">' + escHtml(hkName || '（派遣先）') + '（以下「派遣先」という。）と' +
+        escHtml(HAKEN_GEN_FIXED.name) + '（以下「派遣元」という。）（' + escHtml(HAKEN_GEN_FIXED.kyoka) +
+        '）とは、次のとおり労働者派遣契約を締結する。</div>' +
+      '<table class="hd-main">' +
+        '<tr><th>1　派遣先事業所</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
+          '<tr><td class="hd-inner-l">(名称)</td><td class="hd-inner-v">' + v(hkName) + '</td>' +
+              '<td class="hd-inner-l">(電話)</td><td class="hd-inner-v">' + v(hakenTel) + '</td></tr>' +
+          '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v" colspan="3">' + v(hakenJusho) + '</td></tr>' +
+        '</table></td></tr>' +
+        '<tr><th>2　就業場所</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
+          '<tr><td class="hd-inner-l">(名称)</td><td class="hd-inner-v">' + v(hkName) + '</td>' +
+              '<td class="hd-inner-l">(電話)</td><td class="hd-inner-v">' + v(kinmuTel) + '</td></tr>' +
+          '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v" colspan="3">' + v(kinmuJusho) + '</td></tr>' +
+          '<tr><td class="hd-inner-l">(部署)</td><td class="hd-inner-v" colspan="3">' + v(hkBuka) + '</td></tr>' +
+        '</table></td></tr>' +
+        '<tr><th>3　無期雇用派遣労働者<br>又は60歳以上の派遣労働者<br>に限定するか否かの別</th><td>' +
+          '☐ 無期雇用派遣労働者に限定　　☐ 60歳以上の派遣労働者に限定　　<span class="hd-circle">☑ 限定なし</span></td></tr>' +
+        '<tr><th>4　派遣人員</th><td>　　1　名</td></tr>' +
+        '<tr><th>5　協定対象派遣労働者に<br>限定するか否かの別</th><td>協定対象派遣労働者に限定する</td></tr>' +
+        '<tr><th>6　業務内容</th><td>' + v(gyoumu) + '</td></tr>' +
+        '<tr><th>7　責任の程度</th><td>' + v(sekinin) + '</td></tr>' +
+        '<tr><th>8　組織単位<br>(組織の長の職名)</th><td>' + v(soshiki) +
+          (soshikiCho ? '　／　組織の長: ' + escHtml(soshikiCho) : '') + '</td></tr>' +
+        '<tr><th>9　指揮命令者</th><td class="hd-cell-no-pad">' +
+          innerRespTable(shikiBusho, shikiYaku, shikiName, kinmuTel) + '</td></tr>' +
+        '<tr><th>10　派遣期間</th><td>' + v(pStart) + '　　から　　' + v(pEnd) + '　　まで</td></tr>' +
+        '<tr><th>11　就業日</th><td>月〜金曜日（ただし、年末年始、夏季休業を除く）（別添カレンダーによる）</td></tr>' +
+        '<tr><th>12　就業時間及び<br>休憩時間</th><td class="hd-cell-no-pad">' +
+          '<table class="hd-shift-table">' +
+            '<colgroup><col class="hs-c-no"><col class="hs-c-jikan"><col class="hs-c-jisu"><col class="hs-c-total"><col class="hs-c-slots"></colgroup>' +
+            '<tr><th>No</th><th>就業時間</th><th>実働時間</th><th>休憩時間</th><th>休憩時間帯</th></tr>' +
+            shiftRows +
+          '</table></td></tr>' +
+        '<tr><th>13　就業日外労働及び<br>就業時間外労働</th><td>' +
+          '休日労働: 月に <b>' + dash(kj1m) + '</b> 日まで　※36協定の範囲内とする<br>' +
+          '時間外労働: <b>' + dash(jg1d) + '</b> 時間／日　<b>' + dash(jg1m) + '</b> 時間／月　<b>' +
+            dash(jg1y) + '</b> 時間／年　の範囲内とする。</td></tr>' +
+        '<tr><th>14　派遣料金</th><td class="hd-chingin">' +
+          '通常勤務　<b>' + yen(ryoNormal) + '</b> 円／時間　　深夜時間勤務　<b>' + yen(ryoNight) + '</b> 円／時間<br>' +
+          '時間外・法定外休日勤務　<b>' + yen(ryoOver) + '</b> 円／時間　　法定休日　<b>' + yen(ryoHoutei) + '</b> 円／時間<br>' +
+          '計算単位　' + (tani ? escHtml(tani) + ' 分' : '<span style="color:#bbb;">(未設定)</span>') + '</td></tr>' +
+        '<tr><th>15　支払い方法</th><td>毎月末日締め、翌月末日支払。※派遣元が指定した金融機関口座に振り込みとする。</td></tr>' +
+        '<tr><th>16　製造業務専門<br>派遣先責任者</th><td class="hd-cell-no-pad">' +
+          innerRespTable(hsBusho, hsYaku, hsName, hakenTel) + '</td></tr>' +
+        '<tr><th>17　製造業務専門<br>派遣元責任者</th><td class="hd-cell-no-pad">' +
+          innerRespTable(hgBusho, hgYaku, hgName, HAKEN_GEN_FIXED.tel) + '</td></tr>' +
+        '<tr><th>18　安全及び衛生</th><td style="' + T_LONGSTYLE + '">' + escHtml(T_ANZEN) + '</td></tr>' +
+        '<tr><th>19　福祉増進のための<br>便宜供与</th><td>' + escHtml(T_BENGI) + '</td></tr>' +
+        '<tr><th>20　派遣先が派遣労働者を<br>雇用する場合の<br>紛争防止措置</th><td style="' + T_LONGSTYLE + '">' +
+          escHtml(T_FUNSO) + '</td></tr>' +
+        '<tr><th>21　派遣労働者の雇用の<br>安定を図るために<br>必要な措置</th><td style="' + T_LONGSTYLE + '">' +
+          escHtml(T_KOYOU) + '</td></tr>' +
+        '<tr><th>22　苦情の申出先、<br>処理方法・連携体制</th><td class="hd-cell-no-pad">' +
+          '<table class="hd-inner">' +
+            '<tr><td class="hd-inner-l">派遣先</td><td class="hd-inner-v">部署: ' + v(ksBusho) + '</td>' +
+                '<td class="hd-inner-v">役職: ' + v(ksYaku) + '</td><td class="hd-inner-v">氏名: ' + v(ksName) + '</td></tr>' +
+            '<tr><td class="hd-inner-l">派遣元</td><td class="hd-inner-v">部署: ' + v(kgBusho) + '</td>' +
+                '<td class="hd-inner-v">役職: ' + v(kgYaku) + '</td><td class="hd-inner-v">氏名: ' + v(kgName) + '</td></tr>' +
+          '</table>' +
+          '<div style="padding:6px 8px;border:0.8pt solid #000;border-top:none;' + T_LONGSTYLE + '">' +
+            escHtml(T_KUJOU) + '</div></td></tr>' +
+        '<tr><th>23　紹介予定派遣に<br>関する事項</th><td>☐ 該当あり　　<span class="hd-circle">☑ 該当なし</span></td></tr>' +
+      '</table>' +
+      '<div style="font-size:8.5pt;margin:8px 0 4px;">※本契約成立の証とするため、本書を2通作成し派遣先・派遣元記名捺印の上、各自1通を保持するものとする。</div>' +
+      '<table class="hd-main" style="margin-top:4px;">' +
+        '<tr><th style="width:12%;">派遣先</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
+          '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v">' + v(hakenJusho) + '</td></tr>' +
+          '<tr><td class="hd-inner-l">(事業所名)</td><td class="hd-inner-v">' + v(hkName) +
+            '　　　　　　　㊞</td></tr>' +
+          '<tr><td class="hd-inner-l">(代表者名)</td><td class="hd-inner-v">　</td></tr>' +
+        '</table></td></tr>' +
+        '<tr><th style="width:12%;">派遣元</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
+          '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.jusho) + '</td></tr>' +
+          '<tr><td class="hd-inner-l">(事業所名)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.name) +
+            '　　　　　　　㊞</td></tr>' +
+          '<tr><td class="hd-inner-l">(代表者名)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.daihyou) + '</td></tr>' +
+          '<tr><td class="hd-inner-l">(許可番号)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.kyoka) + '</td></tr>' +
+        '</table></td></tr>' +
+      '</table>' +
+    '</div>';
+
+  switchScreen('haisenDocScreen');
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
+  // 操作ボタン: ズーム + 印刷のみ (電子サイン/Adobe/元に戻す は非表示)
+  var actions = document.getElementById('haisenDocActions');
+  if (actions) actions.style.display = 'flex';
+  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+    var b = document.getElementById(id); if (b) b.style.display = 'none';
+  });
+  document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
+  if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
 }
 
 // ============================================================
@@ -37460,7 +37741,8 @@ function renderHakenList(hakensaki, employees) {
     '<button class="haken-filter-btn" data-filter="yuki" onclick="applyHakenFilter(\'yuki\',this)">📄 有期 (' + countYuki + ')</button>' +
     '<button class="haken-filter-btn" data-filter="muki" onclick="applyHakenFilter(\'muki\',this)">♾️ 無期 (' + countMuki + ')</button>' +
     '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
-    '<button class="haken-dl-btn" onclick="bulkCreateRenewalDocs()" style="background:#e65100;margin-left:auto;">📄 更新書類 一括作成</button>' +
+    '<button class="haken-dl-btn" onclick="openHakenKeiyakuPicker()" style="background:#3949ab;margin-left:auto;">📑 派遣契約書作成</button>' +
+    '<button class="haken-dl-btn" onclick="bulkCreateRenewalDocs()" style="background:#e65100;">📄 更新書類 一括作成</button>' +
     '<button class="koyou-undo-btn haken-dl-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1px solid #e65100;">↩ 元に戻す</button>' +
     '<button class="haken-dl-btn" onclick="downloadHakenExcel()">📥 Excel</button>' +
     '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
