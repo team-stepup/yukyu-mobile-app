@@ -5615,6 +5615,7 @@ select.sankyu-edit-input {
       </div>
       <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
       <button onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
+      <button class="koyou-undo-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1.5px solid #e65100;border-radius:8px;padding:10px;font-weight:700;font-size:13px;">↩ 給与・雇用期間の変更を元に戻す</button>
     </div>
   </div>
 
@@ -9487,6 +9488,92 @@ function getEmpTsukinTeate(emp) {
   return isNaN(n) ? 0 : n;
 }
 
+// ===== 給与・通勤費・雇用期間 変更の「元に戻す」スナップショット (localStorage 保存) =====
+// 新規雇用契約書 / 更新書類一括作成 が社員データを書き換える直前の値を記録し、
+// undoKoyouChanges() でまとめて元に戻せるようにする。
+var KOYOU_UNDO_KEY = '_koyouUndoSnapshot';
+function _recordKoyouUndo(label, items) {
+  // items: [{empId, empNo, name, orig:{ODataキー: 元の値, ...}}]
+  if (!items || !items.length) return;
+  try {
+    localStorage.setItem(KOYOU_UNDO_KEY, JSON.stringify({
+      ts: new Date().toISOString(), label: label, items: items
+    }));
+  } catch (e) { console.warn('undo snapshot 保存失敗:', e); }
+}
+function _getKoyouUndo() {
+  try {
+    var s = localStorage.getItem(KOYOU_UNDO_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch (e) { return null; }
+}
+// 直前の 給与/通勤費/雇用期間 変更を元に戻す
+async function undoKoyouChanges(btnEl) {
+  var snap = _getKoyouUndo();
+  if (!snap || !snap.items || !snap.items.length) {
+    if (typeof showToast === 'function') showToast('元に戻せる変更がありません', 'info');
+    return;
+  }
+  var when = '';
+  try { when = new Date(snap.ts).toLocaleString('ja-JP'); } catch (_) {}
+  if (!confirm('「' + snap.label + '」の変更を元に戻します。\n対象: ' + snap.items.length + '名\n実行日時: ' + when + '\n\nよろしいですか？')) return;
+  if (btnEl) btnEl.disabled = true;
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+    var ok = 0, ng = [];
+    for (var i = 0; i < snap.items.length; i++) {
+      var it = snap.items[i];
+      var body = { __metadata: { type: entityType } };
+      Object.keys(it.orig || {}).forEach(function(odk){
+        body[odk.replace(/^OData_/, '')] = it.orig[odk];
+      });
+      try {
+        var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + it.empId + ")";
+        var resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+            'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+          },
+          body: JSON.stringify(body)
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        // ローカルキャッシュにも反映
+        try {
+          var emps = (typeof hakenEmployeesCache !== 'undefined' && hakenEmployeesCache) ? hakenEmployeesCache : [];
+          var ce = emps.find(function(x){ return x && x.Id === it.empId; });
+          if (ce) Object.keys(it.orig).forEach(function(odk){ ce[odk] = it.orig[odk]; });
+          if (typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.Id === it.empId) {
+            Object.keys(it.orig).forEach(function(odk){ currentEmployee[odk] = it.orig[odk]; });
+          }
+        } catch (_) {}
+        ok++;
+      } catch (e) { ng.push((it.name || it.empNo || '?') + ': ' + (e.message || e)); }
+      await new Promise(function(r){ setTimeout(r, 200); });
+    }
+    localStorage.removeItem(KOYOU_UNDO_KEY);
+    if (typeof showToast === 'function')
+      showToast('↩ 元に戻しました: ' + ok + '名' + (ng.length ? ' / 失敗 ' + ng.length : ''), ng.length ? 'error' : 'success');
+    if (ng.length) console.warn('undo 失敗:', ng);
+    if (btnEl) { btnEl.disabled = false; btnEl.style.display = 'none'; }
+    // 派遣先一覧表示中なら再描画
+    if (typeof refreshUndoButtons === 'function') refreshUndoButtons();
+  } catch (e) {
+    console.error('undoKoyouChanges error:', e);
+    if (typeof showToast === 'function') showToast('復元エラー: ' + (e.message || e), 'error');
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+// 「元に戻す」ボタンの表示/非表示を スナップショット有無で切替
+function refreshUndoButtons() {
+  var has = !!_getKoyouUndo();
+  document.querySelectorAll('.koyou-undo-btn').forEach(function(b){
+    b.style.display = has ? '' : 'none';
+  });
+}
+
 // 新規雇用契約書 作成前の 給与/通勤費/雇用期間 確認・編集モーダル
 // 戻り値: Promise<boolean> (true=作成へ進む / false=キャンセル)
 function showNewHireEditModal(emp) {
@@ -9573,6 +9660,13 @@ async function saveNewHireFields(emp, salaryStr, tsukinStr, startStr, endStr) {
   if (startStr !== curS) { body[F.koyoStart.replace(/^OData_/, '')] = startStr ? (startStr + 'T00:00:00Z') : null; changed = true; }
   if (endStr !== curE) { body[F.koyoEnd.replace(/^OData_/, '')] = endStr ? (endStr + 'T00:00:00Z') : null; changed = true; }
   if (!changed) return { changed: 0 };
+  // 元に戻す用に変更前の値を記録
+  var origVals = {};
+  Object.keys(body).forEach(function(bk){
+    if (bk === '__metadata') return;
+    var odk = (bk.charAt(0) === '_') ? ('OData_' + bk) : bk;
+    origVals[odk] = (emp[odk] === undefined ? null : emp[odk]);
+  });
   var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + emp.Id + ")";
   var resp = await fetch(url, {
     method: 'POST',
@@ -9592,6 +9686,10 @@ async function saveNewHireFields(emp, salaryStr, tsukinStr, startStr, endStr) {
     var odk = (bk.charAt(0) === '_') ? ('OData_' + bk) : bk;
     emp[odk] = body[bk];
   });
+  // 「元に戻す」スナップショットを記録
+  _recordKoyouUndo('新規雇用契約書: ' + (emp.Title || ''), [{
+    empId: emp.Id, empNo: String(emp[F.syainNo] || ''), name: emp.Title || '', orig: origVals
+  }]);
   return { changed: 1 };
 }
 
@@ -9624,6 +9722,8 @@ async function openHaisenDocScreen(docType) {
       return;
     }
     if (actions) actions.style.display = 'flex';
+    // 「元に戻す」ボタンの表示制御 (直前に給与/雇用期間を変更していれば表示)
+    if (typeof refreshUndoButtons === 'function') refreshUndoButtons();
     // 労働契約書③: スマホ50% / PC60%
     if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.6);
   } catch (e) {
@@ -37252,12 +37352,15 @@ function renderHakenList(hakensaki, employees) {
     '<button class="haken-filter-btn" data-filter="muki" onclick="applyHakenFilter(\'muki\',this)">♾️ 無期 (' + countMuki + ')</button>' +
     '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
     '<button class="haken-dl-btn" onclick="bulkCreateRenewalDocs()" style="background:#e65100;margin-left:auto;">📄 更新書類 一括作成</button>' +
+    '<button class="koyou-undo-btn haken-dl-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1px solid #e65100;">↩ 元に戻す</button>' +
     '<button class="haken-dl-btn" onclick="downloadHakenExcel()">📥 Excel</button>' +
     '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
 
   renderHakenTable(employees, body);
   // 産休育休バッジを非同期更新（List52取得が必要な場合あり）
   updateHakenSankyuCount();
+  // 「元に戻す」ボタンの表示制御
+  if (typeof refreshUndoButtons === 'function') refreshUndoButtons();
 }
 
 // 派遣先社員一覧の「🌸 産休育休 (N)」バッジを更新
@@ -37561,6 +37664,7 @@ async function bulkCreateRenewalDocs() {
   setProg('<div style="text-align:center;padding:20px;color:#666;"><div style="font-size:22px;">💾</div>雇用期間・給与を社員データに保存中…</div>');
   var dateSaveErrors = [];
   var dateSavedCount = 0;
+  var undoItems = [];  // 「元に戻す」用の変更前スナップショット
   try {
     var token = await getToken();
     var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
@@ -37589,6 +37693,13 @@ async function bulkCreateRenewalDocs() {
         if ((newSalaryNum || 0) !== (curSalaryNum || 0)) { pBody[salaryWriteKey] = newSalaryNum; anyChange = true; }
       }
       if (!anyChange) continue;  // 変更なし
+      // 元に戻す用に変更前の値を記録
+      var origVals = {};
+      Object.keys(pBody).forEach(function(bk){
+        if (bk === '__metadata') return;
+        var odk = (bk.charAt(0) === '_') ? ('OData_' + bk) : bk;
+        origVals[odk] = (dEmp[odk] === undefined ? null : dEmp[odk]);
+      });
       try {
         var pUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + dEmp.Id + ")";
         var pResp = await fetch(pUrl, {
@@ -37605,10 +37716,15 @@ async function bulkCreateRenewalDocs() {
         if (endKey in pBody) dEmp[F.koyoEnd] = pBody[endKey];
         if (salaryWriteKey && (salaryWriteKey in pBody)) dEmp[salaryODataKey] = newSalaryNum;
         dateSavedCount++;
+        undoItems.push({ empId: dEmp.Id, empNo: String(dEmp[F.syainNo] || ''), name: dEmp.Title || '', orig: origVals });
       } catch (pe) {
         dateSaveErrors.push((dEmp.Title || '') + ': ' + (pe.message || String(pe)));
       }
       await new Promise(function(r){ setTimeout(r, 200); });
+    }
+    // 「元に戻す」スナップショットを記録
+    if (undoItems.length) {
+      _recordKoyouUndo('更新書類一括: ' + filterLabel + ' ' + undoItems.length + '名', undoItems);
     }
   } catch (e) {
     setProg('<div style="color:#c62828;padding:20px;text-align:center;">雇用期間の保存準備に失敗: ' + escHtml(e.message || String(e)) +
@@ -37686,8 +37802,15 @@ async function bulkCreateRenewalDocs() {
     summary += '<div style="background:#fff8e1;border-radius:6px;padding:8px 10px;max-height:120px;overflow-y:auto;font-size:11.5px;color:#e65100;margin-bottom:8px;">' +
       '<b>雇用期間 保存失敗:</b><br>' + dateSaveErrors.map(function(x){ return '・' + escHtml(x); }).join('<br>') + '</div>';
   }
-  summary += '<div style="text-align:center;margin-top:14px;">' +
-    '<button onclick="document.getElementById(\'bulkRenewalOverlay\').remove()" style="background:#388e3c;color:#fff;border:none;border-radius:8px;padding:11px 28px;font-weight:700;cursor:pointer;">閉じる</button></div>';
+  summary += '<div style="text-align:center;margin-top:14px;display:flex;gap:8px;justify-content:center;">';
+  if (dateSavedCount > 0) {
+    summary += '<button onclick="undoKoyouChanges(this)" style="background:#fff;color:#e65100;border:1.5px solid #e65100;border-radius:8px;padding:11px 20px;font-weight:700;cursor:pointer;">↩ 雇用期間・給与を元に戻す</button>';
+  }
+  summary += '<button onclick="document.getElementById(\'bulkRenewalOverlay\').remove()" style="background:#388e3c;color:#fff;border:none;border-radius:8px;padding:11px 28px;font-weight:700;cursor:pointer;">閉じる</button>' +
+    '</div>';
+  if (dateSavedCount > 0) {
+    summary += '<div style="font-size:10.5px;color:#999;text-align:center;margin-top:8px;">※「元に戻す」は給与・雇用期間のみ。作成したPDFは戻りません。</div>';
+  }
   setProg(summary);
   showToast('一括作成完了: 成功 ' + success.length + ' / 失敗 ' + failed.length, success.length ? 'success' : 'error');
 
