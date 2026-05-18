@@ -12264,7 +12264,8 @@ function renderHakenSakiKanribo(h, emp, returnHtml, shaho) {
         '<tr><th>7　組織単位</th><td colspan="3">' + v(soshiki) + '</td></tr>' +
         '<tr><th>8　無期雇用か<br>有期雇用かの別</th><td>' +
           circ(isMuki, '無期雇用') + '　・　' + circ(!isMuki, '有期雇用') +
-          (!isMuki && (koyoS || koyoE) ? '<br><span style="font-size:8pt;">' + escHtml(koyoS) + ' 〜 ' + escHtml(koyoE) + '</span>' : '') + '</td>' +
+          (isMuki ? '<br><span style="font-size:8pt;color:#1565c0;">期間の定めなし</span>'
+            : ((koyoS || koyoE) ? '<br><span style="font-size:8pt;">' + escHtml(koyoS) + ' 〜 ' + escHtml(koyoE) + '</span>' : '')) + '</td>' +
           '<th>9　60歳以上か<br>否かの別</th><td>' +
             (is60 == null ? '60歳未満　・　60歳以上'
               : (circ(!is60, '60歳未満') + '　・　' + circ(is60, '60歳以上'))) + '</td></tr>' +
@@ -12377,7 +12378,8 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho) {
             '<th>4　協定対象派遣<br>労働者かの別</th><td>協定対象派遣労働者</td></tr>' +
         '<tr><th>5　無期雇用か<br>有期雇用かの別</th><td>' +
           circ(isMuki, '無期雇用') + '　・　' + circ(!isMuki, '有期雇用') +
-          (!isMuki && (koyoS || koyoE) ? '<br><span style="font-size:8pt;">' + escHtml(koyoS) + ' 〜 ' + escHtml(koyoE) + '</span>' : '') + '</td>' +
+          (isMuki ? '<br><span style="font-size:8pt;color:#1565c0;">期間の定めなし</span>'
+            : ((koyoS || koyoE) ? '<br><span style="font-size:8pt;">' + escHtml(koyoS) + ' 〜 ' + escHtml(koyoE) + '</span>' : '')) + '</td>' +
           '<th>6　60歳以上か<br>否かの別</th><td>' +
             (is60 == null ? '60歳未満　・　60歳以上' : (circ(!is60, '60歳未満') + '　・　' + circ(is60, '60歳以上'))) + '</td></tr>' +
         '<tr><th>7　年齢区分</th><td colspan="3">' +
@@ -12574,6 +12576,8 @@ function _showHakenIsshikiModal(h, emps) {
   var hasOT = !!(h[HF.jikangai_1day] || h[HF.jikangai_1month] || h[HF.jikangai_1year] || h[HF.kyujitsu_1month]);
   var hakenSeikyu = Number(h[HF.hakenRyokin]) || 0;          // 派遣先情報の請求単価
   var seikyuKey = (_hkIsshikiCtx && _hkIsshikiCtx.seikyuKey) || null;  // 社員データの請求単価キー
+  var pStartIso = (typeof _toDateInputVal === 'function') ? _toDateInputVal(h[HF.haken_period_start]) : '';
+  var pEndIso = (typeof _toDateInputVal === 'function') ? _toDateInputVal(h[HF.haken_period_end]) : '';
   var old = document.getElementById('hkIsshikiOverlay'); if (old) old.remove();
   var empRows = emps.map(function(e, idx) {
     var nm = e.Title || '(無名)';
@@ -12644,6 +12648,14 @@ function _showHakenIsshikiModal(h, emps) {
           'style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box;"></div>' +
         _hkcFld('派遣先名', _hkcInp('hkiss_hkName', cc(HF.hakensaki_name) || cc(HF.hakensaki_keiyaku))) +
         _hkcFld('組織単位', _hkcInp('hkiss_soshiki', cc(HF.soshiki))) +
+        '<div style="margin-bottom:8px;"><div style="color:#666;font-weight:600;margin-bottom:3px;">派遣期間（派遣先情報Listsに保存されます）</div>' +
+          '<div style="display:flex;gap:6px;align-items:center;">' +
+            '<input type="date" id="hkiss_pstart" value="' + pStartIso + '" ' +
+            'style="flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box;">' +
+            '<span style="color:#888;">〜</span>' +
+            '<input type="date" id="hkiss_pend" value="' + pEndIso + '" ' +
+            'style="flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box;">' +
+          '</div></div>' +
         _hkcFld('計算単位（分）', _hkcInp('hkiss_tani', cc(HF.keisanTani), '例: 30')) +
         '<div style="font-size:10.5px;color:#888;margin:-2px 0 6px;">※ 請求単価は社員ごとに下で確認します（単価が違う社員は自動で別PDFになります）</div>' +
         '<div style="font-weight:700;color:#283593;margin:10px 0 4px;">派遣先責任者</div>' +
@@ -12754,6 +12766,10 @@ async function _submitHakenIsshiki() {
   h2[HF.kujouSakiBusho] = val('hkiss_ksBusho');
   h2[HF.kujouSakiYakushoku] = val('hkiss_ksYaku');
   h2[HF.kujouSakiName] = val('hkiss_ksName');
+  // 派遣期間 (派遣先情報Lists へ保存・全書類に反映)
+  var psV = val('hkiss_pstart'), peV = val('hkiss_pend');
+  h2[HF.haken_period_start] = psV ? (psV + 'T00:00:00Z') : '';
+  h2[HF.haken_period_end] = peV ? (peV + 'T00:00:00Z') : '';
 
   // 社員ごとの請求単価を収集 → 単価でグループ分け (単価ごとに別PDF)
   var workerRyokin = {};
@@ -12814,6 +12830,37 @@ async function _submitHakenIsshiki() {
       }
       if (undoItems.length && typeof _recordKoyouUndo === 'function') {
         _recordKoyouUndo('派遣契約書類一式: 有期無期・雇用期間', undoItems);
+      }
+    }
+    // 派遣期間を 派遣先情報Lists へ保存 (変更時)
+    var curPS = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_start]) : '';
+    var curPE = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_end]) : '';
+    if ((psV !== curPS || peV !== curPE) && ctx.h.Id) {
+      if (goBtn) goBtn.textContent = '⏳ 派遣期間を保存中…';
+      try {
+        var hToken = await getToken();
+        var hEntity = await getListItemEntityType(LIST_HAKENSAKI_GUID);
+        var hbody = { __metadata: { type: hEntity } };
+        if (psV !== curPS) hbody[HF.haken_period_start] = psV ? (psV + 'T00:00:00Z') : null;
+        if (peV !== curPE) hbody[HF.haken_period_end] = peV ? (peV + 'T00:00:00Z') : null;
+        var hurl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items(" + ctx.h.Id + ")";
+        var hresp = await fetch(hurl, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + hToken, 'Accept': 'application/json;odata=verbose',
+            'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+          },
+          body: JSON.stringify(hbody)
+        });
+        if (!hresp.ok) {
+          var ht = ''; try { ht = await hresp.text(); } catch (_) {}
+          throw new Error('HTTP ' + hresp.status + ' ' + ht.substring(0, 150));
+        }
+        if (HF.haken_period_start in hbody) ctx.h[HF.haken_period_start] = hbody[HF.haken_period_start];
+        if (HF.haken_period_end in hbody) ctx.h[HF.haken_period_end] = hbody[HF.haken_period_end];
+      } catch (he) {
+        console.warn('派遣期間 保存失敗:', he);
+        showToast('派遣期間の保存に失敗: ' + (he.message || he), 'error');
       }
     }
     if (goBtn) goBtn.textContent = '⏳ 書類を生成中…';
