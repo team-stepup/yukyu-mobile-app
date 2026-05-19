@@ -15475,6 +15475,47 @@ function fmtHakenDateInput(v) {
   return y + '-' + m + '-' + day;
 }
 
+// 派遣先詳細の派遣期間カード: 日付を編集して 派遣先情報Lists へ保存
+async function saveHakenPeriod() {
+  var item = _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!item) { showToast('派遣先データが見つかりません', 'error'); return; }
+  var F = _hakensakiFields;
+  if (!F.start && !F.end) { showToast('派遣期間フィールドが特定できません', 'error'); return; }
+  var sEl = document.getElementById('hakenPeriodStart');
+  var eEl = document.getElementById('hakenPeriodEnd');
+  var ns = sEl ? sEl.value : '', ne = eEl ? eEl.value : '';
+  var btn = document.getElementById('hakenPeriodSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
+  try {
+    var token = await getToken();
+    var entityType = await getListItemEntityType(LIST_HAKENSAKI_GUID);
+    var body = { __metadata: { type: entityType } };
+    if (F.start) body[F.start] = ns ? (ns + 'T00:00:00Z') : null;
+    if (F.end) body[F.end] = ne ? (ne + 'T00:00:00Z') : null;
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items(" + item.Id + ")";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      var t = ''; try { t = await resp.text(); } catch (_) {}
+      throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 150));
+    }
+    if (F.start) item[F.start] = body[F.start];
+    if (F.end) item[F.end] = body[F.end];
+    showToast('✓ 派遣期間を保存しました', 'success');
+    renderHakensakiDetail();
+  } catch (e) {
+    console.error('saveHakenPeriod error:', e);
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+  }
+}
+
 function renderHakensakiDetail() {
   var item = _hakensakiItems[_hakensakiCurrentItemIdx];
   if (!item) return;
@@ -15549,11 +15590,15 @@ function renderHakensakiDetail() {
   // 派遣期間カード
   if (F.start || F.end) {
     html += '<div style="background:#fff;border:1px solid #e8e8f0;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">';
-    html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:6px;">📅 派遣期間</div>';
-    html += '<div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;">';
-    html += '<span>' + escHtml(fmtHakenDate(item[F.start])) + '</span>';
+    html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:6px;">📅 派遣期間（編集して保存できます）</div>';
+    html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+    html += '<input type="date" id="hakenPeriodStart" value="' + escHtml(fmtHakenDateInput(item[F.start])) + '" ' +
+      'style="padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;">';
     html += '<span style="color:#ccc;">〜</span>';
-    html += '<span>' + escHtml(fmtHakenDate(item[F.end])) + '</span>';
+    html += '<input type="date" id="hakenPeriodEnd" value="' + escHtml(fmtHakenDateInput(item[F.end])) + '" ' +
+      'style="padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;">';
+    html += '<button onclick="saveHakenPeriod()" id="hakenPeriodSaveBtn" ' +
+      'style="margin-left:auto;background:#1565c0;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;">💾 保存</button>';
     html += '</div>';
     html += '</div>';
   }
