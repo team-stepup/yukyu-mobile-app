@@ -27475,6 +27475,31 @@ async function saveEditField(catId, fieldKey) {
     return;
   }
 
+  // 有給使用後退社日チェック: 既存の有給申請より前の退社日は設定不可
+  // (例: 有給を5/19まで申請済みなのに退社日を5/18にする → 矛盾)
+  if (field.key === 'yukyuTaisha' && newVal) {
+    var _taishaD = new Date(newVal); _taishaD.setHours(0, 0, 0, 0);
+    if (!isNaN(_taishaD) && Array.isArray(appliedDatesCache)) {
+      var _conflict = appliedDatesCache.filter(function(r) {
+        var dd = new Date(r[F.leaveDate]); dd.setHours(0, 0, 0, 0);
+        return !isNaN(dd) && dd > _taishaD;
+      }).map(function(r) { return formatDate(r[F.leaveDate]); }).sort();
+      if (_conflict.length) {
+        var _tj = _taishaD.getFullYear() + '年' + (_taishaD.getMonth() + 1) + '月' + _taishaD.getDate() + '日';
+        if (typeof showLeaveAlertPopup === 'function') {
+          showLeaveAlertPopup('退社日を設定できません',
+            '有給使用後退社日（<strong style="color:#c62828;">' + _tj + '</strong>）より後の日付に、すでに有給の申請があります。<br><br>' +
+            '対象の有給取得日: <strong style="color:#c62828;">' + _conflict.join('、') + '</strong><br><br>' +
+            'これらの有給申請を取消すか、退社日をその日以降に設定してください。');
+        } else {
+          showToast('退社日より後に有給申請があります: ' + _conflict.join(', '), 'error');
+        }
+        cancelEditField(fieldKey);
+        return;
+      }
+    }
+  }
+
   showSpinner();
   try {
     const body = {};
