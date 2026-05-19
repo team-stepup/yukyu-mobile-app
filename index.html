@@ -2412,6 +2412,7 @@ select.sankyu-edit-input {
 .haisen-doc-page.hd-kobetsu table.hd-shift-table th,
 .haisen-doc-page.hd-kobetsu table.hd-shift-table td { padding:2px 3px; font-size:8pt; }
 .haisen-doc-page.hd-kobetsu .hd-inkan { float:right; padding-right:10px; font-weight:600; }
+.haisen-doc-page table.hd-inner.hd-thin td { border:0.3pt solid #000; }
 
 /* === 年次有給休暇管理簿（付与ごとに1ページ） === */
 .kanribo-page { padding:2mm 2mm 3mm !important; }
@@ -9530,17 +9531,21 @@ async function sendNewHireToAdobeSign() {
 
 // アプリ側から window.print() を呼ばずに済む。
 async function openHaisenDocInNewWindow() {
-  // 派遣契約書類一式: 未保存なら先に SharePoint へ保存し、リンクを表示
-  if (window._isshikiGroups && window._isshikiGroups.length && !window._isshikiSaved) {
-    try {
-      var _savedFiles = await saveIsshikiPdfs();
-      _showIsshikiLinks(_savedFiles);
-      showToast('✓ SharePoint に保存しました（' + _savedFiles.length + '件）', 'success');
-    } catch (e) {
-      console.error('一式 SharePoint保存エラー:', e);
-      showToast('SharePoint保存に失敗: ' + (e.message || String(e)), 'error');
-      return;
+  // 派遣契約書類一式: 保存 → 印刷選択モーダル (個別契約書/その他を別タブで印刷)
+  if (window._isshikiGroups && window._isshikiGroups.length) {
+    if (!window._isshikiSaved) {
+      try {
+        var _saved = await saveIsshikiPdfs();
+        window._isshikiSavedFiles = _saved;
+        showToast('✓ SharePoint に保存しました（' + _saved.length + '件）', 'success');
+      } catch (e) {
+        console.error('一式 SharePoint保存エラー:', e);
+        showToast('SharePoint保存に失敗: ' + (e.message || String(e)), 'error');
+        return;
+      }
     }
+    _showIsshikiLinks(window._isshikiSavedFiles || []);
+    return;
   }
   var body = document.getElementById('haisenDocBody');
   if (!body) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
@@ -9557,10 +9562,14 @@ async function openHaisenDocInNewWindow() {
     clonedHtml += clone.outerHTML;
   });
 
-  // すべての <style> タグをコピー (haisen-doc / kanribo CSS を含む)
+  _openHaisenPrintTab(clonedHtml, '');
+}
+
+// 指定したページHTMLで印刷用タブを開く
+function _openHaisenPrintTab(pagesHtml, hint) {
   var stylesHtml = '';
   document.querySelectorAll('style').forEach(function(s) { stylesHtml += s.outerHTML; });
-
+  var defHint = '💡 推奨設定 (Chrome/Safari共通):<br>　・<b>ヘッダーとフッター: OFF</b> (URL/日付を消す)<br>　・<b>背景のグラフィック: ON</b> (色帯・○マークを印刷)';
   var html = [
     '<!DOCTYPE html>',
     '<html lang="ja">',
@@ -9582,29 +9591,26 @@ async function openHaisenDocInNewWindow() {
         '  .print-toolbar { display:none !important; }',
         '  .doc-wrapper { padding:0 !important; background:#fff !important; min-height:0 !important; }',
         '  body { background:#fff !important; }',
-        '  .haisen-doc-page { box-shadow:none !important; padding:2mm 2mm 2mm !important; }',
-        '  /* 背景色を Chrome/Safari/Firefox 共通で確実に印刷 */',
+        '  /* A4印刷: 用紙の印刷可能幅にぴったり収める (左右の文字切れ防止) */',
+        '  .haisen-doc-page { box-shadow:none !important; padding:0 !important; margin:0 auto !important; max-width:none !important; width:100% !important; }',
         '  *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }',
         '}',
-        // @page を 1 ブロックに統一 (Safari は分割した @page を一部無視する)
-        // ページ番号は Safari で動作しないため CSS では描画せず、
-        // ユーザーが印刷ダイアログの「ヘッダーとフッター」で表示制御
-        '@page { size: A4 portrait; margin: 2mm; }',
+        '/* 契約書らしい標準的な余白 */',
+        '@page { size: A4 portrait; margin: 14mm; }',
       '</style>',
     '</head>',
     '<body>',
       '<div class="print-toolbar">',
         '<button onclick="window.close()" class="btn-close">← 閉じる</button>',
         '<button onclick="window.print()">🖨 印刷 / PDF 保存</button>',
-        '<span class="hint">💡 推奨設定 (Chrome/Safari共通):<br>　・<b>ヘッダーとフッター: OFF</b> (URL/日付を消す)<br>　・<b>背景のグラフィック: ON</b> (色帯・○マークを印刷)</span>',
+        '<span class="hint">' + (hint || defHint) + '</span>',
       '</div>',
       '<div class="doc-wrapper">',
-        clonedHtml,
+        pagesHtml,
       '</div>',
     '</body>',
     '</html>'
   ].join('');
-
   var w = window.open('', '_blank');
   if (!w) {
     if (typeof showToast === 'function') showToast('ポップアップがブロックされました。ブラウザ設定で許可してください。', 'error');
@@ -9613,6 +9619,21 @@ async function openHaisenDocInNewWindow() {
   w.document.open();
   w.document.write(html);
   w.document.close();
+}
+
+// 一式: 個別契約書だけの印刷タブ (両面印刷用)
+function _printIsshikiKobetsu() {
+  var groups = window._isshikiGroups || [];
+  var html = ''; groups.forEach(function(g) { html += g.kobetsu; });
+  if (!html) { showToast('個別契約書が見つかりません', 'error'); return; }
+  _openHaisenPrintTab(html, '💡 <b>個別契約書は【両面印刷】</b>で印刷してください。<br>　・ヘッダーとフッター: OFF　・背景のグラフィック: ON');
+}
+// 一式: 通知書・台帳の印刷タブ (片面印刷用)
+function _printIsshikiRest() {
+  var groups = window._isshikiGroups || [];
+  var html = ''; groups.forEach(function(g) { html += g.rest; });
+  if (!html) { showToast('通知書・台帳が見つかりません', 'error'); return; }
+  _openHaisenPrintTab(html, '💡 <b>通知書・台帳は【片面印刷】</b>で印刷してください。<br>　・ヘッダーとフッター: OFF　・背景のグラフィック: ON');
 }
 
 // 社員の通勤手当(通勤費) を数値で取得
@@ -12050,15 +12071,15 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
           innerRespTable(hsBusho, hsYaku, hsName, hakenTel) + '</td></tr>' +
         '<tr><th>17　製造業務専門<br>派遣元責任者</th><td class="hd-cell-no-pad">' +
           innerRespTable(hgBusho, hgYaku, hgName, HAKEN_GEN_FIXED.tel) + '</td></tr>' +
+        '<tr><th>18　安全及び衛生</th><td style="' + T_LONGSTYLE + '">' + escHtml(T_ANZEN) + '</td></tr>' +
+        '<tr><th>19　福祉増進のための<br>便宜供与</th><td>' + escHtml(T_BENGI) + '</td></tr>' +
+        '<tr><th>20　派遣先が派遣労働者を<br>雇用する場合の<br>紛争防止措置</th><td style="' + T_LONGSTYLE + '">' +
+          escHtml(T_FUNSO) + '</td></tr>' +
       '</table>' +
     '</div>' +
     '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;">' +
       '<h2 style="font-size:12pt;font-weight:700;margin:0 0 6px;padding:4px 0 5px;border-bottom:2px solid #000;letter-spacing:2px;">労働者派遣個別契約書（裏面）</h2>' +
       '<table class="hd-main">' +
-        '<tr><th>18　安全及び衛生</th><td style="' + T_LONGSTYLE + '">' + escHtml(T_ANZEN) + '</td></tr>' +
-        '<tr><th>19　福祉増進のための<br>便宜供与</th><td>' + escHtml(T_BENGI) + '</td></tr>' +
-        '<tr><th>20　派遣先が派遣労働者を<br>雇用する場合の<br>紛争防止措置</th><td style="' + T_LONGSTYLE + '">' +
-          escHtml(T_FUNSO) + '</td></tr>' +
         '<tr><th>21　派遣労働者の雇用の<br>安定を図るために<br>必要な措置</th><td style="' + T_LONGSTYLE + '">' +
           escHtml(T_KOYOU) + '</td></tr>' +
         '<tr><th>22　苦情の申出先、<br>処理方法・連携体制</th><td class="hd-cell-no-pad">' +
@@ -12075,12 +12096,14 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
       '<div style="font-size:8.5pt;margin:8px 0 4px;">※本契約成立の証とするため、本書を2通作成し派遣先・派遣元記名捺印の上、各自1通を保持するものとする。</div>' +
       '<table class="hd-main" style="margin-top:4px;">' +
         '<tr><th style="width:12%;">派遣先</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
-          '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v" style="height:18px;">　</td></tr>' +
-          '<tr><td class="hd-inner-l">(事業所名)</td><td class="hd-inner-v" style="height:18px;">　' +
-            '<span class="hd-inkan">㊞</span></td></tr>' +
-          '<tr><td class="hd-inner-l">(代表者名)</td><td class="hd-inner-v" style="height:18px;">　</td></tr>' +
+          '<tr><td class="hd-inner-l" style="height:40px;vertical-align:middle;">(所在地)</td>' +
+            '<td class="hd-inner-v" style="height:40px;border:none;"></td></tr>' +
+          '<tr><td class="hd-inner-l" style="height:40px;vertical-align:middle;">(事業所名)</td>' +
+            '<td class="hd-inner-v" style="height:40px;border:none;vertical-align:middle;"><span class="hd-inkan">㊞</span></td></tr>' +
+          '<tr><td class="hd-inner-l" style="height:40px;vertical-align:middle;">(代表者名)</td>' +
+            '<td class="hd-inner-v" style="height:40px;border:none;"></td></tr>' +
         '</table></td></tr>' +
-        '<tr><th style="width:12%;">派遣元</th><td class="hd-cell-no-pad"><table class="hd-inner">' +
+        '<tr><th style="width:12%;">派遣元</th><td class="hd-cell-no-pad"><table class="hd-inner hd-thin">' +
           '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.jusho) + '</td></tr>' +
           '<tr><td class="hd-inner-l">(事業所名)</td><td class="hd-inner-v">' + escHtml(HAKEN_GEN_FIXED.name) +
             '<span class="hd-inkan">㊞</span></td></tr>' +
@@ -12094,11 +12117,9 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   // 人数 / 作成方法 (1枚にまとめる or 1名ずつ複数枚)
   var count = Math.max(1, parseInt(opt.count, 10) || 1);
   var perPerson = !!opt.perPerson;
-  // 個別契約書は派遣先・派遣元で2部必要 → 2部ぶん出力
+  // 個別契約書は派遣先・派遣元で2部必要 → 同じものを2部出力 (保管用ラベルは印字しない)
   function twoCopies(jinin, baseLabel) {
-    var pre = baseLabel ? (baseLabel + '　') : '';
-    return buildOnePage(jinin, pre + '〈派遣先 保管用〉') +
-           buildOnePage(jinin, pre + '〈派遣元 保管用〉');
+    return buildOnePage(jinin, baseLabel) + buildOnePage(jinin, baseLabel);
   }
   var pagesHtml = '';
   if (perPerson) {
@@ -13016,7 +13037,7 @@ async function saveIsshikiPdfs() {
 // 保存したファイルへのリンク一覧を表示
 function _showIsshikiLinks(saved) {
   var old = document.getElementById('isshikiLinkOverlay'); if (old) old.remove();
-  if (!saved || !saved.length) return;
+  saved = saved || [];
   var rows = saved.map(function(f) {
     return '<a href="' + escHtml(f.url) + '" target="_blank" rel="noopener" ' +
       'style="display:block;padding:9px 11px;margin-bottom:7px;background:#f5f6fa;border:1px solid #c5cae9;' +
@@ -13035,8 +13056,17 @@ function _showIsshikiLinks(saved) {
           'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
       '</div>' +
       '<div style="padding:14px 18px;">' +
-        '<div style="font-size:11.5px;color:#888;margin-bottom:10px;">保存先: 社員ファイル/派遣契約書、派遣元・先台帳/<br>下のファイル名をタップで開けます。</div>' +
-        rows +
+        '<div style="font-weight:700;color:#283593;font-size:13px;margin-bottom:6px;">🖨 印刷</div>' +
+        '<button onclick="_printIsshikiKobetsu()" ' +
+          'style="display:block;width:100%;background:linear-gradient(135deg,#6a1b9a,#4a148c);color:#fff;border:none;' +
+          'border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:7px;">' +
+          '① 個別契約書を印刷（両面印刷）</button>' +
+        '<button onclick="_printIsshikiRest()" ' +
+          'style="display:block;width:100%;background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;border:none;' +
+          'border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">' +
+          '② 通知書・台帳を印刷（片面印刷）</button>' +
+        (rows ? ('<div style="font-weight:700;color:#2e7d32;font-size:13px;margin-bottom:6px;border-top:1px solid #eee;padding-top:10px;">📂 保存したファイル</div>' +
+          '<div style="font-size:11px;color:#888;margin-bottom:8px;">社員ファイル/派遣契約書、派遣元・先台帳/（タップで開く）</div>' + rows) : '') +
       '</div>' +
     '</div>';
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
