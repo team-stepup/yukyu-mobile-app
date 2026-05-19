@@ -27453,30 +27453,9 @@ async function saveEditField(catId, fieldKey) {
     newVal = null;
   }
 
-  // Check if changed
-  let changed = false;
-  if (inputEl.dataset.format === 'date') {
-    const oldDate = oldVal ? new Date(oldVal).toISOString().substring(0,10) : '';
-    const newDate = newVal ? newVal.substring(0,10) : '';
-    changed = oldDate !== newDate;
-  } else if (inputEl.dataset.format === 'number' || inputEl.dataset.format === 'currency') {
-    const oldNum = oldVal ? parseFloat(String(oldVal).replace(/,/g,'')) : null;
-    changed = oldNum !== newVal;
-  } else {
-    changed = (oldVal || '') !== (newVal || '');
-  }
-  if (!changed) {
-    showToast('変更がありません', 'info');
-    cancelEditField(fieldKey);
-    return;
-  }
-  if (employeeFieldsCache && !employeeFieldsCache[internalName]) {
-    showToast('書き込めないフィールドです', 'error');
-    return;
-  }
-
   // 有給使用後退社日チェック: 既存の有給申請より前の退社日は設定不可
   // (例: 有給を5/19まで申請済みなのに退社日を5/18にする → 矛盾)
+  // ※「変更なし」でも矛盾していれば弾くため、changed 判定の前に実施
   if (field.key === 'yukyuTaisha' && newVal) {
     var _taishaD = new Date(newVal); _taishaD.setHours(0, 0, 0, 0);
     if (!isNaN(_taishaD) && Array.isArray(appliedDatesCache)) {
@@ -27498,6 +27477,28 @@ async function saveEditField(catId, fieldKey) {
         return;
       }
     }
+  }
+
+  // Check if changed
+  let changed = false;
+  if (inputEl.dataset.format === 'date') {
+    const oldDate = oldVal ? new Date(oldVal).toISOString().substring(0,10) : '';
+    const newDate = newVal ? newVal.substring(0,10) : '';
+    changed = oldDate !== newDate;
+  } else if (inputEl.dataset.format === 'number' || inputEl.dataset.format === 'currency') {
+    const oldNum = oldVal ? parseFloat(String(oldVal).replace(/,/g,'')) : null;
+    changed = oldNum !== newVal;
+  } else {
+    changed = (oldVal || '') !== (newVal || '');
+  }
+  if (!changed) {
+    showToast('変更がありません', 'info');
+    cancelEditField(fieldKey);
+    return;
+  }
+  if (employeeFieldsCache && !employeeFieldsCache[internalName]) {
+    showToast('書き込めないフィールドです', 'error');
+    return;
   }
 
   showSpinner();
