@@ -15391,25 +15391,40 @@ var _hakensakiEditMode = false;
 function _hakenFieldGroupOf(title) {
   var t = String(title || '');
   var n = t.replace(/[\s　\n\r]/g, '');
-  // 1. 派遣元 担当者
+  // 0. 非表示 (部課・システム項目)
+  if (n === '部課' || n.indexOf('コンテンツタイプ') >= 0 || n.indexOf('ContentType') >= 0 ||
+      n.indexOf('添付ファイル') >= 0 || n === 'Attachments') return 'hidden';
+  // 1. 36協定 (休日労働・時間外労働)
+  if (n.indexOf('休日労働') >= 0 || n.indexOf('時間外労働') >= 0 ||
+      n.indexOf('36協定') >= 0 || n.indexOf('３６協定') >= 0) return 'sankyo';
+  // 2. 締め・支払
+  if (n.indexOf('締め') >= 0 || n.indexOf('締日') >= 0 || n.indexOf('支払') >= 0) return 'shimebarai';
+  // 3. 就業時間・休憩
+  if (n.indexOf('就業時間') >= 0 || n.indexOf('実働時間') >= 0 || n.indexOf('休憩') >= 0) return 'jikan';
+  // 4. 派遣料金
+  if (n.indexOf('派遣料金') >= 0 || n.indexOf('割増') >= 0 || n.indexOf('深夜') >= 0 ||
+      n.indexOf('法定休日') >= 0 || n.indexOf('計算単位') >= 0) return 'ryokin';
+  // 5. 指揮命令者 → 派遣先 基本情報へ
+  if (n.indexOf('指揮命令') >= 0) return 'haken_basic';
+  // 6. 派遣元 担当者
   if (n.indexOf('派遣元責任者') >= 0) return 'genmoto';
   if (n.indexOf('苦情') >= 0 && n.indexOf('派遣元') >= 0) return 'genmoto';
-  // 2. 派遣先 責任者
+  // 7. 派遣先 責任者
   if (n.indexOf('派遣先責任者') >= 0) return 'haken_resp';
   if (n.indexOf('苦情') >= 0 && n.indexOf('派遣先') >= 0) return 'haken_resp';
-  // 3. 派遣元 (上記以外で派遣元を含む)
+  // 8. 派遣元 (上記以外で派遣元を含む)
   if (n.indexOf('派遣元') >= 0) return 'genmoto';
-  // 4. 派遣先 基本情報
-  if (n === 'Title' || n.indexOf('派遣先会社') >= 0 || n.indexOf('派遣先名') >= 0 || n.indexOf('派遣先') >= 0 || n.indexOf('組織') >= 0 || n.indexOf('部課') >= 0 || n.indexOf('業種') >= 0) return 'haken_basic';
-  // 5. 所在地
+  // 9. 派遣先 基本情報
+  if (n === 'Title' || n.indexOf('派遣先会社') >= 0 || n.indexOf('派遣先名') >= 0 || n.indexOf('派遣先') >= 0 || n.indexOf('組織') >= 0 || n.indexOf('業種') >= 0) return 'haken_basic';
+  // 10. 所在地
   if (n.indexOf('住所') >= 0 || n.indexOf('郵便') >= 0 || n.indexOf('所在') >= 0) return 'address';
-  // 6. 派遣期間
+  // 11. 派遣期間
   if (n.indexOf('期間') >= 0 || n.indexOf('開始') >= 0 || n.indexOf('終わり') >= 0 || n.indexOf('終了') >= 0 || n.indexOf('始まり') >= 0) return 'period';
-  // 7. 契約・人員
+  // 12. 契約・人員
   if (n.indexOf('人数') >= 0 || n.indexOf('単価') >= 0 || n.indexOf('契約') >= 0 || n.indexOf('業務') >= 0 || n.indexOf('職種') >= 0 || n.indexOf('勤務') >= 0 || n.indexOf('責任の程度') >= 0) return 'contract';
-  // 8. 連絡先 (一般、責任者外)
+  // 13. 連絡先 (一般、責任者外)
   if (n.indexOf('電話') >= 0 || n.indexOf('TEL') >= 0 || n.indexOf('メール') >= 0 || n.indexOf('Mail') >= 0 || n.indexOf('FAX') >= 0 || n.indexOf('連絡') >= 0) return 'contact';
-  // 9. その他
+  // 14. その他
   return 'other';
 }
 
@@ -15420,7 +15435,11 @@ var HAKEN_GROUP_DEFS = [
   { id: 'genmoto',     label: '派遣元 担当者',    icon: '🏬', color: '#5e35b2', bg: '#ede7f6' },
   { id: 'period',      label: '派遣期間',          icon: '📅', color: '#6a1b9a', bg: '#f3e5f5' },
   { id: 'contract',    label: '契約・人員',        icon: '📋', color: '#283593', bg: '#e8eaf6' },
-  { id: 'contact',     label: '連絡先',           icon: '☎️', color: '#00838f', bg: '#e0f7fa' },
+  { id: 'jikan',       label: '就業時間・休憩',    icon: '🕐', color: '#00838f', bg: '#e0f7fa' },
+  { id: 'ryokin',      label: '派遣料金',          icon: '💴', color: '#2e7d32', bg: '#e8f5e9' },
+  { id: 'sankyo',      label: '36協定',           icon: '📑', color: '#c62828', bg: '#ffebee' },
+  { id: 'shimebarai',  label: '締め・支払',        icon: '📆', color: '#ad1457', bg: '#fce4ec' },
+  { id: 'contact',     label: '連絡先',           icon: '☎️', color: '#0277bd', bg: '#e1f5fe' },
   { id: 'other',       label: 'その他',           icon: '📝', color: '#455a64', bg: '#eceff1' }
 ];
 
@@ -15542,6 +15561,7 @@ function renderHakensakiDetail() {
   HAKEN_GROUP_DEFS.forEach(function(g) { groupedFields[g.id] = []; });
   (_hakensakiAllFields || []).forEach(function(f) {
     var gid = _hakenFieldGroupOf(f.title);
+    if (!groupedFields[gid]) groupedFields[gid] = [];
     groupedFields[gid].push(f);
   });
 
