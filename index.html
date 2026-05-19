@@ -12898,11 +12898,15 @@ async function _submitHakenIsshiki() {
       _hkSet(HF.kujouSakiBusho, h2[HF.kujouSakiBusho]);
       _hkSet(HF.kujouSakiYakushoku, h2[HF.kujouSakiYakushoku]);
       _hkSet(HF.kujouSakiName, h2[HF.kujouSakiName]);
-      // 請求単価 — 選択社員が全員同一単価のときのみ派遣先情報へ反映
+      // 請求単価 → 派遣先情報Lists へ反映 (単価が混在する場合は最多数の単価)
       var _rateKeys = Object.keys(ryokinGroups);
-      if (_rateKeys.length === 1) {
-        var _oneRate = Number(_rateKeys[0]) || 0;
-        if (_oneRate) _hkSet(HF.hakenRyokin, _oneRate);
+      if (_rateKeys.length) {
+        var _topRate = _rateKeys[0];
+        _rateKeys.forEach(function(rkk) {
+          if ((ryokinGroups[rkk] || []).length > (ryokinGroups[_topRate] || []).length) _topRate = rkk;
+        });
+        var _rateNum = Number(_topRate) || 0;
+        if (_rateNum) _hkSet(HF.hakenRyokin, _rateNum);
       }
       if (Object.keys(hbody).length) {
         if (goBtn) goBtn.textContent = '⏳ 派遣先情報を保存中…';
