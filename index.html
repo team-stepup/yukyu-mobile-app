@@ -12037,6 +12037,11 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
           innerRespTable(hsBusho, hsYaku, hsName, hakenTel) + '</td></tr>' +
         '<tr><th>17　製造業務専門<br>派遣元責任者</th><td class="hd-cell-no-pad">' +
           innerRespTable(hgBusho, hgYaku, hgName, HAKEN_GEN_FIXED.tel) + '</td></tr>' +
+      '</table>' +
+    '</div>' +
+    '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;">' +
+      '<h2 style="font-size:12pt;font-weight:700;margin:0 0 6px;padding:4px 0 5px;border-bottom:2px solid #000;letter-spacing:2px;">労働者派遣個別契約書（裏面）</h2>' +
+      '<table class="hd-main">' +
         '<tr><th>18　安全及び衛生</th><td style="' + T_LONGSTYLE + '">' + escHtml(T_ANZEN) + '</td></tr>' +
         '<tr><th>19　福祉増進のための<br>便宜供与</th><td>' + escHtml(T_BENGI) + '</td></tr>' +
         '<tr><th>20　派遣先が派遣労働者を<br>雇用する場合の<br>紛争防止措置</th><td style="' + T_LONGSTYLE + '">' +
@@ -12917,27 +12922,35 @@ async function _submitHakenIsshiki() {
       // この群の請求単価を h にセット
       var hg = {}; for (var hk in h2) hg[hk] = h2[hk];
       hg[HF.hakenRyokin] = Number(rk) || 0;
-      // 個別契約書 → 通知書 → 各人(派遣先台帳・派遣元台帳)
-      var pages = renderHakenKobetsuKeiyakusho(hg, {
+      // ① 個別契約書 (表裏2ページ) — 両面印刷用に別PDF
+      var kobetsuPages = renderHakenKobetsuKeiyakusho(hg, {
         count: gEmps.length, perPerson: false, noOvertime: noOvertime,
         sakuseiDate: sakuseiDate, returnHtml: true
       });
-      pages += renderHakenTsuuchisho(hg, gEmps, { shahoMap: gShaho, sakuseiDate: sakuseiDate, returnHtml: true });
+      // ② 通知書 + 各人(派遣先台帳・派遣元台帳)
+      var restPages = renderHakenTsuuchisho(hg, gEmps, { shahoMap: gShaho, sakuseiDate: sakuseiDate, returnHtml: true });
       gEmps.forEach(function(emp, j) {
-        pages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
-        pages += renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
+        restPages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
+        restPages += renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
       });
-      // PDF生成のため一旦その群を描画
+      // PDF① 個別契約書
       switchScreen('haisenDocScreen');
-      document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + pages + '</div>';
+      document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + kobetsuPages + '</div>';
       await new Promise(function(r) { setTimeout(r, 350); });
-      showToast('PDF生成中… (' + (gi + 1) + '/' + groupKeys.length + ')', 'info');
-      var prevZoom = _captureAndResetZoom();
-      var pdfBlob = await generateHaisenDocAsPdf();
-      _restoreZoom(prevZoom);
-      var savedName = await _saveIsshikiPdf(hg, pdfBlob);
-      savedFiles.push(savedName);
-      allPagesHtml += pages;
+      showToast('PDF生成中… 個別契約書 (' + (gi + 1) + '/' + groupKeys.length + ')', 'info');
+      var pz1 = _captureAndResetZoom();
+      var pdf1 = await generateHaisenDocAsPdf();
+      _restoreZoom(pz1);
+      savedFiles.push(await _saveIsshikiPdf(hg, pdf1, '個別契約書'));
+      // PDF② 台帳・通知書
+      document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + restPages + '</div>';
+      await new Promise(function(r) { setTimeout(r, 350); });
+      showToast('PDF生成中… 台帳・通知書 (' + (gi + 1) + '/' + groupKeys.length + ')', 'info');
+      var pz2 = _captureAndResetZoom();
+      var pdf2 = await generateHaisenDocAsPdf();
+      _restoreZoom(pz2);
+      savedFiles.push(await _saveIsshikiPdf(hg, pdf2, '台帳・通知書'));
+      allPagesHtml += kobetsuPages + restPages;
     }
     // 全グループをまとめて画面表示
     switchScreen('haisenDocScreen');
@@ -12959,7 +12972,7 @@ async function _submitHakenIsshiki() {
   }
 }
 
-async function _saveIsshikiPdf(h, pdfBlob) {
+async function _saveIsshikiPdf(h, pdfBlob, suffix) {
   function isoD(v) {
     if (!v) return '';
     var d = new Date(v); if (isNaN(d)) return '';
@@ -12973,7 +12986,7 @@ async function _saveIsshikiPdf(h, pdfBlob) {
   var soshikiNm = _hkClean(h[HF.soshiki] || '').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '組織単位未設定';
   var ryokinRaw = (h[HF.hakenRyokin] != null && h[HF.hakenRyokin] !== '') ? String(h[HF.hakenRyokin]).replace(/[^\d]/g, '') : '';
   var ryokinNm = ryokinRaw ? (ryokinRaw + '円') : '単価未設定';
-  var fileName = soshikiNm + '_' + ryokinNm + '_' + kikan + '.pdf';
+  var fileName = soshikiNm + '_' + ryokinNm + '_' + kikan + (suffix ? '_' + suffix : '') + '.pdf';
   var parent = SP_DOC_LIB_PATH + '/派遣契約書、派遣元・先台帳';
   var hkFolder = parent + '/' + safeHk;
   try { await ensureSpFolder(parent); } catch (e1) { console.warn('一式 親フォルダ warn:', e1); }
