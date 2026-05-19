@@ -9563,7 +9563,10 @@ async function openHaisenDocInNewWindow() {
 function _openHaisenPrintTab(pagesHtml, hint) {
   var stylesHtml = '';
   document.querySelectorAll('style').forEach(function(s) { stylesHtml += s.outerHTML; });
-  var defHint = '💡 推奨設定 (Chrome/Safari共通):<br>　・<b>ヘッダーとフッター: OFF</b> (URL/日付を消す)<br>　・<b>背景のグラフィック: ON</b> (色帯・○マークを印刷)';
+  // スマホ印刷: PC と同じ仕上がり(=拡大率90%相当)になるよう自動縮小する
+  var isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  var defHint = '💡 推奨設定:<br>　・<b>背景のグラフィック: ON</b> (色帯・○マークを印刷)' +
+    (isMobile ? '<br>　・倍率は<b>「100%」のまま</b>でPCと同じ仕上がりになります' : '');
   var html = [
     '<!DOCTYPE html>',
     '<html lang="ja">',
@@ -9585,12 +9588,13 @@ function _openHaisenPrintTab(pagesHtml, hint) {
         '  .print-toolbar { display:none !important; }',
         '  .doc-wrapper { padding:0 !important; background:#fff !important; min-height:0 !important; }',
         '  body { background:#fff !important; }',
-        '  /* A4印刷: 用紙の印刷可能幅にぴったり収める (左右の文字切れ防止) */',
-        '  .haisen-doc-page { box-shadow:none !important; padding:0 !important; margin:0 auto !important; max-width:none !important; width:100% !important; }',
+        '  /* @page余白を0にしてブラウザ自動のURL/日付フッターを抑制。余白はページ内paddingで確保 */',
+        '  .haisen-doc-page { box-shadow:none !important; padding:14mm !important; margin:0 auto !important; max-width:none !important; width:100% !important; box-sizing:border-box !important;' +
+          (isMobile ? ' zoom:0.9 !important;' : '') + ' }',
         '  *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }',
         '}',
-        '/* 契約書らしい標準的な余白 */',
-        '@page { size: A4 portrait; margin: 14mm; }',
+        '/* @page余白0: ブラウザのヘッダー/フッター(URL・日付)を出さない */',
+        '@page { size: A4 portrait; margin: 0; }',
       '</style>',
     '</head>',
     '<body>',
