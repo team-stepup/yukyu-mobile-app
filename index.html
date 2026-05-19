@@ -9394,9 +9394,11 @@ function _restoreZoom(save) {
 }
 
 // 派遣書類の各 .haisen-doc-page を html2canvas で画像化 → pdf-lib で結合
-async function generateHaisenDocAsPdf() {
+async function generateHaisenDocAsPdf(containerEl) {
   if (!window.PDFLib || !window.html2canvas) throw new Error('PDF生成ライブラリが未ロード');
-  var pages = document.querySelectorAll('#haisenDocBody .haisen-doc-page');
+  var scope = containerEl || document.getElementById('haisenDocBody');
+  var pages = scope ? scope.querySelectorAll('.haisen-doc-page')
+                    : document.querySelectorAll('#haisenDocBody .haisen-doc-page');
   if (!pages.length) throw new Error('派遣書類ページが見つかりません');
   var pdfDoc = await window.PDFLib.PDFDocument.create();
   for (var i = 0; i < pages.length; i++) {
@@ -9534,6 +9536,50 @@ async function sendNewHireToAdobeSign() {
   }
 }
 
+// iOS(iPhone/iPad) 判定。iOS Safari は window.print() で URL/日付フッターが必ず付き、
+// 改ページもずれるため、印刷は PDF 生成に切り替える。
+var _isIOSDevice = (/iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+// 任意のページHTMLを画面外に一時描画して PDF Blob を生成
+async function _haisenHtmlToPdfBlob(pagesHtml) {
+  var tmp = document.createElement('div');
+  tmp.className = 'haisen-doc-wrapper';
+  tmp.style.cssText = 'position:absolute;left:-99999px;top:0;width:900px;background:#fff;';
+  tmp.innerHTML = pagesHtml;
+  document.body.appendChild(tmp);
+  try {
+    var imgs = tmp.querySelectorAll('img');
+    await Promise.all(Array.prototype.map.call(imgs, function(im) {
+      if (im.complete) return Promise.resolve();
+      return new Promise(function(res) { im.onload = im.onerror = res; });
+    }));
+    return await generateHaisenDocAsPdf(tmp);
+  } finally {
+    tmp.remove();
+  }
+}
+
+// iOS 向け: PDF を生成して新規タブで開く (共有→プリントで印刷)
+async function _openHaisenPdfForIOS(pagesHtml, fileName) {
+  if (typeof showToast === 'function') showToast('PDFを生成中…', 'info');
+  try {
+    var blob = pagesHtml ? await _haisenHtmlToPdfBlob(pagesHtml) : await generateHaisenDocAsPdf();
+    var url = URL.createObjectURL(blob);
+    var w = window.open(url, '_blank');
+    if (!w) {
+      var a = document.createElement('a');
+      a.href = url; a.download = (fileName || '派遣書類') + '.pdf';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    if (typeof showToast === 'function')
+      showToast('PDFを開きました。共有 → プリント で印刷できます', 'success');
+  } catch (e) {
+    console.error('_openHaisenPdfForIOS error:', e);
+    if (typeof showToast === 'function') showToast('PDF生成エラー: ' + (e.message || e), 'error');
+  }
+}
+
 // アプリ側から window.print() を呼ばずに済む。
 async function openHaisenDocInNewWindow() {
   // 派遣契約書類一式: 印刷選択モーダル (個別契約書/その他を別タブで印刷)
@@ -9545,6 +9591,12 @@ async function openHaisenDocInNewWindow() {
   if (!body) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
   var pages = body.querySelectorAll('.haisen-doc-page');
   if (!pages || pages.length === 0) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
+
+  // iOS Safari は印刷時にフッターが付き改ページもずれるため PDF を生成して開く
+  if (_isIOSDevice && window.PDFLib && window.html2canvas) {
+    await _openHaisenPdfForIOS(null, '派遣書類');
+    return;
+  }
 
   // 全ページ (日本語版 + ポルトガル語版 等) をクローンして、インライン transform/zoom を解除
   var clonedHtml = '';
@@ -9624,6 +9676,9 @@ function _printIsshikiKobetsu() {
   var groups = window._isshikiGroups || [];
   var html = ''; groups.forEach(function(g) { html += g.kobetsu; });
   if (!html) { showToast('個別契約書が見つかりません', 'error'); return; }
+  if (_isIOSDevice && window.PDFLib && window.html2canvas) {
+    _openHaisenPdfForIOS(html, '個別契約書'); return;
+  }
   _openHaisenPrintTab(html, '💡 <b>個別契約書は【両面印刷】</b>で印刷してください。<br>　・ヘッダーとフッター: OFF　・背景のグラフィック: ON');
 }
 // 一式: 通知書・台帳の印刷タブ (片面印刷用)
@@ -9631,6 +9686,9 @@ function _printIsshikiRest() {
   var groups = window._isshikiGroups || [];
   var html = ''; groups.forEach(function(g) { html += g.rest; });
   if (!html) { showToast('通知書・台帳が見つかりません', 'error'); return; }
+  if (_isIOSDevice && window.PDFLib && window.html2canvas) {
+    _openHaisenPdfForIOS(html, '通知書・台帳'); return;
+  }
   _openHaisenPrintTab(html, '💡 <b>通知書・台帳は【片面印刷】</b>で印刷してください。<br>　・ヘッダーとフッター: OFF　・背景のグラフィック: ON');
 }
 
