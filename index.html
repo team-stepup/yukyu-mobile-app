@@ -9529,7 +9529,19 @@ async function sendNewHireToAdobeSign() {
 }
 
 // アプリ側から window.print() を呼ばずに済む。
-function openHaisenDocInNewWindow() {
+async function openHaisenDocInNewWindow() {
+  // 派遣契約書類一式: 未保存なら先に SharePoint へ保存し、リンクを表示
+  if (window._isshikiGroups && window._isshikiGroups.length && !window._isshikiSaved) {
+    try {
+      var _savedFiles = await saveIsshikiPdfs();
+      _showIsshikiLinks(_savedFiles);
+      showToast('✓ SharePoint に保存しました（' + _savedFiles.length + '件）', 'success');
+    } catch (e) {
+      console.error('一式 SharePoint保存エラー:', e);
+      showToast('SharePoint保存に失敗: ' + (e.message || String(e)), 'error');
+      return;
+    }
+  }
   var body = document.getElementById('haisenDocBody');
   if (!body) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
   var pages = body.querySelectorAll('.haisen-doc-page');
@@ -9818,6 +9830,7 @@ async function saveNewHireFields(emp, salaryStr, tsukinStr, startStr, endStr) {
 
 // 派遣書類作成画面を開く（docType: 'roudouKeiyaku' / 'koushin'）
 async function openHaisenDocScreen(docType) {
+  window._isshikiGroups = null;  // 一式以外の書類なので保存対象をクリア
   var emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
   closeActionSheet();
@@ -12081,18 +12094,25 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   // 人数 / 作成方法 (1枚にまとめる or 1名ずつ複数枚)
   var count = Math.max(1, parseInt(opt.count, 10) || 1);
   var perPerson = !!opt.perPerson;
+  // 個別契約書は派遣先・派遣元で2部必要 → 2部ぶん出力
+  function twoCopies(jinin, baseLabel) {
+    var pre = baseLabel ? (baseLabel + '　') : '';
+    return buildOnePage(jinin, pre + '〈派遣先 保管用〉') +
+           buildOnePage(jinin, pre + '〈派遣元 保管用〉');
+  }
   var pagesHtml = '';
   if (perPerson) {
     for (var pi = 1; pi <= count; pi++) {
-      pagesHtml += buildOnePage(1, '（' + count + '名中 ' + pi + '人目）');
+      pagesHtml += twoCopies(1, '（' + count + '名中 ' + pi + '人目）');
     }
   } else {
-    pagesHtml += buildOnePage(count, '');
+    pagesHtml += twoCopies(count, '');
   }
 
   // 一式作成などで HTML だけ欲しい場合は返す
   if (opt.returnHtml) return pagesHtml;
 
+  window._isshikiGroups = null;  // 単独表示なので一式の保存対象をクリア
   switchScreen('haisenDocScreen');
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + pagesHtml + '</div>';
   // 操作ボタン: ズーム + 印刷のみ (電子サイン/Adobe/元に戻す は非表示)
@@ -12299,6 +12319,7 @@ function renderHakenSakiKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
     '</div>';
 
   if (returnHtml) return page;
+  window._isshikiGroups = null;
   switchScreen('haisenDocScreen');
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
@@ -12694,7 +12715,7 @@ function _showHakenIsshikiModal(h, emps) {
         '<button onclick="document.getElementById(\'hkIsshikiOverlay\').remove()" ' +
           'style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
         '<button id="hkIsshikiGoBtn" onclick="_submitHakenIsshiki()" ' +
-          'style="background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">作成して SharePoint 保存</button>' +
+          'style="background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">作成（プレビュー）</button>' +
       '</div>' +
     '</div>';
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
@@ -12910,19 +12931,17 @@ async function _submitHakenIsshiki() {
     }
     if (goBtn) goBtn.textContent = '⏳ 書類を生成中…';
     var ov = document.getElementById('hkIsshikiOverlay'); if (ov) ov.remove();
-    await loadEsignLibsIfNeeded();
     var groupKeys = Object.keys(ryokinGroups);
-    var savedFiles = [];
+    var isshikiGroups = [];
     var allPagesHtml = '';
     for (var gi = 0; gi < groupKeys.length; gi++) {
       var rk = groupKeys[gi];
       var gIdx = ryokinGroups[rk];
       var gEmps = gIdx.map(function(i) { return ctx.emps[i]; });
       var gShaho = gIdx.map(function(i) { return shahoMap[i]; });
-      // この群の請求単価を h にセット
       var hg = {}; for (var hk in h2) hg[hk] = h2[hk];
       hg[HF.hakenRyokin] = Number(rk) || 0;
-      // ① 個別契約書 (表裏2ページ) — 両面印刷用に別PDF
+      // ① 個別契約書 (2部・表裏) — 両面印刷用に別PDF
       var kobetsuPages = renderHakenKobetsuKeiyakusho(hg, {
         count: gEmps.length, perPerson: false, noOvertime: noOvertime,
         sakuseiDate: sakuseiDate, returnHtml: true
@@ -12933,26 +12952,12 @@ async function _submitHakenIsshiki() {
         restPages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
         restPages += renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
       });
-      // PDF① 個別契約書
-      switchScreen('haisenDocScreen');
-      document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + kobetsuPages + '</div>';
-      await new Promise(function(r) { setTimeout(r, 350); });
-      showToast('PDF生成中… 個別契約書 (' + (gi + 1) + '/' + groupKeys.length + ')', 'info');
-      var pz1 = _captureAndResetZoom();
-      var pdf1 = await generateHaisenDocAsPdf();
-      _restoreZoom(pz1);
-      savedFiles.push(await _saveIsshikiPdf(hg, pdf1, '個別契約書'));
-      // PDF② 台帳・通知書
-      document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + restPages + '</div>';
-      await new Promise(function(r) { setTimeout(r, 350); });
-      showToast('PDF生成中… 台帳・通知書 (' + (gi + 1) + '/' + groupKeys.length + ')', 'info');
-      var pz2 = _captureAndResetZoom();
-      var pdf2 = await generateHaisenDocAsPdf();
-      _restoreZoom(pz2);
-      savedFiles.push(await _saveIsshikiPdf(hg, pdf2, '台帳・通知書'));
+      isshikiGroups.push({ hg: hg, kobetsu: kobetsuPages, rest: restPages });
       allPagesHtml += kobetsuPages + restPages;
     }
-    // 全グループをまとめて画面表示
+    // ここでは SharePoint 保存しない（「印刷 / PDF保存」押下時に保存）
+    window._isshikiGroups = isshikiGroups;
+    window._isshikiSaved = false;
     switchScreen('haisenDocScreen');
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allPagesHtml + '</div>';
     var actions = document.getElementById('haisenDocActions');
@@ -12962,14 +12967,76 @@ async function _submitHakenIsshiki() {
     });
     document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
     if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
-    showToast('✓ ' + savedFiles.length + '件のPDFを保存しました', 'success');
-    alert('✅ 派遣契約書類一式を保存しました（' + savedFiles.length + '件）。\n\n' +
-      '社員ファイル/派遣契約書、派遣元・先台帳/\n　' + savedFiles.join('\n　'));
+    showToast('✓ 書類を作成しました。「🖨 印刷 / PDF保存」を押すと SharePoint に保存されます', 'success');
   } catch (e) {
     console.error('_submitHakenIsshiki error:', e);
     showToast('作成エラー: ' + (e.message || String(e)), 'error');
-    if (goBtn) { goBtn.disabled = false; goBtn.textContent = '作成して SharePoint 保存'; }
+    if (goBtn) { goBtn.disabled = false; goBtn.textContent = '作成（プレビュー）'; }
   }
+}
+
+// 一式書類を SharePoint へ保存 (印刷/PDF保存 押下時に実行)。保存ファイル {name,url} 配列を返す
+async function saveIsshikiPdfs() {
+  var groups = window._isshikiGroups;
+  if (!groups || !groups.length) return [];
+  await loadEsignLibsIfNeeded();
+  var saved = [];
+  for (var i = 0; i < groups.length; i++) {
+    var g = groups[i];
+    // 個別契約書
+    document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.kobetsu + '</div>';
+    await new Promise(function(r) { setTimeout(r, 350); });
+    showToast('SharePoint保存中… 個別契約書 (' + (i + 1) + '/' + groups.length + ')', 'info');
+    var z1 = _captureAndResetZoom();
+    var p1 = await generateHaisenDocAsPdf();
+    _restoreZoom(z1);
+    saved.push(await _saveIsshikiPdf(g.hg, p1, '個別契約書'));
+    // 台帳・通知書
+    document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.rest + '</div>';
+    await new Promise(function(r) { setTimeout(r, 350); });
+    showToast('SharePoint保存中… 台帳・通知書 (' + (i + 1) + '/' + groups.length + ')', 'info');
+    var z2 = _captureAndResetZoom();
+    var p2 = await generateHaisenDocAsPdf();
+    _restoreZoom(z2);
+    saved.push(await _saveIsshikiPdf(g.hg, p2, '台帳・通知書'));
+  }
+  // 全ページを再表示
+  var allHtml = '';
+  groups.forEach(function(g) { allHtml += g.kobetsu + g.rest; });
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allHtml + '</div>';
+  if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+  window._isshikiSaved = true;
+  return saved;
+}
+
+// 保存したファイルへのリンク一覧を表示
+function _showIsshikiLinks(saved) {
+  var old = document.getElementById('isshikiLinkOverlay'); if (old) old.remove();
+  if (!saved || !saved.length) return;
+  var rows = saved.map(function(f) {
+    return '<a href="' + escHtml(f.url) + '" target="_blank" rel="noopener" ' +
+      'style="display:block;padding:9px 11px;margin-bottom:7px;background:#f5f6fa;border:1px solid #c5cae9;' +
+      'border-radius:8px;font-size:12px;color:#1565c0;text-decoration:none;word-break:break-all;">' +
+      '📄 ' + escHtml(f.name) + '</a>';
+  }).join('');
+  var ov = document.createElement('div');
+  ov.id = 'isshikiLinkOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;' +
+    'align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
+        '<h3 style="margin:0;font-size:15px;color:#2e7d32;">✅ SharePoint に保存しました</h3>' +
+        '<button onclick="document.getElementById(\'isshikiLinkOverlay\').remove()" ' +
+          'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:14px 18px;">' +
+        '<div style="font-size:11.5px;color:#888;margin-bottom:10px;">保存先: 社員ファイル/派遣契約書、派遣元・先台帳/<br>下のファイル名をタップで開けます。</div>' +
+        rows +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
 }
 
 async function _saveIsshikiPdf(h, pdfBlob, suffix) {
@@ -12992,8 +13059,9 @@ async function _saveIsshikiPdf(h, pdfBlob, suffix) {
   try { await ensureSpFolder(parent); } catch (e1) { console.warn('一式 親フォルダ warn:', e1); }
   try { await ensureSpFolder(hkFolder); } catch (e2) { console.warn('一式 派遣先フォルダ warn:', e2); }
   var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-  await uploadFileToSp(hkFolder, fileName, file);
-  return safeHk + '/' + fileName;
+  var res = await uploadFileToSp(hkFolder, fileName, file);
+  var srv = (res && res.d && res.d.ServerRelativeUrl) || (hkFolder + '/' + fileName);
+  return { name: safeHk + '/' + fileName, url: 'https://teamstepupcom774.sharepoint.com' + encodeURI(srv) };
 }
 
 // ============================================================
