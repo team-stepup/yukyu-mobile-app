@@ -5731,6 +5731,11 @@ select.sankyu-edit-input {
         <span class="asi-text">在職証明作成</span>
         <span class="asi-arrow">›</span>
       </button>
+      <button class="action-sheet-item" onclick="openTsukinTodoke()">
+        <span class="asi-icon" style="background:#fff3e0;color:#e65100;">🚗</span>
+        <span class="asi-text">通勤手段等届出書（三和）作成</span>
+        <span class="asi-arrow">›</span>
+      </button>
       <button class="action-sheet-item" onclick="openHaisenDocScreen('roudouKeiyaku')">
         <span class="asi-icon" style="background:#e8eaf6;color:#3949ab;">📝</span>
         <span class="asi-text">新規雇用契約書兼就業条件通知書 作成</span>
@@ -9623,6 +9628,124 @@ function _printIsshikiRest() {
   var html = ''; groups.forEach(function(g) { html += g.rest; });
   if (!html) { showToast('通知書・台帳が見つかりません', 'error'); return; }
   _openHaisenPrintTab(html, '💡 <b>通知書・台帳は【片面印刷】</b>で印刷してください。<br>　・ヘッダーとフッター: OFF　・背景のグラフィック: ON');
+}
+
+// ============================================================
+// 通勤手段等届出書 (三和電子サーキット用) — 社員データListsから作成
+// ============================================================
+async function openTsukinTodoke() {
+  if (typeof closeActionSheet === 'function') closeActionSheet();
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  showToast('通勤手段等届出書を作成中…', 'info');
+  try {
+    if (typeof ensureHakenKeyMap === 'function') await ensureHakenKeyMap();
+    renderTsukinTodoke(emp);
+  } catch (e) {
+    console.error('openTsukinTodoke error:', e);
+    showToast('エラー: ' + (e.message || String(e)), 'error');
+  }
+}
+
+function renderTsukinTodoke(emp) {
+  window._currentHaisenDocMode = 'tsukinTodoke';
+  window._isshikiGroups = null;
+  var km = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap) ? hakenKeyMap : {};
+  function g(key) { var k = km[key]; var x = (k && emp[k] != null) ? emp[k] : ''; return String(x).trim(); }
+  function gd(key) { var x = g(key); return x ? ((typeof toWarekiText === 'function' && toWarekiText(x)) || x) : ''; }
+  function v(s) { return s ? escHtml(s) : ''; }
+  var name = emp.Title || '';
+  var dept = g('soshikiTani') || g('syokusyu') || '';
+  var todayW = (typeof toWarekiText === 'function') ? toWarekiText(new Date()) : '';
+  var TD = 'border:0.8pt solid #000;padding:5px 8px;font-size:9.5pt;vertical-align:middle;';
+  var TDL = 'border:0.8pt solid #000;padding:5px 8px;font-size:9pt;background:#f0f0f0;font-weight:600;text-align:center;vertical-align:middle;';
+  var TH8 = 'border:0.8pt solid #000;padding:3px 5px;font-size:8pt;background:#fafafa;font-weight:600;text-align:center;';
+
+  var page =
+    '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;font-size:9.5pt;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;font-size:10pt;">' +
+        '<div>三和電子サーキット株式会社東海工場　御中</div>' +
+        '<div style="text-align:right;">届出日：　' + escHtml(todayW) + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;font-size:10pt;margin:6px 0 4px;">派遣元：　' +
+        '<b style="font-size:12.5pt;">有限会社ステップ・アップ</b>' +
+        '<img src="seal_stepup.png" alt="" style="height:44px;vertical-align:middle;margin-left:4px;" ' +
+        'onerror="this.style.display=\'none\'">' +
+      '</div>' +
+      '<div style="position:relative;">' +
+        '<div style="position:absolute;right:0;top:0;border:0.8pt solid #000;width:150px;font-size:7.5pt;">' +
+          '<div style="text-align:center;border-bottom:0.8pt solid #000;background:#f0f0f0;padding:1px;">SEC　届出受理</div>' +
+          '<table style="width:100%;border-collapse:collapse;"><tr>' +
+            '<td style="border-right:0.8pt solid #000;text-align:center;height:42px;width:50%;vertical-align:top;padding:1px;">承認</td>' +
+            '<td style="text-align:center;vertical-align:top;padding:1px;">担当</td>' +
+          '</tr></table>' +
+        '</div>' +
+        '<h1 style="font-size:19pt;letter-spacing:6px;margin:6px 0 8px;">通勤手段等届出書</h1>' +
+      '</div>' +
+      '<div class="hd-intro" style="margin:4px 0 8px;">通勤に使用する、車両、通勤方法、車両の保険内容について、以下届出します。</div>' +
+      '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">' +
+        '<tr>' +
+          '<td style="' + TDL + 'width:15%;">氏名</td>' +
+          '<td style="' + TD + 'width:37%;">' + v(name) + '　<span style="color:#aaa;">㊞</span></td>' +
+          '<td style="' + TDL + 'width:15%;">部署名</td>' +
+          '<td style="' + TD + '">' + v(dept) + '</td>' +
+        '</tr>' +
+        '<tr><td style="' + TDL + '">通勤方法</td>' +
+          '<td style="' + TD + 'height:24px;" colspan="3">' + v(g('tsukinHouhou')) + '</td></tr>' +
+        '<tr><td style="' + TDL + '">臨時(一時的)<br>通勤方法</td>' +
+          '<td style="' + TD + 'height:24px;" colspan="3"></td></tr>' +
+        '<tr><td style="' + TDL + '">車両登録<br>(常用)</td><td style="padding:0;" colspan="3">' +
+          '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">' +
+            '<tr><td style="' + TH8 + 'width:25%;">メーカー</td><td style="' + TH8 + 'width:25%;">車種名</td>' +
+              '<td style="' + TH8 + 'width:25%;">ナンバー</td><td style="' + TH8 + 'width:25%;">色</td></tr>' +
+            '<tr><td style="' + TD + 'text-align:center;height:24px;">' + v(g('carMaker')) + '</td>' +
+              '<td style="' + TD + 'text-align:center;">' + v(g('carName')) + '</td>' +
+              '<td style="' + TD + 'text-align:center;">' + v(g('carNumber')) + '</td>' +
+              '<td style="' + TD + 'text-align:center;">' + v(g('carColor')) + '</td></tr>' +
+          '</table></td></tr>' +
+        '<tr><td style="' + TDL + '">運転免許証</td><td style="padding:0;" colspan="3">' +
+          '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">' +
+            '<tr><td style="' + TH8 + 'width:16%;">種類</td>' +
+              '<td style="' + TD + 'width:34%;text-align:center;">' + v(g('licenseType')) + '</td>' +
+              '<td style="' + TH8 + 'width:16%;">有効期限</td>' +
+              '<td style="' + TD + 'text-align:center;">' + v(gd('licenseExpiry')) + '</td></tr>' +
+          '</table></td></tr>' +
+        '<tr><td style="' + TDL + '">車検証</td>' +
+          '<td style="' + TH8 + 'width:16%;">有効期限</td>' +
+          '<td style="' + TD + '" colspan="2">' + v(gd('shakenExpiry')) + '</td></tr>' +
+        '<tr><td style="' + TDL + '">自賠責保険</td>' +
+          '<td style="' + TH8 + 'width:16%;">保険会社名</td>' +
+          '<td style="' + TD + '">' + v(g('jibaisekiCompany')) + '</td>' +
+          '<td style="' + TD + 'font-size:8.5pt;">保険終了日：' + v(gd('jibaisekiExpiry')) + '</td></tr>' +
+        '<tr><td style="' + TDL + '">任意保険<br>(常用)</td><td style="padding:0;" colspan="3">' +
+          '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">' +
+            '<tr><td style="' + TH8 + 'width:20%;">保険会社名</td>' +
+              '<td style="' + TD + '" colspan="3">' + v(g('niniCompany')) + '</td></tr>' +
+            '<tr><td style="' + TH8 + 'width:20%;">補償金額</td>' +
+              '<td style="' + TD + 'font-size:8.5pt;">対人　' + v(g('taijin')) + '</td>' +
+              '<td style="' + TD + 'font-size:8.5pt;">対物　' + v(g('taibutsu')) + '</td>' +
+              '<td style="' + TD + 'font-size:8.5pt;">人身傷害　' + v(g('jinshinShogai')) + '</td></tr>' +
+            '<tr><td style="' + TH8 + 'width:20%;">保険期間</td>' +
+              '<td style="' + TD + '" colspan="3">' + v(gd('niniStartDate')) + '　〜　' + v(gd('niniExpiry')) + '</td></tr>' +
+          '</table></td></tr>' +
+      '</table>' +
+      '<div style="font-size:8pt;line-height:1.7;margin-top:8px;border:0.5pt solid #888;padding:6px 9px;">' +
+        '<b>【記載注意事項】</b><br>' +
+        '※通勤車両は、常用の他、臨時(一時的)に使用する場合は、その車両も記載ください。<br>' +
+        '※車両ナンバーは、上段：運輸地区名・分類数値）下段：用途(ひらがな)・番号(数値) 全て記入ください。<br>' +
+        '※保険会社名は省力せず、正式名称で記載ください。' +
+      '</div>' +
+    '</div>';
+
+  switchScreen('haisenDocScreen');
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
+  var actions = document.getElementById('haisenDocActions');
+  if (actions) actions.style.display = 'flex';
+  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+    var b = document.getElementById(id); if (b) b.style.display = 'none';
+  });
+  document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
+  if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
 }
 
 // 社員の通勤手当(通勤費) を数値で取得
