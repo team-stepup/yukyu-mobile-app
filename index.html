@@ -9531,20 +9531,9 @@ async function sendNewHireToAdobeSign() {
 
 // アプリ側から window.print() を呼ばずに済む。
 async function openHaisenDocInNewWindow() {
-  // 派遣契約書類一式: 保存 → 印刷選択モーダル (個別契約書/その他を別タブで印刷)
+  // 派遣契約書類一式: 印刷選択モーダル (個別契約書/その他を別タブで印刷)
   if (window._isshikiGroups && window._isshikiGroups.length) {
-    if (!window._isshikiSaved) {
-      try {
-        var _saved = await saveIsshikiPdfs();
-        window._isshikiSavedFiles = _saved;
-        showToast('✓ SharePoint に保存しました（' + _saved.length + '件）', 'success');
-      } catch (e) {
-        console.error('一式 SharePoint保存エラー:', e);
-        showToast('SharePoint保存に失敗: ' + (e.message || String(e)), 'error');
-        return;
-      }
-    }
-    _showIsshikiLinks(window._isshikiSavedFiles || []);
+    _showIsshikiPrintModal();
     return;
   }
   var body = document.getElementById('haisenDocBody');
@@ -12993,7 +12982,7 @@ async function _submitHakenIsshiki() {
     });
     document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
     if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
-    showToast('✓ 書類を作成しました。「🖨 印刷 / PDF保存」を押すと SharePoint に保存されます', 'success');
+    showToast('✓ 書類を作成しました。「🖨 印刷 / PDF保存」から印刷できます', 'success');
   } catch (e) {
     console.error('_submitHakenIsshiki error:', e);
     showToast('作成エラー: ' + (e.message || String(e)), 'error');
@@ -13036,38 +13025,29 @@ async function saveIsshikiPdfs() {
 }
 
 // 保存したファイルへのリンク一覧を表示
-function _showIsshikiLinks(saved) {
+function _showIsshikiPrintModal() {
   var old = document.getElementById('isshikiLinkOverlay'); if (old) old.remove();
-  saved = saved || [];
-  var rows = saved.map(function(f) {
-    return '<a href="' + escHtml(f.url) + '" target="_blank" rel="noopener" ' +
-      'style="display:block;padding:9px 11px;margin-bottom:7px;background:#f5f6fa;border:1px solid #c5cae9;' +
-      'border-radius:8px;font-size:12px;color:#1565c0;text-decoration:none;word-break:break-all;">' +
-      '📄 ' + escHtml(f.name) + '</a>';
-  }).join('');
   var ov = document.createElement('div');
   ov.id = 'isshikiLinkOverlay'; ov.className = 'no-print';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;' +
     'align-items:center;justify-content:center;padding:16px;';
   ov.innerHTML =
-    '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+    '<div style="background:#fff;border-radius:12px;max-width:440px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
       '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
-        '<h3 style="margin:0;font-size:15px;color:#2e7d32;">✅ SharePoint に保存しました</h3>' +
+        '<h3 style="margin:0;font-size:15px;color:#283593;">🖨 印刷 / PDF保存</h3>' +
         '<button onclick="document.getElementById(\'isshikiLinkOverlay\').remove()" ' +
           'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
       '</div>' +
-      '<div style="padding:14px 18px;">' +
-        '<div style="font-weight:700;color:#283593;font-size:13px;margin-bottom:6px;">🖨 印刷</div>' +
+      '<div style="padding:16px 18px;">' +
+        '<div style="font-size:11.5px;color:#888;margin-bottom:12px;">改ページがきれいな状態で印刷・PDF保存できます。</div>' +
         '<button onclick="_printIsshikiKobetsu()" ' +
           'style="display:block;width:100%;background:linear-gradient(135deg,#6a1b9a,#4a148c);color:#fff;border:none;' +
-          'border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:7px;">' +
+          'border-radius:8px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px;">' +
           '① 個別契約書を印刷（両面印刷）</button>' +
         '<button onclick="_printIsshikiRest()" ' +
           'style="display:block;width:100%;background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;border:none;' +
-          'border-radius:8px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">' +
+          'border-radius:8px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">' +
           '② 通知書・台帳を印刷（片面印刷）</button>' +
-        (rows ? ('<div style="font-weight:700;color:#2e7d32;font-size:13px;margin-bottom:6px;border-top:1px solid #eee;padding-top:10px;">📂 保存したファイル</div>' +
-          '<div style="font-size:11px;color:#888;margin-bottom:8px;">社員ファイル/派遣契約書、派遣元・先台帳/（タップで開く）</div>' + rows) : '') +
       '</div>' +
     '</div>';
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
