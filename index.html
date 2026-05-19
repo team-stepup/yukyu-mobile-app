@@ -9633,21 +9633,58 @@ function _printIsshikiRest() {
 // ============================================================
 // 通勤手段等届出書 (三和電子サーキット用) — 社員データListsから作成
 // ============================================================
-async function openTsukinTodoke() {
+function openTsukinTodoke() {
   if (typeof closeActionSheet === 'function') closeActionSheet();
   var emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  window._tsukinTodokeEmp = emp;
+  var d = new Date();
+  var iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  var old = document.getElementById('tsukinTodokeOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'tsukinTodokeOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;' +
+    'align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:380px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
+        '<h3 style="margin:0;font-size:15px;color:#e65100;">🚗 通勤手段等届出書</h3>' +
+        '<button onclick="document.getElementById(\'tsukinTodokeOverlay\').remove()" ' +
+          'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:16px 18px;">' +
+        '<div style="font-size:12px;color:#666;font-weight:600;margin-bottom:4px;">届出日</div>' +
+        '<input type="date" id="tsukinTodokeDate" value="' + iso + '" ' +
+          'style="width:100%;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+        '<div style="font-size:11px;color:#999;margin-top:6px;">三和電子サーキットへの届出日を確認してください。</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button onclick="document.getElementById(\'tsukinTodokeOverlay\').remove()" ' +
+          'style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+        '<button onclick="_doTsukinTodoke()" ' +
+          'style="background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">作成</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+async function _doTsukinTodoke() {
+  var emp = window._tsukinTodokeEmp;
+  if (!emp) { showToast('社員データが見つかりません', 'error'); return; }
+  var dateVal = (document.getElementById('tsukinTodokeDate') || {}).value || '';
+  var ov = document.getElementById('tsukinTodokeOverlay'); if (ov) ov.remove();
   showToast('通勤手段等届出書を作成中…', 'info');
   try {
     if (typeof ensureHakenKeyMap === 'function') await ensureHakenKeyMap();
-    renderTsukinTodoke(emp);
+    renderTsukinTodoke(emp, dateVal);
   } catch (e) {
-    console.error('openTsukinTodoke error:', e);
+    console.error('_doTsukinTodoke error:', e);
     showToast('エラー: ' + (e.message || String(e)), 'error');
   }
 }
 
-function renderTsukinTodoke(emp) {
+function renderTsukinTodoke(emp, todokeDate) {
   window._currentHaisenDocMode = 'tsukinTodoke';
   window._isshikiGroups = null;
   var km = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap) ? hakenKeyMap : {};
@@ -9656,7 +9693,7 @@ function renderTsukinTodoke(emp) {
   function v(s) { return s ? escHtml(s) : ''; }
   var name = emp.Title || '';
   var dept = g('soshikiTani') || g('syokusyu') || '';
-  var todayW = (typeof toWarekiText === 'function') ? toWarekiText(new Date()) : '';
+  var todayW = (typeof toWarekiText === 'function') ? toWarekiText(todokeDate || new Date()) : '';
   var TD = 'border:0.8pt solid #000;padding:5px 8px;font-size:9.5pt;vertical-align:middle;';
   var TDL = 'border:0.8pt solid #000;padding:5px 8px;font-size:9pt;background:#f0f0f0;font-weight:600;text-align:center;vertical-align:middle;';
   var TH8 = 'border:0.8pt solid #000;padding:3px 5px;font-size:8pt;background:#fafafa;font-weight:600;text-align:center;';
@@ -9673,12 +9710,18 @@ function renderTsukinTodoke(emp) {
         'onerror="this.style.display=\'none\'">' +
       '</div>' +
       '<div style="position:relative;">' +
-        '<div style="position:absolute;right:0;top:0;border:0.8pt solid #000;width:150px;font-size:7.5pt;">' +
-          '<div style="text-align:center;border-bottom:0.8pt solid #000;background:#f0f0f0;padding:1px;">SEC　届出受理</div>' +
-          '<table style="width:100%;border-collapse:collapse;"><tr>' +
-            '<td style="border-right:0.8pt solid #000;text-align:center;height:42px;width:50%;vertical-align:top;padding:1px;">承認</td>' +
-            '<td style="text-align:center;vertical-align:top;padding:1px;">担当</td>' +
-          '</tr></table>' +
+        '<div style="position:absolute;right:0;top:2px;border:0.8pt solid #000;width:158px;font-size:8pt;">' +
+          '<div style="text-align:center;border-bottom:0.8pt solid #000;background:#f0f0f0;padding:2px 1px;font-weight:600;">SEC　届出受理</div>' +
+          '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">' +
+            '<tr>' +
+              '<td style="border-right:0.8pt solid #000;border-bottom:0.8pt solid #000;text-align:center;width:50%;padding:2px 1px;background:#fafafa;">承認</td>' +
+              '<td style="border-bottom:0.8pt solid #000;text-align:center;padding:2px 1px;background:#fafafa;">担当</td>' +
+            '</tr>' +
+            '<tr>' +
+              '<td style="border-right:0.8pt solid #000;height:46px;"></td>' +
+              '<td style="height:46px;"></td>' +
+            '</tr>' +
+          '</table>' +
         '</div>' +
         '<h1 style="font-size:19pt;letter-spacing:6px;margin:6px 0 8px;">通勤手段等届出書</h1>' +
       '</div>' +
