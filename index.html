@@ -40726,9 +40726,10 @@ function renderHakenTable(employees, container) {
   // 有期フィルタ時は「通勤方法」列の代わりに「雇用期間」列を表示
   var isYukiMode = (typeof hakenCurrentFilter !== 'undefined' && hakenCurrentFilter === 'yuki');
 
-  // Column order: 社員番号 → 氏名 → 通勤方法(or 雇用期間) → 在職
+  // Column order: 社員番号 → 氏名 → 通勤方法(or 雇用期間) → 在職 → 💴前払い
   let html = '<table class="haken-table"><thead><tr>' +
-    '<th>社番</th><th>氏名</th><th>' + (isYukiMode ? '雇用期間' : '通勤方法') + '</th><th>在職</th>';
+    '<th>社番</th><th>氏名</th><th>' + (isYukiMode ? '雇用期間' : '通勤方法') + '</th><th>在職</th>' +
+    '<th>💴 前払い</th>';
   extraCols.forEach(col => {
     html += '<th>' + escHtml(col.field.label) + '</th>';
   });
@@ -40756,11 +40757,16 @@ function renderHakenTable(employees, container) {
     } else {
       col3Display = tsukinDisplay;
     }
+    // 💴 前払いボタン (退社者は無効化)
+    var maebariBtn = resigned
+      ? '<span style="color:#bbb;font-size:11px;">—</span>'
+      : '<button type="button" onclick="event.stopPropagation();openHakenMaebariQuick(' + emp.Id + ')" style="background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">💴 申請</button>';
     html += '<tr onclick=\'selectEmployee(' + JSON.stringify(emp).replace(/'/g, "&#39;") + ')\' style="cursor:pointer;">' +
       '<td>' + (emp[F.syainNo] || '') + '</td>' +
       '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
       '<td>' + col3Display + '</td>' +
-      '<td>' + statusDisplay + '</td>';
+      '<td>' + statusDisplay + '</td>' +
+      '<td style="text-align:center;">' + maebariBtn + '</td>';
     extraCols.forEach(col => {
       html += '<td>' + escHtml(getFieldValueForTable(emp, col.field, hakenKeyMap)) + '</td>';
     });
@@ -40768,6 +40774,235 @@ function renderHakenTable(employees, container) {
   });
   html += '</tbody></table>';
   container.innerHTML = html;
+}
+
+// ===== 派遣先一覧 → 社員別 「💴 前払い 申請」クイックモーダル =====
+// 今月の前払い合計を表示しつつ、今週分(次の金曜) の前払い申請を1画面で完結させる
+async function openHakenMaebariQuick(empId) {
+  var emp = (hakenEmployeesCache || []).find(function(e) { return e && e.Id === empId; });
+  if (!emp) { showToast('社員が見つかりません', 'error'); return; }
+  var sn = String(emp[F.syainNo] || '');
+  var nm = emp.Title || '';
+
+  // 既存overlay を除去して再生成
+  var existed = document.getElementById('hakenMaebariOv');
+  if (existed) existed.remove();
+
+  var ov = document.createElement('div');
+  ov.id = 'hakenMaebariOv';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:14px;';
+
+  // デフォルト前払日: 次の金曜
+  var nextFri = (typeof getNextFriday === 'function') ? getNextFriday() : new Date();
+  var defaultDate = nextFri.getFullYear() + '-' + String(nextFri.getMonth()+1).padStart(2,'0') + '-' + String(nextFri.getDate()).padStart(2,'0');
+  var WD = ['日','月','火','水','木','金','土'];
+
+  var amountBtnsHtml = [5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].map(function(a) {
+    return '<button type="button" data-amt="' + a + '" onclick="_hmqSelectAmount(' + a + ',this)" style="background:#f5f5fa;color:#333;border:1.5px solid #ddd;border-radius:8px;padding:8px 4px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.12s;">' + a.toLocaleString() + '円</button>';
+  }).join('');
+
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.35);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;background:linear-gradient(180deg,#fff,#fff8e1);">' +
+        '<h3 style="margin:0;font-size:16px;color:#e65100;font-weight:800;">💴 前払い 申請</h3>' +
+        '<div style="font-size:13px;font-weight:700;color:#222;margin-top:4px;">' + escHtml(nm) + ' <span style="color:#888;font-weight:600;">(No.' + escHtml(sn) + ')</span></div>' +
+      '</div>' +
+      '<div style="padding:14px 18px;overflow-y:auto;flex:1;">' +
+        // 今月合計バナー
+        '<div id="hmqSumBox" style="background:#fff3e0;border:1.5px solid #ffcc80;border-radius:10px;padding:11px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">' +
+          '<div>' +
+            '<div style="font-size:11px;color:#a04000;font-weight:700;letter-spacing:0.3px;">📅 今月の前払い合計</div>' +
+            '<div id="hmqSumVal" style="font-size:18px;font-weight:800;color:#bf360c;margin-top:1px;">⏳ 集計中…</div>' +
+          '</div>' +
+          '<div id="hmqSumCount" style="font-size:11px;color:#888;text-align:right;"></div>' +
+        '</div>' +
+        // 前払日
+        '<div style="font-size:11.5px;color:#666;font-weight:700;margin-bottom:4px;">① 前払日</div>' +
+        '<input type="date" id="hmqDate" value="' + defaultDate + '" onchange="_hmqUpdateDateDisplay()" style="width:100%;padding:8px 10px;border:1.5px solid #ccc;border-radius:8px;font-size:14px;box-sizing:border-box;margin-bottom:3px;">' +
+        '<div id="hmqDateDisplay" style="font-size:11px;color:#888;margin-bottom:10px;">' + defaultDate + '（' + WD[nextFri.getDay()] + '）</div>' +
+        // 金額
+        '<div style="font-size:11.5px;color:#666;font-weight:700;margin-bottom:4px;">② 金額を選択</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px;">' + amountBtnsHtml + '</div>' +
+        '<div style="font-size:11px;color:#666;font-weight:600;margin-bottom:4px;">その他（半角数字、カンマ可）</div>' +
+        '<input type="text" id="hmqCustom" placeholder="例: 15,000" oninput="_hmqCustomInput(this)" style="width:100%;padding:8px 10px;border:1.5px solid #ccc;border-radius:8px;font-size:14px;box-sizing:border-box;">' +
+        // 申請内容プレビュー
+        '<div id="hmqPreview" style="margin-top:14px;padding:11px 12px;background:#f0f0ff;border-radius:10px;display:none;text-align:center;">' +
+          '<div style="font-size:11px;color:#666;">申請内容</div>' +
+          '<div id="hmqPreviewText" style="font-size:14px;font-weight:700;color:#1565c0;margin-top:2px;"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;">' +
+        '<button id="hmqCancel" style="flex:1;background:#fff;color:#555;border:1.5px solid #ddd;border-radius:8px;padding:11px;font-weight:600;cursor:pointer;">閉じる</button>' +
+        '<button id="hmqSubmit" disabled style="flex:2;background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;border:none;border-radius:8px;padding:11px;font-weight:700;cursor:pointer;opacity:0.55;">💴 前払い申請</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  window._hmqEmp = emp;
+  window._hmqAmount = null;
+  ov.querySelector('#hmqCancel').onclick = function(){ ov.remove(); };
+  ov.querySelector('#hmqSubmit').onclick = function(){ _hmqSubmit(this); };
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+
+  // 今月合計を非同期で取得・表示
+  _hmqLoadMonthlySum(sn);
+}
+
+window._hmqSelectAmount = function(amt, btn) {
+  window._hmqAmount = amt;
+  var box = document.getElementById('hmqCustom'); if (box) box.value = '';
+  document.querySelectorAll('#hakenMaebariOv button[data-amt]').forEach(function(b) {
+    b.style.background = '#f5f5fa'; b.style.color = '#333'; b.style.borderColor = '#ddd';
+  });
+  if (btn) { btn.style.background = 'linear-gradient(135deg,#fb8c00,#e65100)'; btn.style.color = '#fff'; btn.style.borderColor = '#e65100'; }
+  _hmqUpdatePreview();
+};
+
+window._hmqCustomInput = function(inp) {
+  var raw = (inp.value || '').replace(/[,\s]/g, '');
+  var n = parseInt(raw, 10);
+  if (raw && !isNaN(n) && n > 0) {
+    window._hmqAmount = n;
+    document.querySelectorAll('#hakenMaebariOv button[data-amt]').forEach(function(b) {
+      b.style.background = '#f5f5fa'; b.style.color = '#333'; b.style.borderColor = '#ddd';
+    });
+  } else if (!raw) {
+    window._hmqAmount = null;
+  }
+  _hmqUpdatePreview();
+};
+
+window._hmqUpdateDateDisplay = function() {
+  var inp = document.getElementById('hmqDate');
+  var disp = document.getElementById('hmqDateDisplay');
+  if (!inp || !disp) return;
+  var v = inp.value;
+  if (!v) { disp.textContent = ''; return; }
+  var d = new Date(v + 'T00:00:00');
+  var WD = ['日','月','火','水','木','金','土'];
+  disp.textContent = v + '（' + WD[d.getDay()] + '）';
+  _hmqUpdatePreview();
+};
+
+window._hmqUpdatePreview = function() {
+  var amt = window._hmqAmount;
+  var dateInp = document.getElementById('hmqDate');
+  var prev = document.getElementById('hmqPreview');
+  var prevText = document.getElementById('hmqPreviewText');
+  var submit = document.getElementById('hmqSubmit');
+  if (!prev || !prevText || !submit) return;
+  if (amt && amt > 0 && dateInp && dateInp.value) {
+    prev.style.display = '';
+    var WD = ['日','月','火','水','木','金','土'];
+    var d = new Date(dateInp.value + 'T00:00:00');
+    prevText.textContent = dateInp.value + '（' + WD[d.getDay()] + '）  ¥' + amt.toLocaleString();
+    submit.disabled = false;
+    submit.style.opacity = '1';
+  } else {
+    prev.style.display = 'none';
+    submit.disabled = true;
+    submit.style.opacity = '0.55';
+  }
+};
+
+async function _hmqLoadMonthlySum(syainNo) {
+  var sumEl = document.getElementById('hmqSumVal');
+  var cntEl = document.getElementById('hmqSumCount');
+  try {
+    var now = new Date();
+    var first = new Date(now.getFullYear(), now.getMonth(), 1);
+    var nextMo = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    function _iso(d) { return d.toISOString(); }
+    var filter = "Title eq '" + syainNo + "' and " +
+      MF.payDate + " ge datetime'" + _iso(first) + "' and " +
+      MF.payDate + " lt datetime'" + _iso(nextMo) + "'";
+    var token = await getToken();
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items?$filter=" + encodeURIComponent(filter) + "&$top=100";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    var sum = 0;
+    items.forEach(function(it) {
+      var raw = String(it[MF.amount] || '').replace(/[,\s¥￥円]/g, '');
+      var n = parseFloat(raw);
+      if (!isNaN(n)) sum += n;
+    });
+    if (sumEl) sumEl.textContent = (sum > 0 ? '¥' + sum.toLocaleString() : '¥0');
+    if (cntEl) cntEl.textContent = items.length + '件 / ' + (now.getMonth()+1) + '月分';
+  } catch (e) {
+    console.warn('今月合計 取得失敗:', e);
+    if (sumEl) sumEl.textContent = '取得失敗';
+    if (cntEl) cntEl.textContent = '';
+  }
+}
+
+async function _hmqSubmit(btn) {
+  var emp = window._hmqEmp;
+  var amt = window._hmqAmount;
+  var dateInp = document.getElementById('hmqDate');
+  if (!emp || !amt || !dateInp || !dateInp.value) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 送信中…'; btn.style.opacity = '0.7'; }
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var payDate = new Date(dateInp.value + 'T00:00:00');
+    var sn = String(emp[F.syainNo] || '');
+    var bankInfo = (typeof getEmployeeBankInfo === 'function') ? getEmployeeBankInfo(emp) : { bank:'', branch:'', account:'' };
+    var hakensaki = (typeof getHakensakiCode === 'function') ? getHakensakiCode(emp) : '';
+    var entityType = await getListItemEntityType(LIST_MAEBARI_GUID);
+    var body = {
+      '__metadata': { 'type': entityType },
+      'Title': sn,
+      'NO_x002e_': sn,
+      'OData__x652f__x6255__x65e5_': payDate.toISOString(),
+      'OData__x6d3e__x9063__x5148_': hakensaki,
+      'OData__x540d__x3000__x3000__x3000__x52': emp.Title || '',
+      'OData__x91d1__x984d_': amt.toLocaleString(),
+      'OData__x9280__x884c_': bankInfo.bank,
+      'OData__x652f__x5e97_': bankInfo.branch,
+      'OData__x53e3__x5ea7_': bankInfo.account,
+      'OData__x540d__x7fa9_': emp[F.meigi] || '',
+      'zaisyoku': (emp[F.hakenTaisha] || emp[F.yukyuTaisha]) ? '退職' : '在職',
+      'zaiyokusyubetu': emp[F.zaiyokuSyubetu] || ''
+    };
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      var t = ''; try { t = await resp.text(); } catch (_) {}
+      throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 200));
+    }
+    showToast('✓ 前払い申請を送信しました', 'success');
+    // 今月合計を再取得
+    await _hmqLoadMonthlySum(sn);
+    // 申請欄をリセット
+    document.getElementById('hmqCustom').value = '';
+    document.querySelectorAll('#hakenMaebariOv button[data-amt]').forEach(function(b) {
+      b.style.background = '#f5f5fa'; b.style.color = '#333'; b.style.borderColor = '#ddd';
+    });
+    window._hmqAmount = null;
+    _hmqUpdatePreview();
+    if (btn) { btn.textContent = '✅ 送信完了'; btn.style.background = 'linear-gradient(135deg,#43a047,#2e7d32)'; }
+    setTimeout(function() {
+      if (btn) {
+        btn.textContent = '💴 前払い申請';
+        btn.style.background = 'linear-gradient(135deg,#fb8c00,#e65100)';
+        btn.disabled = true;
+        btn.style.opacity = '0.55';
+      }
+    }, 1800);
+  } catch (e) {
+    console.error('_hmqSubmit error:', e);
+    showToast('申請失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💴 前払い申請'; btn.style.opacity = '1'; }
+  }
 }
 
 async function refreshHakenList() {
