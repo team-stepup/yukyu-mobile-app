@@ -9263,18 +9263,23 @@ if (!window._esignMessageInstalled) {
       // ① 個人の社員フォルダへ保存
       await uploadFileToSp(folderPath, fileName, file);
       // ② 新規雇用契約書のときは 集約フォルダ (社員ファイル/新規雇用契約書作成/{操作者名}/{派遣先名}/) にも保存
+      //    操作者名フォルダの作成に失敗したら旧パス(操作者名なし)にフォールバック
       if (window._currentHaisenDocMode !== 'renewal') {
         try {
           var hkNm2 = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(_esignCurrentEmp)) : (getBukaValue(_esignCurrentEmp) || '');
           var safeHk2 = String(hkNm2 || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
           var opName2 = (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
-            .replace(/[\s　\/\\:*?"<>|#%~&{}]/g, '').trim();
-          var safeOp2 = opName2 || '不明';
+            .replace(/[\s　\/\\:*?"<>|#%~&{}\(\)\[\]'"`,;+=@.]/g, '').trim();
           var aggP = SP_DOC_LIB_PATH + '/新規雇用契約書作成';
-          var aggOp2 = aggP + '/' + safeOp2;
-          var aggF = aggOp2 + '/' + safeHk2;
           try { await ensureSpFolder(aggP); } catch (e1) { console.warn('新規雇用契約書 親フォルダ warn:', e1); }
-          try { await ensureSpFolder(aggOp2); } catch (eOp) { console.warn('新規雇用契約書 操作者フォルダ warn:', eOp); }
+          var aggF = aggP + '/' + safeHk2;  // fallback
+          if (opName2) {
+            var aggOp2 = aggP + '/' + opName2;
+            try {
+              await ensureSpFolder(aggOp2);
+              aggF = aggOp2 + '/' + safeHk2;
+            } catch (eOp) { console.warn('新規雇用契約書 操作者フォルダ作成失敗 (旧パスにフォールバック):', eOp); }
+          }
           try { await ensureSpFolder(aggF); } catch (e2) { console.warn('新規雇用契約書 派遣先フォルダ warn:', e2); }
           var kikan2 = _koyouKikanForFilename(_esignCurrentEmp);
           var aggName = '新規雇用契約書兼就業条件通知書_' + sn2 + '_' + nm + '_' + kikan2 + '.pdf';
@@ -9494,14 +9499,19 @@ async function sendNewHireToAdobeSign() {
     }
 
     // ② 集約フォルダ 新規雇用契約書作成/{操作者名}/{派遣先名}/
+    //    操作者名フォルダの作成に失敗したら旧パス(操作者名なし)にフォールバック
     var opNameNH = (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
-      .replace(/[\s　\/\\:*?"<>|#%~&{}]/g, '').trim();
-    var safeOpNH = opNameNH || '不明';
+      .replace(/[\s　\/\\:*?"<>|#%~&{}\(\)\[\]'"`,;+=@.]/g, '').trim();
     var aggParent = SP_DOC_LIB_PATH + '/新規雇用契約書作成';
-    var aggOpFolderNH = aggParent + '/' + safeOpNH;
-    var aggFolder = aggOpFolderNH + '/' + safeHk;
     try { await ensureSpFolder(aggParent); } catch (e) {}
-    try { await ensureSpFolder(aggOpFolderNH); } catch (e) {}
+    var aggFolder = aggParent + '/' + safeHk;  // fallback
+    if (opNameNH) {
+      var aggOpFolderNH = aggParent + '/' + opNameNH;
+      try {
+        await ensureSpFolder(aggOpFolderNH);
+        aggFolder = aggOpFolderNH + '/' + safeHk;
+      } catch (eOp) { console.warn('新規雇用契約書 操作者フォルダ作成失敗 (旧パスにフォールバック):', eOp); }
+    }
     try { await ensureSpFolder(aggFolder); } catch (e) {}
     try { await uploadFileToSp(aggFolder, unsignedName, unsignedFile); }
     catch (e) { console.warn('集約保存 warn:', e); }
@@ -9537,7 +9547,7 @@ async function sendNewHireToAdobeSign() {
           (email ? ('宛先メール: ' + email + '\n') : '⚠ メール未登録 — Power Automate 側で宛先を指定してください\n') +
           '\n未署名PDFを以下へ保存しました:\n' +
           (personalPath ? '・個人の社員フォルダ\n' : '') +
-          '・新規雇用契約書作成/' + safeOpNH + '/' + safeHk + '/\n' +
+          '・' + aggFolder.replace(SP_DOC_LIB_PATH + '/', '') + '/\n' +
           '・_Adobe署名待ち/ (Power Automate が自動で Adobe Sign へ送信)');
   } catch (e) {
     console.error('sendNewHireToAdobeSign error:', e);
@@ -39825,18 +39835,29 @@ async function bulkCreateRenewalDocs() {
 
       // ② 集約フォルダへ保存: 社員ファイル/更新雇用契約書作成/{操作者名}/{派遣先名}/
       //    (操作者名 = MSALログイン中ユーザーの Azure AD 表示名)
+      //    操作者名フォルダの作成に失敗したら旧パス (操作者名なし) にフォールバック。
       var hkNm = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(emp)) : (getBukaValue(emp) || '');
       var safeHk = String(hkNm || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
+      // 操作者名は SharePoint フォルダ名で禁止される文字を全て除去 (記号も基本的に除去)
       var opName = (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
-        .replace(/[\s　\/\\:*?"<>|#%~&{}]/g, '').trim();
-      var safeOp = opName || '不明';
+        .replace(/[\s　\/\\:*?"<>|#%~&{}\(\)\[\]'"`,;+=@.]/g, '').trim();
       var aggParent = SP_DOC_LIB_PATH + '/更新雇用契約書作成';
-      var aggOpFolder = aggParent + '/' + safeOp;
-      var aggFolder = aggOpFolder + '/' + safeHk;
       try { await ensureSpFolder(aggParent); } catch (e1) { console.warn('agg parent warn:', e1); }
-      try { await ensureSpFolder(aggOpFolder); } catch (eOp) { console.warn('agg op folder warn:', eOp); }
+
+      // 操作者フォルダの作成を試みる。失敗時は旧パスにフォールバック。
+      var aggFolder = aggParent + '/' + safeHk;
+      if (opName) {
+        var aggOpFolder = aggParent + '/' + opName;
+        try {
+          await ensureSpFolder(aggOpFolder);
+          aggFolder = aggOpFolder + '/' + safeHk;  // 操作者ディレクトリ作成成功
+        } catch (eOp) {
+          console.warn('操作者フォルダ作成失敗 (旧パスにフォールバック):', eOp);
+        }
+      }
       try { await ensureSpFolder(aggFolder); } catch (e2) { console.warn('agg folder warn:', e2); }
       var fileName2 = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + kikan + '.pdf';
+      console.log('[更新書類] 保存先:', aggFolder, '/', fileName2);
       await uploadFileToSp(aggFolder, fileName2, pdfBlob);
       success.push(nm);
     } catch (e) {
