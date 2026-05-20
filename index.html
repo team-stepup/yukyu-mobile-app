@@ -5630,6 +5630,7 @@ select.sankyu-edit-input {
         <button onclick="zoomHaisenDoc(0.1)" style="flex:1;background:#eef2ff;color:#3949ab;padding:10px;border:1px solid #c5cae9;border-radius:8px;font-weight:700;font-size:16px;">🔍＋</button>
       </div>
       <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
+      <button id="tsukinSaveBtn" onclick="saveTsukinTodokeToSyainFolder(this)" style="display:none;background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">💾 社員フォルダに保存 (通勤届)</button>
       <button id="haisenEsignBtn" onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
       <button id="adobeSignBtn" onclick="sendNewHireToAdobeSign()" class="btn" style="display:none;background:linear-gradient(135deg,#d32f2f,#b71c1c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📤 Adobe Sign 署名へ送信</button>
       <button class="koyou-undo-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1.5px solid #e65100;border-radius:8px;padding:10px;font-weight:700;font-size:13px;">↩ 給与・雇用期間の変更を元に戻す</button>
@@ -9895,11 +9896,60 @@ function renderTsukinTodoke(emp, todokeDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
+  // 通勤届: 「社員フォルダに保存」ボタンを表示
+  var tsBtn = document.getElementById('tsukinSaveBtn');
+  if (tsBtn) {
+    tsBtn.style.display = '';
+    tsBtn.disabled = false;
+    tsBtn.dataset.empId = emp.Id || '';
+    tsBtn.dataset.todokeDate = todokeDate || '';  // 届出日 (YYYY-MM-DD)
+    // 社員情報を window に保持 (保存時に再利用)
+    window._tsukinSaveCtx = { emp: emp, todokeDate: todokeDate || '' };
+  }
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+}
+
+// 通勤届 → 社員フォルダに PDF を保存 (ファイル名: 通勤届{YYYY-MM-DD}.pdf)
+async function saveTsukinTodokeToSyainFolder(btn) {
+  var ctx = window._tsukinSaveCtx;
+  if (!ctx || !ctx.emp) { showToast('社員情報が取得できません', 'error'); return; }
+  var emp = ctx.emp;
+  // ファイル名: 通勤届_{YYYY-MM-DD}.pdf
+  var d = ctx.todokeDate ? new Date(ctx.todokeDate) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+  var ymd = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  var fileName = '通勤届_' + ymd + '.pdf';
+  if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ PDFを生成中…'; }
+  try {
+    if (typeof loadEsignLibsIfNeeded === 'function') await loadEsignLibsIfNeeded();
+    if (btn) btn.textContent = '⏳ PDFを生成中…';
+    var pdfBlob = await generateHaisenDocAsPdf();
+    if (btn) btn.textContent = '⏳ アップロード中…';
+    var folderPath = await getEmpFolderPath(emp);
+    if (!folderPath) throw new Error('社員フォルダのパスが特定できません');
+    try { await ensureSpFolder(folderPath); } catch (_) {}
+    await uploadFileToSp(folderPath, fileName, pdfBlob);
+    if (typeof showToast === 'function') showToast('✓ ' + fileName + ' を社員フォルダへ保存しました', 'success');
+    if (btn) { btn.textContent = '✅ 保存しました'; btn.style.background = 'linear-gradient(135deg,#43a047,#2e7d32)'; }
+    setTimeout(function() {
+      if (btn) {
+        btn.textContent = btn.dataset.label || '💾 社員フォルダに保存 (通勤届)';
+        btn.style.background = 'linear-gradient(135deg,#fb8c00,#e65100)';
+        btn.disabled = false;
+      }
+    }, 2200);
+  } catch (e) {
+    console.error('saveTsukinTodokeToSyainFolder error:', e);
+    if (typeof showToast === 'function') showToast('保存失敗: ' + (e.message || e), 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.label || '💾 社員フォルダに保存 (通勤届)';
+    }
+  }
 }
 
 // 社員の通勤手当(通勤費) を数値で取得
@@ -12441,7 +12491,7 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   // 操作ボタン: ズーム + 印刷のみ (電子サイン/Adobe/元に戻す は非表示)
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12647,7 +12697,7 @@ function renderHakenSakiKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12780,7 +12830,7 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12864,7 +12914,7 @@ function renderHakenTsuuchisho(h, emps, opts) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -13436,7 +13486,7 @@ async function _submitHakenIsshiki() {
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allPagesHtml + '</div>';
     var actions = document.getElementById('haisenDocActions');
     if (actions) actions.style.display = 'flex';
-    ['haisenEsignBtn', 'adobeSignBtn'].forEach(function(id) {
+    ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
       var b = document.getElementById(id); if (b) b.style.display = 'none';
     });
     document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
