@@ -37914,14 +37914,27 @@ async function resolveSyainServerRelativeUrl(rawUrl, token) {
         var d = await r.json();
         if (d.webUrl) {
           var u2 = new URL(d.webUrl);
+          var resolvedPath = null;
           var id2 = u2.searchParams.get('id');
           if (id2) {
             var p2 = decodeURIComponent(id2).replace(/\/+$/, '');
-            if (p2.indexOf('/') === 0) return p2;
+            if (p2.indexOf('/') === 0) resolvedPath = p2;
           }
-          var pn2 = decodeURIComponent(u2.pathname);
-          if (/^\/sites\//i.test(pn2) && !/\.aspx$/i.test(pn2) && pn2.indexOf('/:') === -1) {
-            return pn2.replace(/\/+$/, '');
+          if (!resolvedPath) {
+            var pn2 = decodeURIComponent(u2.pathname);
+            if (/^\/sites\//i.test(pn2) && pn2.indexOf('/:') === -1) {
+              resolvedPath = pn2.replace(/\/+$/, '');
+            }
+          }
+          if (resolvedPath) {
+            // リンク先がファイル(.pdf 等)の場合は親フォルダのパスを返す
+            // (社員フォルダリンクが代表ファイルへの直リンクになっているケースに対応)
+            var isFile = !!d.file || (!d.folder && /\.[a-zA-Z0-9]{2,6}$/.test(resolvedPath));
+            if (isFile) {
+              var lastSlash = resolvedPath.lastIndexOf('/');
+              if (lastSlash > 0) resolvedPath = resolvedPath.substring(0, lastSlash);
+            }
+            return resolvedPath;
           }
         }
       } else {
