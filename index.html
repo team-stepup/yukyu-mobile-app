@@ -29770,6 +29770,17 @@ function getLoggedInEmail() {
   } catch (e) { return ''; }
 }
 
+// MSAL ログイン中ユーザーの表示名 (Azure AD の name クレーム。例: "山下 浩俊")
+// 取得不可なら空文字。ファイル名末尾に「作成者」を入れる用途。
+function getLoggedInName() {
+  try {
+    if (typeof msalInstance === 'undefined' || !msalInstance) return '';
+    const accounts = msalInstance.getAllAccounts();
+    if (!accounts || accounts.length === 0) return '';
+    return String(accounts[0].name || accounts[0].username || '').trim();
+  } catch (e) { return ''; }
+}
+
 function isAdminUser() {
   try {
     if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
@@ -39716,7 +39727,10 @@ async function bulkCreateRenewalDocs() {
       var aggFolder = aggParent + '/' + safeHk;
       try { await ensureSpFolder(aggParent); } catch (e1) { console.warn('agg parent warn:', e1); }
       try { await ensureSpFolder(aggFolder); } catch (e2) { console.warn('agg folder warn:', e2); }
-      var fileName2 = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + kikan + '.pdf';
+      var opName = (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
+        .replace(/[\s　\/\\:*?"<>|#%]/g, '');
+      var fileName2 = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + kikan +
+        (opName ? '_作成者' + opName : '') + '.pdf';
       await uploadFileToSp(aggFolder, fileName2, pdfBlob);
       success.push(nm);
     } catch (e) {
