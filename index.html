@@ -40952,7 +40952,41 @@ function toggleHakenViewMode(btn) {
 // ===== 🗺️ 送迎ルート分け =====
 // 🚐送迎 フィルタ時に押下。Google Maps URL方式で送迎台数ごとに社員をルート分け。
 // 住所順 or あいうえお順で N台に均等振り分け、各社員は車両ドロップダウンで他車両へ移動可。
-function openSougeiRouteSplit() {
+
+// 車両リスト (Pick-up列) から該当派遣先の送迎台数を取得
+// SP リスト: /sites/PowerApps/Lists/List , 列: Pick_x002d_up (Text)
+async function _fetchSougeiVehicleCountByHaken(hakenName) {
+  if (!hakenName) return null;
+  try {
+    var token = await getToken();
+    if (!token) return null;
+    var url = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=Pick_x002d_up&$top=500";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    // 名前の揺らぎを吸収 (法人格、空白、半角全角)
+    function _norm(s) {
+      return String(s || '')
+        .replace(/(株式会社|有限会社|合同会社|合資会社|㈱|㈲|\(株\)|\(有\))/g, '')
+        .replace(/[\s　]/g, '')
+        .toLowerCase();
+    }
+    var target = _norm(hakenName);
+    if (!target) return 0;
+    var count = items.filter(function(it) {
+      var p = _norm(it.Pick_x002d_up);
+      if (!p) return false;
+      return p === target || (p.length >= 2 && target.length >= 2 && (p.indexOf(target) >= 0 || target.indexOf(p) >= 0));
+    }).length;
+    return count;
+  } catch (e) {
+    console.warn('vehicle count fetch error:', e);
+    return null;
+  }
+}
+
+async function openSougeiRouteSplit() {
   var employees = (typeof getHakenFilteredList === 'function') ? getHakenFilteredList() : [];
   var sougeiEmps = employees.filter(function(e) {
     var t = (typeof getTsukinValue === 'function') ? getTsukinValue(e) : '';
@@ -40979,17 +41013,30 @@ function openSougeiRouteSplit() {
   var hakenName = (typeof stripBukaPrefix === 'function')
     ? stripBukaPrefix((typeof getBukaValue === 'function') ? getBukaValue(sougeiEmps[0]) : '')
     : '';
-  var initCars = Math.max(1, Math.min(8, Math.ceil(members.length / 6)));
 
+  // 車両リスト (Pick-up列) から該当派遣先の送迎台数を取得 (取得中はとりあえずモーダルを開く)
+  var fallbackCars = Math.max(1, Math.min(8, Math.ceil(members.length / 6)));
   window._sougeiRouteCtx = {
     members: members,
     hakenName: hakenName,
-    cars: initCars,
+    cars: fallbackCars,
+    carsFromVehicleList: null,  // 取得中
     sortMode: 'address',
     assignments: {}
   };
   _redoSougeiAssignments();
   _renderSougeiRouteModal();
+
+  // 非同期で Pick-up 台数を取得 → 取得できれば初期値として再設定
+  _fetchSougeiVehicleCountByHaken(hakenName).then(function(n) {
+    if (!window._sougeiRouteCtx) return;
+    window._sougeiRouteCtx.carsFromVehicleList = (typeof n === 'number') ? n : null;
+    if (typeof n === 'number' && n > 0 && n !== window._sougeiRouteCtx.cars) {
+      window._sougeiRouteCtx.cars = Math.min(10, n);
+      _redoSougeiAssignments();
+    }
+    _renderSougeiRouteModal();
+  });
 }
 
 // 振り分けロジック: 並び順で N台へ均等分配
@@ -41122,6 +41169,11 @@ function _renderSougeiRouteModal() {
           '<span style="font-size:16px;font-weight:800;color:#00695c;min-width:24px;text-align:center;">' + ctx.cars + '</span>' +
           '<button onclick="_changeSougeiCars(1)" style="width:28px;height:28px;border:1px solid #ccc;background:#fff;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;">＋</button>' +
           '<span style="font-size:11px;color:#888;">台</span>' +
+          (ctx.carsFromVehicleList === null
+            ? '<span style="font-size:10px;color:#aaa;margin-left:6px;">⏳ Pick-up取得中</span>'
+            : (ctx.carsFromVehicleList > 0
+                ? '<span style="font-size:10px;color:#00695c;margin-left:6px;background:#e0f2f1;padding:2px 6px;border-radius:4px;font-weight:600;">🚐 車両List Pick-up: ' + ctx.carsFromVehicleList + '台</span>'
+                : '<span style="font-size:10px;color:#888;margin-left:6px;">車両List未登録</span>')) +
         '</div>' +
         '<div style="display:flex;align-items:center;gap:6px;">' +
           '<span style="font-size:12px;color:#666;font-weight:700;">振り分け方:</span>' +
