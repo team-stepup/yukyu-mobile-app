@@ -13148,6 +13148,105 @@ async function _submitHakenIsshiki() {
     (ryokinGroups[rk] = ryokinGroups[rk] || []).push(i);
   });
 
+  // ===== 確認ダイアログ: 派遣先情報・社員データ Lists への変更を提示 =====
+  var hakenChanges = [];
+  function _addHkCh(label, oldV, newV) {
+    var o = (oldV == null || oldV === '') ? '' : String(oldV);
+    var n = (newV == null || newV === '') ? '' : String(newV);
+    if (o !== n) hakenChanges.push({ label: label, from: o || '(未設定)', to: n || '(未設定)' });
+  }
+  var curPSChk = (typeof _toDateInputVal === 'function') ? (_toDateInputVal(ctx.h[HF.haken_period_start]) || '') : '';
+  var curPEChk = (typeof _toDateInputVal === 'function') ? (_toDateInputVal(ctx.h[HF.haken_period_end]) || '') : '';
+  _addHkCh('派遣期間 開始', curPSChk, psV);
+  _addHkCh('派遣期間 終了', curPEChk, peV);
+  _addHkCh('派遣先名', ctx.h[HF.hakensaki_name], h2[HF.hakensaki_name]);
+  _addHkCh('組織単位', ctx.h[HF.soshiki], h2[HF.soshiki]);
+  _addHkCh('派遣先責任者 部署', ctx.h[HF.hakensakiSekBusho], h2[HF.hakensakiSekBusho]);
+  _addHkCh('派遣先責任者 役職', ctx.h[HF.hakensakiSekYakushoku], h2[HF.hakensakiSekYakushoku]);
+  _addHkCh('派遣先責任者 氏名', ctx.h[HF.hakensakiSekName], h2[HF.hakensakiSekName]);
+  _addHkCh('苦情処理 部署', ctx.h[HF.kujouSakiBusho], h2[HF.kujouSakiBusho]);
+  _addHkCh('苦情処理 役職', ctx.h[HF.kujouSakiYakushoku], h2[HF.kujouSakiYakushoku]);
+  _addHkCh('苦情処理 氏名', ctx.h[HF.kujouSakiName], h2[HF.kujouSakiName]);
+  var _rateKeysChk = Object.keys(ryokinGroups);
+  if (_rateKeysChk.length) {
+    var _topRateChk = _rateKeysChk[0];
+    _rateKeysChk.forEach(function(rkk) {
+      if ((ryokinGroups[rkk] || []).length > (ryokinGroups[_topRateChk] || []).length) _topRateChk = rkk;
+    });
+    var _rateNumChk = Number(_topRateChk) || 0;
+    var _curRateNum = Number(ctx.h[HF.hakenRyokin]) || 0;
+    if (_rateNumChk && _rateNumChk !== _curRateNum) _addHkCh('派遣先請求単価', _curRateNum ? '¥' + _curRateNum : '', '¥' + _rateNumChk);
+  }
+  // 社員ごとの変更
+  var confirmRows = empEdits.map(function(ed) {
+    var changes = [];
+    if (ed.yukiChanged) {
+      var curIsMukiC = String(ed.emp[ed.yukiKey] || '').indexOf('無期') >= 0;
+      changes.push({ label: '📅 雇用区分', from: curIsMukiC ? '無期' : '有期', to: ed.newYuki.indexOf('無期') >= 0 ? '無期' : '有期' });
+    }
+    if (ed.start !== ed.curStart) changes.push({ label: '📅 雇用開始日', from: ed.curStart || '(未設定)', to: ed.start || '(クリア)' });
+    if (ed.end !== ed.curEnd) changes.push({ label: '📅 雇用終了日', from: ed.curEnd || '(未設定)', to: ed.end || '(クリア)' });
+    if (ed.seikyuChanged) changes.push({ label: '💴 請求単価', from: '¥' + (Number(ed.emp[ed.seikyuKey]) || 0), to: '¥' + ed.newSeikyu });
+    return { name: ed.emp.Title || '', sn: String(ed.emp[F.syainNo] || ''), changes: changes };
+  }).filter(function(r) { return r.changes.length > 0; });
+
+  if (hakenChanges.length || confirmRows.length) {
+    var confHtml = '<div style="font-size:13px;margin-bottom:10px;">📝 以下の内容で <b>派遣先情報・社員データ Lists</b> を更新し、派遣契約書類を作成します。よろしいですか？</div>';
+    if (hakenChanges.length) {
+      confHtml += '<div style="background:#fff8e1;border-left:4px solid #ff9800;padding:10px 12px;margin-bottom:10px;border-radius:6px;">' +
+        '<div style="font-weight:700;color:#e65100;margin-bottom:6px;font-size:12.5px;">🏭 派遣先情報の変更 (' + hakenChanges.length + ')</div>';
+      hakenChanges.forEach(function(c) {
+        confHtml += '<div style="font-size:11.5px;padding:2px 0;display:flex;gap:8px;align-items:center;">' +
+          '<span style="min-width:130px;font-weight:600;color:#555;">' + escHtml(c.label) + '</span>' +
+          '<span style="color:#999;text-decoration:line-through;">' + escHtml(c.from) + '</span>' +
+          '<span style="color:#999;">→</span>' +
+          '<span style="color:#e65100;font-weight:700;">' + escHtml(c.to) + '</span></div>';
+      });
+      confHtml += '</div>';
+    }
+    if (confirmRows.length) {
+      confHtml += '<div style="font-weight:700;color:#283593;margin:8px 0 6px;font-size:12.5px;">👤 社員データの変更 (' + confirmRows.length + '名)</div>';
+      confirmRows.forEach(function(r) {
+        confHtml += '<div style="background:#fafafc;border:1px solid #e0e0e8;border-radius:8px;padding:10px 12px;margin-bottom:8px;">' +
+          '<div style="font-size:12.5px;font-weight:700;margin-bottom:6px;color:#222;">' + escHtml(r.name) + ' <span style="color:#888;font-weight:600;">(No.' + escHtml(r.sn) + ')</span></div>';
+        r.changes.forEach(function(c) {
+          confHtml += '<div style="font-size:11.5px;padding:2px 0;display:flex;align-items:center;gap:8px;">' +
+            '<span style="min-width:110px;font-weight:600;color:#555;">' + escHtml(c.label) + '</span>' +
+            '<span style="color:#999;text-decoration:line-through;">' + escHtml(String(c.from)) + '</span>' +
+            '<span style="color:#999;">→</span>' +
+            '<span style="color:#283593;font-weight:700;">' + escHtml(String(c.to)) + '</span></div>';
+        });
+        confHtml += '</div>';
+      });
+    }
+    if (!hakenChanges.length && !confirmRows.length) {
+      confHtml += '<div style="color:#888;text-align:center;padding:12px;">変更項目はありません。書類のみ作成します。</div>';
+    }
+    var confOv = document.createElement('div');
+    confOv.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10010;display:flex;align-items:center;justify-content:center;padding:14px;';
+    confOv.innerHTML =
+      '<div style="background:#fff;border-radius:12px;max-width:660px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.3);">' +
+        '<div style="padding:14px 18px;border-bottom:1px solid #eee;flex-shrink:0;">' +
+          '<h3 style="margin:0;font-size:15px;color:#283593;font-weight:800;">📋 変更内容の確認</h3>' +
+        '</div>' +
+        '<div style="padding:14px 18px;overflow-y:auto;flex:1;">' + confHtml + '</div>' +
+        '<div style="padding:11px 18px;border-top:1px solid #eee;display:flex;gap:8px;flex-shrink:0;">' +
+          '<button id="hkIssConfCancel" style="flex:1;background:#fff;color:#555;border:1px solid #ddd;border-radius:8px;padding:10px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+          '<button id="hkIssConfOk" style="flex:2;background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;">✅ OK で保存して書類作成</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(confOv);
+    var confRes = await new Promise(function(resolve) {
+      confOv.querySelector('#hkIssConfOk').onclick = function(){ resolve(true); };
+      confOv.querySelector('#hkIssConfCancel').onclick = function(){ resolve(false); };
+    });
+    confOv.remove();
+    if (!confRes) {
+      if (typeof showToast === 'function') showToast('キャンセルしました', 'info');
+      return;
+    }
+  }
+
   var goBtn = document.getElementById('hkIsshikiGoBtn');
   if (goBtn) { goBtn.disabled = true; goBtn.textContent = '⏳ 生成中…'; }
   try {
