@@ -40059,12 +40059,23 @@ function getHakenFilteredList() {
   return list.filter(e => !isResigned(e));  // 在職者のみ
 }
 
-// 社員の給与体系(時給) を数値で取得
+// 社員の時給を数値で取得
+// 社員データListsには「給料時給」(_x7d66__x6599__x6642__x7d66_) と
+// 「給与体系」(_x7d66__x4e0e__x4f53__x7cfb_) の2列があり、
+// 社員ごとにどちらに値が入っているか異なる。両方を確認する。
 function getEmpSalary(emp) {
+  var v = null;
+  // 1. hakenKeyMap['kyuyoTaikei'] (= 給与体系)
   var key = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap) ? hakenKeyMap['kyuyoTaikei'] : null;
-  var v = key ? emp[key] : null;
+  if (key) v = emp[key];
+  // 2. 給与体系 (key 走査)
   if (v === null || v === undefined || v === '') {
-    var k2 = Object.keys(emp).find(function(k){ return k.indexOf('x7d66__x4e0e__x4f53__x7cfb') >= 0; });
+    var k1 = Object.keys(emp).find(function(k){ return k.indexOf('x7d66__x4e0e__x4f53__x7cfb') >= 0; });
+    if (k1) v = emp[k1];
+  }
+  // 3. 給料時給 (saveNewHireFields が書き込んでいる列)
+  if (v === null || v === undefined || v === '') {
+    var k2 = Object.keys(emp).find(function(k){ return k.indexOf('x7d66__x6599__x6642__x7d66') >= 0; });
     if (k2) v = emp[k2];
   }
   var n = parseFloat(String(v == null ? '' : v).replace(/[,\s¥￥円]/g, ''));
