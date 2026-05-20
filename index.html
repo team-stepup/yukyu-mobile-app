@@ -5631,6 +5631,7 @@ select.sankyu-edit-input {
       </div>
       <button onclick="openHaisenDocInNewWindow()" class="btn btn-primary" style="background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">🖨 印刷 / PDF 保存（新規タブ）</button>
       <button id="tsukinSaveBtn" onclick="saveTsukinTodokeToSyainFolder(this)" style="display:none;background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">💾 社員フォルダに保存 (通勤届)</button>
+      <button id="tsukinMailBtn" onclick="draftTsukinTodokeEmail(this)" style="display:none;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">📧 寺田様へ下書き作成 (Outlook)</button>
       <button id="haisenEsignBtn" onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
       <button id="adobeSignBtn" onclick="sendNewHireToAdobeSign()" class="btn" style="display:none;background:linear-gradient(135deg,#d32f2f,#b71c1c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📤 Adobe Sign 署名へ送信</button>
       <button class="koyou-undo-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1.5px solid #e65100;border-radius:8px;padding:10px;font-weight:700;font-size:13px;">↩ 給与・雇用期間の変更を元に戻す</button>
@@ -9896,20 +9897,17 @@ function renderTsukinTodoke(emp, todokeDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
-  // 通勤届: 「社員フォルダに保存」ボタンを表示
-  var tsBtn = document.getElementById('tsukinSaveBtn');
-  if (tsBtn) {
-    tsBtn.style.display = '';
-    tsBtn.disabled = false;
-    tsBtn.dataset.empId = emp.Id || '';
-    tsBtn.dataset.todokeDate = todokeDate || '';  // 届出日 (YYYY-MM-DD)
-    // 社員情報を window に保持 (保存時に再利用)
-    window._tsukinSaveCtx = { emp: emp, todokeDate: todokeDate || '' };
-  }
+  // 通勤届: 「社員フォルダに保存」「Outlook下書き作成」ボタンを表示
+  ['tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+    var b = document.getElementById(id);
+    if (b) { b.style.display = ''; b.disabled = false; }
+  });
+  // 社員情報を window に保持 (保存・メール時に再利用)
+  window._tsukinSaveCtx = { emp: emp, todokeDate: todokeDate || '' };
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
 }
 
@@ -9949,6 +9947,110 @@ async function saveTsukinTodokeToSyainFolder(btn) {
       btn.disabled = false;
       btn.textContent = btn.dataset.label || '💾 社員フォルダに保存 (通勤届)';
     }
+  }
+}
+
+// 通勤届 → 寺田様(三和電子サーキット)宛のメール下書き .eml を生成・ダウンロード
+// Outlookで.emlを開くと、X-Unsent:1 により新規下書きとして編集可能な状態で表示される
+async function draftTsukinTodokeEmail(btn) {
+  var ctx = window._tsukinSaveCtx;
+  if (!ctx || !ctx.emp) { showToast('社員情報が取得できません', 'error'); return; }
+  var emp = ctx.emp;
+  var empName = emp.Title || '';
+  var d = ctx.todokeDate ? new Date(ctx.todokeDate) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+  var ymd = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  var fileName = '通勤届_' + ymd + '.pdf';
+  if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ PDF + 下書き生成中…'; }
+  try {
+    if (typeof loadEsignLibsIfNeeded === 'function') await loadEsignLibsIfNeeded();
+    var pdfBlob = await generateHaisenDocAsPdf();
+
+    // 社員フォルダにも保存 (任意で並行実施)
+    try {
+      var folderPath = await getEmpFolderPath(emp);
+      if (folderPath) {
+        try { await ensureSpFolder(folderPath); } catch (_) {}
+        await uploadFileToSp(folderPath, fileName, pdfBlob);
+      }
+    } catch (eS) { console.warn('社員フォルダ保存スキップ:', eS); }
+
+    // 操作者情報 (MSAL)
+    var operatorFull = (typeof getLoggedInName === 'function') ? getLoggedInName() : '';
+    var operatorLast = operatorFull ? (operatorFull.split(/[\s　]+/)[0] || operatorFull) : '';
+
+    // 本文 (ユーザー指定テンプレート)
+    var body =
+      '三和電子サーキット株式会社\n' +
+      '寺田様\n' +
+      '\n' +
+      'いつもお世話になっております。\n' +
+      'ステップ・アップの ' + operatorLast + ' です。\n' +
+      '\n' +
+      empName + 'の通勤届の更新分をお送りしますので、\n' +
+      'ご確認のほどよろしくお願いします。\n' +
+      '\n' +
+      operatorFull + '\n';
+    var subject = '通勤届の更新分（' + empName + '）';
+
+    // PDF を base64 へ
+    var pdfBuf = await pdfBlob.arrayBuffer();
+    var u8 = new Uint8Array(pdfBuf);
+    var bin = '';
+    var CHUNK = 0x8000;
+    for (var i = 0; i < u8.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+    }
+    var pdfB64 = btoa(bin);
+
+    function wrap76(s) {
+      var out = '';
+      for (var k = 0; k < s.length; k += 76) out += s.substring(k, k + 76) + '\r\n';
+      return out;
+    }
+    function b64utf8(s) { return btoa(unescape(encodeURIComponent(s))); }
+    function mimeWord(s) { return '=?UTF-8?B?' + b64utf8(s) + '?='; }
+
+    var boundary = '----=_TsukinPart_' + Date.now();
+    var eml =
+      'From: \r\n' +
+      'To: ' + mimeWord('寺田えみこ') + ' <e-terada@tk.se-circuit.co.jp>\r\n' +
+      'Subject: ' + mimeWord(subject) + '\r\n' +
+      'X-Unsent: 1\r\n' +
+      'MIME-Version: 1.0\r\n' +
+      'Content-Type: multipart/mixed; boundary="' + boundary + '"\r\n\r\n' +
+      '--' + boundary + '\r\n' +
+      'Content-Type: text/plain; charset=UTF-8\r\n' +
+      'Content-Transfer-Encoding: base64\r\n\r\n' +
+      wrap76(b64utf8(body)) + '\r\n' +
+      '--' + boundary + '\r\n' +
+      'Content-Type: application/pdf; name="' + mimeWord(fileName) + '"\r\n' +
+      'Content-Transfer-Encoding: base64\r\n' +
+      'Content-Disposition: attachment; filename="' + mimeWord(fileName) + '"\r\n\r\n' +
+      wrap76(pdfB64) + '\r\n' +
+      '--' + boundary + '--\r\n';
+
+    var emlBlob = new Blob([eml], { type: 'message/rfc822' });
+    var url = URL.createObjectURL(emlBlob);
+    var emlName = '寺田様_通勤届_' + ymd + '_' + (empName.replace(/[\s　\/\\:*?"<>|]/g, '')) + '.eml';
+    var a = document.createElement('a');
+    a.href = url; a.download = emlName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
+
+    if (typeof showToast === 'function') showToast('✓ ' + emlName + ' をダウンロード。Outlookで開くと下書きが表示されます', 'success');
+    if (btn) { btn.textContent = '✅ 下書きをダウンロード'; btn.style.background = 'linear-gradient(135deg,#43a047,#2e7d32)'; }
+    setTimeout(function() {
+      if (btn) {
+        btn.textContent = btn.dataset.label || '📧 寺田様へ下書き作成 (Outlook)';
+        btn.style.background = 'linear-gradient(135deg,#1565c0,#0d47a1)';
+        btn.disabled = false;
+      }
+    }, 2500);
+  } catch (e) {
+    console.error('draftTsukinTodokeEmail error:', e);
+    if (typeof showToast === 'function') showToast('下書き作成失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label || '📧 寺田様へ下書き作成 (Outlook)'; }
   }
 }
 
@@ -12491,7 +12593,7 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   // 操作ボタン: ズーム + 印刷のみ (電子サイン/Adobe/元に戻す は非表示)
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12697,7 +12799,7 @@ function renderHakenSakiKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12830,7 +12932,7 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12914,7 +13016,7 @@ function renderHakenTsuuchisho(h, emps, opts) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -13486,7 +13588,7 @@ async function _submitHakenIsshiki() {
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allPagesHtml + '</div>';
     var actions = document.getElementById('haisenDocActions');
     if (actions) actions.style.display = 'flex';
-    ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn'].forEach(function(id) {
+    ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
       var b = document.getElementById(id); if (b) b.style.display = 'none';
     });
     document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
