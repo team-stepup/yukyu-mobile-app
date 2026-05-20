@@ -40953,19 +40953,18 @@ function toggleHakenViewMode(btn) {
 // 🚐送迎 フィルタ時に押下。Google Maps URL方式で送迎台数ごとに社員をルート分け。
 // 住所順 or あいうえお順で N台に均等振り分け、各社員は車両ドロップダウンで他車両へ移動可。
 
-// 車両リスト (Pick-up列) から該当派遣先の送迎台数を取得
-// SP リスト: /sites/PowerApps/Lists/List , 列: Pick_x002d_up (Text)
-async function _fetchSougeiVehicleCountByHaken(hakenName) {
-  if (!hakenName) return null;
+// 車両リスト (Pick-up列) から該当派遣先の送迎車両を取得 (定員/運転手/プレート含む)
+// SP リスト: /sites/PowerApps/Lists/List
+async function _fetchSougeiVehiclesByHaken(hakenName) {
+  if (!hakenName) return [];
   try {
     var token = await getToken();
-    if (!token) return null;
-    var url = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$select=Pick_x002d_up&$top=500";
+    if (!token) return [];
+    var url = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')/items?$top=500";
     var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-    if (!resp.ok) return null;
+    if (!resp.ok) return [];
     var data = await resp.json();
     var items = (data.d && data.d.results) || [];
-    // 名前の揺らぎを吸収 (法人格、空白、半角全角)
     function _norm(s) {
       return String(s || '')
         .replace(/(株式会社|有限会社|合同会社|合資会社|㈱|㈲|\(株\)|\(有\))/g, '')
@@ -40973,17 +40972,39 @@ async function _fetchSougeiVehicleCountByHaken(hakenName) {
         .toLowerCase();
     }
     var target = _norm(hakenName);
-    if (!target) return 0;
-    var count = items.filter(function(it) {
+    if (!target) return [];
+    var matched = items.filter(function(it) {
       var p = _norm(it.Pick_x002d_up);
       if (!p) return false;
+      var usage = String(it.Usage || '').trim();
+      if (usage === '未使用' || usage === '解約' || usage === '会社') return false;  // 使用中のみ
       return p === target || (p.length >= 2 && target.length >= 2 && (p.indexOf(target) >= 0 || target.indexOf(p) >= 0));
-    }).length;
-    return count;
+    });
+    return matched.map(function(it) {
+      var cap = parseFloat(it.number_x0020_of_x0020_passengers);
+      return {
+        id: it.Id,
+        plate: String(it.Title || '').trim(),
+        no2: String(it.OData__x004e_O2 || '').trim(),
+        name: String(it.syamei_x0020_ || '').trim(),
+        capacity: (isNaN(cap) || cap <= 0) ? 0 : Math.round(cap),
+        driver: String(it.Driver || '').trim(),
+        color: String(it.color || '').trim()
+      };
+    }).sort(function(a, b) {
+      // 定員が大きい順 (詰めやすい順) → 同じならプレート順
+      if (b.capacity !== a.capacity) return b.capacity - a.capacity;
+      return a.plate.localeCompare(b.plate, 'ja');
+    });
   } catch (e) {
-    console.warn('vehicle count fetch error:', e);
-    return null;
+    console.warn('vehicle fetch error:', e);
+    return [];
   }
+}
+// 後方互換 (送迎台数のみ欲しい呼び出し用)
+async function _fetchSougeiVehicleCountByHaken(hakenName) {
+  var v = await _fetchSougeiVehiclesByHaken(hakenName);
+  return v.length;
 }
 
 async function openSougeiRouteSplit() {
@@ -41014,27 +41035,32 @@ async function openSougeiRouteSplit() {
     ? stripBukaPrefix((typeof getBukaValue === 'function') ? getBukaValue(sougeiEmps[0]) : '')
     : '';
 
-  // 車両リスト (Pick-up列) から該当派遣先の送迎台数を取得 (取得中はとりあえずモーダルを開く)
+  // 暫定モーダル表示 → 並行で車両List取得 → 完了後に実際の台数+定員で再描画
   var fallbackCars = Math.max(1, Math.min(8, Math.ceil(members.length / 6)));
   window._sougeiRouteCtx = {
     members: members,
     hakenName: hakenName,
+    vehicles: [],            // 車両リスト Pick-up一致のもの (使用中のみ)
     cars: fallbackCars,
     carsFromVehicleList: null,
-    sortMode: 'geo',  // 既定: ジオコード後にk-means
-    geoStatus: 'pending',  // 'pending' / 'in_progress' / 'done' / 'failed'
+    sortMode: 'geo',
+    geoStatus: 'pending',
     geoProgress: 0,
     assignments: {}
   };
-  _redoSougeiAssignments();  // 暫定: 住所順で表示 (geo モードでも pos なければ文字列順fallback)
+  _redoSougeiAssignments();
   _renderSougeiRouteModal();
 
-  // Pick-up 台数取得
-  _fetchSougeiVehicleCountByHaken(hakenName).then(function(n) {
+  // 車両List 取得 (定員つき)
+  _fetchSougeiVehiclesByHaken(hakenName).then(function(vs) {
     if (!window._sougeiRouteCtx) return;
-    window._sougeiRouteCtx.carsFromVehicleList = (typeof n === 'number') ? n : null;
-    if (typeof n === 'number' && n > 0 && n !== window._sougeiRouteCtx.cars) {
-      window._sougeiRouteCtx.cars = Math.min(10, n);
+    var ctx = window._sougeiRouteCtx;
+    ctx.vehicles = vs || [];
+    ctx.carsFromVehicleList = ctx.vehicles.length;
+    if (ctx.vehicles.length > 0) {
+      ctx.cars = Math.min(10, ctx.vehicles.length);
+      // ジオコード完了後に再クラスタするので、現時点で再描画のみ
+      _redoSougeiAssignments();
     }
     _renderSougeiRouteModal();
   });
@@ -41239,9 +41265,48 @@ function _redoSougeiAssignments() {
         ctx.assignments[m.id] = minIdx;
         loadByCar[minIdx]++;
       });
-      // 容量バランス: クラスタ間で偏りが大きい場合、サイズ差を縮める
-      // (大きすぎるクラスタの遠い点 → 小さいクラスタの近いセントロイドへ移動)
-      var target = Math.ceil(withPos.length / ctx.cars);
+      // 容量バランス: 各車両の定員上限を尊重しつつ、サイズ差を縮める
+      // 上限 = 車両の定員 - 1 (運転手分)。定員不明なら均等分割の目安値を使う
+      var defaultCap = Math.ceil(withPos.length / ctx.cars);
+      function _carCap(idx) {
+        var v = ctx.vehicles && ctx.vehicles[idx];
+        if (v && v.capacity > 0) return Math.max(1, v.capacity - 1);
+        return defaultCap + 1;  // 不明はゆるい上限
+      }
+      // (1) 定員オーバー解消: 過大クラスタの遠い点を、定員に余裕のあるクラスタへ移動
+      for (var capIter = 0; capIter < 100; capIter++) {
+        var sizesCap = new Array(ctx.cars).fill(0);
+        ctx.members.forEach(function(m){ if (m.pos && ctx.assignments[m.id] != null && ctx.assignments[m.id] < ctx.cars) sizesCap[ctx.assignments[m.id]]++; });
+        var overIdx = -1;
+        for (var ci = 0; ci < ctx.cars; ci++) if (sizesCap[ci] > _carCap(ci)) { overIdx = ci; break; }
+        if (overIdx === -1) break;
+        // 余裕のあるクラスタ
+        var roomList = [];
+        for (var ci2 = 0; ci2 < ctx.cars; ci2++) if (sizesCap[ci2] < _carCap(ci2)) roomList.push(ci2);
+        if (!roomList.length) break;
+        // overIdx のセントロイド計算
+        var centsCap = [];
+        for (var c = 0; c < ctx.cars; c++) {
+          var ms = ctx.members.filter(function(m){ return m.pos && ctx.assignments[m.id] === c; });
+          if (!ms.length) { centsCap.push(null); continue; }
+          var sl = 0, sg = 0;
+          ms.forEach(function(m){ sl += m.pos.lat; sg += m.pos.lng; });
+          centsCap.push({ lat: sl / ms.length, lng: sg / ms.length });
+        }
+        // overIdx の各メンバーから、最も近い「余裕のあるクラスタ」を探す
+        var bestMv = null, bestMvD = Infinity;
+        var overMembers = ctx.members.filter(function(m){ return m.pos && ctx.assignments[m.id] === overIdx; });
+        overMembers.forEach(function(m) {
+          roomList.forEach(function(rc) {
+            if (!centsCap[rc]) return;
+            var d = _haversineKm(m.pos, centsCap[rc]);
+            if (d < bestMvD) { bestMvD = d; bestMv = { id: m.id, to: rc }; }
+          });
+        });
+        if (!bestMv) break;
+        ctx.assignments[bestMv.id] = bestMv.to;
+      }
+      // (2) サイズ偏りを更に縮める
       var moveCount = 0;
       while (moveCount < 30) {
         var sizes = new Array(ctx.cars).fill(0);
@@ -41249,6 +41314,12 @@ function _redoSougeiAssignments() {
         var maxC = sizes.indexOf(Math.max.apply(null, sizes));
         var minC = sizes.indexOf(Math.min.apply(null, sizes));
         if (sizes[maxC] - sizes[minC] <= 1) break;
+        // 最大クラスタが既に定員ギリギリでなければスキップ無し
+        if (sizes[maxC] <= _carCap(maxC)) {
+          // 余裕がある場合はバランス調整不要 (定員には収まっている)
+          // ただし極端な偏り(例: 1台に7人,他0人) は緩和したい
+          if (sizes[maxC] - sizes[minC] <= 2) break;
+        }
         // セントロイド再計算 (各クラスタ)
         var centroidsBal = sizes.map(function(_, ci) {
           var ms = ctx.members.filter(function(m){ return m.pos && ctx.assignments[m.id] === ci; });
@@ -41470,14 +41541,38 @@ function _renderSougeiRouteModal() {
             '<select onchange="_moveSougeiMember(' + m.id + ', this.value)" style="font-size:11px;padding:3px 5px;border:1px solid #ccc;border-radius:5px;background:#fff;">' + opts + '</select>' +
           '</div>';
         }).join('');
+    // 車両情報 (vehicles[ci] にマッチがあれば、プレート・定員・運転手を表示)
+    var vinfo = (ctx.vehicles && ctx.vehicles[ci]) || null;
+    var passengerCap = vinfo && vinfo.capacity > 0 ? (vinfo.capacity - 1) : null;
+    var capDisp = '';
+    if (passengerCap !== null) {
+      var overCap = group.length > passengerCap;
+      var nearCap = group.length === passengerCap;
+      var capBg = overCap ? '#ffebee' : (nearCap ? '#fff8e1' : 'rgba(255,255,255,0.18)');
+      var capColor = overCap ? '#c62828' : (nearCap ? '#e65100' : '#fff');
+      var capMark = overCap ? ' ⚠ 定員超' : (nearCap ? ' ⚠ 満員' : '');
+      capDisp = '<span style="background:' + capBg + ';color:' + capColor + ';padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;">' +
+        group.length + ' / ' + passengerCap + '名' + capMark + '</span>';
+    } else {
+      capDisp = '<span style="font-size:11px;opacity:0.9;">(' + group.length + '名)</span>';
+    }
+    var vehicleTitle = vinfo
+      ? '🚐 ' + escHtml(vinfo.plate + ' ' + vinfo.no2) + ' <span style="font-weight:600;opacity:0.92;">' + escHtml(vinfo.name) + '</span>'
+      : '🚐 車両' + (ci + 1);
+    var driverHtml = (vinfo && vinfo.driver)
+      ? '<div style="font-size:10.5px;color:rgba(255,255,255,0.95);margin-top:1px;">👤 ' + escHtml(vinfo.driver) + (vinfo.color ? '　🎨 ' + escHtml(vinfo.color) : '') + (vinfo.capacity > 0 ? '　定員' + vinfo.capacity + '人' : '') + '</div>'
+      : '';
     carsHtml += '<div style="margin-bottom:12px;border:2px solid ' + col + ';border-radius:10px;overflow:hidden;background:#fff;">' +
-      '<div style="background:' + col + ';color:#fff;padding:7px 12px;display:flex;align-items:center;gap:8px;">' +
-        '<span style="font-size:14px;font-weight:800;">🚐 車両' + (ci + 1) + '</span>' +
-        '<span style="font-size:11px;opacity:0.9;">(' + group.length + '名)</span>' +
-        '<div style="flex:1;"></div>' +
-        (hasAddrs
-          ? '<button onclick="_openOptimizedRouteForCar(' + ci + ',this)" style="background:#fff;color:' + col + ';padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;">🗺️ Mapで開く</button>'
-          : '<span style="background:rgba(255,255,255,0.2);color:#fff;padding:4px 10px;border-radius:6px;font-size:10px;">住所なし</span>') +
+      '<div style="background:' + col + ';color:#fff;padding:8px 12px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+          '<span style="font-size:13.5px;font-weight:800;">車両' + (ci + 1) + ':</span>' +
+          '<span style="font-size:13.5px;font-weight:800;flex:1;min-width:0;">' + vehicleTitle + '</span>' +
+          capDisp +
+          (hasAddrs
+            ? '<button onclick="_openOptimizedRouteForCar(' + ci + ',this)" style="background:#fff;color:' + col + ';padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;">🗺️ Mapで開く</button>'
+            : '<span style="background:rgba(255,255,255,0.2);color:#fff;padding:4px 10px;border-radius:6px;font-size:10px;">住所なし</span>') +
+        '</div>' +
+        driverHtml +
       '</div>' +
       memRowsHtml +
     '</div>';
