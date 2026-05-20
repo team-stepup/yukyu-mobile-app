@@ -40855,7 +40855,7 @@ function renderHakenTable(employees, container) {
   var col3Title = maebariMode ? '💴 今月の前払計' : (isYukiMode ? '雇用期間' : '通勤方法');
   html += '<table class="haken-table"><thead><tr>' +
     '<th>社番</th><th>氏名</th><th>' + col3Title + '</th><th>在職</th>' +
-    '<th>💴 前払い</th>';
+    (maebariMode ? '<th>💴 前払い</th>' : '');
   extraCols.forEach(col => {
     html += '<th>' + escHtml(col.field.label) + '</th>';
   });
@@ -40892,16 +40892,20 @@ function renderHakenTable(employees, container) {
       var tsukin = stripTsukinRomaji(getTsukinValue(emp));
       col3Display = tsukin ? escHtml(tsukin) : '<span style="color:var(--warning);font-weight:600;">⚠未登録</span>';
     }
-    // 💴 前払いボタン (退社者は無効化)
-    var maebariBtn = resigned
-      ? '<span style="color:#bbb;font-size:11px;">—</span>'
-      : '<button type="button" onclick="event.stopPropagation();openHakenMaebariQuick(' + emp.Id + ')" style="background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">💴 申請</button>';
+    // 💴 前払いボタン (前払いモード時のみ表示・退社者は無効化)
+    var maebariCell = '';
+    if (maebariMode) {
+      var maebariBtn = resigned
+        ? '<span style="color:#bbb;font-size:11px;">—</span>'
+        : '<button type="button" onclick="event.stopPropagation();openHakenMaebariQuick(' + emp.Id + ')" style="background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">💴 申請</button>';
+      maebariCell = '<td style="text-align:center;">' + maebariBtn + '</td>';
+    }
     html += '<tr onclick=\'selectEmployee(' + JSON.stringify(emp).replace(/'/g, "&#39;") + ')\' style="cursor:pointer;">' +
       '<td>' + (emp[F.syainNo] || '') + '</td>' +
       '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
       '<td>' + col3Display + '</td>' +
       '<td>' + statusDisplay + '</td>' +
-      '<td style="text-align:center;">' + maebariBtn + '</td>';
+      maebariCell;
     extraCols.forEach(col => {
       html += '<td>' + escHtml(getFieldValueForTable(emp, col.field, hakenKeyMap)) + '</td>';
     });
