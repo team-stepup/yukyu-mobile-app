@@ -41057,15 +41057,15 @@ async function openSougeiRouteSplit() {
       }
       // 派遣先のジオコード
       var destQ = ctx.hakenAddress || ctx.hakenName;
-      ctx.destPos = await _geocodeNominatim(destQ);
-      // 全社員の住所をジオコード (1秒間隔)
+      ctx.destPos = await _geocodeJp(destQ);
+      // 全社員の住所をジオコード (GSI 優先・300ms 間隔)
       for (var i = 0; i < ctx.members.length; i++) {
         var m = ctx.members[i];
-        if (m.address) m.pos = await _geocodeNominatim(m.address);
+        if (m.address) m.pos = await _geocodeJp(m.address);
         else m.pos = null;
         ctx.geoProgress = i + 1;
         _renderSougeiRouteModal();
-        if (i < ctx.members.length - 1) await new Promise(function(r){ setTimeout(r, 1100); });
+        if (i < ctx.members.length - 1) await new Promise(function(r){ setTimeout(r, 300); });
       }
       ctx.geoStatus = 'done';
       // クラスタリング実行
@@ -41176,6 +41176,43 @@ function _nnTowardDest(socials, destPos) {
   return ordered;
 }
 
+// 訪問順 tour の総距離 (各ホップ + 最終 → destPos)
+function _tourTotalKm(tour, destPos) {
+  if (!tour.length) return 0;
+  var sum = 0;
+  for (var i = 0; i < tour.length - 1; i++) {
+    if (tour[i].pos && tour[i+1].pos) sum += _haversineKm(tour[i].pos, tour[i+1].pos);
+  }
+  if (destPos && tour[tour.length-1].pos) sum += _haversineKm(tour[tour.length-1].pos, destPos);
+  return sum;
+}
+
+// 2-opt 局所探索: ルートの一部を反転して総距離を短縮する反復法
+function _twoOpt(tour, destPos) {
+  if (!destPos || tour.length < 4) return tour;
+  var best = tour.slice();
+  var bestDist = _tourTotalKm(best, destPos);
+  var improved = true;
+  var safety = 100;
+  while (improved && safety-- > 0) {
+    improved = false;
+    for (var i = 0; i < best.length - 1; i++) {
+      for (var j = i + 1; j < best.length; j++) {
+        var candidate = best.slice();
+        var rev = candidate.slice(i, j + 1).reverse();
+        for (var k = 0; k < rev.length; k++) candidate[i + k] = rev[k];
+        var d = _tourTotalKm(candidate, destPos);
+        if (d < bestDist - 0.001) {
+          best = candidate;
+          bestDist = d;
+          improved = true;
+        }
+      }
+    }
+  }
+  return best;
+}
+
 // 振り分けロジック (3モード):
 //  - 'geo'     : k-means による地理クラスタ + 各車両内で最短近隣
 //  - 'address' : 住所文字列順で順次N台に分配
@@ -41202,12 +41239,43 @@ function _redoSougeiAssignments() {
         ctx.assignments[m.id] = minIdx;
         loadByCar[minIdx]++;
       });
-      // 表示順: 車両ごとに派遣先への最短近隣で並べる
+      // 容量バランス: クラスタ間で偏りが大きい場合、サイズ差を縮める
+      // (大きすぎるクラスタの遠い点 → 小さいクラスタの近いセントロイドへ移動)
+      var target = Math.ceil(withPos.length / ctx.cars);
+      var moveCount = 0;
+      while (moveCount < 30) {
+        var sizes = new Array(ctx.cars).fill(0);
+        ctx.members.forEach(function(m){ if (m.pos && ctx.assignments[m.id] != null) sizes[ctx.assignments[m.id]]++; });
+        var maxC = sizes.indexOf(Math.max.apply(null, sizes));
+        var minC = sizes.indexOf(Math.min.apply(null, sizes));
+        if (sizes[maxC] - sizes[minC] <= 1) break;
+        // セントロイド再計算 (各クラスタ)
+        var centroidsBal = sizes.map(function(_, ci) {
+          var ms = ctx.members.filter(function(m){ return m.pos && ctx.assignments[m.id] === ci; });
+          if (!ms.length) return ctx.destPos || { lat: 0, lng: 0 };
+          var sl = 0, sg = 0;
+          ms.forEach(function(m){ sl += m.pos.lat; sg += m.pos.lng; });
+          return { lat: sl / ms.length, lng: sg / ms.length };
+        });
+        // 過大クラスタから minC のセントロイドに最も近い点を移動
+        var candidates = ctx.members.filter(function(m){ return m.pos && ctx.assignments[m.id] === maxC; });
+        var bestC = null, bestCD = Infinity;
+        candidates.forEach(function(m) {
+          var d = _haversineKm(m.pos, centroidsBal[minC]);
+          if (d < bestCD) { bestCD = d; bestC = m; }
+        });
+        if (!bestC) break;
+        ctx.assignments[bestC.id] = minC;
+        moveCount++;
+      }
+      // 表示順: 車両ごとに NN + 2-opt で最適化
       var dest = ctx.destPos;
       var out = [];
       for (var c2 = 0; c2 < ctx.cars; c2++) {
         var cluster = ctx.members.filter(function(m){ return ctx.assignments[m.id] === c2 && m.pos; });
-        out = out.concat(_nnTowardDest(cluster, dest));
+        var nnOrdered = _nnTowardDest(cluster, dest);
+        var refined = _twoOpt(nnOrdered, dest);
+        out = out.concat(refined);
         // 座標なし社員は末尾
         var clusterNoPos = ctx.members.filter(function(m){ return ctx.assignments[m.id] === c2 && !m.pos; });
         out = out.concat(clusterNoPos);
@@ -41272,23 +41340,55 @@ function _buildGoogleMapsRouteUrl(addresses, destination) {
   return url;
 }
 
-// OpenStreetMap Nominatim でジオコード (無料・APIキー不要・1リクエスト/秒)
+// ジオコーディング: 国土地理院 (GSI) を優先・Nominatim をフォールバック
+// GSI は日本の住所に対して圧倒的に高精度。API キー不要・無料
 window._sougeiGeocodeCache = window._sougeiGeocodeCache || {};
+async function _geocodeGSI(addr) {
+  if (!addr) return null;
+  try {
+    var url = 'https://msearch.gsi.go.jp/address-search/AddressSearch?q=' + encodeURIComponent(addr);
+    var resp = await fetch(url);
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    var coords = data[0].geometry && data[0].geometry.coordinates;
+    if (!coords || coords.length < 2) return null;
+    return { lat: coords[1], lng: coords[0], src: 'GSI' };
+  } catch (e) { return null; }
+}
 async function _geocodeNominatim(addr) {
+  if (!addr) return null;
+  try {
+    var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q=' + encodeURIComponent(addr);
+    var resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    if (!data || !data.length) return null;
+    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), src: 'Nominatim' };
+  } catch (e) { return null; }
+}
+// 住所を順次変換: GSI → 失敗時は番地等を削った大まかな住所で再試行 → Nominatim フォールバック
+async function _geocodeJp(addr) {
   if (!addr) return null;
   var key = String(addr).trim();
   if (!key) return null;
   if (window._sougeiGeocodeCache[key] !== undefined) return window._sougeiGeocodeCache[key];
-  try {
-    var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q=' + encodeURIComponent(key);
-    var resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
-    if (!resp.ok) { window._sougeiGeocodeCache[key] = null; return null; }
-    var data = await resp.json();
-    if (!data || !data.length) { window._sougeiGeocodeCache[key] = null; return null; }
-    var pos = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-    window._sougeiGeocodeCache[key] = pos;
-    return pos;
-  } catch (e) { console.warn('Nominatim error:', e); return null; }
+  // 1. GSI で正規住所そのまま
+  var pos = await _geocodeGSI(key);
+  // 2. GSI で番地以降を削ったもので再試行 (例: "...町1-2-3 ハイツ" → "...町")
+  if (!pos) {
+    var rough = key
+      .replace(/[\dー‐\-－一二三四五六七八九十百千]+[番地号]?[\dー‐\-－]*[番地号]?[一二三四五六七八九十百千]*[番地号]?/g, '')
+      .replace(/(マンション|ハイツ|コーポ|アパート|ビル|ハウス|レジデンス|ハイム)[^\s　]*/g, '')
+      .replace(/[A-Za-z]+\s*\d+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (rough && rough !== key) pos = await _geocodeGSI(rough);
+  }
+  // 3. Nominatim フォールバック
+  if (!pos) pos = await _geocodeNominatim(key);
+  window._sougeiGeocodeCache[key] = pos || null;
+  return pos;
 }
 function _haversineKm(a, b) {
   var R = 6371;
@@ -41303,11 +41403,11 @@ function _haversineKm(a, b) {
 async function _optimizeRouteAddresses(addresses, destAddr) {
   var geocoded = [];
   for (var i = 0; i < addresses.length; i++) {
-    var p = await _geocodeNominatim(addresses[i]);
+    var p = await _geocodeJp(addresses[i]);
     geocoded.push({ address: addresses[i], pos: p });
-    if (i < addresses.length - 1) await new Promise(function(r){ setTimeout(r, 1100); });
+    if (i < addresses.length - 1) await new Promise(function(r){ setTimeout(r, 300); });
   }
-  var destPos = await _geocodeNominatim(destAddr);
+  var destPos = await _geocodeJp(destAddr);
   var resolved = geocoded.filter(function(g){ return g.pos; });
   var unresolved = geocoded.filter(function(g){ return !g.pos; });
   var ordered = [];
@@ -41324,6 +41424,8 @@ async function _optimizeRouteAddresses(addresses, destAddr) {
       ordered.unshift(picked);
       current = picked.pos;
     }
+    // 2-opt で更に短縮
+    if (ordered.length >= 4) ordered = _twoOpt(ordered, destPos);
   } else {
     ordered = resolved;
   }
