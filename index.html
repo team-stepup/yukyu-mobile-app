@@ -10910,8 +10910,9 @@ function kanaToRomaji(s) {
 
 // mode: 'new' = 新規雇用契約書兼就業条件通知書 (カレンダー+確認事項ページあり)
 //       'renewal' = 更新用就業条件通知書 (カレンダー・確認事項ページなし)
-function renderRoudouKeiyakushoSan(emp, h, mode) {
+function renderRoudouKeiyakushoSan(emp, h, mode, opt) {
   mode = mode || 'new';
+  opt = opt || {};
   window._currentHaisenDocMode = mode;
   // 派遣先データ中の <br> や HTML タグをクリーンアップ
   function _clean(s) {
@@ -10960,6 +10961,10 @@ function renderRoudouKeiyakushoSan(emp, h, mode) {
   // 何かしらデータがあるシフトのみ残す
   shifts = shifts.filter(function(s){ return s.jikan || s.jisu || s.total || s.slots.length > 0; });
   if (shifts.length === 0) shifts = [{ n: '①', jikan: '', jisu: '', total: '', slots: [] }];
+  // 呼び出し側がシフトを指定している場合は該当シフトのみに絞る
+  if (opt.shiftIndex != null && opt.shiftIndex >= 0 && opt.shiftIndex < shifts.length) {
+    shifts = [shifts[opt.shiftIndex]];
+  }
 
   // 36協定
   var sankyo1day   = h[HF.jikangai_1day];
@@ -39512,6 +39517,20 @@ function _fmtYmd(d) {
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 // 次回(更新後)の雇用期間を算出: 開始 = 現在の終了日の翌日 / 終了 = 開始 + 3ヶ月 - 1日
+// 派遣先データから就業時間パターン(①②③)のうち中身があるものだけを抽出
+function _extractShiftsFromHakensaki(h) {
+  if (!h) return [];
+  var raw = [
+    { n: '①', jikan: h[HF.syuugyou_time1] || '', jisu: h[HF.jitsudou_time1] || '', total: h[HF.kyuukei_total1] || '',
+      slots: [h[HF.kyuukei1_1], h[HF.kyuukei1_2], h[HF.kyuukei1_3]].filter(function(v){return v;}) },
+    { n: '②', jikan: h[HF.syuugyou_time2] || '', jisu: h[HF.jitsudou_time2] || '', total: h[HF.kyuukei_total2] || '',
+      slots: [h[HF.kyuukei2_1], h[HF.kyuukei2_2], h[HF.kyuukei2_3]].filter(function(v){return v;}) },
+    { n: '③', jikan: h[HF.syuugyou_time3] || '', jisu: h[HF.jitsudou_time3] || '', total: h[HF.kyuukei_total3] || '',
+      slots: [h[HF.kyuukei3_1], h[HF.kyuukei3_2], h[HF.kyuukei3_3]].filter(function(v){return v;}) }
+  ];
+  return raw.filter(function(s){ return s.jikan || s.jisu || s.total || s.slots.length > 0; });
+}
+
 // 一括作成モーダル: 新契約開始日が入社1年後を過ぎていれば自動で「無期」とする。
 // すでに無期で保存済みなら継続して「無期」を返す。
 function _autoIsMukiForRenewal(emp, newStartIso) {
@@ -39608,6 +39627,7 @@ async function bulkCreateRenewalDocs() {
         '<input type="date" id="bkEnd_' + emp.Id + '" value="' + initEndVal + '" style="' + dInputStyle + '">' +
         '<div id="bkEndLabel_' + emp.Id + '" style="font-size:9px;color:' + (autoMuki ? '#7b1fa2' : '#888') + ';margin-top:1px;">' + (autoMuki ? '無期化日' : '終了日') + '</div>' +
       '</td>' +
+      '<td style="padding:5px 4px;" id="bkShifts_' + emp.Id + '"><span style="font-size:9px;color:#bbb;">読込中…</span></td>' +
     '</tr>';
   }).join('');
 
@@ -39615,7 +39635,7 @@ async function bulkCreateRenewalDocs() {
   ov.id = 'bulkRenewalOverlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:12px;';
   ov.innerHTML =
-    '<div style="background:#fff;border-radius:12px;max-width:1020px;width:100%;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+    '<div style="background:#fff;border-radius:12px;max-width:1160px;width:100%;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
       '<div style="padding:14px 18px;border-bottom:1px solid #eee;flex-shrink:0;">' +
         '<h3 style="margin:0;font-size:15px;color:#e65100;">📄 更新用就業条件通知書 一括作成 — 雇用条件の確認</h3>' +
         '<div style="font-size:11.5px;color:#888;margin-top:3px;">「' + escHtml(filterLabel) + '」 ' + list.length + '名（給与の高い順）。雇用期間は<b>現在の続き(3ヶ月間)</b>を初期表示。入社1年経過後の更新は<b style="color:#7b1fa2;">無期</b>として自動判定（変更可）。給与・通勤手当・期間を確認・修正してください。</div>' +
@@ -39632,6 +39652,7 @@ async function bulkCreateRenewalDocs() {
               '<th style="padding:8px 4px;text-align:left;">現雇用期間</th>' +
               '<th style="padding:8px 4px;text-align:left;">新 開始日</th>' +
               '<th style="padding:8px 4px;text-align:left;">新 終了日／無期化日</th>' +
+              '<th style="padding:8px 4px;text-align:left;">就業時間</th>' +
             '</tr>' +
           '</thead>' +
           '<tbody>' + rowsHtml + '</tbody>' +
@@ -39644,6 +39665,36 @@ async function bulkCreateRenewalDocs() {
     '</div>';
   document.body.appendChild(ov);
   function closeOv() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+
+  // 就業時間パターンを派遣先情報から非同期で読み込み、複数パターンなら選択UIを生成
+  window._bkHakensakiCache = {};
+  (async function _loadShiftsAsync() {
+    for (var i = 0; i < list.length; i++) {
+      var bkEmp = list[i];
+      var cellId = 'bkShifts_' + bkEmp.Id;
+      try {
+        var h = await fetchHakensakiByEmp(bkEmp);
+        window._bkHakensakiCache[bkEmp.Id] = h;
+        var shifts = _extractShiftsFromHakensaki(h);
+        var cell = document.getElementById(cellId);
+        if (!cell) continue;
+        if (shifts.length === 0) {
+          cell.innerHTML = '<span style="font-size:9px;color:#bbb;">設定なし</span>';
+        } else if (shifts.length === 1) {
+          cell.innerHTML = '<span style="font-size:9.5px;color:#666;">' + escHtml(shifts[0].n + ' ' + (shifts[0].jikan || '')) + '</span>';
+        } else {
+          var opts = '<option value="-1">全パターン</option>' + shifts.map(function(s, idx) {
+            return '<option value="' + idx + '">' + escHtml(s.n + ' ' + (s.jikan || '')) + '</option>';
+          }).join('');
+          cell.innerHTML = '<select id="bkShift_' + bkEmp.Id + '" style="font-size:10.5px;padding:4px 5px;border:1px solid #ccc;border-radius:4px;max-width:170px;">' + opts + '</select>';
+        }
+      } catch (e) {
+        var c2 = document.getElementById(cellId);
+        if (c2) c2.innerHTML = '<span style="font-size:9px;color:#c00;" title="' + escHtml(e.message || String(e)) + '">取得失敗</span>';
+      }
+      await new Promise(function(r){ setTimeout(r, 80); });  // スロットリング回避
+    }
+  })();
 
   var started = await new Promise(function(resolve) {
     ov.querySelector('#bulkRenewalCancel').onclick = function(){ resolve(false); };
@@ -39660,12 +39711,14 @@ async function bulkCreateRenewalDocs() {
     var sa = document.getElementById('bkSal_' + emp.Id);
     var ts = document.getElementById('bkTsukin_' + emp.Id);
     var ku = document.getElementById('bkKubun_' + emp.Id);
+    var sh = document.getElementById('bkShift_' + emp.Id);  // 複数シフトある時のみ存在
     editedVals[emp.Id] = {
       start: s ? (s.value || '') : '',
       end: e ? (e.value || '') : '',
       salary: sa ? (sa.value || '').trim() : '',
       tsukin: ts ? (ts.value || '').trim() : '',
-      isMuki: ku ? (ku.value === 'muki') : false
+      isMuki: ku ? (ku.value === 'muki') : false,
+      shiftIndex: sh ? parseInt(sh.value, 10) : -1  // -1 = 全パターン表示
     };
   });
 
@@ -39818,8 +39871,11 @@ async function bulkCreateRenewalDocs() {
       '<div style="font-size:11px;color:#999;margin-top:8px;">✓ 成功 ' + success.length + ' / ✗ 失敗 ' + failed.length + ' ／ 雇用期間 ' + dateSavedCount + '件保存済</div>'
     );
     try {
-      var h = await fetchHakensakiByEmp(emp);
-      renderRoudouKeiyakushoSan(emp, h, 'renewal');
+      // 派遣先データはモーダル読込時にキャッシュ済みなら再利用
+      var h = (window._bkHakensakiCache && window._bkHakensakiCache[emp.Id]) || await fetchHakensakiByEmp(emp);
+      var pdfEv = editedVals[emp.Id] || {};
+      var shiftIdx = (typeof pdfEv.shiftIndex === 'number') ? pdfEv.shiftIndex : -1;
+      renderRoudouKeiyakushoSan(emp, h, 'renewal', { shiftIndex: shiftIdx });
       await new Promise(function(r){ setTimeout(r, 380); });  // レイアウト確定待ち
       var pdfBlob = await generateHaisenDocAsPdf();
       var safeNm = nm.replace(/[\s　\/\\:*?"<>|#%]/g, '');
