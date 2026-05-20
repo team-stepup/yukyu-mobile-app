@@ -30078,6 +30078,14 @@ async function populateHakenDropdown() {
       select.appendChild(opt);
     });
     buildHakenMultiPanel();
+    // 担当者(派遣元責任者)マップを非同期で取得 → 完了後にパネルを再描画
+    // (マップが空のままだと「担当者で選択」チップが未割当だけになる)
+    if (typeof loadHakenTantoMapFromSP === 'function') {
+      try {
+        await loadHakenTantoMapFromSP();
+        buildHakenMultiPanel();  // マップ反映後に再描画
+      } catch (e) { console.warn('tanto map load 失敗:', e); }
+    }
   } catch (e) {
     console.error('Haken dropdown error:', e);
   }
