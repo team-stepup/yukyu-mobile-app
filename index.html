@@ -39883,9 +39883,13 @@ function renderHakenList(hakensaki, employees) {
     '<button class="haken-dl-btn" onclick="downloadHakenExcel()">📥 Excel</button>' +
     '<button class="refresh-btn" onclick="refreshHakenList()">&#x21bb; 更新</button>';
 
+  // 既存キャッシュをクリア (新しい派遣先を選んだので前回のキャッシュは無効)
+  window._hakenListMaebariCache = null;
   renderHakenTable(employees, body);
   // 産休育休バッジを非同期更新（List52取得が必要な場合あり）
   updateHakenSankyuCount();
+  // 前払い統計を非同期取得 (今月合計・3か月合計・今週支給済かを集計し再描画)
+  if (typeof _loadHakenListMaebariStats === 'function') _loadHakenListMaebariStats();
   // 「元に戻す」ボタンの表示制御
   if (typeof refreshUndoButtons === 'function') refreshUndoButtons();
 }
@@ -40780,44 +40784,64 @@ function renderHakenTable(employees, container) {
     });
   }
 
-  // Sort by name (あいうえお順)
-  var sorted = employees.slice().sort(function(a, b) {
-    return (a.Title || '').localeCompare(b.Title || '', 'ja');
-  });
+  // 前払い統計キャッシュを参照 (社員番号→{thisMonth, last3mo, hasThisWeek})
+  var maebariCache = (window._hakenListMaebariCache && window._hakenListMaebariCache.bySn) || null;
+  var statsReady = !!maebariCache;
 
-  // 有期フィルタ時は「通勤方法」列の代わりに「雇用期間」列を表示
-  var isYukiMode = (typeof hakenCurrentFilter !== 'undefined' && hakenCurrentFilter === 'yuki');
+  // フィルタ: 今週中(月曜～日曜)に前払いが既に出ている社員はリストから除外
+  var filtered = employees;
+  var hiddenCount = 0;
+  if (statsReady) {
+    filtered = employees.filter(function(e) {
+      var sn = String(e[F.syainNo] || '');
+      var s = maebariCache[sn];
+      if (s && s.hasThisWeek) { hiddenCount++; return false; }
+      return true;
+    });
+  }
 
-  // Column order: 社員番号 → 氏名 → 通勤方法(or 雇用期間) → 在職 → 💴前払い
-  let html = '<table class="haken-table"><thead><tr>' +
-    '<th>社番</th><th>氏名</th><th>' + (isYukiMode ? '雇用期間' : '通勤方法') + '</th><th>在職</th>' +
+  // ソート: 過去3か月の前払計が多い順 (キャッシュ未取得時はあいうえお順)
+  var sorted = filtered.slice();
+  if (statsReady) {
+    sorted.sort(function(a, b) {
+      var sa = maebariCache[String(a[F.syainNo] || '')] || { last3mo: 0 };
+      var sb = maebariCache[String(b[F.syainNo] || '')] || { last3mo: 0 };
+      var d = sb.last3mo - sa.last3mo;
+      if (d !== 0) return d;
+      return (a.Title || '').localeCompare(b.Title || '', 'ja');
+    });
+  } else {
+    sorted.sort(function(a, b) { return (a.Title || '').localeCompare(b.Title || '', 'ja'); });
+  }
+
+  // Column order: 社員番号 → 氏名 → 💴今月の前払計 → 在職 → 💴前払い
+  let html = '';
+  if (statsReady && hiddenCount > 0) {
+    html += '<div style="margin:0 0 6px;padding:6px 10px;background:#e8f5e9;border-left:4px solid #43a047;border-radius:6px;font-size:11.5px;color:#1b5e20;">' +
+      '✓ 今週分の前払いがすでに出ている <b>' + hiddenCount + '名</b> を非表示にしています</div>';
+  }
+  html += '<table class="haken-table"><thead><tr>' +
+    '<th>社番</th><th>氏名</th><th>💴 今月の前払計</th><th>在職</th>' +
     '<th>💴 前払い</th>';
   extraCols.forEach(col => {
     html += '<th>' + escHtml(col.field.label) + '</th>';
   });
   html += '</tr></thead><tbody>';
 
-  // Strip romaji from 通勤方法 (e.g. "送迎 Sougei" → "送迎")
-  function stripTsukinRomaji(val) {
-    if (!val) return val;
-    return val.replace(/\s*[A-Za-z].*/g, '').trim() || val;
-  }
-
   sorted.forEach(emp => {
-    const tsukin = getTsukinValue(emp);
     const resigned = isResigned(emp);
-    const tsukinClean = stripTsukinRomaji(tsukin);
-    const tsukinDisplay = tsukinClean ? escHtml(tsukinClean) : '<span style="color:var(--warning);font-weight:600;">⚠未登録</span>';
     const statusDisplay = resigned ? '<span style="color:var(--danger);">退社</span>' : '<span style="color:var(--success);">在職</span>';
-    // 3列目: 有期モードなら雇用期間、それ以外は通勤方法
-    let col3Display;
-    if (isYukiMode) {
-      const kikan = getKoyouKikanValue(emp);
-      col3Display = kikan
-        ? '<span style="font-size:11px;white-space:nowrap;">' + escHtml(kikan) + '</span>'
-        : '<span style="color:var(--warning);font-weight:600;">⚠未設定</span>';
+    // 💴 今月の前払計
+    var sn = String(emp[F.syainNo] || '');
+    var stats = maebariCache ? maebariCache[sn] : null;
+    var thisMonthDisp;
+    if (!statsReady) {
+      thisMonthDisp = '<span style="color:#bbb;font-size:11px;">⏳</span>';
+    } else if (stats && stats.thisMonth > 0) {
+      thisMonthDisp = '<span style="font-weight:700;color:#e65100;">¥' + stats.thisMonth.toLocaleString() + '</span>' +
+        (stats.last3mo > stats.thisMonth ? '<span style="font-size:10px;color:#999;display:block;">3か月¥' + stats.last3mo.toLocaleString() + '</span>' : '');
     } else {
-      col3Display = tsukinDisplay;
+      thisMonthDisp = '<span style="color:#bbb;">¥0</span>';
     }
     // 💴 前払いボタン (退社者は無効化)
     var maebariBtn = resigned
@@ -40826,7 +40850,7 @@ function renderHakenTable(employees, container) {
     html += '<tr onclick=\'selectEmployee(' + JSON.stringify(emp).replace(/'/g, "&#39;") + ')\' style="cursor:pointer;">' +
       '<td>' + (emp[F.syainNo] || '') + '</td>' +
       '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
-      '<td>' + col3Display + '</td>' +
+      '<td>' + thisMonthDisp + '</td>' +
       '<td>' + statusDisplay + '</td>' +
       '<td style="text-align:center;">' + maebariBtn + '</td>';
     extraCols.forEach(col => {
@@ -40836,6 +40860,68 @@ function renderHakenTable(employees, container) {
   });
   html += '</tbody></table>';
   container.innerHTML = html;
+}
+
+// 派遣先一覧用: 直近3か月の前払い記録を取得し、社員ごとに集計しキャッシュする
+// 完了後に現在の表示を自動で再描画する
+async function _loadHakenListMaebariStats() {
+  try {
+    var token = await getToken();
+    if (!token) return;
+    var now = new Date();
+    var threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    var nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    var filter = MF.payDate + " ge datetime'" + threeMonthsAgo.toISOString() + "' and " +
+                 MF.payDate + " lt datetime'" + nextMonth.toISOString() + "'";
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items?$filter=" +
+      encodeURIComponent(filter) + "&$top=500";
+    var all = [];
+    while (url) {
+      var resp = await fetch(url, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      var items = (data.d && data.d.results) || [];
+      all = all.concat(items);
+      url = data.d && data.d.__next ? data.d.__next : null;
+      if (all.length > 5000) break;  // safety
+    }
+    // 今週範囲 (月曜00:00 〜 次の月曜00:00)
+    var todayD = new Date(); todayD.setHours(0,0,0,0);
+    var dow = todayD.getDay();
+    var diffFromMon = (dow === 0 ? 6 : dow - 1);
+    var weekStart = new Date(todayD); weekStart.setDate(todayD.getDate() - diffFromMon);
+    var weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
+    var thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // 集計
+    var bySn = {};
+    all.forEach(function(it) {
+      var sn = String(it.Title || '');
+      if (!sn) return;
+      if (!bySn[sn]) bySn[sn] = { thisMonth: 0, last3mo: 0, hasThisWeek: false };
+      var raw = String(it[MF.amount] || '').replace(/[,\s¥￥円]/g, '');
+      var amt = parseFloat(raw) || 0;
+      var pd = it[MF.payDate] ? new Date(it[MF.payDate]) : null;
+      if (!pd || isNaN(pd)) return;
+      bySn[sn].last3mo += amt;
+      if (pd >= thisMonthStart && pd < nextMonth) bySn[sn].thisMonth += amt;
+      if (pd >= weekStart && pd < weekEnd) bySn[sn].hasThisWeek = true;
+    });
+    window._hakenListMaebariCache = { bySn: bySn, computedAt: Date.now() };
+    // 現在の表示を再描画
+    var body = document.getElementById('hakenListBody');
+    if (body) {
+      var activeBtn = document.querySelector('#hakenFilterBtns .haken-filter-btn.active');
+      if (activeBtn && typeof applyHakenFilter === 'function') {
+        applyHakenFilter(activeBtn.dataset.filter, activeBtn);
+      } else if (hakenEmployeesCache) {
+        renderHakenTable(hakenEmployeesCache, body);
+      }
+    }
+  } catch (e) {
+    console.warn('_loadHakenListMaebariStats error:', e);
+  }
 }
 
 // ===== 派遣先一覧 → 社員別 「💴 前払い 申請」クイックモーダル =====
@@ -41042,8 +41128,9 @@ async function _hmqSubmit(btn) {
       throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 200));
     }
     showToast('✓ 前払い申請を送信しました', 'success');
-    // 今月合計を再取得
+    // 今月合計を再取得 + 派遣先一覧の前払い統計も再集計 (今週分が出たら一覧から非表示になる)
     await _hmqLoadMonthlySum(sn);
+    if (typeof _loadHakenListMaebariStats === 'function') _loadHakenListMaebariStats();
     // 申請欄をリセット
     document.getElementById('hmqCustom').value = '';
     document.querySelectorAll('#hakenMaebariOv button[data-amt]').forEach(function(b) {
