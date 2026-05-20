@@ -10042,11 +10042,21 @@ async function draftTsukinTodokeEmail(btn) {
       }
     } catch (eS) { console.warn('社員フォルダ保存スキップ:', eS); }
 
-    // 操作者情報 (MSAL)
+    // 操作者の苗字を抽出: スペース区切りがあれば最初、無い場合は日本語なら先頭2文字
+    function _extractSurname(fullName) {
+      var s = String(fullName || '').trim();
+      if (!s) return '';
+      var bySpace = s.split(/[\s　]+/);
+      if (bySpace.length >= 2 && bySpace[0]) return bySpace[0];
+      // 漢字/かなを含むなら先頭2文字を苗字とみなす (一般的な日本人姓)
+      if (/[぀-ゟ゠-ヿ一-鿿]/.test(s)) return s.substring(0, 2);
+      return s;  // ローマ字等はそのまま
+    }
     var operatorFull = (typeof getLoggedInName === 'function') ? getLoggedInName() : '';
-    var operatorLast = operatorFull ? (operatorFull.split(/[\s　]+/)[0] || operatorFull) : '';
+    var operatorLast = _extractSurname(operatorFull);
 
     var subject = '通勤届の更新分（' + empName + '）';
+    // 本文末尾には署名を入れない。Outlookの「挿入→署名→署名1」で本人の署名を挿入する想定。
     var body =
       '三和電子サーキット株式会社\n' +
       '寺田様\n' +
@@ -10056,8 +10066,7 @@ async function draftTsukinTodokeEmail(btn) {
       '\n' +
       empName + 'の通勤届の更新分をお送りしますので、\n' +
       'ご確認のほどよろしくお願いします。\n' +
-      '\n' +
-      operatorFull + '\n';
+      '\n';
 
     // PDF を base64 へ変換
     var pdfBuf = await pdfBlob.arrayBuffer();
