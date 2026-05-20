@@ -10962,7 +10962,11 @@ function renderRoudouKeiyakushoSan(emp, h, mode, opt) {
   shifts = shifts.filter(function(s){ return s.jikan || s.jisu || s.total || s.slots.length > 0; });
   if (shifts.length === 0) shifts = [{ n: '①', jikan: '', jisu: '', total: '', slots: [] }];
   // 呼び出し側がシフトを指定している場合は該当シフトのみに絞る
-  if (opt.shiftIndex != null && opt.shiftIndex >= 0 && opt.shiftIndex < shifts.length) {
+  // opt.shiftIndices: 空配列 = 全パターン / 配列 = 指定インデックスのみ
+  // opt.shiftIndex (旧形式: 単一インデックスまたは -1): 後方互換
+  if (Array.isArray(opt.shiftIndices) && opt.shiftIndices.length > 0 && opt.shiftIndices.length < shifts.length) {
+    shifts = opt.shiftIndices.map(function(i) { return shifts[i]; }).filter(Boolean);
+  } else if (opt.shiftIndex != null && opt.shiftIndex >= 0 && opt.shiftIndex < shifts.length) {
     shifts = [shifts[opt.shiftIndex]];
   }
 
@@ -11075,6 +11079,12 @@ function renderRoudouKeiyakushoSan(emp, h, mode, opt) {
     ];
     var active = shifts.filter(function(s){ return !isShiftEmpty(s.jikan); });
     if (active.length === 0) active = [shifts[0]]; // データが無い場合も1行は描画
+    // 呼び出し側がシフトを指定している場合は絞り込み
+    if (Array.isArray(opt.shiftIndices) && opt.shiftIndices.length > 0 && opt.shiftIndices.length < active.length) {
+      active = opt.shiftIndices.map(function(i) { return active[i]; }).filter(Boolean);
+    } else if (opt.shiftIndex != null && opt.shiftIndex >= 0 && opt.shiftIndex < active.length) {
+      active = [active[opt.shiftIndex]];
+    }
     return active.map(function(s, i){
       return shiftRow(i+1, s.jikan, s.jisu, s.total, s.s1, s.s2, s.s3);
     }).join('');
@@ -39544,6 +39554,29 @@ function _autoIsMukiForRenewal(emp, newStartIso) {
   return ns >= oneYear;
 }
 
+// 一括作成モーダル: 就業時間チェックボックスの全選択/クリア
+function _bkToggleAllShifts(empId, on) {
+  var cbs = document.querySelectorAll('.bk-shift-cb[data-emp="' + empId + '"]');
+  cbs.forEach(function(cb) {
+    cb.checked = !!on;
+    // チップの見た目も切替
+    var chip = cb.closest('.bk-shift-chip');
+    if (chip) {
+      chip.style.background = on ? '#fff8e1' : '#fff';
+      chip.style.borderColor = on ? '#e65100' : '#c5c5d0';
+    }
+  });
+}
+
+// チェックボックス個別変更時にチップの見た目を更新
+function _onBkShiftChange(cb) {
+  var chip = cb.closest('.bk-shift-chip');
+  if (chip) {
+    chip.style.background = cb.checked ? '#fff8e1' : '#fff';
+    chip.style.borderColor = cb.checked ? '#e65100' : '#c5c5d0';
+  }
+}
+
 // 一括作成モーダル: 「雇用区分」セレクト変更ハンドラ
 // 無期切替時はラベルを「無期化日」に変更し、カードの背景・枠を薄紫に
 function _onBkKubunChange(empId) {
@@ -39700,11 +39733,17 @@ async function bulkCreateRenewalDocs() {
         } else if (shifts.length === 1) {
           cell.innerHTML = '<span style="font-size:12px;color:#555;">' + escHtml(shifts[0].n + ' ' + (shifts[0].jikan || '')) + '</span>';
         } else {
-          var opts = '<option value="-1">全パターン</option>' + shifts.map(function(s, idx) {
-            return '<option value="' + idx + '">' + escHtml(s.n + ' ' + (s.jikan || '')) + '</option>';
+          // 複数パターン: チェックボックスで全選択/1つ選択/複数選択を可能に (デフォルト全選択)
+          var cbsHtml = shifts.map(function(s, idx) {
+            return '<label class="bk-shift-chip" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:5px 10px;border:1.5px solid #e65100;border-radius:8px;background:#fff8e1;cursor:pointer;margin:0 6px 4px 0;transition:all 0.12s;color:#333;">' +
+              '<input type="checkbox" class="bk-shift-cb" data-emp="' + bkEmp.Id + '" data-idx="' + idx + '" checked onchange="_onBkShiftChange(this)" style="margin:0;cursor:pointer;accent-color:#e65100;">' +
+              escHtml(s.n + ' ' + (s.jikan || '')) +
+            '</label>';
           }).join('');
-          cell.innerHTML = '<select id="bkShift_' + bkEmp.Id + '" style="font-size:12px;padding:5px 8px;border:1px solid #ccc;border-radius:6px;background:#fff;font-weight:600;">' + opts + '</select>' +
-            '<span style="font-size:10.5px;color:#7b1fa2;margin-left:6px;">複数あり</span>';
+          cell.innerHTML = '<div style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:0;">' + cbsHtml +
+            '<button type="button" onclick="_bkToggleAllShifts(' + bkEmp.Id + ', true)" style="background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;margin:0 4px 4px 0;">✓ 全選</button>' +
+            '<button type="button" onclick="_bkToggleAllShifts(' + bkEmp.Id + ', false)" style="background:#fff;color:#666;border:1px solid #ccc;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin:0 0 4px 0;">クリア</button>' +
+            '</div>';
         }
       } catch (e) {
         var c2 = document.getElementById(cellId);
@@ -39729,14 +39768,23 @@ async function bulkCreateRenewalDocs() {
     var sa = document.getElementById('bkSal_' + emp.Id);
     var ts = document.getElementById('bkTsukin_' + emp.Id);
     var ku = document.getElementById('bkKubun_' + emp.Id);
-    var sh = document.getElementById('bkShift_' + emp.Id);  // 複数シフトある時のみ存在
+    // 就業時間: チェック済みインデックスを配列で収集 (全選択 or 0個=全パターン扱い)
+    var shCbs = document.querySelectorAll('.bk-shift-cb[data-emp="' + emp.Id + '"]');
+    var shiftIndices = [];
+    var totalCbs = 0;
+    shCbs.forEach(function(cb) {
+      totalCbs++;
+      if (cb.checked) shiftIndices.push(parseInt(cb.dataset.idx, 10));
+    });
+    // 全選択 or 0個 → 全パターン扱い (空配列を渡す)
+    if (totalCbs > 0 && shiftIndices.length === totalCbs) shiftIndices = [];
     editedVals[emp.Id] = {
       start: s ? (s.value || '') : '',
       end: e ? (e.value || '') : '',
       salary: sa ? (sa.value || '').trim() : '',
       tsukin: ts ? (ts.value || '').trim() : '',
       isMuki: ku ? (ku.value === 'muki') : false,
-      shiftIndex: sh ? parseInt(sh.value, 10) : -1  // -1 = 全パターン表示
+      shiftIndices: shiftIndices  // 空配列 = 全パターン
     };
   });
 
@@ -39892,8 +39940,8 @@ async function bulkCreateRenewalDocs() {
       // 派遣先データはモーダル読込時にキャッシュ済みなら再利用
       var h = (window._bkHakensakiCache && window._bkHakensakiCache[emp.Id]) || await fetchHakensakiByEmp(emp);
       var pdfEv = editedVals[emp.Id] || {};
-      var shiftIdx = (typeof pdfEv.shiftIndex === 'number') ? pdfEv.shiftIndex : -1;
-      renderRoudouKeiyakushoSan(emp, h, 'renewal', { shiftIndex: shiftIdx });
+      var shiftIndices = Array.isArray(pdfEv.shiftIndices) ? pdfEv.shiftIndices : [];
+      renderRoudouKeiyakushoSan(emp, h, 'renewal', { shiftIndices: shiftIndices });
       await new Promise(function(r){ setTimeout(r, 380); });  // レイアウト確定待ち
       var pdfBlob = await generateHaisenDocAsPdf();
       var safeNm = nm.replace(/[\s　\/\\:*?"<>|#%]/g, '');
