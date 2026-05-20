@@ -9260,14 +9260,19 @@ if (!window._esignMessageInstalled) {
       var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
       // ① 個人の社員フォルダへ保存
       await uploadFileToSp(folderPath, fileName, file);
-      // ② 新規雇用契約書のときは 集約フォルダ (社員ファイル/新規雇用契約書作成/{派遣先名}/) にも保存
+      // ② 新規雇用契約書のときは 集約フォルダ (社員ファイル/新規雇用契約書作成/{操作者名}/{派遣先名}/) にも保存
       if (window._currentHaisenDocMode !== 'renewal') {
         try {
           var hkNm2 = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(_esignCurrentEmp)) : (getBukaValue(_esignCurrentEmp) || '');
           var safeHk2 = String(hkNm2 || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
+          var opName2 = (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
+            .replace(/[\s　\/\\:*?"<>|#%~&{}]/g, '').trim();
+          var safeOp2 = opName2 || '不明';
           var aggP = SP_DOC_LIB_PATH + '/新規雇用契約書作成';
-          var aggF = aggP + '/' + safeHk2;
+          var aggOp2 = aggP + '/' + safeOp2;
+          var aggF = aggOp2 + '/' + safeHk2;
           try { await ensureSpFolder(aggP); } catch (e1) { console.warn('新規雇用契約書 親フォルダ warn:', e1); }
+          try { await ensureSpFolder(aggOp2); } catch (eOp) { console.warn('新規雇用契約書 操作者フォルダ warn:', eOp); }
           try { await ensureSpFolder(aggF); } catch (e2) { console.warn('新規雇用契約書 派遣先フォルダ warn:', e2); }
           var kikan2 = _koyouKikanForFilename(_esignCurrentEmp);
           var aggName = '新規雇用契約書兼就業条件通知書_' + sn2 + '_' + nm + '_' + kikan2 + '.pdf';
@@ -9486,10 +9491,15 @@ async function sendNewHireToAdobeSign() {
       catch (e) { console.warn('社員フォルダ保存 warn:', e); }
     }
 
-    // ② 集約フォルダ 新規雇用契約書作成/{派遣先名}/
+    // ② 集約フォルダ 新規雇用契約書作成/{操作者名}/{派遣先名}/
+    var opNameNH = (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
+      .replace(/[\s　\/\\:*?"<>|#%~&{}]/g, '').trim();
+    var safeOpNH = opNameNH || '不明';
     var aggParent = SP_DOC_LIB_PATH + '/新規雇用契約書作成';
-    var aggFolder = aggParent + '/' + safeHk;
+    var aggOpFolderNH = aggParent + '/' + safeOpNH;
+    var aggFolder = aggOpFolderNH + '/' + safeHk;
     try { await ensureSpFolder(aggParent); } catch (e) {}
+    try { await ensureSpFolder(aggOpFolderNH); } catch (e) {}
     try { await ensureSpFolder(aggFolder); } catch (e) {}
     try { await uploadFileToSp(aggFolder, unsignedName, unsignedFile); }
     catch (e) { console.warn('集約保存 warn:', e); }
@@ -9525,7 +9535,7 @@ async function sendNewHireToAdobeSign() {
           (email ? ('宛先メール: ' + email + '\n') : '⚠ メール未登録 — Power Automate 側で宛先を指定してください\n') +
           '\n未署名PDFを以下へ保存しました:\n' +
           (personalPath ? '・個人の社員フォルダ\n' : '') +
-          '・新規雇用契約書作成/' + safeHk + '/\n' +
+          '・新規雇用契約書作成/' + safeOpNH + '/' + safeHk + '/\n' +
           '・_Adobe署名待ち/ (Power Automate が自動で Adobe Sign へ送信)');
   } catch (e) {
     console.error('sendNewHireToAdobeSign error:', e);
