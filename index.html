@@ -41246,14 +41246,73 @@ function _twoOpt(tour, destPos) {
 function _redoSougeiAssignments() {
   var ctx = window._sougeiRouteCtx;
   if (!ctx) return;
-  // geo モード かつ 全員ジオコード済 ならクラスタリング
+  // geo モード かつ 全員ジオコード済 ならクラスタリング (Capacity-First Greedy)
   if (ctx.sortMode === 'geo') {
     var withPos = ctx.members.filter(function(m){ return m.pos; });
     var noPos = ctx.members.filter(function(m){ return !m.pos; });
+    if (withPos.length > 0 && ctx.destPos) {
+      // === Capacity-First Greedy ===
+      // 1. 車両を定員 DESC でソート (既に _fetchSougeiVehiclesByHaken でソート済)
+      // 2. 各車両を順番に: 「派遣先から最も遠い未割当社員」を seed → seed の最近 K 人を割当
+      //    K = max(1, 車両定員 - 1)  ※運転手分1名を引く
+      // 3. 最後の車両は残り全員を引き取る (定員超なら警告だけ表示)
+      var defaultCap = Math.ceil(withPos.length / ctx.cars);
+      function _carCapGreedy(idx) {
+        var v = ctx.vehicles && ctx.vehicles[idx];
+        if (v && v.capacity > 0) return Math.max(1, v.capacity - 1);
+        return defaultCap;
+      }
+      ctx.assignments = {};
+      var remaining = withPos.slice();
+      for (var ciG = 0; ciG < ctx.cars && remaining.length > 0; ciG++) {
+        var capG = _carCapGreedy(ciG);
+        var takeCount = (ciG === ctx.cars - 1) ? remaining.length : Math.min(capG, remaining.length);
+        if (takeCount <= 0) continue;
+        // seed: 派遣先から最も遠い社員 (長距離ピックアップを大型車に割り当てる)
+        var seedIdx = 0;
+        var farD = -1;
+        remaining.forEach(function(m, i) {
+          var d = _haversineKm(m.pos, ctx.destPos);
+          if (d > farD) { farD = d; seedIdx = i; }
+        });
+        var seedM = remaining[seedIdx];
+        // seed の最近 K-1 人 + seed 自身 = K 人を取得
+        var withDist = remaining.map(function(m) {
+          return { m: m, d: _haversineKm(m.pos, seedM.pos) };
+        }).sort(function(a, b){ return a.d - b.d; });
+        var takenList = withDist.slice(0, takeCount).map(function(x){ return x.m; });
+        takenList.forEach(function(m){ ctx.assignments[m.id] = ciG; });
+        var takenIds = {};
+        takenList.forEach(function(m){ takenIds[m.id] = true; });
+        remaining = remaining.filter(function(m){ return !takenIds[m.id]; });
+      }
+      // 座標不明者は最小負荷の車両に均等配分
+      var loadByCar2 = new Array(ctx.cars).fill(0);
+      Object.values(ctx.assignments).forEach(function(c){ if (c < ctx.cars) loadByCar2[c]++; });
+      noPos.forEach(function(m) {
+        var minI = 0; var minV = loadByCar2[0];
+        for (var c = 1; c < ctx.cars; c++) if (loadByCar2[c] < minV) { minV = loadByCar2[c]; minI = c; }
+        ctx.assignments[m.id] = minI;
+        loadByCar2[minI]++;
+      });
+      // 表示順: 車両ごとに NN + 2-opt
+      var destG = ctx.destPos;
+      var outG = [];
+      for (var c2g = 0; c2g < ctx.cars; c2g++) {
+        var clusterG = ctx.members.filter(function(m){ return ctx.assignments[m.id] === c2g && m.pos; });
+        var nnG = _nnTowardDest(clusterG, destG);
+        var refG = _twoOpt(nnG, destG);
+        outG = outG.concat(refG);
+        var clusterGNoPos = ctx.members.filter(function(m){ return ctx.assignments[m.id] === c2g && !m.pos; });
+        outG = outG.concat(clusterGNoPos);
+      }
+      ctx._sorted = outG;
+      return;
+    }
+    // フォールバック (destPos未取得時): K-means
     if (withPos.length > 0) {
       var k = Math.min(ctx.cars, withPos.length);
       var labels = _kmeansCluster(withPos.map(function(m){ return m.pos; }), k, 30);
-      // クラスタID → 元配列インデックスのマップ
       ctx.assignments = {};
       withPos.forEach(function(m, i) { ctx.assignments[m.id] = labels[i]; });
       // 座標不明者は均等に配分 (足りないクラスタは小さい順優先)
