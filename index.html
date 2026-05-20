@@ -9950,8 +9950,74 @@ async function saveTsukinTodokeToSyainFolder(btn) {
   }
 }
 
-// 通勤届 → 寺田様(三和電子サーキット)宛のメール下書き .eml を生成・ダウンロード
-// Outlookで.emlを開くと、X-Unsent:1 により新規下書きとして編集可能な状態で表示される
+// Outlook下書き作成用のトークン取得 (Mail.ReadWrite スコープ)
+async function _getOutlookMailToken() {
+  if (!msalInstance) throw new Error('認証されていません');
+  var accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) throw new Error('ログインが必要です');
+  var scopes = ['https://graph.microsoft.com/Mail.ReadWrite'];
+  try {
+    var r = await msalInstance.acquireTokenSilent({ scopes: scopes, account: accounts[0] });
+    return r.accessToken;
+  } catch (e) {
+    try {
+      var r2 = await msalInstance.acquireTokenPopup({ scopes: scopes, account: accounts[0] });
+      return r2.accessToken;
+    } catch (e2) {
+      throw new Error('メール作成権限の取得失敗 (' + (e2.errorCode || e2.message || e2) + ')');
+    }
+  }
+}
+
+// Microsoft Graph API でOutlook下書きを作成し、添付ファイルを追加する
+async function _createOutlookDraftWithAttachment(opts) {
+  var token = await _getOutlookMailToken();
+  // 1) 下書きメッセージを作成
+  var draftResp = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      subject: opts.subject,
+      body: { contentType: 'Text', content: opts.body },
+      toRecipients: [{ emailAddress: { address: opts.toEmail, name: opts.toName || undefined } }]
+    })
+  });
+  if (!draftResp.ok) {
+    var et = ''; try { et = await draftResp.text(); } catch (_) {}
+    throw new Error('下書き作成失敗 ' + draftResp.status + ' ' + et.substring(0, 200));
+  }
+  var msg = await draftResp.json();
+  // 2) 添付ファイルを追加 (≤3MB は単一POST。それ以上は uploadSession API)
+  if (opts.attachment && opts.attachment.contentB64) {
+    // contentBytes の base64 サイズから元バイト数を概算
+    var base64Len = opts.attachment.contentB64.length;
+    var approxBytes = Math.ceil(base64Len * 3 / 4);
+    if (approxBytes < 3 * 1024 * 1024) {
+      // 単一POST
+      var attResp = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + msg.id + '/attachments', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: opts.attachment.name,
+          contentType: opts.attachment.contentType || 'application/pdf',
+          contentBytes: opts.attachment.contentB64
+        })
+      });
+      if (!attResp.ok) {
+        var at = ''; try { at = await attResp.text(); } catch (_) {}
+        console.warn('添付失敗 ' + attResp.status + ' ' + at.substring(0, 200));
+      }
+    } else {
+      // 大きい添付: uploadSession (省略・通常PDFは数百KB)
+      console.warn('添付ファイルが3MB超のため添付スキップ');
+    }
+  }
+  return msg;  // { id, webLink, ... }
+}
+
+// 通勤届 → 寺田様(三和電子サーキット)宛のOutlook下書きを作成し、ブラウザで開く
+// Graph API で下書きをサーバー側Drafts フォルダに作成する。Outlookデスクトップ/Web 双方から開ける。
 async function draftTsukinTodokeEmail(btn) {
   var ctx = window._tsukinSaveCtx;
   if (!ctx || !ctx.emp) { showToast('社員情報が取得できません', 'error'); return; }
@@ -9961,12 +10027,13 @@ async function draftTsukinTodokeEmail(btn) {
   if (isNaN(d.getTime())) d = new Date();
   var ymd = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   var fileName = '通勤届_' + ymd + '.pdf';
-  if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ PDF + 下書き生成中…'; }
+  if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ 下書きを作成中…'; }
   try {
     if (typeof loadEsignLibsIfNeeded === 'function') await loadEsignLibsIfNeeded();
+    if (btn) btn.textContent = '⏳ PDFを生成中…';
     var pdfBlob = await generateHaisenDocAsPdf();
 
-    // 社員フォルダにも保存 (任意で並行実施)
+    // 社員フォルダにも保存 (失敗しても下書き作成は続行)
     try {
       var folderPath = await getEmpFolderPath(emp);
       if (folderPath) {
@@ -9979,7 +10046,7 @@ async function draftTsukinTodokeEmail(btn) {
     var operatorFull = (typeof getLoggedInName === 'function') ? getLoggedInName() : '';
     var operatorLast = operatorFull ? (operatorFull.split(/[\s　]+/)[0] || operatorFull) : '';
 
-    // 本文 (ユーザー指定テンプレート)
+    var subject = '通勤届の更新分（' + empName + '）';
     var body =
       '三和電子サーキット株式会社\n' +
       '寺田様\n' +
@@ -9991,9 +10058,8 @@ async function draftTsukinTodokeEmail(btn) {
       'ご確認のほどよろしくお願いします。\n' +
       '\n' +
       operatorFull + '\n';
-    var subject = '通勤届の更新分（' + empName + '）';
 
-    // PDF を base64 へ
+    // PDF を base64 へ変換
     var pdfBuf = await pdfBlob.arrayBuffer();
     var u8 = new Uint8Array(pdfBuf);
     var bin = '';
@@ -10003,50 +10069,31 @@ async function draftTsukinTodokeEmail(btn) {
     }
     var pdfB64 = btoa(bin);
 
-    function wrap76(s) {
-      var out = '';
-      for (var k = 0; k < s.length; k += 76) out += s.substring(k, k + 76) + '\r\n';
-      return out;
+    if (btn) btn.textContent = '⏳ Outlook下書きを作成中…';
+    var draft = await _createOutlookDraftWithAttachment({
+      toEmail: 'e-terada@tk.se-circuit.co.jp',
+      toName: '寺田えみこ',
+      subject: subject,
+      body: body,
+      attachment: { name: fileName, contentType: 'application/pdf', contentB64: pdfB64 }
+    });
+
+    // Outlook で下書きを開く (webLink: Outlook on the web で編集可能)
+    var webLink = draft && draft.webLink;
+    if (webLink) {
+      try { window.open(webLink, '_blank', 'noopener,noreferrer'); } catch (_) {}
     }
-    function b64utf8(s) { return btoa(unescape(encodeURIComponent(s))); }
-    function mimeWord(s) { return '=?UTF-8?B?' + b64utf8(s) + '?='; }
-
-    var boundary = '----=_TsukinPart_' + Date.now();
-    var eml =
-      'From: \r\n' +
-      'To: ' + mimeWord('寺田えみこ') + ' <e-terada@tk.se-circuit.co.jp>\r\n' +
-      'Subject: ' + mimeWord(subject) + '\r\n' +
-      'X-Unsent: 1\r\n' +
-      'MIME-Version: 1.0\r\n' +
-      'Content-Type: multipart/mixed; boundary="' + boundary + '"\r\n\r\n' +
-      '--' + boundary + '\r\n' +
-      'Content-Type: text/plain; charset=UTF-8\r\n' +
-      'Content-Transfer-Encoding: base64\r\n\r\n' +
-      wrap76(b64utf8(body)) + '\r\n' +
-      '--' + boundary + '\r\n' +
-      'Content-Type: application/pdf; name="' + mimeWord(fileName) + '"\r\n' +
-      'Content-Transfer-Encoding: base64\r\n' +
-      'Content-Disposition: attachment; filename="' + mimeWord(fileName) + '"\r\n\r\n' +
-      wrap76(pdfB64) + '\r\n' +
-      '--' + boundary + '--\r\n';
-
-    var emlBlob = new Blob([eml], { type: 'message/rfc822' });
-    var url = URL.createObjectURL(emlBlob);
-    var emlName = '寺田様_通勤届_' + ymd + '_' + (empName.replace(/[\s　\/\\:*?"<>|]/g, '')) + '.eml';
-    var a = document.createElement('a');
-    a.href = url; a.download = emlName;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
-
-    if (typeof showToast === 'function') showToast('✓ ' + emlName + ' をダウンロード。Outlookで開くと下書きが表示されます', 'success');
-    if (btn) { btn.textContent = '✅ 下書きをダウンロード'; btn.style.background = 'linear-gradient(135deg,#43a047,#2e7d32)'; }
+    if (typeof showToast === 'function') {
+      showToast('✓ Outlook の下書きに作成しました。確認後に送信ボタンを押してください', 'success');
+    }
+    if (btn) { btn.textContent = '✅ 下書きを開きました'; btn.style.background = 'linear-gradient(135deg,#43a047,#2e7d32)'; }
     setTimeout(function() {
       if (btn) {
         btn.textContent = btn.dataset.label || '📧 寺田様へ下書き作成 (Outlook)';
         btn.style.background = 'linear-gradient(135deg,#1565c0,#0d47a1)';
         btn.disabled = false;
       }
-    }, 2500);
+    }, 3000);
   } catch (e) {
     console.error('draftTsukinTodokeEmail error:', e);
     if (typeof showToast === 'function') showToast('下書き作成失敗: ' + (e.message || e), 'error');
