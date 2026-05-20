@@ -40790,15 +40790,19 @@ function renderHakenTable(employees, container) {
 
   // フィルタ: 今週中(月曜～日曜)に前払いが既に出ている社員はリストから除外
   var filtered = employees;
-  var hiddenCount = 0;
+  var hiddenList = [];  // [{sn, name}, ...] 今週前払い済 = 非表示
   if (statsReady) {
     filtered = employees.filter(function(e) {
       var sn = String(e[F.syainNo] || '');
       var s = maebariCache[sn];
-      if (s && s.hasThisWeek) { hiddenCount++; return false; }
+      if (s && s.hasThisWeek) {
+        hiddenList.push({ sn: sn, name: e.Title || '' });
+        return false;
+      }
       return true;
     });
   }
+  var hiddenCount = hiddenList.length;
 
   // ソート: 過去3か月の前払計が多い順 (キャッシュ未取得時はあいうえお順)
   var sorted = filtered.slice();
@@ -40817,8 +40821,18 @@ function renderHakenTable(employees, container) {
   // Column order: 社員番号 → 氏名 → 💴今月の前払計 → 在職 → 💴前払い
   let html = '';
   if (statsReady && hiddenCount > 0) {
-    html += '<div style="margin:0 0 6px;padding:6px 10px;background:#e8f5e9;border-left:4px solid #43a047;border-radius:6px;font-size:11.5px;color:#1b5e20;">' +
-      '✓ 今週分の前払いがすでに出ている <b>' + hiddenCount + '名</b> を非表示にしています</div>';
+    // 非表示社員名 (今週前払い済)を hidden list として埋め込み、クリックで表示する
+    var hiddenNamesEsc = hiddenList.map(function(x) {
+      return escHtml(x.name) + ' <span style="color:#999;font-size:10px;">(No.' + escHtml(x.sn) + ')</span>';
+    }).join('　/　');
+    html += '<div style="margin:0 0 6px;padding:7px 10px;background:#e8f5e9;border-left:4px solid #43a047;border-radius:6px;font-size:11.5px;color:#1b5e20;cursor:pointer;user-select:none;" onclick="_toggleHiddenMaebariList(this)" title="クリックで詳細表示">' +
+      '<span style="display:inline-block;margin-right:5px;transition:transform 0.15s;" class="hk-tri">▶</span>' +
+      '✓ 今週分の前払いがすでに出ている <b>' + hiddenCount + '名</b> を非表示にしています ' +
+      '<span style="color:#388e3c;font-size:10px;font-weight:600;">（クリックで名前表示）</span>' +
+      '<div class="hk-hidden-names" style="display:none;margin-top:6px;padding-top:6px;border-top:1px dashed #a5d6a7;color:#1b5e20;font-size:11px;line-height:1.7;">' +
+        hiddenNamesEsc +
+      '</div>' +
+      '</div>';
   }
   html += '<table class="haken-table"><thead><tr>' +
     '<th>社番</th><th>氏名</th><th>💴 今月の前払計</th><th>在職</th>' +
@@ -40862,6 +40876,17 @@ function renderHakenTable(employees, container) {
   container.innerHTML = html;
 }
 
+// 「今週前払い済の N名を非表示」バナーをクリックすると名前一覧を展開/格納
+function _toggleHiddenMaebariList(banner) {
+  if (!banner) return;
+  var names = banner.querySelector('.hk-hidden-names');
+  var tri = banner.querySelector('.hk-tri');
+  if (!names) return;
+  var open = names.style.display !== 'none';
+  names.style.display = open ? 'none' : 'block';
+  if (tri) tri.style.transform = open ? '' : 'rotate(90deg)';
+}
+
 // 派遣先一覧用: 直近3か月の前払い記録を取得し、社員ごとに集計しキャッシュする
 // 完了後に現在の表示を自動で再描画する
 async function _loadHakenListMaebariStats() {
@@ -40894,10 +40919,11 @@ async function _loadHakenListMaebariStats() {
     var weekStart = new Date(todayD); weekStart.setDate(todayD.getDate() - diffFromMon);
     var weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
     var thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    // 集計
+    // 集計 (社員番号は NO_x002e_ 列 = MF.syainNo に格納されている)
     var bySn = {};
+    var hiddenNames = {};  // sn → 社員名 (非表示バナーに名前を表示するため保持)
     all.forEach(function(it) {
-      var sn = String(it.Title || '');
+      var sn = String(it[MF.syainNo] || it.Title || '').trim();
       if (!sn) return;
       if (!bySn[sn]) bySn[sn] = { thisMonth: 0, last3mo: 0, hasThisWeek: false };
       var raw = String(it[MF.amount] || '').replace(/[,\s¥￥円]/g, '');
@@ -40906,8 +40932,13 @@ async function _loadHakenListMaebariStats() {
       if (!pd || isNaN(pd)) return;
       bySn[sn].last3mo += amt;
       if (pd >= thisMonthStart && pd < nextMonth) bySn[sn].thisMonth += amt;
-      if (pd >= weekStart && pd < weekEnd) bySn[sn].hasThisWeek = true;
+      if (pd >= weekStart && pd < weekEnd) {
+        bySn[sn].hasThisWeek = true;
+        var nm = String(it[MF.name] || '').trim();
+        if (nm) hiddenNames[sn] = nm;
+      }
     });
+    window._hakenListMaebariHiddenNames = hiddenNames;
     window._hakenListMaebariCache = { bySn: bySn, computedAt: Date.now() };
     // 現在の表示を再描画
     var body = document.getElementById('hakenListBody');
@@ -41060,7 +41091,7 @@ async function _hmqLoadMonthlySum(syainNo) {
     var first = new Date(now.getFullYear(), now.getMonth(), 1);
     var nextMo = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     function _iso(d) { return d.toISOString(); }
-    var filter = "Title eq '" + syainNo + "' and " +
+    var filter = MF.syainNo + " eq '" + syainNo + "' and " +
       MF.payDate + " ge datetime'" + _iso(first) + "' and " +
       MF.payDate + " lt datetime'" + _iso(nextMo) + "'";
     var token = await getToken();
