@@ -16116,10 +16116,10 @@ async function saveEditHakenField(odKey) {
     if (!token) throw new Error('認証エラー');
     var entityType = await getHakensakiEntityType();
     if (!entityType) throw new Error('リスト型取得失敗');
-    var writeKey = odKey;
-    if (writeKey.indexOf('OData_') === 0) writeKey = writeKey.substring(6);
+    // 書き込みキーは EntityPropertyName (OData_付き) のまま使う。
+    // OData_ を剥がすと SharePoint が「フィールド未定義」で 400 を返す。
     var patchBody = {};
-    patchBody[writeKey] = newVal;
+    patchBody[odKey] = newVal;
     patchBody['__metadata'] = { type: entityType };
     var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items(" + item.Id + ")";
     var resp = await fetch(url, {
