@@ -13442,8 +13442,9 @@ async function saveMissingFields(itemId) {
   inputs.forEach(function(el) {
     var v = (el.value || '').trim();
     if (!v) return;
+    // 書き込みキーは EntityPropertyName (OData_付き) のまま使う。
+    // OData_ を剥がすと SharePoint が「フィールド未定義」で 400 を返す。
     var key = el.getAttribute('data-od');
-    if (key.indexOf('OData_') === 0) key = key.substring(6);
     body[key] = v;
     savedKeys.push(key);
   });
@@ -16229,18 +16230,11 @@ async function saveHakensakiDetail() {
     var entityType = await getHakensakiEntityType();
     if (!entityType) throw new Error('リスト型取得失敗');
 
-    // OData_ プレフィックスを InternalName に戻すロジック
-    // changes のキーは odKey (例: OData__x6d3e__x9063_...) or 普通のInternalName
+    // 書き込みキーは EntityPropertyName (OData_付き) のまま使う。
+    // OData_ を剥がすと SharePoint が「フィールド未定義」で 400 を返す。
     var patchBody = {};
     Object.keys(changes).forEach(function(k) {
-      // OData_ プレフィックスは SharePoint 側で自動処理されるので、そのまま or 外す
-      // EntityPropertyName があればそれを使うべきだが、ひとまずそのまま
-      var field = (_hakensakiAllFields || []).find(function(x) { return x.odKey === k; });
-      // odKey は OData_<InternalName> or InternalName そのまま
-      // PATCH用の body キーは InternalName を使う (SharePointは `OData_` なしで受け付ける)
-      var writeKey = k;
-      if (k.indexOf('OData_') === 0) writeKey = k.substring(6);
-      patchBody[writeKey] = changes[k];
+      patchBody[k] = changes[k];
     });
     patchBody['__metadata'] = { type: entityType };
 
