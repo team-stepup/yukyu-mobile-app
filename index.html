@@ -30101,8 +30101,42 @@ function buildHakenMultiPanel() {
     updateHakenMultiBtnText();
     return;
   }
+  // 👤 担当者で選択 (チップ): 担当者を押すとその担当者が見ている派遣先がまとめて選択される
+  let html = '';
+  try {
+    var tantoMap = {};
+    visible.forEach(function(b) {
+      var t = (typeof getHakenTanto === 'function') ? getHakenTanto(b) : '⚠ 未割当';
+      if (!tantoMap[t]) tantoMap[t] = [];
+      tantoMap[t].push(b);
+    });
+    var tantoNames = Object.keys(tantoMap).sort(function(a, b) {
+      // 件数が多い順 → 名前順
+      var c = tantoMap[b].length - tantoMap[a].length;
+      return c !== 0 ? c : String(a).localeCompare(String(b), 'ja');
+    });
+    if (tantoNames.length >= 2) {
+      var chipsHtml = tantoNames.map(function(t) {
+        var bukas = tantoMap[t];
+        var allChecked = bukas.length > 0 && bukas.every(function(b){ return hakenMultiSelected.indexOf(b) >= 0; });
+        var bg = allChecked ? 'linear-gradient(135deg,#fb8c00,#e65100)' : '#fff';
+        var color = allChecked ? '#fff' : '#333';
+        var border = allChecked ? '#e65100' : '#d5d5dd';
+        var icon = allChecked ? '✓ ' : '';
+        return '<button type="button" data-tanto="' + escHtml(t) + '" onclick="_hakenTantoChipClick(this)" ' +
+          'style="background:' + bg + ';color:' + color + ';border:1.5px solid ' + border + ';border-radius:14px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;margin:0 5px 5px 0;white-space:nowrap;transition:all 0.12s;">' +
+          icon + escHtml(t) + ' <span style="opacity:0.7;font-size:10px;">(' + bukas.length + ')</span>' +
+          '</button>';
+      }).join('');
+      html += '<div style="padding:6px 8px 4px;border-bottom:1px solid #f0f0f5;background:#fafafc;">' +
+        '<div style="font-size:10px;color:#888;font-weight:700;margin-bottom:4px;letter-spacing:0.3px;">👤 担当者で選択 <span style="font-weight:500;color:#aaa;">(押すと担当派遣先をまとめてON/OFF)</span></div>' +
+        '<div style="display:flex;flex-wrap:wrap;">' + chipsHtml + '</div>' +
+        '</div>';
+    }
+  } catch (e) { console.warn('担当者チップ生成エラー:', e); }
+
   // 全選択/解除ヘッダー
-  let html = '<div style="display:flex;gap:8px;padding:4px 8px 8px;border-bottom:1px solid #eee;margin-bottom:4px;">';
+  html += '<div style="display:flex;gap:8px;padding:4px 8px 8px;border-bottom:1px solid #eee;margin-bottom:4px;">';
   html += '<button type="button" onclick="selectAllHakenMulti()" style="flex:1;font-size:11px;padding:4px;background:#f5f5fa;border:1px solid #e0e0e8;border-radius:6px;cursor:pointer;">全て選択</button>';
   html += '<button type="button" onclick="clearHakenMultiSelection()" style="flex:1;font-size:11px;padding:4px;background:#fff;border:1px solid #e0e0e8;border-radius:6px;cursor:pointer;">全て解除</button>';
   html += '</div>';
@@ -30146,6 +30180,34 @@ function onHakenMultiToggle(cb) {
     hakenMultiSelected = hakenMultiSelected.filter(b => b !== val);
   }
   updateHakenMultiBtnText();
+}
+
+// 👤 担当者チップ クリック: その担当者の派遣先をまとめて選択/解除
+function _hakenTantoChipClick(btn) {
+  if (!btn || !btn.dataset || !btn.dataset.tanto) return;
+  var tanto = btn.dataset.tanto;
+  var includeRetired = document.getElementById('hakenIncludeRetired') && document.getElementById('hakenIncludeRetired').checked;
+  var sorted = Object.keys(_hakenEmpByBuka).sort();
+  var visible = sorted.filter(function(b) {
+    if (typeof isHakensakiBuka === 'function' && !isHakensakiBuka(b)) return false;
+    var c = _hakenEmpByBuka[b];
+    return includeRetired ? c.total > 0 : c.active > 0;
+  });
+  var targetBukas = visible.filter(function(b) {
+    return ((typeof getHakenTanto === 'function') ? getHakenTanto(b) : '⚠ 未割当') === tanto;
+  });
+  if (!targetBukas.length) return;
+  var allChecked = targetBukas.every(function(b){ return hakenMultiSelected.indexOf(b) >= 0; });
+  if (allChecked) {
+    // 既に全部チェック済 → 解除
+    hakenMultiSelected = hakenMultiSelected.filter(function(b){ return targetBukas.indexOf(b) < 0; });
+  } else {
+    // 未チェックを追加
+    targetBukas.forEach(function(b) {
+      if (hakenMultiSelected.indexOf(b) < 0) hakenMultiSelected.push(b);
+    });
+  }
+  buildHakenMultiPanel();
 }
 
 function selectAllHakenMulti() {
