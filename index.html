@@ -41037,6 +41037,45 @@ async function openSougeiRouteSplit() {
     }
     _renderSougeiRouteModal();
   });
+
+  // 派遣先住所もバックグラウンド取得 (Google Mapsの目的地ジオコード用)
+  if (typeof fetchHakensakiByEmp === 'function') {
+    fetchHakensakiByEmp(sougeiEmps[0]).then(function(h) {
+      if (!window._sougeiRouteCtx || !h) return;
+      var addr = (typeof HF !== 'undefined') ? (h[HF.kinmu_jusho] || h[HF.haken_jusho] || '') : '';
+      addr = String(addr || '').trim();
+      if (addr) window._sougeiRouteCtx.hakenAddress = addr;
+    }).catch(function(e){ console.warn('haken addr fetch:', e); });
+  }
+}
+
+// 「🗺️ Mapで開く」: その車両の社員住所をジオコードして最短近隣で並べ替え → Google Maps を開く
+async function _openOptimizedRouteForCar(carIdx, btn) {
+  var ctx = window._sougeiRouteCtx;
+  if (!ctx) return;
+  var sorted = ctx._sorted || ctx.members.slice();
+  var group = sorted.filter(function(m){ return ctx.assignments[m.id] === carIdx; });
+  var addresses = group.filter(function(m){ return m.address; }).map(function(m){ return m.address; });
+  if (!addresses.length) { showToast('住所登録された社員がいません', 'error'); return; }
+  var destAddr = ctx.hakenAddress || ctx.hakenName;
+  if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ ルート最適化中…'; }
+  try {
+    var ordered = await _optimizeRouteAddresses(addresses, destAddr);
+    var url = _buildGoogleMapsRouteUrl(ordered, destAddr);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch (e) {
+    console.error('route optimize error:', e);
+    // フォールバック: 元順序のまま開く
+    var url2 = _buildGoogleMapsRouteUrl(addresses, destAddr);
+    window.open(url2, '_blank', 'noopener,noreferrer');
+  } finally {
+    if (btn) {
+      setTimeout(function() {
+        btn.disabled = false;
+        btn.textContent = btn.dataset.label || '🗺️ Mapで開く';
+      }, 600);
+    }
+  }
 }
 
 // 振り分けロジック: 並び順で N台へ均等分配
@@ -41098,6 +41137,64 @@ function _buildGoogleMapsRouteUrl(addresses, destination) {
   return url;
 }
 
+// OpenStreetMap Nominatim でジオコード (無料・APIキー不要・1リクエスト/秒)
+window._sougeiGeocodeCache = window._sougeiGeocodeCache || {};
+async function _geocodeNominatim(addr) {
+  if (!addr) return null;
+  var key = String(addr).trim();
+  if (!key) return null;
+  if (window._sougeiGeocodeCache[key] !== undefined) return window._sougeiGeocodeCache[key];
+  try {
+    var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q=' + encodeURIComponent(key);
+    var resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) { window._sougeiGeocodeCache[key] = null; return null; }
+    var data = await resp.json();
+    if (!data || !data.length) { window._sougeiGeocodeCache[key] = null; return null; }
+    var pos = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    window._sougeiGeocodeCache[key] = pos;
+    return pos;
+  } catch (e) { console.warn('Nominatim error:', e); return null; }
+}
+function _haversineKm(a, b) {
+  var R = 6371;
+  var dLat = (b.lat - a.lat) * Math.PI / 180;
+  var dLon = (b.lng - a.lng) * Math.PI / 180;
+  var s = Math.sin(dLat/2)*Math.sin(dLat/2) +
+          Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*
+          Math.sin(dLon/2)*Math.sin(dLon/2);
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+// 派遣先 destAddr に向かう最短近隣ルートで住所配列を並べ替えて返す
+async function _optimizeRouteAddresses(addresses, destAddr) {
+  var geocoded = [];
+  for (var i = 0; i < addresses.length; i++) {
+    var p = await _geocodeNominatim(addresses[i]);
+    geocoded.push({ address: addresses[i], pos: p });
+    if (i < addresses.length - 1) await new Promise(function(r){ setTimeout(r, 1100); });
+  }
+  var destPos = await _geocodeNominatim(destAddr);
+  var resolved = geocoded.filter(function(g){ return g.pos; });
+  var unresolved = geocoded.filter(function(g){ return !g.pos; });
+  var ordered = [];
+  if (destPos && resolved.length) {
+    var remaining = resolved.slice();
+    var current = destPos;
+    while (remaining.length > 0) {
+      var nearestIdx = 0, nearestDist = Infinity;
+      for (var j = 0; j < remaining.length; j++) {
+        var d = _haversineKm(current, remaining[j].pos);
+        if (d < nearestDist) { nearestDist = d; nearestIdx = j; }
+      }
+      var picked = remaining.splice(nearestIdx, 1)[0];
+      ordered.unshift(picked);
+      current = picked.pos;
+    }
+  } else {
+    ordered = resolved;
+  }
+  return ordered.concat(unresolved).map(function(o){ return o.address; });
+}
+
 function _renderSougeiRouteModal() {
   var ctx = window._sougeiRouteCtx;
   if (!ctx) return;
@@ -41142,7 +41239,7 @@ function _renderSougeiRouteModal() {
         '<span style="font-size:11px;opacity:0.9;">(' + group.length + '名)</span>' +
         '<div style="flex:1;"></div>' +
         (hasAddrs
-          ? '<a href="' + escHtml(url) + '" target="_blank" rel="noopener" style="background:#fff;color:' + col + ';padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none;">🗺️ Mapで開く</a>'
+          ? '<button onclick="_openOptimizedRouteForCar(' + ci + ',this)" style="background:#fff;color:' + col + ';padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;">🗺️ Mapで開く</button>'
           : '<span style="background:rgba(255,255,255,0.2);color:#fff;padding:4px 10px;border-radius:6px;font-size:10px;">住所なし</span>') +
       '</div>' +
       memRowsHtml +
