@@ -10270,6 +10270,12 @@ function showNewHireEditModal(emp) {
     var nm = emp.Title || '';
     var sal = getEmpSalary(emp);
     var tsukin = getEmpTsukinTeate(emp);
+    // 通勤手当キーが社員データに存在するか (0 と 未設定 を区別するため)
+    var tsuKeyFound = Object.keys(emp).some(function(k){ return k.indexOf('x901a__x52e4__x624b__x5f53') >= 0; });
+    // 通勤方法 (送迎/車 等) を併記用に取得
+    var tsuHouhou = '';
+    var tsuHouhouKey = Object.keys(emp).find(function(k){ return k.indexOf('x901a__x52e4__x65b9__x6cd5') >= 0; });
+    if (tsuHouhouKey) tsuHouhou = String(emp[tsuHouhouKey] || '').replace(/\s*[A-Za-z].*/, '').trim();
     var cs = _toDateInputVal(emp[F.koyoStart]);
     var ce = _toDateInputVal(emp[F.koyoEnd]);
     var inS = 'font-size:13px;padding:6px 8px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box;';
@@ -10288,7 +10294,8 @@ function showNewHireEditModal(emp) {
         '</div>' +
         '<div style="padding:16px 20px;">' +
           row('給与（時給）', '<input type="number" id="nhSalary" min="0" step="10" value="' + (sal > 0 ? sal : '') + '" style="' + inS + '">') +
-          row('通勤費（通勤手当）', '<input type="number" id="nhTsukin" min="0" step="10" value="' + (tsukin > 0 ? tsukin : '') + '" style="' + inS + '">') +
+          row('通勤費（通勤手当）' + (tsuHouhou ? ' <span style="font-size:10.5px;color:#888;font-weight:500;">／ 通勤方法: ' + escHtml(tsuHouhou) + '</span>' : ''),
+              '<input type="number" id="nhTsukin" min="0" step="10" value="' + (tsuKeyFound ? tsukin : '') + '" style="' + inS + '">') +
           row('雇用契約開始日', '<input type="date" id="nhStart" value="' + cs + '" style="' + inS + '">') +
           row('雇用契約終了日', '<input type="date" id="nhEnd" value="' + ce + '" style="' + inS + '">') +
           '<div id="nhStatus" style="font-size:11.5px;color:#1976d2;min-height:14px;"></div>' +
