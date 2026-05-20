@@ -39720,17 +39720,20 @@ async function bulkCreateRenewalDocs() {
       var fileName1 = '更新用就業条件通知書_' + sn + '_' + kikan + '.pdf';
       await uploadFileToSp(folderPath, fileName1, pdfBlob);
 
-      // ② 集約フォルダへ保存: 社員ファイル/更新雇用契約書作成/{派遣先名}/ (ファイル名: 社員番号_氏名_雇用期間)
+      // ② 集約フォルダへ保存: 社員ファイル/更新雇用契約書作成/{操作者名}/{派遣先名}/
+      //    (操作者名 = MSALログイン中ユーザーの Azure AD 表示名)
       var hkNm = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(emp)) : (getBukaValue(emp) || '');
       var safeHk = String(hkNm || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
-      var aggParent = SP_DOC_LIB_PATH + '/更新雇用契約書作成';
-      var aggFolder = aggParent + '/' + safeHk;
-      try { await ensureSpFolder(aggParent); } catch (e1) { console.warn('agg parent warn:', e1); }
-      try { await ensureSpFolder(aggFolder); } catch (e2) { console.warn('agg folder warn:', e2); }
       var opName = (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
-        .replace(/[\s　\/\\:*?"<>|#%]/g, '');
-      var fileName2 = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + kikan +
-        (opName ? '_作成者' + opName : '') + '.pdf';
+        .replace(/[\s　\/\\:*?"<>|#%~&{}]/g, '').trim();
+      var safeOp = opName || '不明';
+      var aggParent = SP_DOC_LIB_PATH + '/更新雇用契約書作成';
+      var aggOpFolder = aggParent + '/' + safeOp;
+      var aggFolder = aggOpFolder + '/' + safeHk;
+      try { await ensureSpFolder(aggParent); } catch (e1) { console.warn('agg parent warn:', e1); }
+      try { await ensureSpFolder(aggOpFolder); } catch (eOp) { console.warn('agg op folder warn:', eOp); }
+      try { await ensureSpFolder(aggFolder); } catch (e2) { console.warn('agg folder warn:', e2); }
+      var fileName2 = '更新用就業条件通知書_' + sn + '_' + safeNm + '_' + kikan + '.pdf';
       await uploadFileToSp(aggFolder, fileName2, pdfBlob);
       success.push(nm);
     } catch (e) {
