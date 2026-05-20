@@ -13019,12 +13019,24 @@ function _showHakenIsshikiModal(h, emps) {
           '<div style="flex:1;">' + _hkcLbl('役職') + _hkcInp('hkiss_ksYaku', cc(HF.kujouSakiYakushoku)) + '</div>' +
           '<div style="flex:1;">' + _hkcLbl('氏名') + _hkcInp('hkiss_ksName', cc(HF.kujouSakiName)) + '</div>' +
         '</div>' +
-        '<div style="font-weight:700;color:#283593;margin:10px 0 4px;">時間外・休日労働</div>' +
+        '<div style="font-weight:700;color:#283593;margin:10px 0 4px;">時間外・休日労働 <span style="font-size:10px;color:#888;font-weight:600;">（派遣先情報Listsに保存）</span></div>' +
         '<div style="background:#f5f6fa;border-radius:6px;padding:8px 10px;">' +
           '<label style="display:block;margin-bottom:6px;cursor:pointer;">' +
-            '<input type="radio" name="hkiss_ot" value="yes"' + (hasOT ? ' checked' : '') + '> あり（36協定の範囲内）</label>' +
+            '<input type="radio" name="hkiss_ot" value="yes"' + (hasOT ? ' checked' : '') + ' onchange="_hkIssOtChange()"> あり（36協定の範囲内）</label>' +
           '<label style="display:block;cursor:pointer;">' +
-            '<input type="radio" name="hkiss_ot" value="no"' + (hasOT ? '' : ' checked') + '> なし（時間外・休日労働を行わない）</label>' +
+            '<input type="radio" name="hkiss_ot" value="no"' + (hasOT ? '' : ' checked') + ' onchange="_hkIssOtChange()"> なし（時間外・休日労働を行わない）</label>' +
+          '<div id="hkiss_36block" style="margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #e0e0e8;border-radius:6px;' + (hasOT ? '' : 'display:none;') + '">' +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">' +
+              '<div><div style="font-size:10.5px;color:#666;font-weight:600;margin-bottom:2px;">時間外労働 (1日)</div>' +
+                '<input type="number" id="hkiss_otD" value="' + (cc(HF.jikangai_1day) || '') + '" min="0" step="1" style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"><span style="font-size:10px;color:#999;margin-left:3px;">時間/日</span></div>' +
+              '<div><div style="font-size:10.5px;color:#666;font-weight:600;margin-bottom:2px;">時間外労働 (1か月)</div>' +
+                '<input type="number" id="hkiss_otM" value="' + (cc(HF.jikangai_1month) || '') + '" min="0" step="1" style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"><span style="font-size:10px;color:#999;margin-left:3px;">時間/月</span></div>' +
+              '<div><div style="font-size:10.5px;color:#666;font-weight:600;margin-bottom:2px;">時間外労働 (1年)</div>' +
+                '<input type="number" id="hkiss_otY" value="' + (cc(HF.jikangai_1year) || '') + '" min="0" step="1" style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"><span style="font-size:10px;color:#999;margin-left:3px;">時間/年</span></div>' +
+              '<div><div style="font-size:10.5px;color:#666;font-weight:600;margin-bottom:2px;">休日労働 (1か月)</div>' +
+                '<input type="number" id="hkiss_kjM" value="' + (cc(HF.kyujitsu_1month) || '') + '" min="0" step="1" style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"><span style="font-size:10px;color:#999;margin-left:3px;">日/月</span></div>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 4px;">' +
           '<span style="font-weight:700;color:#283593;">派遣労働者を選択　' +
@@ -13055,6 +13067,13 @@ function _hkIssUpdateCount() {
   var el = document.getElementById('hkissCount');
   if (el) el.textContent = '(' + checked + ' / ' + total + '名 選択中)';
 }
+// 時間外・休日労働 ラジオ変更: 36協定の数値ブロック表示を切替
+function _hkIssOtChange() {
+  var sel = document.querySelector('input[name="hkiss_ot"]:checked');
+  var blk = document.getElementById('hkiss_36block');
+  if (blk) blk.style.display = (sel && sel.value === 'yes') ? '' : 'none';
+}
+
 // 有期/無期 を切り替えたら雇用期間欄の表示を切替
 function _hkIssYukiChange(idx) {
   var s = document.getElementById('hkiss_yuki_' + idx);
@@ -13119,6 +13138,19 @@ async function _submitHakenIsshiki() {
   var noOvertime = !!(otEl && otEl.value === 'no');
   var sakuseiDate = val('hkiss_date');
 
+  // 36協定の数値 (「あり」の場合のみ)。「なし」の場合は全て null (=クリア) を渡す。
+  function _hkiss36(id) {
+    var el = document.getElementById(id);
+    if (!el) return null;
+    var v = String(el.value || '').trim();
+    if (v === '') return null;
+    var n = parseFloat(v);
+    return isNaN(n) ? null : n;
+  }
+  var ot36 = noOvertime
+    ? { day: null, month: null, year: null, kyujitsu: null }
+    : { day: _hkiss36('hkiss_otD'), month: _hkiss36('hkiss_otM'), year: _hkiss36('hkiss_otY'), kyujitsu: _hkiss36('hkiss_kjM') };
+
   // 編集値を h のコピーに反映 (3書類すべてに効かせる)
   var h2 = {};
   for (var key in ctx.h) h2[key] = ctx.h[key];
@@ -13135,6 +13167,11 @@ async function _submitHakenIsshiki() {
   var psV = val('hkiss_pstart'), peV = val('hkiss_pend');
   h2[HF.haken_period_start] = psV ? (psV + 'T00:00:00Z') : '';
   h2[HF.haken_period_end] = peV ? (peV + 'T00:00:00Z') : '';
+  // 36協定 数値も h2 に反映 (契約書3点に同じ値が反映される)
+  h2[HF.jikangai_1day] = ot36.day;
+  h2[HF.jikangai_1month] = ot36.month;
+  h2[HF.jikangai_1year] = ot36.year;
+  h2[HF.kyujitsu_1month] = ot36.kyujitsu;
 
   // 社員ごとの請求単価を収集 → 単価でグループ分け (単価ごとに別PDF)
   var workerRyokin = {};
@@ -13167,6 +13204,12 @@ async function _submitHakenIsshiki() {
   _addHkCh('苦情処理 部署', ctx.h[HF.kujouSakiBusho], h2[HF.kujouSakiBusho]);
   _addHkCh('苦情処理 役職', ctx.h[HF.kujouSakiYakushoku], h2[HF.kujouSakiYakushoku]);
   _addHkCh('苦情処理 氏名', ctx.h[HF.kujouSakiName], h2[HF.kujouSakiName]);
+  // 36協定の数値変更
+  function _fmt36(v, unit) { return (v == null || v === '') ? '(未設定)' : (v + unit); }
+  _addHkCh('36協定 時間外労働(1日)',  _fmt36(ctx.h[HF.jikangai_1day], '時間'),   _fmt36(ot36.day, '時間'));
+  _addHkCh('36協定 時間外労働(1か月)', _fmt36(ctx.h[HF.jikangai_1month], '時間'), _fmt36(ot36.month, '時間'));
+  _addHkCh('36協定 時間外労働(1年)',  _fmt36(ctx.h[HF.jikangai_1year], '時間'),  _fmt36(ot36.year, '時間'));
+  _addHkCh('36協定 休日労働(1か月)',  _fmt36(ctx.h[HF.kyujitsu_1month], '日'),   _fmt36(ot36.kyujitsu, '日'));
   var _rateKeysChk = Object.keys(ryokinGroups);
   if (_rateKeysChk.length) {
     var _topRateChk = _rateKeysChk[0];
@@ -13320,6 +13363,11 @@ async function _submitHakenIsshiki() {
       _hkSet(HF.kujouSakiBusho, h2[HF.kujouSakiBusho]);
       _hkSet(HF.kujouSakiYakushoku, h2[HF.kujouSakiYakushoku]);
       _hkSet(HF.kujouSakiName, h2[HF.kujouSakiName]);
+      // 36協定 (Number型・null可)
+      _hkSet(HF.jikangai_1day,   ot36.day);
+      _hkSet(HF.jikangai_1month, ot36.month);
+      _hkSet(HF.jikangai_1year,  ot36.year);
+      _hkSet(HF.kyujitsu_1month, ot36.kyujitsu);
       // 請求単価 → 派遣先情報Lists へ反映 (単価が混在する場合は最多数の単価)
       var _rateKeys = Object.keys(ryokinGroups);
       if (_rateKeys.length) {
