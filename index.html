@@ -9415,35 +9415,81 @@ async function generateHaisenDocAsPdf(containerEl) {
   var pages = scope ? scope.querySelectorAll('.haisen-doc-page')
                     : document.querySelectorAll('#haisenDocBody .haisen-doc-page');
   if (!pages.length) throw new Error('派遣書類ページが見つかりません');
-  var pdfDoc = await window.PDFLib.PDFDocument.create();
-  for (var i = 0; i < pages.length; i++) {
-    var pageEl = pages[i];
-    // 高解像度キャプチャ (scale 2)
-    var canvas = await window.html2canvas(pageEl, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false
-    });
-    var pngBytes = await new Promise(function(resolve, reject){
-      canvas.toBlob(function(blob){
-        if (!blob) { reject(new Error('canvas.toBlob 失敗')); return; }
-        blob.arrayBuffer().then(resolve, reject);
-      }, 'image/png');
-    });
-    var img = await pdfDoc.embedPng(pngBytes);
-    // A4 幅 (595pt) いっぱいに描画し、ページ高さは内容のアスペクト比に合わせる
-    // → 左右の余白(レターボックス)が出ないようにする。書類ページ自身の内側余白が
-    //   そのまま適切なマージンになる
-    var pageW = 595;
-    var imgRatio = canvas.width / canvas.height;
-    var drawW = pageW;
-    var drawH = pageW / imgRatio;
-    var pdfPage = pdfDoc.addPage([pageW, drawH]);
-    pdfPage.drawImage(img, { x: 0, y: 0, width: drawW, height: drawH });
+
+  // 親 wrapper に transform:scale() が掛かっていると html2canvas が文字描画を
+  // 重ねて出力してしまうため、キャプチャ中だけ transform/zoom をクリアする。
+  // 終了後 (try-finally) で元の値に復元する。
+  var transformTargets = [];
+  function _findTransformTargets(el) {
+    var w = el && el.querySelector ? el.querySelector('.haisen-doc-wrapper') : null;
+    if (w && w.style) {
+      transformTargets.push({ el: w, transform: w.style.transform, zoom: w.style.zoom });
+      w.style.transform = 'none';
+      w.style.zoom = '';
+    }
+    if (el && el !== document && el.style) {
+      transformTargets.push({ el: el, transform: el.style.transform, zoom: el.style.zoom, width: el.style.width, height: el.style.height });
+      el.style.transform = 'none';
+      el.style.zoom = '';
+      el.style.width = '';
+      el.style.height = '';
+    }
   }
-  var pdfBytes = await pdfDoc.save();
-  return new Blob([pdfBytes], { type: 'application/pdf' });
+  function _restoreTransformTargets() {
+    transformTargets.forEach(function(t) {
+      try {
+        if (t.transform !== undefined) t.el.style.transform = t.transform;
+        if (t.zoom !== undefined) t.el.style.zoom = t.zoom;
+        if (t.width !== undefined) t.el.style.width = t.width;
+        if (t.height !== undefined) t.el.style.height = t.height;
+      } catch (_) {}
+    });
+  }
+  _findTransformTargets(scope);
+  // レイアウト確定待ち (transform解除後の reflow)
+  await new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(r); }); });
+  // フォント読込待ち (Yu Gothic等の Web フォントが遅れているとキャプチャで重複描画になる)
+  if (document.fonts && document.fonts.ready) {
+    try { await document.fonts.ready; } catch (_) {}
+  }
+
+  try {
+    var pdfDoc = await window.PDFLib.PDFDocument.create();
+    for (var i = 0; i < pages.length; i++) {
+      var pageEl = pages[i];
+      // 高解像度キャプチャ (scale 2)
+      var canvas = await window.html2canvas(pageEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        // 親の transform を無効化済みなので、windowWidth はビューポートそのまま
+        windowWidth: document.documentElement.clientWidth
+      });
+      var pngBytes = await new Promise(function(resolve, reject){
+        canvas.toBlob(function(blob){
+          if (!blob) { reject(new Error('canvas.toBlob 失敗')); return; }
+          blob.arrayBuffer().then(resolve, reject);
+        }, 'image/png');
+      });
+      var img = await pdfDoc.embedPng(pngBytes);
+      // A4 幅 (595pt) いっぱいに描画し、ページ高さは内容のアスペクト比に合わせる
+      var pageW = 595;
+      var imgRatio = canvas.width / canvas.height;
+      var drawW = pageW;
+      var drawH = pageW / imgRatio;
+      var pdfPage = pdfDoc.addPage([pageW, drawH]);
+      pdfPage.drawImage(img, { x: 0, y: 0, width: drawW, height: drawH });
+    }
+    var pdfBytes = await pdfDoc.save();
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+  } finally {
+    _restoreTransformTargets();
+    // ズーム復元のために再適用 (haisenDocBody の width/height も再計算させる)
+    if (typeof zoomHaisenDoc === 'function') {
+      try { zoomHaisenDoc(0, 0.5, 0.65); } catch (_) {}
+    }
+  }
 }
 
 // === Adobe Sign 連携 ===
