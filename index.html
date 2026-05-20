@@ -39886,6 +39886,7 @@ function renderHakenList(hakensaki, employees) {
     '<button class="haken-filter-btn" data-filter="yuki" onclick="applyHakenFilter(\'yuki\',this)">📄 有期 (' + countYuki + ')</button>' +
     '<button class="haken-filter-btn" data-filter="muki" onclick="applyHakenFilter(\'muki\',this)">♾️ 無期 (' + countMuki + ')</button>' +
     '<button class="haken-filter-btn warn' + (countEmpty > 0 ? '' : '') + '" data-filter="empty" onclick="applyHakenFilter(\'empty\',this)">⚠ 未登録 (' + countEmpty + ')</button>' +
+    '<button class="haken-dl-btn" id="hakenSougeiRouteBtn" onclick="openSougeiRouteSplit()" style="display:none;background:#00897b;">🗺️ 送迎ルート分け</button>' +
     '<button class="haken-dl-btn" onclick="bulkCreateRenewalDocs()" style="background:#e65100;margin-left:auto;">📄 更新書類 一括作成</button>' +
     '<button class="haken-dl-btn" id="hakenMaebariToggleBtn" onclick="toggleHakenViewMode(this)" style="background:#fb8c00;">💴 前払い表示</button>' +
     '<button class="koyou-undo-btn haken-dl-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1px solid #e65100;">↩ 元に戻す</button>' +
@@ -40022,6 +40023,9 @@ function applyHakenFilter(filter, btn) {
   // Update active button
   document.querySelectorAll('#hakenFilterBtns .haken-filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  // 🗺️ 送迎ルート分けボタンは送迎フィルタの時のみ表示
+  var rb = document.getElementById('hakenSougeiRouteBtn');
+  if (rb) rb.style.display = (filter === 'sougei') ? '' : 'none';
 
   // 産休育休除外の workforce が利用可能ならそれを使う
   let source = (window._hakenWorkforceCache !== null && window._hakenWorkforceCache !== undefined) ? window._hakenWorkforceCache : hakenEmployeesCache;
@@ -40943,6 +40947,198 @@ function toggleHakenViewMode(btn) {
     var body = document.getElementById('hakenListBody');
     if (body && hakenEmployeesCache) renderHakenTable(hakenEmployeesCache, body);
   }
+}
+
+// ===== 🗺️ 送迎ルート分け =====
+// 🚐送迎 フィルタ時に押下。Google Maps URL方式で送迎台数ごとに社員をルート分け。
+// 住所順 or あいうえお順で N台に均等振り分け、各社員は車両ドロップダウンで他車両へ移動可。
+function openSougeiRouteSplit() {
+  var employees = (typeof getHakenFilteredList === 'function') ? getHakenFilteredList() : [];
+  var sougeiEmps = employees.filter(function(e) {
+    var t = (typeof getTsukinValue === 'function') ? getTsukinValue(e) : '';
+    return t && t.indexOf('送迎') >= 0;
+  });
+  if (sougeiEmps.length === 0) { showToast('🚐 送迎の社員がいません', 'error'); return; }
+
+  // 住所キー解決
+  var addrKey = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap) ? hakenKeyMap['address'] : null;
+  if (!addrKey) {
+    var any = sougeiEmps[0];
+    var k = Object.keys(any).find(function(kk){ return kk.indexOf('x4f4f__x6240') >= 0; });
+    if (k) addrKey = k;
+  }
+  var members = sougeiEmps.map(function(e) {
+    return {
+      id: e.Id,
+      sn: String(e[F.syainNo] || ''),
+      name: e.Title || '',
+      address: addrKey ? String(e[addrKey] || '').trim() : ''
+    };
+  });
+  // 派遣先名
+  var hakenName = (typeof stripBukaPrefix === 'function')
+    ? stripBukaPrefix((typeof getBukaValue === 'function') ? getBukaValue(sougeiEmps[0]) : '')
+    : '';
+  var initCars = Math.max(1, Math.min(8, Math.ceil(members.length / 6)));
+
+  window._sougeiRouteCtx = {
+    members: members,
+    hakenName: hakenName,
+    cars: initCars,
+    sortMode: 'address',
+    assignments: {}
+  };
+  _redoSougeiAssignments();
+  _renderSougeiRouteModal();
+}
+
+// 振り分けロジック: 並び順で N台へ均等分配
+function _redoSougeiAssignments() {
+  var ctx = window._sougeiRouteCtx;
+  if (!ctx) return;
+  var sorted = ctx.members.slice();
+  if (ctx.sortMode === 'address') {
+    sorted.sort(function(a, b) {
+      return (a.address || 'ｚ').localeCompare(b.address || 'ｚ', 'ja') ||
+             a.name.localeCompare(b.name, 'ja');
+    });
+  } else {
+    sorted.sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
+  }
+  var n = sorted.length;
+  var perCar = Math.ceil(n / ctx.cars);
+  ctx.assignments = {};
+  sorted.forEach(function(m, i) {
+    ctx.assignments[m.id] = Math.min(ctx.cars - 1, Math.floor(i / perCar));
+  });
+  ctx._sorted = sorted;  // モーダル表示順
+}
+
+function _changeSougeiCars(delta) {
+  var ctx = window._sougeiRouteCtx;
+  if (!ctx) return;
+  var n = Math.max(1, Math.min(10, ctx.cars + delta));
+  if (n === ctx.cars) return;
+  ctx.cars = n;
+  _redoSougeiAssignments();
+  _renderSougeiRouteModal();
+}
+
+function _changeSougeiSortMode(mode) {
+  var ctx = window._sougeiRouteCtx;
+  if (!ctx) return;
+  ctx.sortMode = mode;
+  _redoSougeiAssignments();
+  _renderSougeiRouteModal();
+}
+
+function _moveSougeiMember(empId, newCarIdx) {
+  var ctx = window._sougeiRouteCtx;
+  if (!ctx) return;
+  ctx.assignments[empId] = parseInt(newCarIdx, 10);
+  _renderSougeiRouteModal();
+}
+
+function _buildGoogleMapsRouteUrl(addresses, destination) {
+  if (!addresses || addresses.length === 0) return '';
+  var origin = addresses[0];
+  var waypoints = addresses.slice(1).join('|');
+  var url = 'https://www.google.com/maps/dir/?api=1' +
+            '&origin=' + encodeURIComponent(origin) +
+            '&destination=' + encodeURIComponent(destination);
+  if (waypoints) url += '&waypoints=' + encodeURIComponent(waypoints);
+  url += '&travelmode=driving';
+  return url;
+}
+
+function _renderSougeiRouteModal() {
+  var ctx = window._sougeiRouteCtx;
+  if (!ctx) return;
+  var sorted = ctx._sorted || ctx.members.slice();
+  var byCar = {};
+  for (var c = 0; c < ctx.cars; c++) byCar[c] = [];
+  sorted.forEach(function(m) {
+    var i = (ctx.assignments[m.id] != null && ctx.assignments[m.id] < ctx.cars) ? ctx.assignments[m.id] : 0;
+    byCar[i].push(m);
+  });
+
+  // 車両ごとのカード
+  var carColors = ['#1976d2','#43a047','#fb8c00','#8e24aa','#e53935','#00897b','#5d4037','#546e7a','#c2185b','#7b1fa2'];
+  var carsHtml = '';
+  for (var ci = 0; ci < ctx.cars; ci++) {
+    var col = carColors[ci % carColors.length];
+    var group = byCar[ci];
+    var addresses = group.filter(function(m){ return m.address; }).map(function(m){ return m.address; });
+    var hasAddrs = addresses.length > 0;
+    var url = hasAddrs ? _buildGoogleMapsRouteUrl(addresses, ctx.hakenName) : '';
+    var memRowsHtml = group.length === 0
+      ? '<div style="padding:8px 10px;color:#bbb;font-size:11px;text-align:center;">（割当なし）</div>'
+      : group.map(function(m, idx) {
+          var opts = '';
+          for (var ji = 0; ji < ctx.cars; ji++) {
+            opts += '<option value="' + ji + '"' + (ji === ci ? ' selected' : '') + '>車' + (ji + 1) + '</option>';
+          }
+          return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px dashed #f0f0f5;font-size:12px;">' +
+            '<span style="color:#888;min-width:14px;font-size:10px;">' + (idx + 1) + '</span>' +
+            '<div style="flex:1;min-width:0;">' +
+              '<div style="font-weight:700;color:#222;">' + escHtml(m.name) + ' <span style="color:#888;font-size:10px;font-weight:600;">(No.' + escHtml(m.sn) + ')</span></div>' +
+              (m.address
+                ? '<div style="font-size:10.5px;color:#666;margin-top:1px;">📍 ' + escHtml(m.address) + '</div>'
+                : '<div style="font-size:10.5px;color:#c00;margin-top:1px;">⚠ 住所未登録</div>') +
+            '</div>' +
+            '<select onchange="_moveSougeiMember(' + m.id + ', this.value)" style="font-size:11px;padding:3px 5px;border:1px solid #ccc;border-radius:5px;background:#fff;">' + opts + '</select>' +
+          '</div>';
+        }).join('');
+    carsHtml += '<div style="margin-bottom:12px;border:2px solid ' + col + ';border-radius:10px;overflow:hidden;background:#fff;">' +
+      '<div style="background:' + col + ';color:#fff;padding:7px 12px;display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:14px;font-weight:800;">🚐 車両' + (ci + 1) + '</span>' +
+        '<span style="font-size:11px;opacity:0.9;">(' + group.length + '名)</span>' +
+        '<div style="flex:1;"></div>' +
+        (hasAddrs
+          ? '<a href="' + escHtml(url) + '" target="_blank" rel="noopener" style="background:#fff;color:' + col + ';padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none;">🗺️ Mapで開く</a>'
+          : '<span style="background:rgba(255,255,255,0.2);color:#fff;padding:4px 10px;border-radius:6px;font-size:10px;">住所なし</span>') +
+      '</div>' +
+      memRowsHtml +
+    '</div>';
+  }
+
+  var existed = document.getElementById('sougeiRouteOverlay');
+  if (existed) existed.remove();
+  var ov = document.createElement('div');
+  ov.id = 'sougeiRouteOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:14px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:780px;width:100%;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.35);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;background:linear-gradient(180deg,#fff,#e0f2f1);">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+          '<h3 style="margin:0;font-size:16px;color:#00695c;font-weight:800;">🗺️ 送迎ルート分け</h3>' +
+          '<span style="color:#555;font-size:12.5px;">派遣先: <b>' + escHtml(ctx.hakenName) + '</b></span>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-bottom:1px solid #eee;background:#fafafc;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">' +
+        '<div style="display:flex;align-items:center;gap:6px;">' +
+          '<span style="font-size:12px;color:#666;font-weight:700;">送迎台数</span>' +
+          '<button onclick="_changeSougeiCars(-1)" style="width:28px;height:28px;border:1px solid #ccc;background:#fff;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;">−</button>' +
+          '<span style="font-size:16px;font-weight:800;color:#00695c;min-width:24px;text-align:center;">' + ctx.cars + '</span>' +
+          '<button onclick="_changeSougeiCars(1)" style="width:28px;height:28px;border:1px solid #ccc;background:#fff;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;">＋</button>' +
+          '<span style="font-size:11px;color:#888;">台</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;">' +
+          '<span style="font-size:12px;color:#666;font-weight:700;">振り分け方:</span>' +
+          '<label style="font-size:12px;cursor:pointer;"><input type="radio" name="sougeiSort" value="address"' + (ctx.sortMode === 'address' ? ' checked' : '') + ' onchange="_changeSougeiSortMode(\'address\')"> 住所順</label>' +
+          '<label style="font-size:12px;cursor:pointer;"><input type="radio" name="sougeiSort" value="name"' + (ctx.sortMode === 'name' ? ' checked' : '') + ' onchange="_changeSougeiSortMode(\'name\')"> あいうえお順</label>' +
+        '</div>' +
+        '<div style="margin-left:auto;color:#888;font-size:11px;">対象: <b>' + ctx.members.length + '名</b></div>' +
+      '</div>' +
+      '<div style="padding:14px 18px;overflow-y:auto;flex:1;background:#f5f5fa;">' +
+        carsHtml +
+      '</div>' +
+      '<div style="padding:11px 18px;border-top:1px solid #eee;display:flex;gap:8px;background:#fff;">' +
+        '<button onclick="document.getElementById(\'sougeiRouteOverlay\').remove()" style="flex:1;background:#fff;color:#555;border:1px solid #ddd;border-radius:8px;padding:10px;font-weight:600;cursor:pointer;">閉じる</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
 }
 
 // 「今週前払い済の N名を非表示」バナーをクリックすると名前一覧を展開/格納
