@@ -41020,33 +41020,65 @@ async function openSougeiRouteSplit() {
     members: members,
     hakenName: hakenName,
     cars: fallbackCars,
-    carsFromVehicleList: null,  // 取得中
-    sortMode: 'address',
+    carsFromVehicleList: null,
+    sortMode: 'geo',  // 既定: ジオコード後にk-means
+    geoStatus: 'pending',  // 'pending' / 'in_progress' / 'done' / 'failed'
+    geoProgress: 0,
     assignments: {}
   };
-  _redoSougeiAssignments();
+  _redoSougeiAssignments();  // 暫定: 住所順で表示 (geo モードでも pos なければ文字列順fallback)
   _renderSougeiRouteModal();
 
-  // 非同期で Pick-up 台数を取得 → 取得できれば初期値として再設定
+  // Pick-up 台数取得
   _fetchSougeiVehicleCountByHaken(hakenName).then(function(n) {
     if (!window._sougeiRouteCtx) return;
     window._sougeiRouteCtx.carsFromVehicleList = (typeof n === 'number') ? n : null;
     if (typeof n === 'number' && n > 0 && n !== window._sougeiRouteCtx.cars) {
       window._sougeiRouteCtx.cars = Math.min(10, n);
-      _redoSougeiAssignments();
     }
     _renderSougeiRouteModal();
   });
 
-  // 派遣先住所もバックグラウンド取得 (Google Mapsの目的地ジオコード用)
-  if (typeof fetchHakensakiByEmp === 'function') {
-    fetchHakensakiByEmp(sougeiEmps[0]).then(function(h) {
-      if (!window._sougeiRouteCtx || !h) return;
-      var addr = (typeof HF !== 'undefined') ? (h[HF.kinmu_jusho] || h[HF.haken_jusho] || '') : '';
-      addr = String(addr || '').trim();
-      if (addr) window._sougeiRouteCtx.hakenAddress = addr;
-    }).catch(function(e){ console.warn('haken addr fetch:', e); });
-  }
+  // 派遣先住所 → ジオコード → 全社員ジオコード → k-means クラスタリング
+  (async function _geocodeAndCluster() {
+    try {
+      var ctx = window._sougeiRouteCtx;
+      if (!ctx) return;
+      ctx.geoStatus = 'in_progress';
+      // 派遣先住所を取得
+      if (typeof fetchHakensakiByEmp === 'function') {
+        try {
+          var h = await fetchHakensakiByEmp(sougeiEmps[0]);
+          if (h && typeof HF !== 'undefined') {
+            var addr = String(h[HF.kinmu_jusho] || h[HF.haken_jusho] || '').trim();
+            if (addr) ctx.hakenAddress = addr;
+          }
+        } catch (e1) { console.warn('haken addr fetch:', e1); }
+      }
+      // 派遣先のジオコード
+      var destQ = ctx.hakenAddress || ctx.hakenName;
+      ctx.destPos = await _geocodeNominatim(destQ);
+      // 全社員の住所をジオコード (1秒間隔)
+      for (var i = 0; i < ctx.members.length; i++) {
+        var m = ctx.members[i];
+        if (m.address) m.pos = await _geocodeNominatim(m.address);
+        else m.pos = null;
+        ctx.geoProgress = i + 1;
+        _renderSougeiRouteModal();
+        if (i < ctx.members.length - 1) await new Promise(function(r){ setTimeout(r, 1100); });
+      }
+      ctx.geoStatus = 'done';
+      // クラスタリング実行
+      _redoSougeiAssignments();
+      _renderSougeiRouteModal();
+    } catch (e) {
+      console.error('geocode/cluster error:', e);
+      if (window._sougeiRouteCtx) {
+        window._sougeiRouteCtx.geoStatus = 'failed';
+        _renderSougeiRouteModal();
+      }
+    }
+  })();
 }
 
 // 「🗺️ Mapで開く」: その車両の社員住所をジオコードして最短近隣で並べ替え → Google Maps を開く
@@ -41078,18 +41110,121 @@ async function _openOptimizedRouteForCar(carIdx, btn) {
   }
 }
 
-// 振り分けロジック: 並び順で N台へ均等分配
+// K-means clustering (k-means++ 初期化)
+function _kmeansCluster(points, k, maxIter) {
+  if (!points.length || k <= 0) return [];
+  if (k >= points.length) return points.map(function(_, i){ return i; });
+  // k-means++ で初期セントロイドを「互いに最も離れた点」から選ぶ
+  var centroids = [points[0]];
+  for (var i = 1; i < k; i++) {
+    var bestP = points[0], bestMinD = -1;
+    for (var p = 0; p < points.length; p++) {
+      var minD = Infinity;
+      for (var c = 0; c < centroids.length; c++) {
+        var d = _haversineKm(points[p], centroids[c]);
+        if (d < minD) minD = d;
+      }
+      if (minD > bestMinD) { bestMinD = minD; bestP = points[p]; }
+    }
+    centroids.push(bestP);
+  }
+  var assignments = new Array(points.length).fill(0);
+  for (var iter = 0; iter < (maxIter || 20); iter++) {
+    var changed = false;
+    for (var p2 = 0; p2 < points.length; p2++) {
+      var bestK = 0, bestD = Infinity;
+      for (var c2 = 0; c2 < k; c2++) {
+        var d2 = _haversineKm(points[p2], centroids[c2]);
+        if (d2 < bestD) { bestD = d2; bestK = c2; }
+      }
+      if (assignments[p2] !== bestK) { changed = true; assignments[p2] = bestK; }
+    }
+    if (!changed) break;
+    var sums = [];
+    for (var s = 0; s < k; s++) sums.push({lat:0, lng:0, count:0});
+    for (var p3 = 0; p3 < points.length; p3++) {
+      var c3 = assignments[p3];
+      sums[c3].lat += points[p3].lat;
+      sums[c3].lng += points[p3].lng;
+      sums[c3].count++;
+    }
+    for (var c4 = 0; c4 < k; c4++) {
+      if (sums[c4].count > 0) {
+        centroids[c4] = { lat: sums[c4].lat / sums[c4].count, lng: sums[c4].lng / sums[c4].count };
+      }
+    }
+  }
+  return assignments;
+}
+// 派遣先 destPos から逆向きに最短近隣で並べ替え (末尾が destPos に最も近い)
+function _nnTowardDest(socials, destPos) {
+  if (!destPos || !socials.length) return socials.slice();
+  var remaining = socials.slice();
+  var ordered = [];
+  var current = destPos;
+  while (remaining.length > 0) {
+    var nearestIdx = 0, nearestDist = Infinity;
+    for (var j = 0; j < remaining.length; j++) {
+      if (!remaining[j].pos) continue;
+      var d = _haversineKm(current, remaining[j].pos);
+      if (d < nearestDist) { nearestDist = d; nearestIdx = j; }
+    }
+    var picked = remaining.splice(nearestIdx, 1)[0];
+    ordered.unshift(picked);
+    current = picked.pos || current;
+  }
+  return ordered;
+}
+
+// 振り分けロジック (3モード):
+//  - 'geo'     : k-means による地理クラスタ + 各車両内で最短近隣
+//  - 'address' : 住所文字列順で順次N台に分配
+//  - 'name'    : あいうえお順で順次N台に分配
 function _redoSougeiAssignments() {
   var ctx = window._sougeiRouteCtx;
   if (!ctx) return;
+  // geo モード かつ 全員ジオコード済 ならクラスタリング
+  if (ctx.sortMode === 'geo') {
+    var withPos = ctx.members.filter(function(m){ return m.pos; });
+    var noPos = ctx.members.filter(function(m){ return !m.pos; });
+    if (withPos.length > 0) {
+      var k = Math.min(ctx.cars, withPos.length);
+      var labels = _kmeansCluster(withPos.map(function(m){ return m.pos; }), k, 30);
+      // クラスタID → 元配列インデックスのマップ
+      ctx.assignments = {};
+      withPos.forEach(function(m, i) { ctx.assignments[m.id] = labels[i]; });
+      // 座標不明者は均等に配分 (足りないクラスタは小さい順優先)
+      var loadByCar = new Array(ctx.cars).fill(0);
+      Object.values(ctx.assignments).forEach(function(c){ if (c < ctx.cars) loadByCar[c]++; });
+      noPos.forEach(function(m) {
+        var minIdx = 0; var minVal = loadByCar[0];
+        for (var c = 1; c < ctx.cars; c++) if (loadByCar[c] < minVal) { minVal = loadByCar[c]; minIdx = c; }
+        ctx.assignments[m.id] = minIdx;
+        loadByCar[minIdx]++;
+      });
+      // 表示順: 車両ごとに派遣先への最短近隣で並べる
+      var dest = ctx.destPos;
+      var out = [];
+      for (var c2 = 0; c2 < ctx.cars; c2++) {
+        var cluster = ctx.members.filter(function(m){ return ctx.assignments[m.id] === c2 && m.pos; });
+        out = out.concat(_nnTowardDest(cluster, dest));
+        // 座標なし社員は末尾
+        var clusterNoPos = ctx.members.filter(function(m){ return ctx.assignments[m.id] === c2 && !m.pos; });
+        out = out.concat(clusterNoPos);
+      }
+      ctx._sorted = out;
+      return;
+    }
+  }
+  // 文字列ソート + 順次分配 (geo 不可 or 'address'/'name')
   var sorted = ctx.members.slice();
-  if (ctx.sortMode === 'address') {
+  if (ctx.sortMode === 'name') {
+    sorted.sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
+  } else {
     sorted.sort(function(a, b) {
       return (a.address || 'ｚ').localeCompare(b.address || 'ｚ', 'ja') ||
              a.name.localeCompare(b.name, 'ja');
     });
-  } else {
-    sorted.sort(function(a, b) { return a.name.localeCompare(b.name, 'ja'); });
   }
   var n = sorted.length;
   var perCar = Math.ceil(n / ctx.cars);
@@ -41097,7 +41232,7 @@ function _redoSougeiAssignments() {
   sorted.forEach(function(m, i) {
     ctx.assignments[m.id] = Math.min(ctx.cars - 1, Math.floor(i / perCar));
   });
-  ctx._sorted = sorted;  // モーダル表示順
+  ctx._sorted = sorted;
 }
 
 function _changeSougeiCars(delta) {
@@ -41272,12 +41407,17 @@ function _renderSougeiRouteModal() {
                 ? '<span style="font-size:10px;color:#00695c;margin-left:6px;background:#e0f2f1;padding:2px 6px;border-radius:4px;font-weight:600;">🚐 車両List Pick-up: ' + ctx.carsFromVehicleList + '台</span>'
                 : '<span style="font-size:10px;color:#888;margin-left:6px;">車両List未登録</span>')) +
         '</div>' +
-        '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
           '<span style="font-size:12px;color:#666;font-weight:700;">振り分け方:</span>' +
+          '<label style="font-size:12px;cursor:pointer;' + (ctx.geoStatus !== 'done' ? 'opacity:0.5;' : '') + '"><input type="radio" name="sougeiSort" value="geo"' + (ctx.sortMode === 'geo' ? ' checked' : '') + (ctx.geoStatus !== 'done' ? ' disabled' : '') + ' onchange="_changeSougeiSortMode(\'geo\')"> 🗺️ 地理的に最適 (推奨)</label>' +
           '<label style="font-size:12px;cursor:pointer;"><input type="radio" name="sougeiSort" value="address"' + (ctx.sortMode === 'address' ? ' checked' : '') + ' onchange="_changeSougeiSortMode(\'address\')"> 住所順</label>' +
           '<label style="font-size:12px;cursor:pointer;"><input type="radio" name="sougeiSort" value="name"' + (ctx.sortMode === 'name' ? ' checked' : '') + ' onchange="_changeSougeiSortMode(\'name\')"> あいうえお順</label>' +
         '</div>' +
-        '<div style="margin-left:auto;color:#888;font-size:11px;">対象: <b>' + ctx.members.length + '名</b></div>' +
+        '<div style="margin-left:auto;color:#888;font-size:11px;">対象: <b>' + ctx.members.length + '名</b>' +
+          (ctx.geoStatus === 'in_progress' ? '　<span style="color:#e65100;font-weight:700;">⏳ 住所変換中 ' + ctx.geoProgress + '/' + ctx.members.length + '</span>' :
+           ctx.geoStatus === 'done' ? '　<span style="color:#2e7d32;font-weight:700;">✓ 地理最適化済</span>' :
+           ctx.geoStatus === 'failed' ? '　<span style="color:#c62828;">⚠ 住所変換失敗</span>' : '') +
+        '</div>' +
       '</div>' +
       '<div style="padding:14px 18px;overflow-y:auto;flex:1;background:#f5f5fa;">' +
         carsHtml +
