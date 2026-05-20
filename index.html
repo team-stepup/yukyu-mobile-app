@@ -5822,6 +5822,8 @@ const F = {
   koyoStart: 'OData__x96c7__x7528__x5951__x7d04__x95',   // 雇用契約開始日
   koyoEnd:   'OData__x96c7__x7528__x5951__x7d04__x7d',   // 雇用契約終了日
   yukiMuki:  'OData__x6709__x671f_yuuki_x7121__x671f',  // 有期/無期 雇用
+  tsukinTeate:   'OData__x901a__x52e4__x624b__x5f53_',   // 通勤手当(1日)
+  mukikoyouDate: 'OData__x7121__x671f__x96c7__x7528__x30', // 無期雇用になった日付
 };
 
 let msalInstance = null;
@@ -10974,6 +10976,13 @@ function renderRoudouKeiyakushoSan(emp, h, mode) {
   for (var k3 in emp) {
     if (k3.indexOf('x6709__x671f') >= 0 && k3.indexOf('x7121__x671f') >= 0) { yukiMuki = emp[k3]; break; }
   }
+  // 無期雇用になった日付 (無期社員の契約期間表示用)
+  var mukikoyouDate = emp[F.mukikoyouDate] || '';
+  if (!mukikoyouDate) {
+    for (var k3b in emp) {
+      if (k3b.indexOf('x7121__x671f__x96c7__x7528__x30') >= 0) { mukikoyouDate = emp[k3b]; break; }
+    }
+  }
   var hourlyRate = 0;
   for (var k4 in emp) {
     if (k4.indexOf('x7d66__x6599__x6642__x7d66') >= 0) { hourlyRate = emp[k4]; break; }
@@ -11090,6 +11099,7 @@ function renderRoudouKeiyakushoSan(emp, h, mode) {
           '<td>' +
             chk(isMuki) + ' 1. 期間の定めなし　・　' + chk(!isMuki) + ' 2. 期間の定めあり' +
             (!isMuki ? '<span class="hd-period-dates">　&nbsp;&nbsp;&nbsp;&nbsp;' + escHtml(fmtDateJa(koyouStart) || '') + '　～　' + escHtml(fmtDateJa(koyouEnd) || '') + '</span>' : '') +
+            (isMuki && mukikoyouDate ? '<span class="hd-period-dates">　&nbsp;&nbsp;（無期雇用 ' + escHtml(fmtDateJa(mukikoyouDate)) + ' より）</span>' : '') +
           '</td>' +
         '</tr>' +
 
@@ -39498,6 +39508,34 @@ function _fmtYmd(d) {
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 // 次回(更新後)の雇用期間を算出: 開始 = 現在の終了日の翌日 / 終了 = 開始 + 3ヶ月 - 1日
+// 一括作成モーダル: 新契約開始日が入社1年後を過ぎていれば自動で「無期」とする。
+// すでに無期で保存済みなら継続して「無期」を返す。
+function _autoIsMukiForRenewal(emp, newStartIso) {
+  var curYM = String(emp[F.yukiMuki] || '');
+  if (curYM.indexOf('無期') >= 0) return true;
+  var nyusha = emp[F.nyushaDate];
+  if (!nyusha || !newStartIso) return false;
+  var nd = new Date(nyusha); if (isNaN(nd)) return false;
+  var oneYear = new Date(nd.getFullYear() + 1, nd.getMonth(), nd.getDate());
+  var ns = new Date(newStartIso); if (isNaN(ns)) return false;
+  return ns >= oneYear;
+}
+
+// 一括作成モーダル: 「雇用区分」セレクト変更ハンドラ
+// 無期切替時は終了日入力のラベルを「無期化日」に変更し、行の背景色を薄紫に
+function _onBkKubunChange(empId) {
+  var sel = document.getElementById('bkKubun_' + empId);
+  var lbl = document.getElementById('bkEndLabel_' + empId);
+  var row = document.getElementById('bkRow_' + empId);
+  if (!sel) return;
+  var isMuki = sel.value === 'muki';
+  if (lbl) {
+    lbl.textContent = isMuki ? '無期化日' : '終了日';
+    lbl.style.color = isMuki ? '#7b1fa2' : '#888';
+  }
+  if (row) row.style.background = isMuki ? '#f3e5f5' : '';
+}
+
 function _computeNextKoyouKikan(emp) {
   var start = null;
   var curEnd = emp[F.koyoEnd];
@@ -39536,20 +39574,36 @@ async function bulkCreateRenewalDocs() {
     var sn = emp[F.syainNo] || '';
     var nm = emp.Title || '';
     var sal = getEmpSalary(emp);
+    var tsukin = (typeof getEmpTsukinTeate === 'function') ? (getEmpTsukinTeate(emp) || 0) : 0;
     var curS = _toDateInputVal(emp[F.koyoStart]);
     var curE = _toDateInputVal(emp[F.koyoEnd]);
     var curKikan = (curS || curE) ? ((curS || '?') + '〜' + (curE || '?')) : '(未設定)';
     var next = _computeNextKoyouKikan(emp);
-    var dInputStyle = 'font-size:11px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:124px;';
-    return '<tr style="border-bottom:1px solid #eee;">' +
-      '<td style="padding:6px 4px;font-size:12px;white-space:nowrap;">' + escHtml(String(sn)) + '</td>' +
-      '<td style="padding:6px 4px;font-size:12px;font-weight:600;">' + escHtml(nm) + '</td>' +
-      '<td style="padding:6px 4px;white-space:nowrap;"><span style="color:#2e7d32;font-weight:700;font-size:11px;">¥</span>' +
+    var autoMuki = _autoIsMukiForRenewal(emp, next.start);
+    var existMukiDate = _toDateInputVal(emp[F.mukikoyouDate]);
+    var initEndVal = autoMuki ? (existMukiDate || next.start) : next.end;
+    var dInputStyle = 'font-size:11px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:118px;';
+    var rowBg = autoMuki ? 'background:#f3e5f5;' : '';
+    return '<tr id="bkRow_' + emp.Id + '" style="border-bottom:1px solid #eee;' + rowBg + '">' +
+      '<td style="padding:5px 4px;font-size:12px;white-space:nowrap;">' + escHtml(String(sn)) + '</td>' +
+      '<td style="padding:5px 4px;font-size:12px;font-weight:600;">' + escHtml(nm) + '</td>' +
+      '<td style="padding:5px 4px;white-space:nowrap;"><span style="color:#2e7d32;font-weight:700;font-size:11px;">¥</span>' +
         '<input type="number" id="bkSal_' + emp.Id + '" value="' + (sal > 0 ? sal : '') + '" min="0" step="10" ' +
-        'style="font-size:12px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:72px;text-align:right;"></td>' +
-      '<td style="padding:6px 4px;font-size:10px;color:#999;white-space:nowrap;">' + escHtml(curKikan) + '</td>' +
-      '<td style="padding:6px 4px;"><input type="date" id="bkStart_' + emp.Id + '" value="' + next.start + '" style="' + dInputStyle + '"></td>' +
-      '<td style="padding:6px 4px;"><input type="date" id="bkEnd_' + emp.Id + '" value="' + next.end + '" style="' + dInputStyle + '"></td>' +
+        'style="font-size:12px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:62px;text-align:right;"></td>' +
+      '<td style="padding:5px 4px;white-space:nowrap;"><span style="color:#1976d2;font-weight:700;font-size:11px;">¥</span>' +
+        '<input type="number" id="bkTsukin_' + emp.Id + '" value="' + (tsukin > 0 ? tsukin : '') + '" min="0" step="10" ' +
+        'style="font-size:12px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;width:62px;text-align:right;"></td>' +
+      '<td style="padding:5px 4px;">' +
+        '<select id="bkKubun_' + emp.Id + '" onchange="_onBkKubunChange(' + emp.Id + ')" style="font-size:11px;padding:3px 4px;border:1px solid #ccc;border-radius:4px;">' +
+          '<option value="yuki"' + (autoMuki ? '' : ' selected') + '>📄 有期</option>' +
+          '<option value="muki"' + (autoMuki ? ' selected' : '') + '>♾️ 無期</option>' +
+        '</select></td>' +
+      '<td style="padding:5px 4px;font-size:10px;color:#999;white-space:nowrap;">' + escHtml(curKikan) + '</td>' +
+      '<td style="padding:5px 4px;"><input type="date" id="bkStart_' + emp.Id + '" value="' + next.start + '" style="' + dInputStyle + '"></td>' +
+      '<td style="padding:5px 4px;">' +
+        '<input type="date" id="bkEnd_' + emp.Id + '" value="' + initEndVal + '" style="' + dInputStyle + '">' +
+        '<div id="bkEndLabel_' + emp.Id + '" style="font-size:9px;color:' + (autoMuki ? '#7b1fa2' : '#888') + ';margin-top:1px;">' + (autoMuki ? '無期化日' : '終了日') + '</div>' +
+      '</td>' +
     '</tr>';
   }).join('');
 
@@ -39557,10 +39611,10 @@ async function bulkCreateRenewalDocs() {
   ov.id = 'bulkRenewalOverlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:12px;';
   ov.innerHTML =
-    '<div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+    '<div style="background:#fff;border-radius:12px;max-width:1020px;width:100%;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
       '<div style="padding:14px 18px;border-bottom:1px solid #eee;flex-shrink:0;">' +
-        '<h3 style="margin:0;font-size:15px;color:#e65100;">📄 更新用就業条件通知書 一括作成 — 雇用期間の確認</h3>' +
-        '<div style="font-size:11.5px;color:#888;margin-top:3px;">「' + escHtml(filterLabel) + '」 ' + list.length + '名（給与の高い順）。雇用期間は<b>現在の続き(3ヶ月間)</b>を初期表示。給与・期間を確認・修正してください。</div>' +
+        '<h3 style="margin:0;font-size:15px;color:#e65100;">📄 更新用就業条件通知書 一括作成 — 雇用条件の確認</h3>' +
+        '<div style="font-size:11.5px;color:#888;margin-top:3px;">「' + escHtml(filterLabel) + '」 ' + list.length + '名（給与の高い順）。雇用期間は<b>現在の続き(3ヶ月間)</b>を初期表示。入社1年経過後の更新は<b style="color:#7b1fa2;">無期</b>として自動判定（変更可）。給与・通勤手当・期間を確認・修正してください。</div>' +
       '</div>' +
       '<div id="bulkRenewalBody" style="padding:0;overflow-y:auto;flex:1;">' +
         '<table style="width:100%;border-collapse:collapse;">' +
@@ -39569,9 +39623,11 @@ async function bulkCreateRenewalDocs() {
               '<th style="padding:8px 4px;text-align:left;">社番</th>' +
               '<th style="padding:8px 4px;text-align:left;">氏名</th>' +
               '<th style="padding:8px 4px;text-align:left;">給与(時給)</th>' +
+              '<th style="padding:8px 4px;text-align:left;">通勤手当(1日)</th>' +
+              '<th style="padding:8px 4px;text-align:left;">雇用区分</th>' +
               '<th style="padding:8px 4px;text-align:left;">現雇用期間</th>' +
-              '<th style="padding:8px 4px;text-align:left;">新 雇用契約開始日</th>' +
-              '<th style="padding:8px 4px;text-align:left;">新 雇用契約終了日</th>' +
+              '<th style="padding:8px 4px;text-align:left;">新 開始日</th>' +
+              '<th style="padding:8px 4px;text-align:left;">新 終了日／無期化日</th>' +
             '</tr>' +
           '</thead>' +
           '<tbody>' + rowsHtml + '</tbody>' +
@@ -39598,10 +39654,14 @@ async function bulkCreateRenewalDocs() {
     var s = document.getElementById('bkStart_' + emp.Id);
     var e = document.getElementById('bkEnd_' + emp.Id);
     var sa = document.getElementById('bkSal_' + emp.Id);
+    var ts = document.getElementById('bkTsukin_' + emp.Id);
+    var ku = document.getElementById('bkKubun_' + emp.Id);
     editedVals[emp.Id] = {
       start: s ? (s.value || '') : '',
       end: e ? (e.value || '') : '',
-      salary: sa ? (sa.value || '').trim() : ''
+      salary: sa ? (sa.value || '').trim() : '',
+      tsukin: ts ? (ts.value || '').trim() : '',
+      isMuki: ku ? (ku.value === 'muki') : false
     };
   });
 
@@ -39634,9 +39694,32 @@ async function bulkCreateRenewalDocs() {
       var curEnd = _toDateInputVal(dEmp[F.koyoEnd]);
       var pBody = { __metadata: { type: entityType } };
       var anyChange = false;
-      if (newStart !== curStart) { pBody[startKey] = newStart ? (newStart + 'T00:00:00Z') : null; anyChange = true; }
-      if (newEnd !== curEnd) { pBody[endKey] = newEnd ? (newEnd + 'T00:00:00Z') : null; anyChange = true; }
-      // 給与(時給) の変更 — 書き込みキーは dEmp 上のキー(EntityPropertyName, OData_付き)
+
+      // 雇用区分 (有期/無期)
+      var curYMRaw = String(dEmp[F.yukiMuki] || '');
+      var curIsMuki = curYMRaw.indexOf('無期') >= 0;
+      if (ev.isMuki !== curIsMuki) {
+        pBody[F.yukiMuki] = ev.isMuki ? '無期' : '有期';
+        anyChange = true;
+      }
+
+      if (ev.isMuki) {
+        // 無期: end 入力欄は「無期化日」。雇用契約終了日は null に。
+        var newMukiDate = ev.end || ev.start;  // 入力空なら開始日
+        var curMukiDate = _toDateInputVal(dEmp[F.mukikoyouDate]);
+        if (newMukiDate && newMukiDate !== curMukiDate) {
+          pBody[F.mukikoyouDate] = newMukiDate + 'T00:00:00Z';
+          anyChange = true;
+        }
+        if (newStart !== curStart) { pBody[startKey] = newStart ? (newStart + 'T00:00:00Z') : null; anyChange = true; }
+        if (curEnd) { pBody[endKey] = null; anyChange = true; }  // 無期化なので終了日クリア
+      } else {
+        // 有期: 通常の start/end 保存
+        if (newStart !== curStart) { pBody[startKey] = newStart ? (newStart + 'T00:00:00Z') : null; anyChange = true; }
+        if (newEnd !== curEnd) { pBody[endKey] = newEnd ? (newEnd + 'T00:00:00Z') : null; anyChange = true; }
+      }
+
+      // 給与(時給) の変更
       var salKey = Object.keys(dEmp).find(function(k){ return k.indexOf('x7d66__x6599__x6642__x7d66') >= 0; });
       var newSalaryNum = null;
       if (salKey) {
@@ -39645,6 +39728,19 @@ async function bulkCreateRenewalDocs() {
         var curSalaryNum = getEmpSalary(dEmp) || null;
         if ((newSalaryNum || 0) !== (curSalaryNum || 0)) { pBody[salKey] = newSalaryNum; anyChange = true; }
       }
+
+      // 通勤手当 の変更
+      var newTsukinNum = null;
+      if (ev.tsukin || ev.tsukin === '0') {
+        newTsukinNum = parseFloat(ev.tsukin);
+        if (isNaN(newTsukinNum)) newTsukinNum = null;
+      }
+      var curTsukinNum = (typeof getEmpTsukinTeate === 'function') ? (getEmpTsukinTeate(dEmp) || 0) : 0;
+      if ((newTsukinNum || 0) !== (curTsukinNum || 0)) {
+        pBody[F.tsukinTeate] = newTsukinNum;
+        anyChange = true;
+      }
+
       if (!anyChange) continue;  // 変更なし
       // 元に戻す用に変更前の値を記録
       var origVals = {};
@@ -39673,6 +39769,9 @@ async function bulkCreateRenewalDocs() {
         if (startKey in pBody) dEmp[F.koyoStart] = pBody[startKey];
         if (endKey in pBody) dEmp[F.koyoEnd] = pBody[endKey];
         if (salKey && (salKey in pBody)) dEmp[salKey] = newSalaryNum;
+        if (F.tsukinTeate in pBody) dEmp[F.tsukinTeate] = newTsukinNum;
+        if (F.yukiMuki in pBody) dEmp[F.yukiMuki] = pBody[F.yukiMuki];
+        if (F.mukikoyouDate in pBody) dEmp[F.mukikoyouDate] = pBody[F.mukikoyouDate];
         dateSavedCount++;
         undoItems.push({ empId: dEmp.Id, empNo: String(dEmp[F.syainNo] || ''), name: dEmp.Title || '', orig: origVals });
       } catch (pe) {
