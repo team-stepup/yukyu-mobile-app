@@ -9540,6 +9540,29 @@ async function generateHaisenDocAsPdf(containerEl) {
     try { await document.fonts.ready; } catch (_) {}
   }
 
+  // canvas → PNG バイト列。toBlob が null 返す場合は toDataURL でフォールバック
+  async function _canvasToPng(canvas) {
+    var bytes = await new Promise(function(resolve) {
+      try {
+        canvas.toBlob(function(blob) {
+          if (!blob) { resolve(null); return; }
+          blob.arrayBuffer().then(resolve).catch(function(){ resolve(null); });
+        }, 'image/png');
+      } catch (e) { resolve(null); }
+    });
+    if (bytes) return bytes;
+    try {
+      var dataUrl = canvas.toDataURL('image/png');
+      if (!dataUrl) return null;
+      var b64 = dataUrl.split(',')[1];
+      if (!b64) return null;
+      var bin = atob(b64);
+      var arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return arr.buffer;
+    } catch (e) { return null; }
+  }
+
   try {
     var pdfDoc = await window.PDFLib.PDFDocument.create();
     for (var i = 0; i < pages.length; i++) {
@@ -9550,19 +9573,42 @@ async function generateHaisenDocAsPdf(containerEl) {
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
-        // 親の transform を無効化済みなので、windowWidth はビューポートそのまま
         windowWidth: document.documentElement.clientWidth
       });
-      var pngBytes = await new Promise(function(resolve, reject){
-        canvas.toBlob(function(blob){
-          if (!blob) { reject(new Error('canvas.toBlob 失敗')); return; }
-          blob.arrayBuffer().then(resolve, reject);
-        }, 'image/png');
-      });
+      var pngBytes = await _canvasToPng(canvas);
+      if (!pngBytes) {
+        // メモリ不足等で巨大キャンバスを Blob 化できなかった場合、scale を下げて再試行
+        console.warn('toBlob/toDataURL 失敗 → scale=1.3 で再試行');
+        canvas = null;  // メモリ解放ヒント
+        var canvas2 = await window.html2canvas(pageEl, {
+          scale: 1.3,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+          windowWidth: document.documentElement.clientWidth
+        });
+        pngBytes = await _canvasToPng(canvas2);
+        canvas2 = null;
+        if (!pngBytes) {
+          // 最終フォールバック: scale=1
+          console.warn('再試行も失敗 → scale=1 で最終試行');
+          var canvas3 = await window.html2canvas(pageEl, {
+            scale: 1,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            logging: false,
+            windowWidth: document.documentElement.clientWidth
+          });
+          pngBytes = await _canvasToPng(canvas3);
+          canvas3 = null;
+          if (!pngBytes) throw new Error('PDF画像変換失敗 (canvas.toBlob/toDataURL いずれも null)');
+        }
+      }
       var img = await pdfDoc.embedPng(pngBytes);
       // A4 幅 (595pt) いっぱいに描画し、ページ高さは内容のアスペクト比に合わせる
+      // canvas は fallback で再生成されている可能性があるため img のサイズを使う
       var pageW = 595;
-      var imgRatio = canvas.width / canvas.height;
+      var imgRatio = img.width / img.height;
       var drawW = pageW;
       var drawH = pageW / imgRatio;
       var pdfPage = pdfDoc.addPage([pageW, drawH]);
