@@ -2571,6 +2571,41 @@ select.sankyu-edit-input {
 /* @page は size のみ指定。余白は印刷ダイアログで自由に変更可能 */
 @page { size: A4 portrait; }
 
+/* === マイカー通勤申請書 (ASTI) 専用の印刷ルール ===
+ * 目的:
+ *   1. ブラウザ自動付与のURL/日付/ページ番号フッターを抑止 (@page margin:0)
+ *   2. 各ページを必ず A4 1枚に収める (overflow:hidden で溢れ分は切り捨て)
+ *   3. transform/zoom は印刷時クリア
+ * iOS Safari / mobile で 共有→プリント で直接印刷した場合の保険。
+ * (本来は 新規タブで PDF Viewer 経由を推奨)
+ *
+ * 注: :has() を使わないことで iOS 16 以下にも対応
+ */
+@media print {
+  /* maicar-asti ページ自体の A4 強制サイズ */
+  .maicar-asti-page {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    max-width: 210mm !important;
+    height: 297mm !important;
+    box-sizing: border-box !important;
+    padding: 8mm 10mm 8mm 10mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always !important;
+    page-break-inside: avoid !important;
+    transform: none !important;
+    zoom: 1 !important;
+    overflow: hidden !important;
+  }
+  .maicar-asti-page:last-of-type { page-break-after: auto !important; }
+  /* 表は途中で改ページしない */
+  .maicar-asti-page table { page-break-inside: avoid !important; }
+  .maicar-asti-page table tr { page-break-inside: avoid !important; }
+}
+/* ブラウザ自動の URL/日付/ページ番号フッターを抑制 (グローバルに 0) */
+@page { size: A4 portrait; margin: 0; }
+
 .header-logout-sm.is-loggedout {
   background: #c62828;
   color: #fff;
@@ -10575,8 +10610,10 @@ function renderMaicarTsukinASTI(emp, opts) {
   var tsuMin = g('tsukinJikan');
 
   // 共通 cell styles
-  var TD  = 'border:0.6pt solid #000;padding:3px 5px;font-size:8.5pt;vertical-align:middle;';
-  var TDL = 'border:0.6pt solid #000;padding:3px 5px;font-size:8.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;white-space:nowrap;';
+  //   nowrap は使わない (ラベルがセル幅を超えてはみ出すため)
+  //   word-break:keep-all + overflow-wrap:break-word でラベルを必要な位置で折り返す
+  var TD  = 'border:0.6pt solid #000;padding:3px 5px;font-size:8.5pt;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
+  var TDL = 'border:0.6pt solid #000;padding:2px 3px;font-size:8pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;word-break:keep-all;line-height:1.3;';
   var TDC = TD + 'text-align:center;';
   var TDCK = 'border:0.5pt solid #000;padding:1px;text-align:center;font-size:9pt;width:3.2%;vertical-align:middle;'; // 左の変更チェック列
 
@@ -10586,7 +10623,7 @@ function renderMaicarTsukinASTI(emp, opts) {
 
   // ---- ページ1: 通勤方法・駐車場使用申請書 ----
   var page1 =
-    '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;font-size:8.8pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
+    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="page-break-before:always;font-size:8.8pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
       // 様式番号
       '<div style="font-size:8pt;color:#444;margin-bottom:4px;">様式－２</div>' +
       // タイトル（黒枠ボックス、中央）
@@ -10603,15 +10640,15 @@ function renderMaicarTsukinASTI(emp, opts) {
       '<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1.5pt solid #000;">' +
         // 列幅定義
         '<colgroup>' +
-          '<col style="width:3.2%;">' +   // 0: 変更チェック
-          '<col style="width:11%;">' +    // 1: 大ラベル
-          '<col style="width:13%;">' +    // 2: 中ラベル
-          '<col style="width:13%;">' +    // 3
+          '<col style="width:3%;">' +     // 0: 変更チェック
+          '<col style="width:9%;">' +     // 1: 大ラベル (利用者区分等)
+          '<col style="width:15%;">' +    // 2: 中ラベル (社員(社員番号)等) - 広めにして折り返し回避
+          '<col style="width:12%;">' +    // 3
           '<col style="width:14%;">' +    // 4
           '<col style="width:10%;">' +    // 5
           '<col style="width:13%;">' +    // 6
-          '<col style="width:11.6%;">' +  // 7
-          '<col style="width:11%;">' +    // 8
+          '<col style="width:12%;">' +    // 7
+          '<col style="width:12%;">' +    // 8
         '</colgroup>' +
 
         // 1行目: 区分 / 記入日 / 施行日 （左の変更チェックなし）
@@ -30716,15 +30753,24 @@ async function loadHakensakiByBukaMap() {
     var items = (data.d && data.d.results) || [];
     _hakensakiByBuka = {};
     items.forEach(function(it) {
-      // buka フィールドは Title (派遣先(部課))
-      var b = String(it.Title || '').trim();
-      if (!b) return;
-      // 就業場所住所 > 派遣先住所 の優先順
-      var addr = it[HF.kinmu_jusho] || it[HF.haken_jusho] || '';
+      // 派遣先情報リストの実際の構造:
+      //   - Title = 派遣元責任者の人名 (例: "森 ゆうじ")  ← 部課ではない！
+      //   - HF.hakensaki_keiyaku = "077:ASTI㈱掛川" 形式の部課/派遣先会社番号 ← 本当のキー
+      //   - HF.hakensaki_name    = "ASTI株式会社 掛川工場" 形式の派遣先会社名
+      //   - HF.haken_jusho       = 派遣先住所 (例: "静岡県掛川市初馬180")
+      //   - HF.kinmu_jusho       = 就業場所住所
+      var primaryKey = String(it[HF.hakensaki_keiyaku] || '').trim();   // 例: "077:ASTI㈱掛川"
+      var companyName = String(it[HF.hakensaki_name] || '').trim();     // 例: "ASTI株式会社 掛川工場"
+      var titleKey   = String(it.Title || '').trim();                   // 例: "森 ゆうじ"
+      // 派遣先住所 を優先 (就業場所が違うサテライト施設なら kinmu_jusho が別だが、
+      // マイカー通勤届の経路としては派遣先の正式住所が望ましい)
+      var addr = it[HF.haken_jusho] || it[HF.kinmu_jusho] || '';
       addr = String(addr).trim();
       if (!addr) return;
-      // 同じ buka に複数あれば最初を採用
-      if (!_hakensakiByBuka[b]) _hakensakiByBuka[b] = addr;
+      // 3 種類すべてをキーとして登録 (順序: 既存値は上書きしない)
+      if (primaryKey  && !_hakensakiByBuka[primaryKey])  _hakensakiByBuka[primaryKey]  = addr;
+      if (companyName && !_hakensakiByBuka[companyName]) _hakensakiByBuka[companyName] = addr;
+      if (titleKey    && !_hakensakiByBuka[titleKey])    _hakensakiByBuka[titleKey]    = addr;
     });
     return _hakensakiByBuka;
   } catch (e) {
