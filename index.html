@@ -5713,6 +5713,11 @@ select.sankyu-edit-input {
         <span class="asi-text">派遣先 移動 (退社→入社)</span>
         <span class="asi-arrow">›</span>
       </button>
+      <button class="action-sheet-item" onclick="startProcedure('rejoin')">
+        <span class="asi-icon" style="background:#e0f7fa;color:#006064;">🔁</span>
+        <span class="asi-text">再入社 (退社→再雇用)</span>
+        <span class="asi-arrow">›</span>
+      </button>
       <button class="action-sheet-item" onclick="startProcedure('shaho')">
         <span class="asi-icon" style="background:#e8f5e9;color:#2e7d32;">🏥</span>
         <span class="asi-text">社保申請</span>
@@ -32460,6 +32465,7 @@ function closeActionSheet() {
 const PROCEDURE_TYPES = {
   taisha:   { label: '退社報告', icon: '📤' },
   idou:     { label: '派遣先 移動 (退社→入社)', icon: '🔄' },
+  rejoin:   { label: '再入社 (退社→再雇用)', icon: '🔁' },
   shaho:    { label: '社保申請', icon: '🏥' },
   dattai:   { label: '脱退連絡票作成', icon: '📋' },
   kyuryo:   { label: '給料精算', icon: '💰' },
@@ -32509,6 +32515,7 @@ function startProcedure(type) {
   if (type === 'zaishoku') { openZaishokuForm(); return; }
   if (type === 'kyuryo') { openKyuryoForm(); return; }
   if (type === 'idou') { openIdouForm(); return; }
+  if (type === 'rejoin') { openIdouForm({ mode: 'rejoin' }); return; }
 
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -33619,6 +33626,8 @@ function _buildIdouInheritHtml(emp, fieldsMeta, keyMap) {
         if (hv.indexOf('あり') < 0) return;
       }
       if (field.showOnlyResigned) return;  // 退職理由などは新規には不要
+      // 再入社モード: 退社日関連は前回退社の値が入っているので継承しない
+      if (window._idouMode === 'rejoin' && (field.key === 'hakenTaisha' || field.key === 'yukyuTaisha')) return;
       const odKey = keyMap[field.key];
       if (!odKey) return;
       const val = emp[odKey];
@@ -33637,12 +33646,24 @@ function _buildIdouInheritHtml(emp, fieldsMeta, keyMap) {
   return html;
 }
 
-async function openIdouForm() {
+async function openIdouForm(opts) {
+  opts = opts || {};
+  var isRejoin = (opts.mode === 'rejoin');
+  window._idouMode = isRejoin ? 'rejoin' : 'idou';
   const emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
-  if (isEmployeeRetired(emp)) {
-    showToast('退社済みの社員のため移動入社はできません', 'error');
-    return;
+  if (isRejoin) {
+    // 再入社モード: 退社済みでないと意味がない
+    if (!isEmployeeRetired(emp)) {
+      showToast('在職中の社員には再入社処理は不要です。「派遣先 移動」を使ってください', 'error');
+      return;
+    }
+  } else {
+    // 通常の移動: 退社済みは不可
+    if (isEmployeeRetired(emp)) {
+      showToast('退社済みの社員のため移動入社はできません。再入社を選んでください', 'error');
+      return;
+    }
   }
   const name = emp.Title || '';
   const no = emp[F.syainNo] || '';
@@ -33774,38 +33795,41 @@ async function openIdouForm() {
       '#idouOverlay .idou-inh-field input,#idouOverlay .idou-inh-field select { width:100%;box-sizing:border-box;padding:9px 11px;font-size:14px;border:1px solid #e0d4f5;border-radius:8px;background:#fff;-webkit-appearance:none;appearance:none; }' +
     '</style>' +
     '<div class="taisha-panel">' +
-      '<div class="taisha-header" style="background:linear-gradient(135deg,#6a1b9a 0%,#8e24aa 50%,#ab47bc 100%);">' +
+      '<div class="taisha-header" style="background:linear-gradient(135deg,' + (isRejoin ? '#006064 0%,#0097a7 50%,#26c6da' : '#6a1b9a 0%,#8e24aa 50%,#ab47bc') + ' 100%);">' +
         '<div class="taisha-header-bar">' +
-          '<span class="taisha-title">🔄 退社移動・入社報告</span>' +
+          '<span class="taisha-title">' + (isRejoin ? '🔁 再入社報告' : '🔄 退社移動・入社報告') + '</span>' +
           '<button class="taisha-close" onclick="closeIdouForm()">✕</button>' +
         '</div>' +
         '<div class="taisha-emp-info">' +
           '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
-          '<span>現派遣先: ' + escHtml(oldBuka || '-') + '</span>' +
+          '<span>' + (isRejoin ? '前派遣先: ' : '現派遣先: ') + escHtml(oldBuka || '-') + '</span>' +
           '<span>有休起算日: ' + escHtml(kisan || '-') + '(継続)</span>' +
         '</div>' +
       '</div>' +
       '<div class="taisha-body">' +
 
-      '<div class="idou-section-title">📌 必須入力 (新しい派遣先情報)</div>' +
+      '<div class="idou-section-title">📌 必須入力 (' + (isRejoin ? '再入社' : '新しい派遣先') + '情報)</div>' +
 
-      // ───── 採用種別(移動在職中など) ─────
+      // ───── 採用種別 ─────
       '<div class="taisha-field">' +
         '<label>採用種別 <span style="color:var(--danger);">*</span></label>' +
         (zaiyokuChoices.length > 0
-          ? '<select id="idou_zaiyokuSyubetu"><option value="">選択してください</option>' + buildOpts(zaiyokuChoices, '移動在職中idou zaisyokutyuu') + '</select>'
-          : '<input type="text" id="idou_zaiyokuSyubetu" value="移動在職中idou zaisyokutyuu">') +
+          ? '<select id="idou_zaiyokuSyubetu"><option value="">選択してください</option>' +
+            buildOpts(zaiyokuChoices, isRejoin ? '' : '移動在職中idou zaisyokutyuu') + '</select>'
+          : '<input type="text" id="idou_zaiyokuSyubetu" value="' + (isRejoin ? '' : '移動在職中idou zaisyokutyuu') + '">') +
       '</div>' +
 
-      // ───── 派遣先退社日 (旧レコード用、明示入力) ─────
-      '<div class="taisha-field">' +
-        '<label>派遣先退社日 <span style="color:var(--danger);">*</span> <span style="font-size:10px;color:var(--text-light);font-weight:400;">(旧派遣先での最終勤務日)</span></label>' +
-        '<input type="date" id="idou_oldHakenTaisha" value="' + yesterdayStr + '">' +
-      '</div>' +
+      // ───── 派遣先退社日 (移動入社時のみ表示・再入社時は既存退社日を使うので不要) ─────
+      (isRejoin
+        ? ''
+        : '<div class="taisha-field">' +
+            '<label>派遣先退社日 <span style="color:var(--danger);">*</span> <span style="font-size:10px;color:var(--text-light);font-weight:400;">(旧派遣先での最終勤務日)</span></label>' +
+            '<input type="date" id="idou_oldHakenTaisha" value="' + yesterdayStr + '">' +
+          '</div>') +
 
-      // ───── 移動入社日 ─────
+      // ───── 入社日 ─────
       '<div class="taisha-field">' +
-        '<label>移動入社日 <span style="color:var(--danger);">*</span> <span style="font-size:10px;color:var(--text-light);font-weight:400;">(新派遣先での初日)</span></label>' +
+        '<label>' + (isRejoin ? '再入社日' : '移動入社日') + ' <span style="color:var(--danger);">*</span> <span style="font-size:10px;color:var(--text-light);font-weight:400;">' + (isRejoin ? '(再雇用される日)' : '(新派遣先での初日)') + '</span></label>' +
         '<input type="date" id="idou_nyushaDate" value="' + today + '">' +
       '</div>' +
 
@@ -33896,7 +33920,7 @@ async function openIdouForm() {
 
       '</div>' +
       '<div class="taisha-footer">' +
-        '<button class="taisha-submit-btn" id="idouSubmitBtn" onclick="submitIdouForm()" style="background:linear-gradient(135deg,#6a1b9a,#8e24aa);">🔄 退社・入社報告を送信</button>' +
+        '<button class="taisha-submit-btn" id="idouSubmitBtn" onclick="submitIdouForm()" style="background:linear-gradient(135deg,' + (isRejoin ? '#006064,#0097a7' : '#6a1b9a,#8e24aa') + ');">' + (isRejoin ? '🔁 再入社を登録' : '🔄 退社・入社報告を送信') + '</button>' +
       '</div>' +
     '</div>';
 
@@ -33982,12 +34006,13 @@ async function submitIdouForm() {
   const koyouKaisi = v('idou_koyouKaisi');
   const koyouSyuryo = v('idou_koyouSyuryo');
 
+  var isRejoin = (window._idouMode === 'rejoin');
   if (!zaiyoku) { showToast('採用種別を選択してください', 'error'); return; }
-  if (!oldHakenTaishaInput) { showToast('派遣先退社日を入力してください', 'error'); return; }
-  if (!nyushaDate) { showToast('移動入社日を入力してください', 'error'); return; }
-  if (!buka) { showToast('新派遣先(部課)を選択してください', 'error'); return; }
+  if (!isRejoin && !oldHakenTaishaInput) { showToast('派遣先退社日を入力してください', 'error'); return; }
+  if (!nyushaDate) { showToast((isRejoin ? '再' : '移動') + '入社日を入力してください', 'error'); return; }
+  if (!buka) { showToast((isRejoin ? '再入社先' : '新派遣先') + '(部課)を選択してください', 'error'); return; }
 
-  // 旧レコードの派遣先退社日 = ユーザー入力値
+  // 旧レコードの派遣先退社日 = ユーザー入力値 (再入社時は使わない)
   const oldHakenTaisha = oldHakenTaishaInput;
 
   const name = emp.Title || '';
@@ -33997,15 +34022,15 @@ async function submitIdouForm() {
   overlay.className = 'confirm-overlay';
   overlay.style.zIndex = '99999';
   overlay.innerHTML = '<div class="confirm-box">' +
-    '<div class="confirm-title">🔄 退社移動・入社報告 確認</div>' +
+    '<div class="confirm-title">' + (isRejoin ? '🔁 再入社報告 確認' : '🔄 退社移動・入社報告 確認') + '</div>' +
     '<div class="confirm-msg" style="text-align:left;">' +
     '<strong>' + escHtml(no + ' ' + name) + '</strong><br><br>' +
-    '<u>旧レコード(更新)</u><br>' +
-    '派遣先退社日: ' + escHtml(oldHakenTaisha) + '<br><br>' +
-    '<u>新レコード(作成)</u><br>' +
+    (isRejoin
+      ? '<u>新レコード(作成)</u> ※前回退社レコードは履歴として保持<br>'
+      : '<u>旧レコード(更新)</u><br>派遣先退社日: ' + escHtml(oldHakenTaisha) + '<br><br><u>新レコード(作成)</u><br>') +
     '社員番号: ' + escHtml(String(no)) + ' (同番)<br>' +
     '採用種別: ' + escHtml(zaiyoku) + '<br>' +
-    '移動入社日: ' + escHtml(nyushaDate) + '<br>' +
+    (isRejoin ? '再入社日: ' : '移動入社日: ') + escHtml(nyushaDate) + '<br>' +
     '派遣先: ' + escHtml(buka) + '<br>' +
     (soshiki ? '組織: ' + escHtml(soshiki) + '<br>' : '') +
     (syokusyu ? '職種: ' + escHtml(syokusyu) + '<br>' : '') +
@@ -34025,7 +34050,8 @@ async function submitIdouForm() {
       soshiki: soshiki, syokusyu: syokusyu, seikyu: seikyu,
       kyuyo: kyuyo, tsukin: tsukin, sagyou: sagyou,
       yuukimuki: yuukimuki, koyouKaisi: koyouKaisi, koyouSyuryo: koyouSyuryo,
-      oldHakenTaisha: oldHakenTaisha
+      oldHakenTaisha: oldHakenTaisha,
+      isRejoin: isRejoin
     });
   };
 }
@@ -34061,12 +34087,15 @@ async function executeIdouSubmit(p) {
       body[internalName] = v;
     }
 
-    // ─── 旧レコード PATCH (派遣先退社日のみ) ───
-    const patchBody = {};
-    patchBody[F.hakenTaisha.replace(/^OData_/, '')] = p.oldHakenTaisha + 'T00:00:00Z';
-    patchBody['__metadata'] = { type: LIST_ITEM_ENTITY };
-    if (btn) btn.textContent = '旧レコード更新中...';
-    await spPatchEmployee(emp.Id, patchBody);
+    // ─── 旧レコード PATCH (派遣先退社日のみ) ※再入社モードでは旧レコードに退社日が既に
+    //      入っているのでスキップし、履歴として保持 ───
+    if (!p.isRejoin) {
+      const patchBody = {};
+      patchBody[F.hakenTaisha.replace(/^OData_/, '')] = p.oldHakenTaisha + 'T00:00:00Z';
+      patchBody['__metadata'] = { type: LIST_ITEM_ENTITY };
+      if (btn) btn.textContent = '旧レコード更新中...';
+      await spPatchEmployee(emp.Id, patchBody);
+    }
 
     // ─── 新レコード CREATE ───
     if (btn) btn.textContent = '新レコード作成中...';
@@ -34134,7 +34163,7 @@ async function executeIdouSubmit(p) {
     console.log('[idou] new record body:', JSON.stringify(newBody));
     await spCreateEmployee(newBody);
 
-    showToast('🔄 退社移動・入社報告を登録しました', 'success');
+    showToast((p.isRejoin ? '🔁 再入社を登録しました' : '🔄 退社移動・入社報告を登録しました'), 'success');
     closeIdouForm();
 
     // 新レコードに切り替え(同番号で再取得)
@@ -34147,7 +34176,10 @@ async function executeIdouSubmit(p) {
     console.error('Idou submit error:', e);
     showToast('送信に失敗しました: ' + e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 退社・入社報告を送信'; }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = p.isRejoin ? '🔁 再入社を登録' : '🔄 退社・入社報告を送信';
+    }
   }
 }
 
