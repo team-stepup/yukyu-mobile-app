@@ -2582,34 +2582,31 @@ select.sankyu-edit-input {
  * 注: :has() を使わない iOS 16 以下対応
  */
 @media print {
-  /* メイン UI は全部隠す (印刷時は派遣書類エリアのみ表示) */
-  body > *:not(#haisenDocScreen):not(script):not(style):not(noscript) { display: none !important; }
-  #haisenDocScreen { display: block !important; padding: 0 !important; margin: 0 !important; background: #fff !important; }
-  #haisenDocScreen.active { display: block !important; }
-  .haisen-doc-actions, .no-print, .header, .fab-btn, .toast-container { display: none !important; }
-  .haisen-doc-body { padding: 0 !important; background: #fff !important; margin: 0 !important; overflow: visible !important; }
-  .haisen-doc-wrapper { transform: none !important; zoom: 1 !important; display: block !important; width: auto !important; }
+  /* haisen 書類画面以外の screen は既存ルール (.screen:not(.active)) で非表示。
+   * ヘッダー/ボタン/トーストは既存の @media print で非表示済み。
+   * ここでは maicar 用のサイズ/改ページ制御だけを追加する。
+   * (#mainContent や #haisenDocScreen は触らず通常表示のまま) */
 
   /* maicar-asti ページ自体の A4 強制サイズ */
   .maicar-asti-page {
     width: 210mm !important;
     min-width: 210mm !important;
     max-width: 210mm !important;
-    /* height は max-height で指定。ぴったり 297mm にすると最終ページに白ページが出るため */
+    /* max-height でぴったり A4 に収める (height だと 0mm の隙間で次ページに送られる) */
     max-height: 297mm !important;
     box-sizing: border-box !important;
     padding: 7mm 9mm 7mm 9mm !important;
     margin: 0 auto !important;
     box-shadow: none !important;
     page-break-after: always !important;
+    break-after: page !important;
     page-break-inside: avoid !important;
+    break-inside: avoid !important;
     transform: none !important;
     zoom: 1 !important;
     overflow: hidden !important;
-    /* 内部要素のはみ出しを抑止 */
-    contain: layout paint;
   }
-  .maicar-asti-page:last-of-type { page-break-after: auto !important; }
+  .maicar-asti-page:last-of-type { page-break-after: auto !important; break-after: auto !important; }
   /* 内部の表・grid も改ページ禁止 */
   .maicar-asti-page table { page-break-inside: avoid !important; break-inside: avoid !important; }
   .maicar-asti-page table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
