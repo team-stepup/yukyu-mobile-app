@@ -40839,13 +40839,23 @@ async function bulkCreateRenewalDocs() {
 
   var success = [], failed = [];
   var stamp = (new Date()).toISOString().substring(0, 10).replace(/-/g, '');
+  // 中止フラグ (停止ボタン押下でtrueに、ループ先頭でチェック)
+  window._bulkRenewalCancel = false;
 
   for (var i = 0; i < list.length; i++) {
+    if (window._bulkRenewalCancel) {
+      setProg('<div style="text-align:center;padding:14px;font-size:14px;color:#c62828;font-weight:700;">⏹ 作成を中止しました</div>' +
+              '<div style="text-align:center;font-size:12px;color:#666;margin-top:6px;">完了: ' + success.length + '名 / 失敗: ' + failed.length + '名 / 残り: ' + (list.length - i) + '名</div>');
+      break;
+    }
     var emp = list[i];
     var nm = emp.Title || '(無名)';
     var pct = Math.round(i / list.length * 100);
     setProg(
-      '<div style="font-size:13px;color:#444;margin-bottom:10px;">作成中… <b>' + (i+1) + ' / ' + list.length + '</b></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+        '<div style="font-size:13px;color:#444;flex:1;">作成中… <b>' + (i+1) + ' / ' + list.length + '</b></div>' +
+        '<button type="button" onclick="window._bulkRenewalCancel=true;" style="background:#fff;color:#c62828;border:1.5px solid #ef9a9a;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;">⏹ 停止</button>' +
+      '</div>' +
       '<div style="background:#eee;border-radius:6px;height:14px;overflow:hidden;"><div style="background:linear-gradient(90deg,#fb8c00,#e65100);height:100%;width:' + pct + '%;transition:width 0.3s;"></div></div>' +
       '<div style="font-size:12px;color:#666;margin-top:8px;">📝 ' + escHtml(nm) + '</div>' +
       '<div style="font-size:11px;color:#999;margin-top:8px;">✓ 成功 ' + success.length + ' / ✗ 失敗 ' + failed.length + ' ／ 雇用期間 ' + dateSavedCount + '件保存済</div>'
@@ -40904,9 +40914,14 @@ async function bulkCreateRenewalDocs() {
   }
 
   // 完了サマリ
+  var wasCancelled = !!window._bulkRenewalCancel;
+  window._bulkRenewalCancel = false;
   var summary =
-    '<div style="text-align:center;font-size:15px;font-weight:700;color:#2e7d32;margin-bottom:6px;">✅ 一括作成 完了</div>' +
-    '<div style="font-size:13px;color:#444;text-align:center;margin-bottom:6px;">PDF: 成功 <b style="color:#2e7d32;">' + success.length + '</b> 名 / 失敗 <b style="color:#c62828;">' + failed.length + '</b> 名</div>' +
+    (wasCancelled
+      ? '<div style="text-align:center;font-size:15px;font-weight:700;color:#c62828;margin-bottom:6px;">⏹ 作成を中止しました</div>'
+      : '<div style="text-align:center;font-size:15px;font-weight:700;color:#2e7d32;margin-bottom:6px;">✅ 一括作成 完了</div>') +
+    '<div style="font-size:13px;color:#444;text-align:center;margin-bottom:6px;">PDF: 成功 <b style="color:#2e7d32;">' + success.length + '</b> 名 / 失敗 <b style="color:#c62828;">' + failed.length + '</b> 名' +
+    (wasCancelled ? ' / 未処理 <b style="color:#c62828;">' + (list.length - success.length - failed.length) + '</b> 名' : '') + '</div>' +
     '<div style="font-size:12px;color:#666;text-align:center;margin-bottom:12px;">雇用期間・給与の更新: <b>' + dateSavedCount + '</b> 件保存</div>';
   if (failed.length) {
     summary += '<div style="background:#ffebee;border-radius:6px;padding:8px 10px;max-height:140px;overflow-y:auto;font-size:11.5px;color:#c62828;margin-bottom:8px;">' +
