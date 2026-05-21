@@ -8541,29 +8541,19 @@ function pickKalendarFileForHakensaki(files, primaryName, secondaryHints, target
   if (!keyN) return null;
   var hintsN = (secondaryHints || []).map(_kalendarNorm).filter(function(s) { return s.length >= 2; });
 
-  // 年フィルタ: 目標年を最優先、見つからなければ最新年で再試行、最終的に全件で再試行
+  // 年フィルタ: 目標年に一致するファイルのみで検索。該当なしなら null を返して
+  // カレンダーを添付しない (古い年のカレンダーを誤って添付しないため)
   if (!targetYear) targetYear = new Date().getFullYear();
-  function _filterByYear(yr) {
-    return files.filter(function(f) {
-      var y = _kalendarExtractYear((f._folder || '') + ' ' + (f.Name || ''));
-      return y === yr;
-    });
-  }
-  // 1段階目: 目標年で絞り込み
-  var workingFiles = _filterByYear(targetYear);
+  var workingFiles = files.filter(function(f) {
+    var y = _kalendarExtractYear((f._folder || '') + ' ' + (f.Name || ''));
+    return y === targetYear;
+  });
+  console.log('[kalendar] year filter: target=' + targetYear + ' → working files=' + workingFiles.length);
   if (!workingFiles.length) {
-    // 2段階目: 全ファイルの中で最新年を採用 (古いカレンダーが選ばれないように)
-    var maxYear = 0;
-    files.forEach(function(f) {
-      var y = _kalendarExtractYear((f._folder || '') + ' ' + (f.Name || ''));
-      if (y && y > maxYear) maxYear = y;
-    });
-    if (maxYear > 0) workingFiles = _filterByYear(maxYear);
+    console.log('[kalendar] 目標年のカレンダーが見つからないため添付スキップ');
+    return null;
   }
-  // 3段階目: それでも見つからなければ全ファイルから探す (年情報なしのファイル等)
-  if (!workingFiles.length) workingFiles = files;
   files = workingFiles;
-  console.log('[kalendar] year filter: target=' + targetYear + ' → working files=' + files.length);
 
   // 各候補をスコアリング:
   //   primaryScore = LCS(候補, primary) (主スコア)
@@ -8760,37 +8750,10 @@ async function appendKalendarPage(hkName, secondaryHints) {
     }
     var file = pickKalendarFileForHakensaki(files, hkName, secondaryHints || []);
     if (!file) {
-      // 利用可能なフォルダ/ファイル一覧を表示してユーザが該当を判断できるようにする
-      var foldersList = (listResult.folders || []).map(function(f) {
-        return '<li style="margin:2px 0;">' + escHtml(f.Name) + '</li>';
-      }).join('');
-      var filesByFolder = {};
-      files.forEach(function(f) {
-        var k = f._folder || '(ルート)';
-        if (!filesByFolder[k]) filesByFolder[k] = [];
-        filesByFolder[k].push(f.Name);
-      });
-      var filesListHtml = Object.keys(filesByFolder).map(function(folder) {
-        return '<div style="margin:6px 0;"><b style="color:#1976d2;">📁 ' + escHtml(folder) + '</b>' +
-          '<ul style="margin:2px 0 0 20px;padding:0;font-size:9.5pt;color:#444;">' +
-          filesByFolder[folder].map(function(n) { return '<li>' + escHtml(n) + '</li>'; }).join('') +
-          '</ul></div>';
-      }).join('');
-      placeholder.innerHTML =
-        '<h2 style="text-align:center;font-size:14pt;margin:0 0 12px;">📅 取引先カレンダー</h2>' +
-        '<div style="color:#c62828;padding:20px;background:#fff8e1;border:1px solid #ffd54f;border-radius:8px;font-size:11pt;">' +
-        '<div style="text-align:center;margin-bottom:8px;">⚠ 派遣先「<b>' + escHtml(hkName) + '</b>」に該当するカレンダーファイルが見つかりませんでした</div>' +
-        '<div style="font-size:9.5pt;color:#666;text-align:center;margin-bottom:12px;">' +
-        'サブフォルダ ' + (listResult.folders || []).length + '件 / ファイル ' + files.length + '件 をスキャンしました' +
-        '</div>' +
-        '<div style="background:#fff;padding:10px 14px;border-radius:6px;max-height:160mm;overflow-y:auto;">' +
-        '<div style="font-size:10pt;color:#333;margin-bottom:6px;"><b>📂 利用可能なファイル:</b></div>' +
-        (filesListHtml || '<div style="color:#999;">(なし)</div>') +
-        '</div>' +
-        '<div style="margin-top:10px;font-size:9.5pt;color:#666;">' +
-        '💡 該当するファイルがある場合は、サブフォルダ名 or ファイル名に派遣先名(<b>' + escHtml(hkName) + '</b>)の一部を含めてください。' +
-        '</div>' +
-        '</div>';
+      // 当年のカレンダーが該当派遣先に存在しない → カレンダーページを丸ごと省く
+      // (プレースホルダも削除して契約書本文だけにする)
+      console.log('[kalendar] ' + hkName + ' の当年カレンダーなし → 添付スキップ');
+      try { placeholder.remove(); } catch (_) {}
       return;
     }
     var ext = (file.Name.split('.').pop() || '').toLowerCase();
