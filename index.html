@@ -10619,12 +10619,16 @@ function renderMaicarTsukinASTI(emp, opts) {
   var tsuMin = g('tsukinJikan');
 
   // 共通 cell styles - A4×2枚に収めるため極めてコンパクトに
-  //   TD = データセル, TDL = 灰背景ラベルセル, TDC = データセル中央寄せ, TDCK = 変更チェック列
-  //   overflow-wrap:anywhere でラベルがセル幅を超えたら適切に折り返す
+  //   TD  = データセル (折り返しOK)
+  //   TDL = 灰背景ラベルセル (nowrap で1行固定。colgroup でセル幅を十分に確保)
+  //   TDC = データセル中央寄せ
+  //   TDN = データセル + nowrap (日付など短い値を1行で収めたい時)
+  //   TDCK = 変更チェック列
   var TD  = 'border:0.5pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
-  var TDL = 'border:0.5pt solid #000;padding:1.5px 2px;font-size:7.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;line-height:1.15;word-break:break-all;overflow-wrap:anywhere;';
+  var TDL = 'border:0.5pt solid #000;padding:1.5px 2px;font-size:7.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;line-height:1.15;white-space:nowrap;';
   var TDC = TD + 'text-align:center;';
-  var TDCK = 'border:0.5pt solid #000;padding:0;text-align:center;font-size:8pt;width:3.2%;vertical-align:middle;'; // 左の変更チェック列
+  var TDN = 'border:0.5pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;text-align:center;white-space:nowrap;'; // 日付など 1行で固定したいセル
+  var TDCK = 'border:0.5pt solid #000;padding:0;text-align:center;font-size:8pt;width:3.2%;vertical-align:middle;';
 
   // 左端の変更チェック (前回からの変更がある項目に手書きでチェック)
   var ck = '<td style="' + TDCK + '">☐</td>';
@@ -10647,28 +10651,28 @@ function renderMaicarTsukinASTI(emp, opts) {
 
       // メイン情報テーブル: 1列目=左端の変更チェック列, 残りが本体
       '<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1.5pt solid #000;">' +
-        // 列幅定義
+        // 列幅定義 — 日付/電話番号を1行に収めるため右側列を広めに
         '<colgroup>' +
           '<col style="width:3%;">' +     // 0: 変更チェック
-          '<col style="width:9%;">' +     // 1: 大ラベル (利用者区分等)
-          '<col style="width:15%;">' +    // 2: 中ラベル (社員(社員番号)等) - 広めにして折り返し回避
-          '<col style="width:12%;">' +    // 3
-          '<col style="width:14%;">' +    // 4
-          '<col style="width:10%;">' +    // 5
-          '<col style="width:13%;">' +    // 6
-          '<col style="width:12%;">' +    // 7
-          '<col style="width:12%;">' +    // 8
+          '<col style="width:10%;">' +    // 1: 大ラベル (区分/利用者区分/通勤方法/所属/住所/車検満了日/任意保険/運転免許証 等)
+          '<col style="width:13%;">' +    // 2: 中ラベル (社員(社員番号)/社員以外(会社名)/居住/住民票/メーカー名/保険会社名/種類 等)
+          '<col style="width:9%;">' +     // 3
+          '<col style="width:11%;">' +    // 4
+          '<col style="width:9%;">' +     // 5
+          '<col style="width:14%;">' +    // 6: 日付 (記入日) / 中ラベル (勤務地/性別/生年月日) / 副ラベル (保険満了日)
+          '<col style="width:9%;">' +     // 7: 副ラベル (施行日)
+          '<col style="width:22%;">' +    // 8: 日付 (施行日) / 電話番号 / 生年月日値 等
         '</colgroup>' +
 
-        // 1行目: 区分 / 記入日 / 施行日 （左の変更チェックなし）
+        // 1行目: 区分 / 記入日 / 施行日 （日付は nowrap で1行固定）
         '<tr>' +
           ckEmpty +
           '<td style="' + TDL + '">区分</td>' +
           '<td style="' + TD  + '" colspan="3">' + chk(kubun==='新規') + '新規　・　' + chk(kubun==='変更') + '変更</td>' +
           '<td style="' + TDL + '">記入日</td>' +
-          '<td style="' + TDC + '">' + v(kinyuG) + '</td>' +
+          '<td style="' + TDN + '">' + v(kinyuG) + '</td>' +
           '<td style="' + TDL + '">施行日</td>' +
-          '<td style="' + TDC + '">' + v(sekoG) + '</td>' +
+          '<td style="' + TDN + '">' + v(sekoG) + '</td>' +
         '</tr>' +
 
         // 2,3行目: 利用者区分 (rowspan=2): 社員(社員番号) / 社員以外(会社名)
@@ -10722,19 +10726,21 @@ function renderMaicarTsukinASTI(emp, opts) {
         '</tr>' +
 
         // 8,9行目: 住所 rowspan=2 (居住/住民票) と 電話番号 rowspan=2 (自宅/携帯)
+        // 注: 以前 phone に colspan=2 を付けていたため row が 10 col 占有でレイアウト崩壊。
+        //     col 8 を 22% に広げ、colspan は除去して 9 col 内に収める。
         '<tr>' +
           ck +
           '<td style="' + TDL + '" rowspan="2">住所</td>' +
           '<td style="' + TDL + '">居住</td>' +
           '<td style="' + TD  + '" colspan="4">〒　' + v(address) + '</td>' +
           '<td style="' + TDL + '" rowspan="2">電話<br>番号</td>' +
-          '<td style="' + TD  + '" colspan="2">自宅（　　）　　　－' + (jitaku ? '　' + v(jitaku) : '') + '</td>' +
+          '<td style="' + TD  + 'white-space:nowrap;">自宅　　　　　' + (jitaku ? v(jitaku) : '') + '</td>' +
         '</tr>' +
         '<tr>' +
           ck +
           '<td style="' + TDL + '">住民票</td>' +
           '<td style="' + TD  + '" colspan="4">〒　' + v(jyuminhyo) + '</td>' +
-          '<td style="' + TD  + '" colspan="2">' + v(keitai) + '</td>' +
+          '<td style="' + TD  + 'text-align:center;white-space:nowrap;">' + v(keitai) + '</td>' +
         '</tr>' +
 
         // 10行目: 緊急連絡先
@@ -10891,14 +10897,15 @@ function renderMaicarTsukinASTI(emp, opts) {
           '<td style="vertical-align:top;">' +
             '<table style="border-collapse:collapse;font-size:8pt;width:100%;">' +
               '<tr>' +
-                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;">部　署　長<br><span style="font-size:6.5pt;">(受付・審査)</span></td>' +
-                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:34%;">安全運転管理者<br><span style="font-size:6.5pt;">(許可・保管)</span></td>' +
-                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;">人　事　課<br><span style="font-size:6.5pt;">登　録</span></td>' +
+                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;white-space:nowrap;">部　署　長<br><span style="font-size:6.5pt;">(受付・審査)</span></td>' +
+                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:34%;white-space:nowrap;">安全運転管理者<br><span style="font-size:6.5pt;">(許可・保管)</span></td>' +
+                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;white-space:nowrap;">人　事　課<br><span style="font-size:6.5pt;">登　録</span></td>' +
               '</tr>' +
+              // 印鑑が押せるよう 15mm の高さを確保
               '<tr>' +
-                '<td style="border:0.6pt solid #000;height:30px;"></td>' +
-                '<td style="border:0.6pt solid #000;height:30px;"></td>' +
-                '<td style="border:0.6pt solid #000;height:30px;"></td>' +
+                '<td style="border:0.6pt solid #000;height:15mm;"></td>' +
+                '<td style="border:0.6pt solid #000;height:15mm;"></td>' +
+                '<td style="border:0.6pt solid #000;height:15mm;"></td>' +
               '</tr>' +
             '</table>' +
             '<div style="text-align:right;font-size:7pt;color:#333;margin-top:3px;line-height:1.35;">（裏面の通勤経路も記入のこと）<br>ＡＳＴＩ株式会社　改訂 2024.08.01</div>' +
@@ -10930,15 +10937,15 @@ function renderMaicarTsukinASTI(emp, opts) {
         '<li>心と体のコンディションを考えて運転する</li>' +
       '</ol>' +
 
-      // 日付 + 氏名 (本人直筆) - コンパクト
-      '<div style="margin:6px 0 4px;font-size:9.5pt;display:flex;align-items:flex-end;gap:6px;">' +
-        '<div style="margin-left:40px;">' +
+      // 日付 + 氏名 (本人直筆) - 日付は nowrap で必ず1行に
+      '<div style="margin:6px 0 4px;font-size:9.5pt;display:flex;align-items:flex-end;gap:6px;flex-wrap:nowrap;">' +
+        '<div style="margin-left:40px;white-space:nowrap;">' +
           '<span style="display:inline-block;min-width:46px;border-bottom:0.5pt solid #000;text-align:center;padding:0 4px;">' + v(kinyuYMD.y) + '</span> 年 ' +
           '<span style="display:inline-block;min-width:24px;border-bottom:0.5pt solid #000;text-align:center;padding:0 4px;">' + v(kinyuYMD.m) + '</span> 月 ' +
           '<span style="display:inline-block;min-width:24px;border-bottom:0.5pt solid #000;text-align:center;padding:0 4px;">' + v(kinyuYMD.d) + '</span> 日' +
         '</div>' +
-        '<div style="margin-left:18px;">' +
-          '氏　名　<span style="display:inline-block;min-width:200px;border-bottom:0.5pt solid #000;padding:0 6px;">　</span>' +
+        '<div style="margin-left:18px;white-space:nowrap;">' +
+          '氏　名　<span style="display:inline-block;min-width:180px;border-bottom:0.5pt solid #000;padding:0 6px;">　</span>' +
           '<span style="font-size:7.5pt;color:#666;margin-left:4px;">（本人直筆のこと）</span>' +
         '</div>' +
       '</div>' +
