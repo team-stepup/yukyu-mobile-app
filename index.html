@@ -2574,34 +2574,46 @@ select.sankyu-edit-input {
 /* === マイカー通勤申請書 (ASTI) 専用の印刷ルール ===
  * 目的:
  *   1. ブラウザ自動付与のURL/日付/ページ番号フッターを抑止 (@page margin:0)
- *   2. 各ページを必ず A4 1枚に収める (overflow:hidden で溢れ分は切り捨て)
+ *   2. 各ページを必ず A4 1枚に収める
  *   3. transform/zoom は印刷時クリア
- * iOS Safari / mobile で 共有→プリント で直接印刷した場合の保険。
- * (本来は 新規タブで PDF Viewer 経由を推奨)
+ * iOS Safari / mobile で 共有→プリント した場合の最終保険。
+ * (推奨は 🖨ボタン → 新規タブで PDF Viewer 経由)
  *
- * 注: :has() を使わないことで iOS 16 以下にも対応
+ * 注: :has() を使わない iOS 16 以下対応
  */
 @media print {
+  /* メイン UI は全部隠す (印刷時は派遣書類エリアのみ表示) */
+  body > *:not(#haisenDocScreen):not(script):not(style):not(noscript) { display: none !important; }
+  #haisenDocScreen { display: block !important; padding: 0 !important; margin: 0 !important; background: #fff !important; }
+  #haisenDocScreen.active { display: block !important; }
+  .haisen-doc-actions, .no-print, .header, .fab-btn, .toast-container { display: none !important; }
+  .haisen-doc-body { padding: 0 !important; background: #fff !important; margin: 0 !important; overflow: visible !important; }
+  .haisen-doc-wrapper { transform: none !important; zoom: 1 !important; display: block !important; width: auto !important; }
+
   /* maicar-asti ページ自体の A4 強制サイズ */
   .maicar-asti-page {
     width: 210mm !important;
     min-width: 210mm !important;
     max-width: 210mm !important;
-    height: 297mm !important;
+    /* height は max-height で指定。ぴったり 297mm にすると最終ページに白ページが出るため */
+    max-height: 297mm !important;
     box-sizing: border-box !important;
-    padding: 8mm 10mm 8mm 10mm !important;
-    margin: 0 !important;
+    padding: 7mm 9mm 7mm 9mm !important;
+    margin: 0 auto !important;
     box-shadow: none !important;
     page-break-after: always !important;
     page-break-inside: avoid !important;
     transform: none !important;
     zoom: 1 !important;
     overflow: hidden !important;
+    /* 内部要素のはみ出しを抑止 */
+    contain: layout paint;
   }
   .maicar-asti-page:last-of-type { page-break-after: auto !important; }
-  /* 表は途中で改ページしない */
-  .maicar-asti-page table { page-break-inside: avoid !important; }
-  .maicar-asti-page table tr { page-break-inside: avoid !important; }
+  /* 内部の表・grid も改ページ禁止 */
+  .maicar-asti-page table { page-break-inside: avoid !important; break-inside: avoid !important; }
+  .maicar-asti-page table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+  .maicar-asti-page table td { page-break-inside: avoid !important; break-inside: avoid !important; }
 }
 /* ブラウザ自動の URL/日付/ページ番号フッターを抑制 (グローバルに 0) */
 @page { size: A4 portrait; margin: 0; }
@@ -10609,13 +10621,13 @@ function renderMaicarTsukinASTI(emp, opts) {
   var tsuKm  = g('tsukinKyori');
   var tsuMin = g('tsukinJikan');
 
-  // 共通 cell styles
-  //   nowrap は使わない (ラベルがセル幅を超えてはみ出すため)
-  //   word-break:keep-all + overflow-wrap:break-word でラベルを必要な位置で折り返す
-  var TD  = 'border:0.6pt solid #000;padding:3px 5px;font-size:8.5pt;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
-  var TDL = 'border:0.6pt solid #000;padding:2px 3px;font-size:8pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;word-break:keep-all;line-height:1.3;';
+  // 共通 cell styles - A4×2枚に収めるため極めてコンパクトに
+  //   TD = データセル, TDL = 灰背景ラベルセル, TDC = データセル中央寄せ, TDCK = 変更チェック列
+  //   overflow-wrap:anywhere でラベルがセル幅を超えたら適切に折り返す
+  var TD  = 'border:0.5pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
+  var TDL = 'border:0.5pt solid #000;padding:1.5px 2px;font-size:7.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;line-height:1.15;word-break:break-all;overflow-wrap:anywhere;';
   var TDC = TD + 'text-align:center;';
-  var TDCK = 'border:0.5pt solid #000;padding:1px;text-align:center;font-size:9pt;width:3.2%;vertical-align:middle;'; // 左の変更チェック列
+  var TDCK = 'border:0.5pt solid #000;padding:0;text-align:center;font-size:8pt;width:3.2%;vertical-align:middle;'; // 左の変更チェック列
 
   // 左端の変更チェック (前回からの変更がある項目に手書きでチェック)
   var ck = '<td style="' + TDCK + '">☐</td>';
@@ -10623,17 +10635,17 @@ function renderMaicarTsukinASTI(emp, opts) {
 
   // ---- ページ1: 通勤方法・駐車場使用申請書 ----
   var page1 =
-    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="page-break-before:always;font-size:8.8pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
+    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="page-break-before:always;font-size:8.2pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
       // 様式番号
-      '<div style="font-size:8pt;color:#444;margin-bottom:4px;">様式－２</div>' +
-      // タイトル（黒枠ボックス、中央）
-      '<div style="text-align:center;margin:2px 0 10px;">' +
-        '<span style="display:inline-block;font-size:17pt;font-weight:700;letter-spacing:6px;padding:2px 24px;">通勤方法・駐車場使用申請書</span>' +
+      '<div style="font-size:7.5pt;color:#444;margin-bottom:2px;">様式－２</div>' +
+      // タイトル（中央、コンパクトに）
+      '<div style="text-align:center;margin:0 0 5px;">' +
+        '<span style="display:inline-block;font-size:13pt;font-weight:700;letter-spacing:3px;padding:0;">通勤方法・駐車場使用申請書</span>' +
       '</div>' +
       // 「安全運転管理者 様」 と ※太枠内…
-      '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;">' +
-        '<div style="font-size:11pt;font-weight:700;letter-spacing:1px;">安全運転管理者　様</div>' +
-        '<div style="font-size:8.5pt;color:#333;">※太枠内は必ず記入すること</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:2px;">' +
+        '<div style="font-size:9.5pt;font-weight:700;letter-spacing:1px;">安全運転管理者　様</div>' +
+        '<div style="font-size:7.5pt;color:#333;">※太枠内は必ず記入すること</div>' +
       '</div>' +
 
       // メイン情報テーブル: 1列目=左端の変更チェック列, 残りが本体
@@ -10822,14 +10834,14 @@ function renderMaicarTsukinASTI(emp, opts) {
           '<td style="' + TDL + '">人身傷害</td>' +
           '<td style="' + TDC + '" colspan="2">' + v(jinshin) + (jinshin && jinshin.indexOf('万円')<0 ? '万円' : '') + '</td>' +
         '</tr>' +
-        // 条件 (対物) + 車両
+        // 条件 (対物) + 車両 (車両保険は手書きで記入するため自動入力しない)
         '<tr>' +
           ckEmpty +
           '<td style="' + TDL + '">条件</td>' +
           '<td style="' + TDL + '">条件</td>' +
           '<td style="' + TDC + '" colspan="2">1,000万円以上</td>' +
           '<td style="' + TDL + '">車両</td>' +
-          '<td style="' + TDC + '" colspan="3">' + v(carHoken) + (carHoken ? '万円' : '　　　　万円') + '　（免責　　　　万円）</td>' +
+          '<td style="' + TDC + '" colspan="3">　　　　万円　（免責　　　　万円）</td>' +
         '</tr>' +
 
         // 運転免許証 (3行)
@@ -10900,21 +10912,20 @@ function renderMaicarTsukinASTI(emp, opts) {
       '<div style="text-align:right;font-size:6.5pt;color:#888;margin-top:2px;">安全運転管理規程</div>' +
     '</div>';
 
-  // ---- ページ2: 誓約書 + 私の通勤経路 ----
+  // ---- ページ2: 誓約書 + 私の通勤経路 (A4 1ページに収まるよう詰める) ----
   var page2 =
-    '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;font-size:9pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
-      '<div style="font-size:8pt;color:#444;margin-bottom:4px;">様式－２</div>' +
+    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="page-break-before:always;font-size:8.5pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
+      '<div style="font-size:7.5pt;color:#444;margin-bottom:2px;">様式－２</div>' +
 
-      // 誓約書 タイトル(枠付き、中央)
-      '<div style="text-align:center;margin:4px 0 8px;">' +
-        '<span style="display:inline-block;border:1pt solid #000;padding:4px 36px;font-size:16pt;font-weight:700;letter-spacing:8px;">誓約書</span>' +
+      // 誓約書 タイトル
+      '<div style="text-align:center;margin:0 0 4px;">' +
+        '<span style="display:inline-block;border:0.8pt solid #000;padding:2px 26px;font-size:13pt;font-weight:700;letter-spacing:5px;">誓約書</span>' +
       '</div>' +
 
-      // ASTI様 (左寄せだが少しインデント)
-      '<div style="font-size:11pt;font-weight:700;letter-spacing:2px;margin-left:50px;">ＡＳＴＩ株式会社　　様</div>' +
-      '<div style="text-align:center;font-size:10pt;margin:8px 0 4px;">私は交通法規を遵守し、事故防止に万全を期して通勤いたします。</div>' +
-      '<div style="text-align:center;font-size:10pt;font-weight:600;">（安全運転５則）</div>' +
-      '<ol style="margin:6px auto 0;width:50%;font-size:10pt;line-height:1.85;padding-left:24px;">' +
+      '<div style="font-size:10pt;font-weight:700;letter-spacing:2px;margin-left:30px;">ＡＳＴＩ株式会社　　様</div>' +
+      '<div style="text-align:center;font-size:9pt;margin:3px 0 1px;">私は交通法規を遵守し、事故防止に万全を期して通勤いたします。</div>' +
+      '<div style="text-align:center;font-size:9pt;font-weight:600;">（安全運転５則）</div>' +
+      '<ol style="margin:1px auto 0;width:55%;font-size:9pt;line-height:1.35;padding-left:24px;">' +
         '<li>制限速度は必ず守る</li>' +
         '<li>カーブの手前でスピードを落とす</li>' +
         '<li>交差点では必ず安全を確かめる</li>' +
@@ -10922,62 +10933,62 @@ function renderMaicarTsukinASTI(emp, opts) {
         '<li>心と体のコンディションを考えて運転する</li>' +
       '</ol>' +
 
-      // 日付 + 氏名 (本人直筆)
-      '<div style="margin:18px 0 4px;font-size:10.5pt;display:flex;align-items:flex-end;gap:8px;">' +
-        '<div style="margin-left:60px;">' +
-          '<span style="display:inline-block;min-width:60px;border-bottom:0.6pt solid #000;text-align:center;padding:0 6px;">' + v(kinyuYMD.y) + '</span> 年 ' +
-          '<span style="display:inline-block;min-width:30px;border-bottom:0.6pt solid #000;text-align:center;padding:0 6px;">' + v(kinyuYMD.m) + '</span> 月 ' +
-          '<span style="display:inline-block;min-width:30px;border-bottom:0.6pt solid #000;text-align:center;padding:0 6px;">' + v(kinyuYMD.d) + '</span> 日' +
+      // 日付 + 氏名 (本人直筆) - コンパクト
+      '<div style="margin:6px 0 4px;font-size:9.5pt;display:flex;align-items:flex-end;gap:6px;">' +
+        '<div style="margin-left:40px;">' +
+          '<span style="display:inline-block;min-width:46px;border-bottom:0.5pt solid #000;text-align:center;padding:0 4px;">' + v(kinyuYMD.y) + '</span> 年 ' +
+          '<span style="display:inline-block;min-width:24px;border-bottom:0.5pt solid #000;text-align:center;padding:0 4px;">' + v(kinyuYMD.m) + '</span> 月 ' +
+          '<span style="display:inline-block;min-width:24px;border-bottom:0.5pt solid #000;text-align:center;padding:0 4px;">' + v(kinyuYMD.d) + '</span> 日' +
         '</div>' +
-        '<div style="margin-left:30px;">' +
-          '氏　名　<span style="display:inline-block;min-width:260px;border-bottom:0.6pt solid #000;padding:0 8px;">　</span>' +
-          '<span style="font-size:8pt;color:#666;margin-left:6px;">（本人直筆のこと）</span>' +
+        '<div style="margin-left:18px;">' +
+          '氏　名　<span style="display:inline-block;min-width:200px;border-bottom:0.5pt solid #000;padding:0 6px;">　</span>' +
+          '<span style="font-size:7.5pt;color:#666;margin-left:4px;">（本人直筆のこと）</span>' +
         '</div>' +
       '</div>' +
 
-      // 「私の通勤経路」タイトル
-      '<div style="text-align:center;margin:18px 0 6px;">' +
-        '<span style="display:inline-block;border:1pt solid #000;padding:4px 36px;font-size:14pt;font-weight:700;letter-spacing:6px;">私の通勤経路</span>' +
+      // 「私の通勤経路」タイトル - コンパクト
+      '<div style="text-align:center;margin:6px 0 2px;">' +
+        '<span style="display:inline-block;border:0.8pt solid #000;padding:2px 24px;font-size:11.5pt;font-weight:700;letter-spacing:4px;">私の通勤経路</span>' +
       '</div>' +
-      '<div style="text-align:center;font-size:9pt;line-height:1.5;">' +
-        '私は下図のような経路で通勤しています。<br>' +
+      '<div style="text-align:center;font-size:8pt;line-height:1.4;">' +
+        '私は下図のような経路で通勤しています。' +
         '通勤途中で、危険と思われる<u>箇所（赤〇印）は下図の通りです。</u>特に安全に注意して通勤します。' +
       '</div>' +
-      '<div style="text-align:center;font-size:10pt;font-weight:600;margin-top:8px;">自宅より会社（工場）まで</div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:8.5pt;margin:2px 4px 2px;">' +
+      '<div style="text-align:center;font-size:9pt;font-weight:600;margin-top:2px;">自宅より会社（工場）まで</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:7.5pt;margin:0 4px 1px;">' +
         '<span>（経路図）</span>' +
-        '<span style="font-size:8pt;color:#444;">※　往復経路が違う場合は両方記入すること</span>' +
+        '<span style="color:#444;">※　往復経路が違う場合は両方記入すること</span>' +
       '</div>' +
-      // 経路図エリア (大きな空欄 → 自動で地理院タイルの経路マップを埋め込み)
-      '<div id="maicarRouteMapBox" style="border:0.8pt solid #000;height:96mm;background:#fafafa;position:relative;overflow:hidden;">' +
-        '<div id="maicarRouteStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10pt;color:#888;">⌛ 経路図を準備中…</div>' +
+      // 経路図エリア (110mm - A4 内に収まるサイズ)
+      '<div id="maicarRouteMapBox" style="border:0.6pt solid #000;height:110mm;background:#fafafa;position:relative;overflow:hidden;">' +
+        '<div id="maicarRouteStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9.5pt;color:#888;">⌛ 経路図を準備中…</div>' +
       '</div>' +
 
-      // 通勤方法 + 通勤距離・通勤時間
-      '<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:9pt;">' +
+      // 通勤方法 + 通勤距離・通勤時間 - 枠付きコンパクトテーブル
+      '<table style="width:100%;border-collapse:collapse;margin-top:3px;font-size:8.5pt;border:0.5pt solid #000;">' +
         '<tr>' +
-          '<td style="vertical-align:top;width:50%;padding:4px 8px;">' +
+          '<td style="vertical-align:top;width:55%;padding:2px 6px;border-right:0.5pt solid #000;">' +
             '<div style="font-weight:700;text-decoration:underline;">【通勤方法】</div>' +
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;padding-left:8px;margin-top:3px;">' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;padding-left:6px;line-height:1.4;">' +
               '<span>' + chk(tm1Walk) + '１．徒歩</span>' +
               '<span>' + chk(tm5Futsu) + '５．普通車</span>' +
               '<span>' + chk(tm2Bike) + '２．自転車</span>' +
               '<span>' + chk(tm6Pub) + '６．公共交通機関</span>' +
               '<span>' + chk(tm3Nirin) + '３．自動二輪/原付</span>' +
-              '<span>' + chk(tm7Other) + '７．その他（　　　　　　）</span>' +
+              '<span>' + chk(tm7Other) + '７．その他（　　　）</span>' +
               '<span>' + chk(tm4Kei) + '４．軽自動車</span>' +
               '<span></span>' +
             '</div>' +
           '</td>' +
-          '<td style="vertical-align:top;width:50%;padding:4px 8px;">' +
-            '<div>・通勤距離　：　<span id="maicarRouteKmCell" style="display:inline-block;min-width:48px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;font-weight:600;">' + v(tsuKm) + '</span>Km　（片道）</div>' +
-            '<div style="font-size:7.5pt;color:#666;text-align:right;margin-top:1px;">※小数点第一位まで記入ください。</div>' +
-            '<div style="margin-top:8px;">・通勤時間　　：　約　<span id="maicarRouteMinCell" style="display:inline-block;min-width:40px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;font-weight:600;">' + v(tsuMin) + '</span> 分</div>' +
+          '<td style="vertical-align:top;padding:2px 6px;line-height:1.5;">' +
+            '<div>・通勤距離　：　<span id="maicarRouteKmCell" style="display:inline-block;min-width:44px;text-align:right;border-bottom:0.4pt solid #888;padding:0 3px;font-weight:600;">' + v(tsuKm) + '</span>Km（片道）</div>' +
+            '<div style="font-size:7pt;color:#666;text-align:right;">※小数点第一位まで記入</div>' +
+            '<div style="margin-top:3px;">・通勤時間：約　<span id="maicarRouteMinCell" style="display:inline-block;min-width:36px;text-align:right;border-bottom:0.4pt solid #888;padding:0 3px;font-weight:600;">' + v(tsuMin) + '</span> 分</div>' +
           '</td>' +
         '</tr>' +
       '</table>' +
-      '<div style="font-weight:700;margin-top:6px;text-align:center;">※公共交通機関の場合、定期券のコピーまたは領収書を添付ください。</div>' +
-      '<div style="text-align:right;font-size:7pt;color:#888;margin-top:6px;">安全運転管理規程</div>' +
+      '<div style="font-weight:700;margin-top:3px;text-align:center;font-size:8.5pt;">※公共交通機関の場合、定期券のコピーまたは領収書を添付ください。</div>' +
+      '<div style="text-align:right;font-size:6.5pt;color:#888;margin-top:2px;">安全運転管理規程</div>' +
     '</div>';
 
   switchScreen('haisenDocScreen');
