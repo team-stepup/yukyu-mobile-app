@@ -2589,38 +2589,55 @@ select.sankyu-edit-input {
 
   /* maicar-asti ページ自体の A4 強制サイズ
    *
-   * 重要: page-break-after: always は使わない。最終ページの後に
-   *      "空白の3ページ目" を生成する原因になる (last-of-type の上書きが
-   *      ブラウザによって効かない場合がある)。
-   *      代わりに height:297mm で「1要素=1A4」を確定させ、ブラウザが
-   *      自然に次ページへ送るのに任せる。
+   * 重要 (修正履歴):
+   *  - height:297mm + page-break-before:always 等にすると、ブラウザの
+   *    レンダリング誤差 (1〜2mm) で要素が 297mm を超え、わずかな overflow
+   *    が次ページに送られ "空白ページ" が量産される問題があった。
+   *  - そこで height を 285mm に縮小 (12mm の安全マージン)。
+   *    元々 padding が 14mm 含まれている (7mm×2) ので、コンテンツ面では
+   *    285 - 14 = 271mm 確保され、現状の content (≈200mm) には十分。
+   *  - page-break-after / page-break-before は付けず、ブラウザの自然な
+   *    改ページに任せる。
+   *  - .haisen-doc-page の base style (margin:0 auto 16px) を !important で
+   *    打ち消す。これも phantom blank page の原因。
    */
   .maicar-asti-page {
     width: 210mm !important;
     min-width: 210mm !important;
     max-width: 210mm !important;
-    height: 297mm !important;            /* ピッタリ A4 1枚分の高さ */
-    max-height: 297mm !important;
+    height: 285mm !important;            /* A4 297mm より小さく安全マージン */
+    max-height: 285mm !important;
     box-sizing: border-box !important;
     padding: 7mm 9mm 7mm 9mm !important;
-    margin: 0 !important;                 /* 余分なマージン除去 (3ページ目原因) */
+    margin: 0 !important;
     box-shadow: none !important;
-    /* page-break-after は指定しない → 自然な改ページに任せる */
+    /* page-break-after / page-break-before は 指定しない */
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     transform: none !important;
     zoom: 1 !important;
     overflow: hidden !important;
   }
+  /* 2 枚目以降は明示的に「新シートで始める」(natural break を補強) */
+  .maicar-asti-page + .maicar-asti-page {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
   /* 内部の表・grid も改ページ禁止 */
   .maicar-asti-page table { page-break-inside: avoid !important; break-inside: avoid !important; }
   .maicar-asti-page table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
   .maicar-asti-page table td { page-break-inside: avoid !important; break-inside: avoid !important; }
-  /* haisen-doc-wrapper の余白も 0 にしないと 3ページ目を生む */
+  /* haisen-doc-wrapper の余白も 0 */
   .haisen-doc-wrapper { margin: 0 !important; padding: 0 !important; }
 }
-/* ブラウザ自動の URL/日付/ページ番号フッターを抑制 (グローバルに 0) */
-@page { size: A4 portrait; margin: 0; }
+/* ブラウザ自動の URL/日付/ページ番号フッターを抑制
+ * iOS Safari は :first/:left/:right まで全部 0 を指定しないと honor しない
+ * (それでも未対応の場合は PDF Viewer 経由の印刷を推奨)
+ */
+@page { size: A4 portrait; margin: 0 !important; }
+@page :first { margin: 0 !important; }
+@page :left { margin: 0 !important; }
+@page :right { margin: 0 !important; }
 
 .header-logout-sm.is-loggedout {
   background: #c62828;
@@ -10641,16 +10658,17 @@ function renderMaicarTsukinASTI(emp, opts) {
   var tsuMin = g('tsukinJikan');
 
   // 共通 cell styles - A4×2枚に収めるため極めてコンパクトに
+  // 罫線は 0.7pt で印刷時にもしっかり見える太さに
   //   TD  = データセル (折り返しOK)
   //   TDL = 灰背景ラベルセル (nowrap で1行固定。colgroup でセル幅を十分に確保)
   //   TDC = データセル中央寄せ
   //   TDN = データセル + nowrap (日付など短い値を1行で収めたい時)
   //   TDCK = 変更チェック列
-  var TD  = 'border:0.5pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
-  var TDL = 'border:0.5pt solid #000;padding:1.5px 2px;font-size:7.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;line-height:1.15;white-space:nowrap;';
+  var TD  = 'border:0.7pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
+  var TDL = 'border:0.7pt solid #000;padding:1.5px 2px;font-size:7.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;line-height:1.15;white-space:nowrap;';
   var TDC = TD + 'text-align:center;';
-  var TDN = 'border:0.5pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;text-align:center;white-space:nowrap;'; // 日付など 1行で固定したいセル
-  var TDCK = 'border:0.5pt solid #000;padding:0;text-align:center;font-size:8pt;width:3.2%;vertical-align:middle;';
+  var TDN = 'border:0.7pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;text-align:center;white-space:nowrap;';
+  var TDCK = 'border:0.7pt solid #000;padding:0;text-align:center;font-size:8pt;width:3.2%;vertical-align:middle;';
 
   // 左端の変更チェック (前回からの変更がある項目に手書きでチェック)
   var ck = '<td style="' + TDCK + '">☐</td>';
@@ -10658,7 +10676,7 @@ function renderMaicarTsukinASTI(emp, opts) {
 
   // ---- ページ1: 通勤方法・駐車場使用申請書 ----
   var page1 =
-    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="page-break-before:always;font-size:8.2pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
+    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="font-size:8.2pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
       // 様式番号
       '<div style="font-size:7.5pt;color:#444;margin-bottom:2px;">様式－２</div>' +
       // タイトル（中央、コンパクトに）
@@ -10672,6 +10690,7 @@ function renderMaicarTsukinASTI(emp, opts) {
       '</div>' +
 
       // メイン情報テーブル: 1列目=左端の変更チェック列, 残りが本体
+      // border-style:solid; 内部罫線も明示的に確保
       '<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1.5pt solid #000;">' +
         // 列幅定義 — 登録番号の 4 サブ列 (地域/用途番号/記号/指定番号) と
         // データ行を整列させるため cols 4-7 を等幅 (各 9.5%) にする。
@@ -10933,17 +10952,19 @@ function renderMaicarTsukinASTI(emp, opts) {
             '</div>' +
           '</td>' +
           '<td style="vertical-align:top;">' +
-            '<table style="border-collapse:collapse;font-size:8pt;width:100%;">' +
+            // table-layout:fixed で列幅を厳密にし、ヘッダの重なりを防止
+            // 「安全運転管理者」が長いため font 7pt + 折返し可で対応
+            '<table style="border-collapse:collapse;font-size:7.5pt;width:100%;table-layout:fixed;">' +
               '<tr>' +
-                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;white-space:nowrap;">部　署　長<br><span style="font-size:6.5pt;">(受付・審査)</span></td>' +
-                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:34%;white-space:nowrap;">安全運転管理者<br><span style="font-size:6.5pt;">(許可・保管)</span></td>' +
-                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;white-space:nowrap;">人　事　課<br><span style="font-size:6.5pt;">登　録</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:32%;line-height:1.15;">部署長<br><span style="font-size:6pt;">(受付・審査)</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:36%;line-height:1.15;font-size:7pt;">安全運転管理者<br><span style="font-size:6pt;">(許可・保管)</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:32%;line-height:1.15;">人事課<br><span style="font-size:6pt;">登録</span></td>' +
               '</tr>' +
               // 印鑑が押せるよう 15mm の高さを確保
               '<tr>' +
-                '<td style="border:0.6pt solid #000;height:15mm;"></td>' +
-                '<td style="border:0.6pt solid #000;height:15mm;"></td>' +
-                '<td style="border:0.6pt solid #000;height:15mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:15mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:15mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:15mm;"></td>' +
               '</tr>' +
             '</table>' +
             '<div style="text-align:right;font-size:7pt;color:#333;margin-top:3px;line-height:1.35;">（裏面の通勤経路も記入のこと）<br>ＡＳＴＩ株式会社　改訂 2024.08.01</div>' +
@@ -10956,7 +10977,7 @@ function renderMaicarTsukinASTI(emp, opts) {
 
   // ---- ページ2: 誓約書 + 私の通勤経路 (A4 1ページに収まるよう詰める) ----
   var page2 =
-    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="page-break-before:always;font-size:8.5pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
+    '<div class="haisen-doc-page hd-kobetsu maicar-asti-page" style="font-size:8.5pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
       '<div style="font-size:7.5pt;color:#444;margin-bottom:2px;">様式－２</div>' +
 
       // 誓約書 タイトル
