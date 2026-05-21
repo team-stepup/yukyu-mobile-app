@@ -2587,30 +2587,37 @@ select.sankyu-edit-input {
    * ここでは maicar 用のサイズ/改ページ制御だけを追加する。
    * (#mainContent や #haisenDocScreen は触らず通常表示のまま) */
 
-  /* maicar-asti ページ自体の A4 強制サイズ */
+  /* maicar-asti ページ自体の A4 強制サイズ
+   *
+   * 重要: page-break-after: always は使わない。最終ページの後に
+   *      "空白の3ページ目" を生成する原因になる (last-of-type の上書きが
+   *      ブラウザによって効かない場合がある)。
+   *      代わりに height:297mm で「1要素=1A4」を確定させ、ブラウザが
+   *      自然に次ページへ送るのに任せる。
+   */
   .maicar-asti-page {
     width: 210mm !important;
     min-width: 210mm !important;
     max-width: 210mm !important;
-    /* max-height でぴったり A4 に収める (height だと 0mm の隙間で次ページに送られる) */
+    height: 297mm !important;            /* ピッタリ A4 1枚分の高さ */
     max-height: 297mm !important;
     box-sizing: border-box !important;
     padding: 7mm 9mm 7mm 9mm !important;
-    margin: 0 auto !important;
+    margin: 0 !important;                 /* 余分なマージン除去 (3ページ目原因) */
     box-shadow: none !important;
-    page-break-after: always !important;
-    break-after: page !important;
+    /* page-break-after は指定しない → 自然な改ページに任せる */
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     transform: none !important;
     zoom: 1 !important;
     overflow: hidden !important;
   }
-  .maicar-asti-page:last-of-type { page-break-after: auto !important; break-after: auto !important; }
   /* 内部の表・grid も改ページ禁止 */
   .maicar-asti-page table { page-break-inside: avoid !important; break-inside: avoid !important; }
   .maicar-asti-page table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
   .maicar-asti-page table td { page-break-inside: avoid !important; break-inside: avoid !important; }
+  /* haisen-doc-wrapper の余白も 0 にしないと 3ページ目を生む */
+  .haisen-doc-wrapper { margin: 0 !important; padding: 0 !important; }
 }
 /* ブラウザ自動の URL/日付/ページ番号フッターを抑制 (グローバルに 0) */
 @page { size: A4 portrait; margin: 0; }
@@ -10548,12 +10555,27 @@ function renderMaicarTsukinASTI(emp, opts) {
   var shakenExp= gd('shakenExpiry');
   var firstReg = gd('carFirstReg');
 
-  // ナンバープレート 分解 (浜松 330 ね 2731)
+  // ナンバープレート 分解
+  //   想定する2形式:
+  //     (A) スペース区切り: "浜松 330 ね 2731" → split で4分割
+  //     (B) スペースなし:   "浜松587つ820"   → 正規表現で抽出
+  //         地域(漢字/カナ) + 用途番号(3桁) + 記号(1文字) + 指定番号(数字/-)
   function parseCarNum(s) {
-    var p = (s || '').split(/[\s　・･,、\-‐－]+/).filter(Boolean);
+    if (!s) return { region: '', usage: '', symbol: '', assign: '' };
+    var p = String(s).split(/[\s　・･,、]+/).filter(Boolean);
     if (p.length >= 4) return { region: p[0], usage: p[1], symbol: p[2], assign: p.slice(3).join('') };
     if (p.length === 3) return { region: p[0], usage: p[1], symbol: '', assign: p[2] };
-    return { region: '', usage: '', symbol: '', assign: s || '' };
+    // 連結された形式を解析: "浜松587つ820" 等
+    //   region: 非数字文字 (漢字・カナ)
+    //   usage:  3〜4 桁の数字
+    //   symbol: 1 文字 (ひらがな/カタカナ/英字)
+    //   assign: 残りの数字 (ハイフン可)
+    var m = String(s).match(/^([^\d]+?)(\d{2,4})\s*([^\d\s]{1,2})\s*([\d\-]+)$/);
+    if (m) {
+      return { region: m[1].trim(), usage: m[2], symbol: m[3].trim(), assign: m[4].trim() };
+    }
+    // 失敗時は assign に全部入れる
+    return { region: '', usage: '', symbol: '', assign: s };
   }
   var cn = parseCarNum(carNum);
   var carDispDisplay = carDisp ? (carDisp.indexOf('cc') >= 0 ? carDisp : carDisp + 'cc') : '';
@@ -10651,26 +10673,30 @@ function renderMaicarTsukinASTI(emp, opts) {
 
       // メイン情報テーブル: 1列目=左端の変更チェック列, 残りが本体
       '<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1.5pt solid #000;">' +
-        // 列幅定義 — 日付/電話番号を1行に収めるため右側列を広めに
+        // 列幅定義 — 登録番号の 4 サブ列 (地域/用途番号/記号/指定番号) と
+        // データ行を整列させるため cols 4-7 を等幅 (各 9.5%) にする。
+        // 「登録番号」ヘッダ内に grid-template-columns:1fr×4 を入れることで
+        // サブラベルもデータと同じ位置に揃う。
         '<colgroup>' +
           '<col style="width:3%;">' +     // 0: 変更チェック
-          '<col style="width:10%;">' +    // 1: 大ラベル (区分/利用者区分/通勤方法/所属/住所/車検満了日/任意保険/運転免許証 等)
-          '<col style="width:13%;">' +    // 2: 中ラベル (社員(社員番号)/社員以外(会社名)/居住/住民票/メーカー名/保険会社名/種類 等)
-          '<col style="width:9%;">' +     // 3
-          '<col style="width:11%;">' +    // 4
-          '<col style="width:9%;">' +     // 5
-          '<col style="width:14%;">' +    // 6: 日付 (記入日) / 中ラベル (勤務地/性別/生年月日) / 副ラベル (保険満了日)
-          '<col style="width:9%;">' +     // 7: 副ラベル (施行日)
-          '<col style="width:22%;">' +    // 8: 日付 (施行日) / 電話番号 / 生年月日値 等
+          '<col style="width:10%;">' +    // 1: 大ラベル
+          '<col style="width:13%;">' +    // 2: 中ラベル
+          '<col style="width:11%;">' +    // 3
+          '<col style="width:9.5%;">' +   // 4: 地域 (車両情報)
+          '<col style="width:9.5%;">' +   // 5: 用途番号
+          '<col style="width:9.5%;">' +   // 6: 記号
+          '<col style="width:9.5%;">' +   // 7: 指定番号
+          '<col style="width:25%;">' +    // 8: データ
         '</colgroup>' +
 
         // 1行目: 区分 / 記入日 / 施行日 （日付は nowrap で1行固定）
+        //   cols 4-7 を等幅 (9.5%×4) にしたので、記入日 date は colspan=2 (cols 5-6=19%) で確保
         '<tr>' +
           ckEmpty +
           '<td style="' + TDL + '">区分</td>' +
-          '<td style="' + TD  + '" colspan="3">' + chk(kubun==='新規') + '新規　・　' + chk(kubun==='変更') + '変更</td>' +
+          '<td style="' + TD  + '" colspan="2">' + chk(kubun==='新規') + '新規　・　' + chk(kubun==='変更') + '変更</td>' +
           '<td style="' + TDL + '">記入日</td>' +
-          '<td style="' + TDN + '">' + v(kinyuG) + '</td>' +
+          '<td style="' + TDN + '" colspan="2">' + v(kinyuG) + '</td>' +
           '<td style="' + TDL + '">施行日</td>' +
           '<td style="' + TDN + '">' + v(sekoG) + '</td>' +
         '</tr>' +
@@ -10758,12 +10784,23 @@ function renderMaicarTsukinASTI(emp, opts) {
             chk(true) + '普通自動車　・　☐軽自動車　・　☐自動二輪車　・　☐原動機付自転車　・　☐自転車' +
           '</td>' +
         '</tr>' +
-        // 12,13行目: 対象車両 詳細 (メーカー名/車名/登録番号(4列)/排気量)
+        // 12,13行目: 対象車両 詳細
+        //   登録番号 ヘッダ内に grid (1fr×4) を入れ、サブラベル
+        //   (地域/用途番号/記号/指定番号) を下のデータ列 (cols 4-7, 各9.5%等幅)
+        //   と垂直に整列させる。
         '<tr>' +
           ckEmpty +
           '<td style="' + TDL + '">メーカー名</td>' +
           '<td style="' + TDL + '">車名</td>' +
-          '<td style="' + TDL + '" colspan="4">登録番号<br><span style="font-weight:400;font-size:7.5pt;">地域　用途番号　記号　指定番号</span></td>' +
+          '<td style="' + TDL + 'padding:1px 0;" colspan="4">' +
+            '<div style="font-weight:600;text-align:center;">登録番号</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;font-weight:400;font-size:6.8pt;line-height:1.1;margin-top:1px;">' +
+              '<span style="text-align:center;border-right:0.3pt dotted #999;">地域</span>' +
+              '<span style="text-align:center;border-right:0.3pt dotted #999;">用途番号</span>' +
+              '<span style="text-align:center;border-right:0.3pt dotted #999;">記号</span>' +
+              '<span style="text-align:center;">指定番号</span>' +
+            '</div>' +
+          '</td>' +
           '<td style="' + TDL + '">排気量</td>' +
         '</tr>' +
         '<tr>' +
@@ -10838,13 +10875,14 @@ function renderMaicarTsukinASTI(emp, opts) {
           '<td style="' + TDC + '" colspan="2">' + v(jinshin) + (jinshin && jinshin.indexOf('万円')<0 ? '万円' : '') + '</td>' +
         '</tr>' +
         // 条件 (対物) + 車両 (車両保険は手書きで記入するため自動入力しない)
+        //   修正: 以前 colspan=3 で row が 10 col 占有 (overflow) していたため colspan=2 に。
         '<tr>' +
           ckEmpty +
           '<td style="' + TDL + '">条件</td>' +
           '<td style="' + TDL + '">条件</td>' +
           '<td style="' + TDC + '" colspan="2">1,000万円以上</td>' +
           '<td style="' + TDL + '">車両</td>' +
-          '<td style="' + TDC + '" colspan="3">　　　　万円　（免責　　　　万円）</td>' +
+          '<td style="' + TDC + '" colspan="2">　　　　万円　（免責　　　万円）</td>' +
         '</tr>' +
 
         // 運転免許証 (3行)
