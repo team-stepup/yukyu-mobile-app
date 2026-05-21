@@ -40887,6 +40887,9 @@ async function bulkCreateRenewalDocs() {
   var stamp = (new Date()).toISOString().substring(0, 10).replace(/-/g, '');
   // 中止フラグ (停止ボタン押下でtrueに、ループ先頭でチェック)
   window._bulkRenewalCancel = false;
+  // バッチ分割: 25名ごとに 10秒のクールダウン (メモリ解放・スロットリング回避)
+  var BATCH_SIZE = 25;
+  var BATCH_COOLDOWN_SEC = 10;
 
   for (var i = 0; i < list.length; i++) {
     if (window._bulkRenewalCancel) {
@@ -40894,12 +40897,43 @@ async function bulkCreateRenewalDocs() {
               '<div style="text-align:center;font-size:12px;color:#666;margin-top:6px;">完了: ' + success.length + '名 / 失敗: ' + failed.length + '名 / 残り: ' + (list.length - i) + '名</div>');
       break;
     }
+    // バッチ区切り: i > 0 かつ i % BATCH_SIZE === 0 でクールダウン
+    if (i > 0 && i % BATCH_SIZE === 0 && i < list.length) {
+      // メモリ解放ヒント (DOM クリア)
+      try {
+        var bodyEl = document.getElementById('haisenDocBody');
+        if (bodyEl) bodyEl.innerHTML = '';
+      } catch (_) {}
+      // ハーフサイズで再描画 + カウントダウン
+      var batchNo = Math.floor(i / BATCH_SIZE);
+      var totalBatches = Math.ceil(list.length / BATCH_SIZE);
+      for (var cd = BATCH_COOLDOWN_SEC; cd > 0; cd--) {
+        if (window._bulkRenewalCancel) break;
+        setProg(
+          '<div style="text-align:center;padding:16px;background:#e8f5e9;border-radius:10px;margin-bottom:8px;">' +
+            '<div style="font-size:14px;font-weight:700;color:#2e7d32;">📦 バッチ ' + batchNo + ' / ' + totalBatches + ' 完了</div>' +
+            '<div style="font-size:12px;color:#1b5e20;margin-top:4px;">メモリ解放中… 次のバッチまで <b style="font-size:18px;">' + cd + '</b> 秒</div>' +
+            '<div style="margin-top:8px;"><button type="button" onclick="window._bulkRenewalCancel=true;" style="background:#fff;color:#c62828;border:1.5px solid #ef9a9a;border-radius:8px;padding:5px 14px;font-size:11.5px;font-weight:700;cursor:pointer;">⏹ ここで停止</button></div>' +
+          '</div>' +
+          '<div style="font-size:11px;color:#999;text-align:center;">✓ 成功 ' + success.length + ' / ✗ 失敗 ' + failed.length + ' / 残り ' + (list.length - i) + '名</div>'
+        );
+        await new Promise(function(r){ setTimeout(r, 1000); });
+      }
+      if (window._bulkRenewalCancel) {
+        setProg('<div style="text-align:center;padding:14px;font-size:14px;color:#c62828;font-weight:700;">⏹ クールダウン中に中止しました</div>' +
+                '<div style="text-align:center;font-size:12px;color:#666;margin-top:6px;">完了: ' + success.length + '名 / 失敗: ' + failed.length + '名 / 残り: ' + (list.length - i) + '名</div>');
+        break;
+      }
+    }
     var emp = list[i];
     var nm = emp.Title || '(無名)';
     var pct = Math.round(i / list.length * 100);
+    var curBatch = Math.floor(i / BATCH_SIZE) + 1;
+    var totBatch = Math.ceil(list.length / BATCH_SIZE);
+    var batchInfo = (totBatch > 1) ? ' <span style="color:#888;font-size:11px;font-weight:600;">(バッチ ' + curBatch + '/' + totBatch + ')</span>' : '';
     setProg(
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-        '<div style="font-size:13px;color:#444;flex:1;">作成中… <b>' + (i+1) + ' / ' + list.length + '</b></div>' +
+        '<div style="font-size:13px;color:#444;flex:1;">作成中… <b>' + (i+1) + ' / ' + list.length + '</b>' + batchInfo + '</div>' +
         '<button type="button" onclick="window._bulkRenewalCancel=true;" style="background:#fff;color:#c62828;border:1.5px solid #ef9a9a;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;">⏹ 停止</button>' +
       '</div>' +
       '<div style="background:#eee;border-radius:6px;height:14px;overflow:hidden;"><div style="background:linear-gradient(90deg,#fb8c00,#e65100);height:100%;width:' + pct + '%;transition:width 0.3s;"></div></div>' +
