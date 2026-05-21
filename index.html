@@ -2589,29 +2589,22 @@ select.sankyu-edit-input {
 
   /* maicar-asti ページ自体の A4 強制サイズ
    *
-   * 重要 (修正履歴):
-   *  - height:297mm + page-break-before:always 等にすると、ブラウザの
-   *    レンダリング誤差 (1〜2mm) で要素が 297mm を超え、わずかな overflow
-   *    が次ページに送られ "空白ページ" が量産される問題があった。
-   *  - そこで height を 285mm に縮小 (12mm の安全マージン)。
-   *    元々 padding が 14mm 含まれている (7mm×2) ので、コンテンツ面では
-   *    285 - 14 = 271mm 確保され、現状の content (≈200mm) には十分。
-   *  - page-break-after / page-break-before は付けず、ブラウザの自然な
-   *    改ページに任せる。
-   *  - .haisen-doc-page の base style (margin:0 auto 16px) を !important で
-   *    打ち消す。これも phantom blank page の原因。
+   *  - height:297mm + page-break-before:always だとレンダリング誤差で
+   *    297mm を超え phantom blank page を量産する問題があった。
+   *  - height:285mm では下に余白が大きすぎ「お客様提出レベル」に
+   *    達しない問題があったため、295mm に再調整 (2mm の安全マージン)
+   *    + 印鑑欄を 15mm → 25mm に拡大して内容を A4 下部までフィットさせる。
    */
   .maicar-asti-page {
     width: 210mm !important;
     min-width: 210mm !important;
     max-width: 210mm !important;
-    height: 285mm !important;            /* A4 297mm より小さく安全マージン */
-    max-height: 285mm !important;
+    height: 295mm !important;            /* A4 297mm に対し 2mm の安全マージン */
+    max-height: 295mm !important;
     box-sizing: border-box !important;
     padding: 7mm 9mm 7mm 9mm !important;
     margin: 0 !important;
     box-shadow: none !important;
-    /* page-break-after / page-break-before は 指定しない */
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     transform: none !important;
@@ -10346,13 +10339,22 @@ async function _maicarRenderMapImage(srcPos, dstPos, coords) {
   marker(dstPos.lng, dstPos.lat, '#c62828', '会');
 
   // 9. W×H でセンタリングクロップ
+  //    バグ修正: ソースキャンバスが W×H より小さい場合、出力に黒い
+  //    領域が出てしまう (drawImage がソース外をフェッチして黒で埋める)。
+  //    対策: 出力サイズはソースキャンバス内に収まる範囲に縮小。
+  //         CSS の object-fit:cover で表示時にボックスに合わせる。
   var p1 = proj(minLng, minLat), p2 = proj(maxLng, maxLat);
   var cx = (p1.x + p2.x) / 2, cy = (p1.y + p2.y) / 2;
-  var cropX = Math.max(0, Math.min(canvasW - W, cx - W / 2));
-  var cropY = Math.max(0, Math.min(canvasH - H, cy - H / 2));
+  var outW = Math.min(W, canvasW);
+  var outH = Math.min(H, canvasH);
+  var cropX = Math.max(0, Math.min(canvasW - outW, cx - outW / 2));
+  var cropY = Math.max(0, Math.min(canvasH - outH, cy - outH / 2));
   var out = document.createElement('canvas');
-  out.width = W; out.height = H;
-  out.getContext('2d').drawImage(canvas, cropX, cropY, W, H, 0, 0, W, H);
+  out.width = outW; out.height = outH;
+  var outCtx = out.getContext('2d');
+  outCtx.fillStyle = '#dde4ea';
+  outCtx.fillRect(0, 0, outW, outH);
+  outCtx.drawImage(canvas, cropX, cropY, outW, outH, 0, 0, outW, outH);
 
   try { return out.toDataURL('image/jpeg', 0.85); }
   catch (e) { throw new Error('画像化失敗 (CORS): ' + e.message); }
@@ -10773,19 +10775,20 @@ function renderMaicarTsukinASTI(emp, opts) {
         // 8,9行目: 住所 rowspan=2 (居住/住民票) と 電話番号 rowspan=2 (自宅/携帯)
         // 注: 以前 phone に colspan=2 を付けていたため row が 10 col 占有でレイアウト崩壊。
         //     col 8 を 22% に広げ、colspan は除去して 9 col 内に収める。
+        //     電話番号セルは 2行構成: 上=自宅、下=携帯 (それぞれにラベル付き)
         '<tr>' +
           ck +
           '<td style="' + TDL + '" rowspan="2">住所</td>' +
           '<td style="' + TDL + '">居住</td>' +
           '<td style="' + TD  + '" colspan="4">〒　' + v(address) + '</td>' +
           '<td style="' + TDL + '" rowspan="2">電話<br>番号</td>' +
-          '<td style="' + TD  + 'white-space:nowrap;">自宅　　　　　' + (jitaku ? v(jitaku) : '') + '</td>' +
+          '<td style="' + TD  + 'white-space:nowrap;">自宅　' + (jitaku ? v(jitaku) : '') + '</td>' +
         '</tr>' +
         '<tr>' +
           ck +
           '<td style="' + TDL + '">住民票</td>' +
           '<td style="' + TD  + '" colspan="4">〒　' + v(jyuminhyo) + '</td>' +
-          '<td style="' + TD  + 'text-align:center;white-space:nowrap;">' + v(keitai) + '</td>' +
+          '<td style="' + TD  + 'white-space:nowrap;">携帯　' + v(keitai) + '</td>' +
         '</tr>' +
 
         // 10行目: 緊急連絡先
@@ -10952,19 +10955,19 @@ function renderMaicarTsukinASTI(emp, opts) {
             '</div>' +
           '</td>' +
           '<td style="vertical-align:top;">' +
-            // table-layout:fixed で列幅を厳密にし、ヘッダの重なりを防止
-            // 「安全運転管理者」が長いため font 7pt + 折返し可で対応
-            '<table style="border-collapse:collapse;font-size:7.5pt;width:100%;table-layout:fixed;">' +
+            // table-layout:fixed + 「安全運転管理者」は 2行 (安全運転/管理者) に分けて
+            // セル幅に確実に収まるように
+            '<table style="border-collapse:collapse;font-size:8pt;width:100%;table-layout:fixed;">' +
               '<tr>' +
-                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:32%;line-height:1.15;">部署長<br><span style="font-size:6pt;">(受付・審査)</span></td>' +
-                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:36%;line-height:1.15;font-size:7pt;">安全運転管理者<br><span style="font-size:6pt;">(許可・保管)</span></td>' +
-                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:32%;line-height:1.15;">人事課<br><span style="font-size:6pt;">登録</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:33%;line-height:1.2;">部署長<br><span style="font-size:6.5pt;color:#555;">(受付・審査)</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:34%;line-height:1.2;">安全運転<br>管理者<br><span style="font-size:6.5pt;color:#555;">(許可・保管)</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:33%;line-height:1.2;">人事課<br><span style="font-size:6.5pt;color:#555;">登録</span></td>' +
               '</tr>' +
-              // 印鑑が押せるよう 15mm の高さを確保
+              // 印鑑欄: A4 下部の余白を活用、印鑑 (角印 12-15mm) が余裕で押せる 25mm の高さ
               '<tr>' +
-                '<td style="border:0.8pt solid #000;height:15mm;"></td>' +
-                '<td style="border:0.8pt solid #000;height:15mm;"></td>' +
-                '<td style="border:0.8pt solid #000;height:15mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:25mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:25mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:25mm;"></td>' +
               '</tr>' +
             '</table>' +
             '<div style="text-align:right;font-size:7pt;color:#333;margin-top:3px;line-height:1.35;">（裏面の通勤経路も記入のこと）<br>ＡＳＴＩ株式会社　改訂 2024.08.01</div>' +
