@@ -9803,6 +9803,12 @@ async function openHaisenDocInNewWindow() {
   var pages = body.querySelectorAll('.haisen-doc-page');
   if (!pages || pages.length === 0) { if (typeof showToast === 'function') showToast('書類が読み込まれていません', 'error'); return; }
 
+  // ASTIマイカー通勤申請書 はブラウザ直接印刷だと崩れる (フッター付き・改ページずれ・5ページ化) ため
+  // 必ず PDF を生成して開く方式に切替 (html2canvas + pdf-lib で A4 仕上げ)
+  if (window._currentHaisenDocMode === 'maicarASTI' && window.PDFLib && window.html2canvas) {
+    await _openHaisenPdfForIOS(null, 'マイカー通勤申請書');
+    return;
+  }
   // iOS Safari は印刷時にフッターが付き改ページもずれるため PDF を生成して開く
   if (_isIOSDevice && window.PDFLib && window.html2canvas) {
     await _openHaisenPdfForIOS(null, '派遣書類');
@@ -10295,15 +10301,87 @@ async function _maicarBuildRouteForEmployee(emp) {
   if (!bukaVal) throw new Error('派遣先 (部課) が未設定');
   var hakenMap = await loadHakensakiByBukaMap();
   if (!hakenMap) throw new Error('派遣先住所マップ取得失敗');
-  var workAddr = hakenMap[bukaVal];
-  if (!workAddr) {
-    var num = (bukaVal.match(/^(\d+)/) || [])[1];
+
+  // 段階的な fallback で 派遣先住所 を引く
+  function lookupHakenAddress(map, bv) {
+    if (!bv) return null;
+    // 1. 完全一致
+    if (map[bv]) return map[bv];
+    var keys = Object.keys(map);
+    // 番号 (077 や 002-1) と 名前部分を分離
+    var num = (bv.match(/^\s*(\d+(?:[-－]\d+)?)/) || [])[1];
+    var nameOnly = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(bv) : bv.replace(/^\s*\d+(?:[-－]\d+)?\s*[:：]?\s*/, '').trim();
+    // 2. 番号で始まるキー
     if (num) {
-      var k2 = Object.keys(hakenMap).find(function(k){ return k.indexOf(num) === 0; });
-      if (k2) workAddr = hakenMap[k2];
+      var hit = keys.find(function(k){ return k.indexOf(num) === 0; });
+      if (hit) return map[hit];
     }
+    // 3. 番号を含むキー
+    if (num) {
+      var hit3 = keys.find(function(k){ return k.indexOf(num) >= 0; });
+      if (hit3) return map[hit3];
+    }
+    // 4. 名前部分が一致 (両方向のsubstring)
+    if (nameOnly) {
+      var hit4 = keys.find(function(k){
+        var kn = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(k) : k.replace(/^\s*\d+(?:[-－]\d+)?\s*[:：]?\s*/, '').trim();
+        return kn === nameOnly;
+      });
+      if (hit4) return map[hit4];
+      // 5. 名前部分が含まれる
+      var hit5 = keys.find(function(k){
+        var kn = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(k) : k.replace(/^\s*\d+(?:[-－]\d+)?\s*[:：]?\s*/, '').trim();
+        return kn.indexOf(nameOnly) >= 0 || nameOnly.indexOf(kn) >= 0;
+      });
+      if (hit5) return map[hit5];
+    }
+    return null;
   }
-  if (!workAddr) throw new Error('派遣先「' + bukaVal + '」の住所が見つかりません');
+  var workAddr = lookupHakenAddress(hakenMap, bukaVal);
+
+  // 派遣先マップに住所がなければ、Lists から個別に再取得を試みる (kinmu_jusho/haken_jusho 以外のフィールドも探す)
+  if (!workAddr) {
+    try {
+      var token2 = await getToken();
+      if (token2) {
+        var url2 = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$select=*";
+        var r2 = await fetch(url2, { headers: { 'Authorization': 'Bearer ' + token2, 'Accept': 'application/json;odata=verbose' } });
+        if (r2.ok) {
+          var d2 = await r2.json();
+          var items2 = (d2.d && d2.d.results) || [];
+          var num2 = (bukaVal.match(/^\s*(\d+(?:[-－]\d+)?)/) || [])[1];
+          var nameOnly2 = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(bukaVal) : bukaVal;
+          var hit = items2.find(function(it) {
+            var t = String(it.Title || '').trim();
+            if (!t) return false;
+            if (t === bukaVal) return true;
+            if (num2 && t.indexOf(num2) === 0) return true;
+            if (nameOnly2 && t.indexOf(nameOnly2) >= 0) return true;
+            return false;
+          });
+          if (hit) {
+            // 「住所」を含む任意のフィールドから値を探す
+            var addrKey = Object.keys(hit).find(function(k) {
+              return k.indexOf('jusho') >= 0 || k.indexOf('x4f4f__x6240') >= 0 ||
+                     k.indexOf('x6240__x5728_') >= 0 || k.indexOf('x4f4f_') >= 0;
+            });
+            if (addrKey && hit[addrKey]) {
+              workAddr = String(hit[addrKey]).trim();
+            }
+            // 「住所」が項目名で見つからない場合、長い文字列から推定 (静岡県/愛知県等で始まるもの)
+            if (!workAddr) {
+              for (var k in hit) {
+                var v = hit[k];
+                if (typeof v === 'string' && v.length > 8 && /^[都道府県市区].*|^.+[都道府県].+/.test(v)) { workAddr = v.trim(); break; }
+              }
+            }
+          }
+        }
+      }
+    } catch (e2) { console.warn('haken addr re-lookup failed:', e2); }
+  }
+
+  if (!workAddr) throw new Error('派遣先「' + bukaVal + '」の住所が未登録');
 
   var src = await _geocodeJp(homeAddr);
   if (!src) throw new Error('社員住所のジオコード失敗');
@@ -10370,7 +10448,8 @@ function renderMaicarTsukinASTI(emp, opts) {
   function chk(on) { return on ? '☑' : '☐'; }
 
   var name = emp.Title || '';
-  var furigana = g('furigana') || g('huriganaName') || '';
+  // ふりがな: 専用フィールドがあれば優先、なければ振込先氏名フリガナ(bankMeigi)を流用
+  var furigana = g('furigana') || g('huriganaName') || g('bankMeigi') || '';
   var sn = emp[F.syainNo] || '';
   var hakenName = (typeof stripBukaPrefix === 'function')
     ? stripBukaPrefix((typeof getBukaValue === 'function') ? getBukaValue(emp) : '')
@@ -10741,46 +10820,47 @@ function renderMaicarTsukinASTI(emp, opts) {
         '</tr>' +
       '</table>' +
 
-      // 注意事項 + 押印欄 (2カラム: 左=注意事項テキスト / 右=押印テーブル)
-      '<div style="display:flex;gap:8px;margin-top:5px;align-items:flex-start;">' +
-        '<div style="flex:1;font-size:7.8pt;line-height:1.55;">' +
-          '<div style="font-weight:700;">【注意事項】</div>' +
-          '<div style="padding-left:6px;">' +
-            '◎自動二輪、原動機付自転車も任意保険に加入すること。<br>' +
-            '◎車種区分、対象車両、任意保険条件欄、運転免許証種類欄は、いずれかを〇で囲んで下さい。<br>' +
-            '◎任意保険の条件は、対人：無制限、対物：1,000万円以上、搭乗者傷害（または同等の保険）：1,000万円以上に加入すること。<br>' +
-            '◎次のいずれかに該当するときは、速やかに届け出ること。' +
-          '</div>' +
-          '<div style="padding-left:18px;">' +
-            '（１）氏名・住所を変更したとき<br>' +
-            '（２）車両を変更したとき<br>' +
-            '（３）通勤経路・通勤方法を変更したとき<br>' +
-            '（４）保険契約の条件を変更したとき' +
-          '</div>' +
-          '<div style="padding-left:6px;margin-top:3px;">' +
-            '<span style="font-weight:700;text-decoration:underline;">※ 前回の申請時から変更のある項目は、項目左側の□欄に<br>　　チェックマークを記載のこと</span><br>' +
-            '※ 安全運転管理者は人事課へ送付すること<br>' +
-            '※ 申請書に記載いただいた情報は、この申請にのみ使用し、他の目的では一切使用しません。' +
-          '</div>' +
-        '</div>' +
-        '<div style="min-width:200px;">' +
-          '<table style="border-collapse:collapse;font-size:8pt;width:100%;">' +
-            '<tr>' +
-              '<td style="border:0.6pt solid #000;padding:3px;text-align:center;width:33%;">部　署　長<br><span style="font-size:7pt;">(受付・審査)</span></td>' +
-              '<td style="border:0.6pt solid #000;padding:3px;text-align:center;width:34%;">安全運転管理者<br><span style="font-size:7pt;">(許可・保管)</span></td>' +
-              '<td style="border:0.6pt solid #000;padding:3px;text-align:center;width:33%;">人　事　課<br><span style="font-size:7pt;">登　録</span></td>' +
-            '</tr>' +
-            '<tr>' +
-              '<td style="border:0.6pt solid #000;height:34px;"></td>' +
-              '<td style="border:0.6pt solid #000;height:34px;"></td>' +
-              '<td style="border:0.6pt solid #000;height:34px;"></td>' +
-            '</tr>' +
-          '</table>' +
-          '<div style="text-align:right;font-size:7.5pt;color:#333;margin-top:4px;">（裏面の通勤経路も記入のこと）<br>ＡＳＴＩ株式会社　改訂 2024.08.01</div>' +
-        '</div>' +
-      '</div>' +
+      // 注意事項 + 押印欄 (table レイアウトで page break を防止)
+      '<table style="width:100%;border-collapse:collapse;margin-top:4px;page-break-inside:avoid;">' +
+        '<colgroup><col style="width:62%;"><col style="width:38%;"></colgroup>' +
+        '<tr>' +
+          '<td style="vertical-align:top;padding:0 6px 0 0;font-size:7.4pt;line-height:1.4;">' +
+            '<div style="font-weight:700;">【注意事項】</div>' +
+            '<div style="padding-left:4px;">' +
+              '◎自動二輪、原動機付自転車も任意保険に加入すること。<br>' +
+              '◎車種区分、対象車両、任意保険条件欄、運転免許証種類欄は、いずれかを〇で囲んで下さい。<br>' +
+              '◎任意保険の条件は、対人：無制限、対物：1,000万円以上、搭乗者傷害（または同等の保険）：1,000万円以上に加入すること。<br>' +
+              '◎次のいずれかに該当するときは、速やかに届け出ること。' +
+            '</div>' +
+            '<div style="padding-left:14px;">' +
+              '（１）氏名・住所を変更したとき　（２）車両を変更したとき<br>' +
+              '（３）通勤経路・通勤方法を変更したとき　（４）保険契約の条件を変更したとき' +
+            '</div>' +
+            '<div style="padding-left:4px;margin-top:2px;">' +
+              '<span style="font-weight:700;text-decoration:underline;">※ 前回の申請時から変更のある項目は、項目左側の□欄にチェックマークを記載のこと</span><br>' +
+              '※ 安全運転管理者は人事課へ送付すること<br>' +
+              '※ 申請書に記載いただいた情報は、この申請にのみ使用し、他の目的では一切使用しません。' +
+            '</div>' +
+          '</td>' +
+          '<td style="vertical-align:top;">' +
+            '<table style="border-collapse:collapse;font-size:8pt;width:100%;">' +
+              '<tr>' +
+                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;">部　署　長<br><span style="font-size:6.5pt;">(受付・審査)</span></td>' +
+                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:34%;">安全運転管理者<br><span style="font-size:6.5pt;">(許可・保管)</span></td>' +
+                '<td style="border:0.6pt solid #000;padding:2px;text-align:center;width:33%;">人　事　課<br><span style="font-size:6.5pt;">登　録</span></td>' +
+              '</tr>' +
+              '<tr>' +
+                '<td style="border:0.6pt solid #000;height:30px;"></td>' +
+                '<td style="border:0.6pt solid #000;height:30px;"></td>' +
+                '<td style="border:0.6pt solid #000;height:30px;"></td>' +
+              '</tr>' +
+            '</table>' +
+            '<div style="text-align:right;font-size:7pt;color:#333;margin-top:3px;line-height:1.35;">（裏面の通勤経路も記入のこと）<br>ＡＳＴＩ株式会社　改訂 2024.08.01</div>' +
+          '</td>' +
+        '</tr>' +
+      '</table>' +
 
-      '<div style="text-align:right;font-size:7pt;color:#888;margin-top:4px;">安全運転管理規程</div>' +
+      '<div style="text-align:right;font-size:6.5pt;color:#888;margin-top:2px;">安全運転管理規程</div>' +
     '</div>';
 
   // ---- ページ2: 誓約書 + 私の通勤経路 ----
