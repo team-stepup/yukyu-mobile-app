@@ -2589,20 +2589,22 @@ select.sankyu-edit-input {
 
   /* maicar-asti ページ自体の A4 強制サイズ
    *
-   *  - height:297mm + page-break-before:always だとレンダリング誤差で
-   *    297mm を超え phantom blank page を量産する問題があった。
-   *  - height:285mm では下に余白が大きすぎ「お客様提出レベル」に
-   *    達しない問題があったため、295mm に再調整 (2mm の安全マージン)
-   *    + 印鑑欄を 15mm → 25mm に拡大して内容を A4 下部までフィットさせる。
+   *  - height:297mm → 295mm → 285mm の試行錯誤の結果、モバイル
+   *    Safari の rendering 誤差は ~3-5mm に達することが判明。
+   *    295mm でも phantom blank page が出る (モバイル印刷側)。
+   *  - 285mm に再固定し、足りない空白は 印鑑欄 (25mm → 38mm) と
+   *    各セクションの line-height 強化で内容側を膨らませて充填する。
+   *  - PC 印刷では @page margin:0 で全 297mm 使えるため、285mm でも
+   *    上下に若干余白が残るが、それは「天地マージン」として機能。
    */
   .maicar-asti-page {
     width: 210mm !important;
     min-width: 210mm !important;
     max-width: 210mm !important;
-    height: 295mm !important;            /* A4 297mm に対し 2mm の安全マージン */
-    max-height: 295mm !important;
+    height: 285mm !important;
+    max-height: 285mm !important;
     box-sizing: border-box !important;
-    padding: 7mm 9mm 7mm 9mm !important;
+    padding: 6mm 9mm 6mm 9mm !important;   /* 上下 padding 7→6mm で +2mm の content area */
     margin: 0 !important;
     box-shadow: none !important;
     page-break-inside: avoid !important;
@@ -10659,17 +10661,18 @@ function renderMaicarTsukinASTI(emp, opts) {
   var tsuKm  = g('tsukinKyori');
   var tsuMin = g('tsukinJikan');
 
-  // 共通 cell styles - A4×2枚に収めるため極めてコンパクトに
-  // 罫線は 0.7pt で印刷時にもしっかり見える太さに
+  // 共通 cell styles - A4×2枚に収め、かつ A4 下部まで内容を充填するため
+  //   padding & line-height を増やして表全体を高さ方向に伸ばす。
+  // 罫線は 0.7pt で印刷時にもしっかり見える太さ。
   //   TD  = データセル (折り返しOK)
-  //   TDL = 灰背景ラベルセル (nowrap で1行固定。colgroup でセル幅を十分に確保)
+  //   TDL = 灰背景ラベルセル (nowrap で1行固定)
   //   TDC = データセル中央寄せ
   //   TDN = データセル + nowrap (日付など短い値を1行で収めたい時)
   //   TDCK = 変更チェック列
-  var TD  = 'border:0.7pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
-  var TDL = 'border:0.7pt solid #000;padding:1.5px 2px;font-size:7.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;line-height:1.15;white-space:nowrap;';
+  var TD  = 'border:0.7pt solid #000;padding:2.5px 4px;font-size:8pt;line-height:1.35;vertical-align:middle;word-break:break-all;overflow-wrap:break-word;';
+  var TDL = 'border:0.7pt solid #000;padding:2.5px 2px;font-size:7.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;line-height:1.25;white-space:nowrap;';
   var TDC = TD + 'text-align:center;';
-  var TDN = 'border:0.7pt solid #000;padding:1.5px 4px;font-size:7.8pt;line-height:1.25;vertical-align:middle;text-align:center;white-space:nowrap;';
+  var TDN = 'border:0.7pt solid #000;padding:2.5px 4px;font-size:8pt;line-height:1.35;vertical-align:middle;text-align:center;white-space:nowrap;';
   var TDCK = 'border:0.7pt solid #000;padding:0;text-align:center;font-size:8pt;width:3.2%;vertical-align:middle;';
 
   // 左端の変更チェック (前回からの変更がある項目に手書きでチェック)
@@ -10933,10 +10936,11 @@ function renderMaicarTsukinASTI(emp, opts) {
       '</table>' +
 
       // 注意事項 + 押印欄 (table レイアウトで page break を防止)
+      //   印鑑欄を 38% → 46% に拡大し、3 列のセルが見やすい正方形に近い形に
       '<table style="width:100%;border-collapse:collapse;margin-top:4px;page-break-inside:avoid;">' +
-        '<colgroup><col style="width:62%;"><col style="width:38%;"></colgroup>' +
+        '<colgroup><col style="width:54%;"><col style="width:46%;"></colgroup>' +
         '<tr>' +
-          '<td style="vertical-align:top;padding:0 6px 0 0;font-size:7.4pt;line-height:1.4;">' +
+          '<td style="vertical-align:top;padding:0 6px 0 0;font-size:8pt;line-height:1.55;">' +
             '<div style="font-weight:700;">【注意事項】</div>' +
             '<div style="padding-left:4px;">' +
               '◎自動二輪、原動機付自転車も任意保険に加入すること。<br>' +
@@ -10948,26 +10952,26 @@ function renderMaicarTsukinASTI(emp, opts) {
               '（１）氏名・住所を変更したとき　（２）車両を変更したとき<br>' +
               '（３）通勤経路・通勤方法を変更したとき　（４）保険契約の条件を変更したとき' +
             '</div>' +
-            '<div style="padding-left:4px;margin-top:2px;">' +
+            '<div style="padding-left:4px;margin-top:3px;">' +
               '<span style="font-weight:700;text-decoration:underline;">※ 前回の申請時から変更のある項目は、項目左側の□欄にチェックマークを記載のこと</span><br>' +
               '※ 安全運転管理者は人事課へ送付すること<br>' +
               '※ 申請書に記載いただいた情報は、この申請にのみ使用し、他の目的では一切使用しません。' +
             '</div>' +
           '</td>' +
           '<td style="vertical-align:top;">' +
-            // table-layout:fixed + 「安全運転管理者」は 2行 (安全運転/管理者) に分けて
-            // セル幅に確実に収まるように
-            '<table style="border-collapse:collapse;font-size:8pt;width:100%;table-layout:fixed;">' +
+            // 列幅: 部署長 33%、安全運転管理者 34%、人事課 33% で均等に近く
+            // セル幅が広がったので「安全運転管理者」も font 8pt の1行に戻せる
+            '<table style="border-collapse:collapse;font-size:9pt;width:100%;table-layout:fixed;">' +
               '<tr>' +
-                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:33%;line-height:1.2;">部署長<br><span style="font-size:6.5pt;color:#555;">(受付・審査)</span></td>' +
-                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:34%;line-height:1.2;">安全運転<br>管理者<br><span style="font-size:6.5pt;color:#555;">(許可・保管)</span></td>' +
-                '<td style="border:0.8pt solid #000;padding:3px 1px;text-align:center;width:33%;line-height:1.2;">人事課<br><span style="font-size:6.5pt;color:#555;">登録</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:4px 2px;text-align:center;width:33%;line-height:1.3;">部　署　長<br><span style="font-size:7pt;color:#555;font-weight:400;">(受付・審査)</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:4px 2px;text-align:center;width:34%;line-height:1.3;">安全運転管理者<br><span style="font-size:7pt;color:#555;font-weight:400;">(許可・保管)</span></td>' +
+                '<td style="border:0.8pt solid #000;padding:4px 2px;text-align:center;width:33%;line-height:1.3;">人　事　課<br><span style="font-size:7pt;color:#555;font-weight:400;">登　録</span></td>' +
               '</tr>' +
-              // 印鑑欄: A4 下部の余白を活用、印鑑 (角印 12-15mm) が余裕で押せる 25mm の高さ
+              // 印鑑欄: A4 下部の余白を充填しつつ、角印 (12-15mm) が余裕で押せる 38mm の高さ
               '<tr>' +
-                '<td style="border:0.8pt solid #000;height:25mm;"></td>' +
-                '<td style="border:0.8pt solid #000;height:25mm;"></td>' +
-                '<td style="border:0.8pt solid #000;height:25mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:38mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:38mm;"></td>' +
+                '<td style="border:0.8pt solid #000;height:38mm;"></td>' +
               '</tr>' +
             '</table>' +
             '<div style="text-align:right;font-size:7pt;color:#333;margin-top:3px;line-height:1.35;">（裏面の通勤経路も記入のこと）<br>ＡＳＴＩ株式会社　改訂 2024.08.01</div>' +
