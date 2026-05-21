@@ -25276,10 +25276,34 @@ async function loadEmployeeProfile() {
     if (!hasData) return;
 
     const hasAlert = categoryHasAlert(emp, keyMap, cat);
+    // 社会保険 扶養: アクティブな扶養人数バッジを表示
+    var huyouBadgeHtml = '';
+    if (cat.id === 'shahoHuyou') {
+      var huyouCount = 0;
+      for (var hi = 1; hi <= 4; hi++) {
+        var hk = keyMap['syahoHuyou' + hi];
+        if (!hk) continue;
+        var hv = String(emp[hk] || '').trim();
+        if (!hv || hv.indexOf('なし') >= 0 || hv === '未') continue;
+        // 喪失日が今日以前なら非アクティブ
+        var sk = keyMap['syahoHuyou' + hi + 'Soushitsu'];
+        var sv = sk ? emp[sk] : null;
+        var active = true;
+        if (sv) {
+          var sd = new Date(sv);
+          var today = new Date(); today.setHours(0,0,0,0);
+          if (!isNaN(sd) && sd < today) active = false;
+        }
+        if (active) huyouCount++;
+      }
+      if (huyouCount > 0) {
+        huyouBadgeHtml = '<span style="background:linear-gradient(135deg,#1565c0,#1976d2);color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:800;margin-left:8px;letter-spacing:0.3px;box-shadow:0 1px 3px rgba(21,101,192,0.3);">👨‍👩‍👧 ' + huyouCount + '名</span>';
+      }
+    }
     html += '<div class="accordion-section" id="acc_' + cat.id + '">';
     html += '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
     html += '<span class="acc-icon">' + cat.icon + '</span>';
-    html += '<span>' + cat.label + '</span>';
+    html += '<span>' + cat.label + huyouBadgeHtml + '</span>';
     if (hasAlert) html += '<span class="acc-alert">期限注意</span>';
     html += '<button class="edit-btn" onclick="event.stopPropagation();startEditSection(\'' + cat.id + '\')" style="margin-left:auto;margin-right:8px;display:none;">✏️ 編集</button>';
     html += '<span class="acc-arrow">&#9654;</span>';
