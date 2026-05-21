@@ -10114,13 +10114,20 @@ function openMaicarTsukinASTI() {
   ov.innerHTML =
     '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
       '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
-        '<h3 style="margin:0;font-size:15px;color:#1565c0;">🚗 マイカー通勤申請書兼誓約書 (ASTI)</h3>' +
+        '<h3 style="margin:0;font-size:15px;color:#1565c0;">🚗 通勤方法・駐車場使用申請書 (ASTI)</h3>' +
         '<button onclick="document.getElementById(\'maicarASTIOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
       '</div>' +
       '<div style="padding:16px 18px;">' +
-        '<div style="font-size:12px;color:#666;font-weight:600;margin-bottom:4px;">申請日 (誓約日)</div>' +
-        '<input type="date" id="maicarKinyuDate" value="' + iso + '" style="width:100%;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
-        '<div style="font-size:11px;color:#999;margin-top:6px;">「上記マイカー通勤申請、注意事項、誓約について理解しました」の日付です。</div>' +
+        '<div style="font-size:12px;color:#666;font-weight:600;margin-bottom:4px;">区分</div>' +
+        '<div style="display:flex;gap:14px;margin-bottom:12px;">' +
+          '<label style="font-size:13px;cursor:pointer;"><input type="radio" name="maicarKubun" value="新規"> 新規</label>' +
+          '<label style="font-size:13px;cursor:pointer;"><input type="radio" name="maicarKubun" value="変更" checked> 変更</label>' +
+        '</div>' +
+        '<div style="font-size:12px;color:#666;font-weight:600;margin-bottom:4px;">記入日</div>' +
+        '<input type="date" id="maicarKinyuDate" value="' + iso + '" style="width:100%;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">' +
+        '<div style="font-size:12px;color:#666;font-weight:600;margin-bottom:4px;">施行日</div>' +
+        '<input type="date" id="maicarSekoDate" value="' + iso + '" style="width:100%;padding:7px 9px;border:1px solid #ccc;border-radius:6px;font-size:13px;box-sizing:border-box;">' +
+        '<div style="font-size:11px;color:#999;margin-top:6px;">2ページ目の誓約書日付も記入日が使われます。</div>' +
       '</div>' +
       '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
         '<button onclick="document.getElementById(\'maicarASTIOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
@@ -10134,12 +10141,14 @@ function openMaicarTsukinASTI() {
 async function _doMaicarTsukinASTI() {
   var emp = window._maicarTsukinEmp;
   if (!emp) { showToast('社員データが見つかりません', 'error'); return; }
+  var kubun = (document.querySelector('input[name="maicarKubun"]:checked') || {}).value || '変更';
   var kinyu = (document.getElementById('maicarKinyuDate') || {}).value || '';
+  var seko = (document.getElementById('maicarSekoDate') || {}).value || '';
   var ov = document.getElementById('maicarASTIOverlay'); if (ov) ov.remove();
-  showToast('マイカー通勤申請書兼誓約書 を作成中…', 'info');
+  showToast('通勤方法・駐車場使用申請書 を作成中…', 'info');
   try {
     if (typeof ensureHakenKeyMap === 'function') await ensureHakenKeyMap();
-    renderMaicarTsukinASTI(emp, { kinyuDate: kinyu });
+    renderMaicarTsukinASTI(emp, { kubun: kubun, kinyuDate: kinyu, sekoDate: seko });
   } catch (e) {
     console.error('_doMaicarTsukinASTI error:', e);
     showToast('エラー: ' + (e.message || String(e)), 'error');
@@ -10154,16 +10163,31 @@ function renderMaicarTsukinASTI(emp, opts) {
   function g(key) { var k = km[key]; var x = (k && emp[k] != null) ? emp[k] : ''; return String(x).trim(); }
   function gd(key) { var x = g(key); return x ? ((typeof toWarekiText === 'function' && toWarekiText(x)) || x) : ''; }
   function v(s) { return s ? escHtml(s) : ''; }
+  function chk(on) { return on ? '☑' : '☐'; }
 
   var name = emp.Title || '';
+  var furigana = g('furigana') || g('huriganaName') || '';
   var sn = emp[F.syainNo] || '';
   var hakenName = (typeof stripBukaPrefix === 'function')
     ? stripBukaPrefix((typeof getBukaValue === 'function') ? getBukaValue(emp) : '')
     : '';
+  var dept = (g('soshikiTani') || '').replace(/[\s　]*[（(]\s*\d+\s*[-‐－ｰ−]\s*\d+\s*[）)]\s*$/, '').trim();
+  var kinmuChi = g('kinmuChi') || g('kinmuShoZai') || '';
 
+  // 区分・日付
+  var kubun = opts.kubun || '変更';
   var kinyuW = (typeof toWarekiText === 'function' && opts.kinyuDate) ? toWarekiText(opts.kinyuDate) : (opts.kinyuDate || '');
-
-  // 申請日 を「○○○○年 ○○月 ○○日」形式に分解（誓約日表記）
+  var sekoW  = (typeof toWarekiText === 'function' && opts.sekoDate)  ? toWarekiText(opts.sekoDate)  : (opts.sekoDate || '');
+  // 西暦表記(2024年11月6日)で出すバージョンも作る
+  function fmtJpDate(s) {
+    if (!s) return '';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日';
+  }
+  var kinyuG = fmtJpDate(opts.kinyuDate);
+  var sekoG  = fmtJpDate(opts.sekoDate);
+  // 申請日 を「○○年○○月○○日」形式に分解（誓約書日付用）
   var kinyuYMD = { y: '', m: '', d: '' };
   if (opts.kinyuDate) {
     var kd = new Date(opts.kinyuDate);
@@ -10174,186 +10198,469 @@ function renderMaicarTsukinASTI(emp, opts) {
     }
   }
 
-  // 車両情報の組み立て（メーカー、車種名、ナンバー、色）
+  // 性別
+  var sex = g('sex') || '';
+  var sexText = sex.indexOf('男') >= 0 ? '男性' : sex.indexOf('女') >= 0 ? '女性' : '';
+
+  // 住所・電話
+  var address = g('address');
+  var jyuminhyo = g('jyuminhyoAddress') || g('jyuminAddress') || address; // 住民票住所がなければ居住住所を再利用
+  var jitaku = g('jitakuTel') || g('homeTel') || '';
+  var keitai = g('keitai');
+
+  // 緊急連絡先
+  var emName = g('emergencyName');
+  var emRel  = g('emergencyRelation');
+  var emTel  = g('emergencyTel');
+
+  // 車両
   var carMaker = g('carMaker');
   var carName  = g('carName');
   var carNum   = g('carNumber');
-  var carColor = g('carColor');
+  var carDisp  = g('carDisplacement');
+  var shakenExp= gd('shakenExpiry');
+  var firstReg = gd('carFirstReg');
 
-  // 自賠責保険
-  var jbCo  = g('jibaisekiCompany');
-  var jbExp = gd('jibaisekiExpiry');
-  var jbNo  = g('jibaisekiNo');
+  // ナンバープレート 分解 (浜松 330 ね 2731)
+  function parseCarNum(s) {
+    var p = (s || '').split(/[\s　・･,、\-‐－]+/).filter(Boolean);
+    if (p.length >= 4) return { region: p[0], usage: p[1], symbol: p[2], assign: p.slice(3).join('') };
+    if (p.length === 3) return { region: p[0], usage: p[1], symbol: '', assign: p[2] };
+    return { region: '', usage: '', symbol: '', assign: s || '' };
+  }
+  var cn = parseCarNum(carNum);
+  var carDispDisplay = carDisp ? (carDisp.indexOf('cc') >= 0 ? carDisp : carDisp + 'cc') : '';
+
+  // 自賠責
+  var jbCo = g('jibaisekiCompany');
+  var jbNo = g('jibaisekiNo');
 
   // 任意保険
   var niCo  = g('niniCompany');
-  var niExp = gd('niniExpiry');
   var niNo  = g('niniNo');
+  var niStartW = gd('niniStartDate');
+  var niExpW   = gd('niniExpiry');
 
   // 契約条件
   var taijin   = g('taijin');
   var taibutsu = g('taibutsu');
+  var tojo     = g('tojoshaShogai');
   var jinshin  = g('jinshinShogai');
+  var carHoken = g('carHoken');
+  function isMugen(s) { return s && (s.indexOf('無制限') >= 0); }
+  var taijinMugen   = isMugen(taijin);
+  var taibutsuMugen = isMugen(taibutsu);
 
   // 運転免許証
   var lcType = g('licenseType');
-  var lcExp  = gd('licenseExpiry');
   var lcNo   = g('licenseNo');
+  var lcGet  = gd('licenseGetDate');
+  var lcExp  = gd('licenseExpiry');
+  // 種類判定
+  var lcOgata=false, lcChugata=false, lcJunCh=false, lcFutsu=false;
+  var lcOgataNi=false, lcFutsuNi=false, lcGenfu=false, lcOther=false;
+  if (lcType) {
+    var lt = lcType.replace(/\s/g,'');
+    if (lt.indexOf('大型二輪') >= 0) lcOgataNi = true;
+    else if (lt.indexOf('普通二輪') >= 0) lcFutsuNi = true;
+    else if (lt.indexOf('準中型') >= 0) lcJunCh = true;
+    else if (lt.indexOf('中型') >= 0) lcChugata = true;
+    else if (lt.indexOf('大型') >= 0) lcOgata = true;
+    else if (lt.indexOf('普通') >= 0 || lt.indexOf('ゴールド') >= 0 || lt.indexOf('ブルー') >= 0 || lt.indexOf('グリーン') >= 0) lcFutsu = true;
+    else if (lt.indexOf('原付') >= 0) lcGenfu = true;
+    else lcOther = true;
+  }
 
-  // 車検
-  var shakenNo  = g('shakenNo');
-  var shakenExp = gd('shakenExpiry');
+  // 通勤方法 (表面: 四輪/二輪/徒歩/公共/その他)
+  var tsuMethod = g('tsukinHouhou') || '';
+  var tmFour   = (tsuMethod.indexOf('車')>=0 && tsuMethod.indexOf('自転')<0 && tsuMethod.indexOf('二輪')<0 && tsuMethod.indexOf('バイク')<0) || tsuMethod.indexOf('四輪')>=0;
+  var tmTwo    = tsuMethod.indexOf('自動二輪')>=0 || tsuMethod.indexOf('バイク')>=0 || tsuMethod.indexOf('原付')>=0 || tsuMethod.indexOf('二輪')>=0;
+  var tmWalk   = tsuMethod.indexOf('徒歩')>=0;
+  var tmPublic = tsuMethod.indexOf('公共')>=0 || tsuMethod.indexOf('電車')>=0 || tsuMethod.indexOf('バス')>=0;
+  var tmOther  = tsuMethod && !(tmFour || tmTwo || tmWalk || tmPublic);
 
-  // 通勤距離 / 通勤時間（ListsにあればOK、なければ空欄）
-  var tsuKm   = g('tsukinKyori');
-  var tsuMin  = g('tsukinJikan');
+  // 通勤方法 (裏面: 1-7細分)
+  var tm1Walk  = tsuMethod.indexOf('徒歩')>=0;
+  var tm2Bike  = tsuMethod.indexOf('自転車')>=0 && tsuMethod.indexOf('自動')<0;
+  var tm3Nirin = tsuMethod.indexOf('自動二輪')>=0 || tsuMethod.indexOf('バイク')>=0 || tsuMethod.indexOf('原付')>=0;
+  var tm4Kei   = tsuMethod.indexOf('軽')>=0;
+  var tm5Futsu = tsuMethod.indexOf('車')>=0 && tsuMethod.indexOf('軽')<0 && tsuMethod.indexOf('自転')<0 && tsuMethod.indexOf('自動二輪')<0 && tsuMethod.indexOf('バイク')<0;
+  var tm6Pub   = tsuMethod.indexOf('公共')>=0 || tsuMethod.indexOf('電車')>=0 || tsuMethod.indexOf('バス')>=0;
+  var tm7Other = tsuMethod && !(tm1Walk||tm2Bike||tm3Nirin||tm4Kei||tm5Futsu||tm6Pub);
 
-  var TD  = 'border:0.7pt solid #000;padding:4px 7px;font-size:9pt;vertical-align:middle;';
-  var TDL = 'border:0.7pt solid #000;padding:4px 7px;font-size:9pt;background:#f4f4f4;font-weight:600;text-align:center;vertical-align:middle;white-space:nowrap;';
+  var tsuKm  = g('tsukinKyori');
+  var tsuMin = g('tsukinJikan');
 
-  // ---- 1ページ完結のレイアウト ----
+  // 共通 cell styles
+  var TD  = 'border:0.6pt solid #000;padding:3px 5px;font-size:8.5pt;vertical-align:middle;';
+  var TDL = 'border:0.6pt solid #000;padding:3px 5px;font-size:8.5pt;background:#f3f3f3;font-weight:600;text-align:center;vertical-align:middle;white-space:nowrap;';
+  var TDC = TD + 'text-align:center;';
+  var TDCK = 'border:0.5pt solid #000;padding:1px;text-align:center;font-size:9pt;width:3.2%;vertical-align:middle;'; // 左の変更チェック列
+
+  // 左端の変更チェック (前回からの変更がある項目に手書きでチェック)
+  var ck = '<td style="' + TDCK + '">☐</td>';
+  var ckEmpty = '<td style="' + TDCK + 'border:none;background:transparent;"></td>';
+
+  // ---- ページ1: 通勤方法・駐車場使用申請書 ----
   var page1 =
-    '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;font-size:9.5pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
-      // ヘッダー: 「有限会社ステップ・アップ 安全運転管理者 様」 + 改訂日
-      '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:2px;">' +
-        '<div style="font-size:11pt;font-weight:700;letter-spacing:1px;">有限会社ステップ・アップ　安全運転管理者　様</div>' +
-        '<div style="font-size:8.5pt;color:#333;">2020年4月1日</div>' +
+    '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;font-size:8.8pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
+      // 様式番号
+      '<div style="font-size:8pt;color:#444;margin-bottom:4px;">様式－２</div>' +
+      // タイトル（黒枠ボックス、中央）
+      '<div style="text-align:center;margin:2px 0 10px;">' +
+        '<span style="display:inline-block;font-size:17pt;font-weight:700;letter-spacing:6px;padding:2px 24px;">通勤方法・駐車場使用申請書</span>' +
       '</div>' +
-      // タイトル中央・下線、右に「084-2 [社員番号]」
-      '<div style="position:relative;text-align:center;margin:6px 0 8px;">' +
-        '<span style="font-size:18pt;font-weight:700;letter-spacing:6px;border-bottom:2pt solid #000;padding:0 12px 2px;">マイカー通勤申請書兼誓約書</span>' +
-        '<div style="position:absolute;right:0;bottom:2px;font-size:9pt;font-weight:600;letter-spacing:1px;">084-2　' + v(sn) + '</div>' +
+      // 「安全運転管理者 様」 と ※太枠内…
+      '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;">' +
+        '<div style="font-size:11pt;font-weight:700;letter-spacing:1px;">安全運転管理者　様</div>' +
+        '<div style="font-size:8.5pt;color:#333;">※太枠内は必ず記入すること</div>' +
       '</div>' +
 
-      // メイン情報テーブル
+      // メイン情報テーブル: 1列目=左端の変更チェック列, 残りが本体
       '<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1.5pt solid #000;">' +
-        // 1行目: 社員番号 / 氏名 / 派遣先
+        // 列幅定義
+        '<colgroup>' +
+          '<col style="width:3.2%;">' +   // 0: 変更チェック
+          '<col style="width:11%;">' +    // 1: 大ラベル
+          '<col style="width:13%;">' +    // 2: 中ラベル
+          '<col style="width:13%;">' +    // 3
+          '<col style="width:14%;">' +    // 4
+          '<col style="width:10%;">' +    // 5
+          '<col style="width:13%;">' +    // 6
+          '<col style="width:11.6%;">' +  // 7
+          '<col style="width:11%;">' +    // 8
+        '</colgroup>' +
+
+        // 1行目: 区分 / 記入日 / 施行日 （左の変更チェックなし）
         '<tr>' +
-          '<td style="' + TDL + 'width:13%;">社員番号</td>' +
-          '<td style="' + TD  + 'width:13%;text-align:center;">' + v(sn) + '</td>' +
-          '<td style="' + TDL + 'width:8%;">氏名</td>' +
-          '<td style="' + TD  + 'width:27%;">' + v(name) + '</td>' +
-          '<td style="' + TDL + 'width:10%;">派遣先</td>' +
-          '<td style="' + TD  + '">' + v(hakenName) + '</td>' +
+          ckEmpty +
+          '<td style="' + TDL + '">区分</td>' +
+          '<td style="' + TD  + '" colspan="3">' + chk(kubun==='新規') + '新規　・　' + chk(kubun==='変更') + '変更</td>' +
+          '<td style="' + TDL + '">記入日</td>' +
+          '<td style="' + TDC + '">' + v(kinyuG) + '</td>' +
+          '<td style="' + TDL + '">施行日</td>' +
+          '<td style="' + TDC + '">' + v(sekoG) + '</td>' +
         '</tr>' +
-        // 2行目: 通勤使用車両 - 普通自動車
+
+        // 2,3行目: 利用者区分 (rowspan=2): 社員(社員番号) / 社員以外(会社名)
         '<tr>' +
-          '<td style="' + TDL + '">通勤使用車両</td>' +
-          '<td style="' + TD  + '" colspan="5">普通自動車</td>' +
+          ck +
+          '<td style="' + TDL + '" rowspan="2">利用者区分</td>' +
+          '<td style="' + TDL + '">社員（社員番号）</td>' +
+          '<td style="' + TDC + '" colspan="6">' + v(sn) + '</td>' +
         '</tr>' +
-        // 3行目: メーカー / 車種名 / ナンバー / 色
         '<tr>' +
-          '<td style="' + TDL + '">メーカー</td>' +
-          '<td style="' + TD  + '">' + v(carMaker) + '</td>' +
-          '<td style="' + TDL + '">車種名</td>' +
-          '<td style="' + TD  + '">' + v(carName) + '</td>' +
-          '<td style="' + TDL + '">ナンバー</td>' +
-          '<td style="' + TD  + '">' + v(carNum) +
-            '<span style="float:right;font-weight:600;">色</span> ' + v(carColor) + '</td>' +
+          ckEmpty +
+          '<td style="' + TDL + '">社員以外（会社名）</td>' +
+          '<td style="' + TDC + '" colspan="6">有限会社ステップ・アップ</td>' +
         '</tr>' +
-        // 4行目: 車検満了日 (横長1行)
+
+        // 4行目: 通勤方法
         '<tr>' +
+          ck +
+          '<td style="' + TDL + '">通勤方法</td>' +
+          '<td style="' + TD  + '" colspan="7">' +
+            chk(tmFour) + '四輪　・　' + chk(tmTwo) + '二輪　・　' + chk(tmWalk) + '徒歩　・　' +
+            chk(tmPublic) + '公共交通機関　・　' + chk(tmOther) + 'その他' +
+          '</td>' +
+        '</tr>' +
+
+        // 5行目: 所属 / 勤務地
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDL + '">所　　属</td>' +
+          '<td style="' + TD  + '" colspan="4">' + v(hakenName) + (dept ? '　' + v(dept) : '') + '</td>' +
+          '<td style="' + TDL + '">勤務地</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(kinmuChi || hakenName) + '</td>' +
+        '</tr>' +
+
+        // 6行目: ふりがな / 性別
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDL + '">ふりがな</td>' +
+          '<td style="' + TDC + '" colspan="4">' + v(furigana) + '</td>' +
+          '<td style="' + TDL + '">性別</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(sexText) + '</td>' +
+        '</tr>' +
+
+        // 7行目: 氏名 / 生年月日
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDL + '">氏名</td>' +
+          '<td style="' + TDC + '" colspan="4">' + v(name) + '</td>' +
+          '<td style="' + TDL + '">生年月日</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(fmtJpDate(g('birthday'))) + '</td>' +
+        '</tr>' +
+
+        // 8,9行目: 住所 rowspan=2 (居住/住民票) と 電話番号 rowspan=2 (自宅/携帯)
+        '<tr>' +
+          ck +
+          '<td style="' + TDL + '" rowspan="2">住所</td>' +
+          '<td style="' + TDL + '">居住</td>' +
+          '<td style="' + TD  + '" colspan="4">〒　' + v(address) + '</td>' +
+          '<td style="' + TDL + '" rowspan="2">電話<br>番号</td>' +
+          '<td style="' + TD  + '" colspan="2">自宅（　　）　　　－' + (jitaku ? '　' + v(jitaku) : '') + '</td>' +
+        '</tr>' +
+        '<tr>' +
+          ck +
+          '<td style="' + TDL + '">住民票</td>' +
+          '<td style="' + TD  + '" colspan="4">〒　' + v(jyuminhyo) + '</td>' +
+          '<td style="' + TD  + '" colspan="2">' + v(keitai) + '</td>' +
+        '</tr>' +
+
+        // 10行目: 緊急連絡先
+        '<tr>' +
+          ck +
+          '<td style="' + TDL + '">緊急連絡先</td>' +
+          '<td style="' + TD  + '" colspan="7">氏名：' + v(emName) + '　　　　続柄：' + v(emRel) + '　　　　TEL：' + v(emTel) + '</td>' +
+        '</tr>' +
+
+        // 11行目: 対象車両 チェック
+        '<tr>' +
+          ck +
+          '<td style="' + TDL + '" rowspan="3">対象車両</td>' +
+          '<td style="' + TD  + '" colspan="7">' +
+            chk(true) + '普通自動車　・　☐軽自動車　・　☐自動二輪車　・　☐原動機付自転車　・　☐自転車' +
+          '</td>' +
+        '</tr>' +
+        // 12,13行目: 対象車両 詳細 (メーカー名/車名/登録番号(4列)/排気量)
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDL + '">メーカー名</td>' +
+          '<td style="' + TDL + '">車名</td>' +
+          '<td style="' + TDL + '" colspan="4">登録番号<br><span style="font-weight:400;font-size:7.5pt;">地域　用途番号　記号　指定番号</span></td>' +
+          '<td style="' + TDL + '">排気量</td>' +
+        '</tr>' +
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDC + '">' + v(carMaker) + '</td>' +
+          '<td style="' + TDC + '">' + v(carName) + '</td>' +
+          '<td style="' + TDC + '">' + v(cn.region) + '</td>' +
+          '<td style="' + TDC + '">' + v(cn.usage) + '</td>' +
+          '<td style="' + TDC + '">' + v(cn.symbol) + '</td>' +
+          '<td style="' + TDC + '">' + v(cn.assign) + '</td>' +
+          '<td style="' + TDC + '">' + v(carDispDisplay) + '</td>' +
+        '</tr>' +
+
+        // 14行目: 車検満了日 / 初登録日
+        '<tr>' +
+          ck +
           '<td style="' + TDL + '">車検満了日</td>' +
-          '<td style="' + TD  + '" colspan="5">' +
-            (shakenNo ? '第' + v(shakenNo) + '号　　' : '') + v(shakenExp) +
-          '</td>' +
+          '<td style="' + TDC + '" colspan="4">' + v(shakenExp) + '</td>' +
+          '<td style="' + TDL + '">初登録日</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(firstReg) + '</td>' +
         '</tr>' +
-        // 5,6行目: 自賠責保険（保険会社名|保険満了日 / 保険証番号）
+
+        // 15行目: 自賠責保険 - 保険会社名 / 証券番号
         '<tr>' +
-          '<td style="' + TDL + '" rowspan="2">自賠責保険</td>' +
+          ck +
+          '<td style="' + TDL + '">自賠責保険</td>' +
           '<td style="' + TDL + '">保険会社名</td>' +
-          '<td style="' + TD  + '" colspan="2">' + v(jbCo) + '</td>' +
-          '<td style="' + TDL + '">保険満了日</td>' +
-          '<td style="' + TD  + '">' + v(jbExp) + '</td>' +
+          '<td style="' + TDC + '" colspan="3">' + v(jbCo) + '</td>' +
+          '<td style="' + TDL + '">証券番号</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(jbNo) + '</td>' +
         '</tr>' +
+
+        // 任意保険 (6行で構成: 保険会社名/証券番号、保険期間、対人＋搭乗者傷害、対物＋人身傷害、車両)
         '<tr>' +
-          '<td style="' + TDL + '">保険証番号</td>' +
-          '<td style="' + TD  + '" colspan="4">' + v(jbNo) + '</td>' +
-        '</tr>' +
-        // 7,8行目: 任意保険（保険会社名|保険満了日 / 保険証番号）
-        '<tr>' +
-          '<td style="' + TDL + '" rowspan="2">任意保険</td>' +
+          ck +
+          '<td style="' + TDL + '" rowspan="5">任意保険<br>（契約条件）</td>' +
           '<td style="' + TDL + '">保険会社名</td>' +
-          '<td style="' + TD  + '" colspan="2">' + v(niCo) + '</td>' +
-          '<td style="' + TDL + '">保険満了日</td>' +
-          '<td style="' + TD  + '">' + v(niExp) + '</td>' +
+          '<td style="' + TDC + '" colspan="3">' + v(niCo) + '</td>' +
+          '<td style="' + TDL + '">証券番号</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(niNo) + '</td>' +
         '</tr>' +
         '<tr>' +
-          '<td style="' + TDL + '">保険証番号</td>' +
-          '<td style="' + TD  + '" colspan="4">' + v(niNo) + '</td>' +
+          ckEmpty +
+          '<td style="' + TDL + '">保険期間</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(niStartW) + '</td>' +
+          '<td style="' + TDC + '">〜</td>' +
+          '<td style="' + TDC + '" colspan="3">' + v(niExpW) + '</td>' +
         '</tr>' +
-        // 9行目: (契約条件) 対人/対物/人身傷害
+        // 対人 + 搭乗者傷害
         '<tr>' +
-          '<td style="' + TDL + '">(契約条件)</td>' +
-          '<td style="' + TD  + 'font-size:9pt;" colspan="5">' +
-            '対人 <span style="display:inline-block;min-width:64px;text-align:center;border-bottom:0.5pt solid #999;">' + v(taijin) + '</span> 円　' +
-            '対物 <span style="display:inline-block;min-width:64px;text-align:center;border-bottom:0.5pt solid #999;">' + v(taibutsu) + '</span> 円　' +
-            '人身傷害 <span style="display:inline-block;min-width:52px;text-align:center;border-bottom:0.5pt solid #999;">' + v(jinshin) + '</span> 万円' +
-          '</td>' +
+          ck +
+          '<td style="' + TDL + '" rowspan="2">対人</td>' +
+          '<td style="' + TD  + '" colspan="3">' + chk(taijinMugen) + '無制限　　・　　☐' +
+            '<span style="display:inline-block;min-width:48px;text-align:center;border-bottom:0.4pt dotted #777;">' + (taijinMugen ? '' : v(taijin)) + '</span> 万円</td>' +
+          '<td style="' + TDL + '">搭乗者傷害</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(tojo) + (tojo && tojo.indexOf('万円')<0 ? '万円' : '') + '</td>' +
         '</tr>' +
-        // 10行目: 運転免許証 種類/有効期限/番号
         '<tr>' +
-          '<td style="' + TDL + '">運転免許証</td>' +
+          ckEmpty +
+          '<td style="' + TDL + '">条件</td>' +
+          '<td style="' + TDC + '" colspan="2">' + (taijinMugen ? '無制限' : '') + '</td>' +
+          '<td style="' + TDL + '">条件</td>' +
+          '<td style="' + TDC + '" colspan="2">1,000万円以上</td>' +
+        '</tr>' +
+        // 対物 + 人身傷害
+        '<tr>' +
+          ck +
+          '<td style="' + TDL + '">対物</td>' +
+          '<td style="' + TD  + '" colspan="3">' + chk(taibutsuMugen) + '無制限　　・　　☐' +
+            '<span style="display:inline-block;min-width:48px;text-align:center;border-bottom:0.4pt dotted #777;">' + (taibutsuMugen ? '' : v(taibutsu)) + '</span> 万円</td>' +
+          '<td style="' + TDL + '">人身傷害</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(jinshin) + (jinshin && jinshin.indexOf('万円')<0 ? '万円' : '') + '</td>' +
+        '</tr>' +
+        // 条件 (対物) + 車両
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDL + '">条件</td>' +
+          '<td style="' + TDL + '">条件</td>' +
+          '<td style="' + TDC + '" colspan="2">1,000万円以上</td>' +
+          '<td style="' + TDL + '">車両</td>' +
+          '<td style="' + TDC + '" colspan="3">' + v(carHoken) + (carHoken ? '万円' : '　　　　万円') + '　（免責　　　　万円）</td>' +
+        '</tr>' +
+
+        // 運転免許証 (3行)
+        '<tr>' +
+          ck +
+          '<td style="' + TDL + '" rowspan="3">運転免許証<br><span style="font-weight:400;font-size:7.5pt;">（所持者は<br>全て記入）</span></td>' +
           '<td style="' + TDL + '">種類</td>' +
-          '<td style="' + TD  + '">' + v(lcType) + '</td>' +
-          '<td style="' + TDL + '">免許証有効期限</td>' +
-          '<td style="' + TD  + '" colspan="2">' + v(lcExp) +
-            '　<span style="font-weight:600;">免許証番号</span>　' + v(lcNo) + '</td>' +
-        '</tr>' +
-        // 11行目: 通勤距離 / 通勤時間
-        '<tr>' +
-          '<td style="' + TDL + '">通勤距離</td>' +
-          '<td style="' + TD  + 'text-align:center;" colspan="2">' + v(tsuKm) + '　　km</td>' +
-          '<td style="' + TDL + '">通勤時間</td>' +
-          '<td style="' + TD  + 'text-align:center;" colspan="2">' + v(tsuMin) + '　　分</td>' +
-        '</tr>' +
-        // 12行目: 通勤経路 (大きな空欄。ご本人が経路図を貼付)
-        '<tr>' +
-          '<td style="' + TDL + '">通勤経路</td>' +
-          '<td style="' + TD  + 'position:relative;height:65mm;vertical-align:top;" colspan="5">' +
-            '<div style="font-size:8pt;color:#888;position:absolute;bottom:4px;right:8px;">※経路図（Google Mapなど）を貼付してください</div>' +
+          '<td style="' + TD  + '" colspan="6">（ ' +
+            chk(lcOgata) + '大型 ・ ' + chk(lcChugata) + '中型 ・ ' + chk(lcJunCh) + '準中型 ・ ' +
+            chk(lcFutsu) + '普通 ・ ' + chk(lcOgataNi) + '大型二輪 ・ ' + chk(lcFutsuNi) + '普通二輪 ・ ' +
+            chk(lcGenfu) + '原付 ・ ' + chk(lcOther) + 'その他 ）' +
           '</td>' +
+        '</tr>' +
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDL + '">番号</td>' +
+          '<td style="' + TDC + '" colspan="6">' + v(lcNo) + '</td>' +
+        '</tr>' +
+        '<tr>' +
+          ckEmpty +
+          '<td style="' + TDL + '">取得年月日</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(lcGet) + '</td>' +
+          '<td style="' + TDL + '" colspan="2">有効期限</td>' +
+          '<td style="' + TDC + '" colspan="2">' + v(lcExp) + '</td>' +
         '</tr>' +
       '</table>' +
 
-      // ※1 注意事項
-      '<div style="margin-top:8px;font-size:9.5pt;line-height:1.65;">' +
-        '<div><span style="font-weight:700;">※1　【注意事項】</span>次のどれかに該当するときは、直ちに届け出ること。</div>' +
-        '<div style="padding-left:18px;">' +
-          '①氏名、住所、車両を変更をしたとき<br>' +
-          '②通勤経路、通勤方法を変更したとき<br>' +
-          '③保険契約の条件を変更、更新したとき<br>' +
-          '④運転免許証を更新、停止処分、取り消し処分を受けたとき。' +
+      // 注意事項 + 押印欄 (2カラム: 左=注意事項テキスト / 右=押印テーブル)
+      '<div style="display:flex;gap:8px;margin-top:5px;align-items:flex-start;">' +
+        '<div style="flex:1;font-size:7.8pt;line-height:1.55;">' +
+          '<div style="font-weight:700;">【注意事項】</div>' +
+          '<div style="padding-left:6px;">' +
+            '◎自動二輪、原動機付自転車も任意保険に加入すること。<br>' +
+            '◎車種区分、対象車両、任意保険条件欄、運転免許証種類欄は、いずれかを〇で囲んで下さい。<br>' +
+            '◎任意保険の条件は、対人：無制限、対物：1,000万円以上、搭乗者傷害（または同等の保険）：1,000万円以上に加入すること。<br>' +
+            '◎次のいずれかに該当するときは、速やかに届け出ること。' +
+          '</div>' +
+          '<div style="padding-left:18px;">' +
+            '（１）氏名・住所を変更したとき<br>' +
+            '（２）車両を変更したとき<br>' +
+            '（３）通勤経路・通勤方法を変更したとき<br>' +
+            '（４）保険契約の条件を変更したとき' +
+          '</div>' +
+          '<div style="padding-left:6px;margin-top:3px;">' +
+            '<span style="font-weight:700;text-decoration:underline;">※ 前回の申請時から変更のある項目は、項目左側の□欄に<br>　　チェックマークを記載のこと</span><br>' +
+            '※ 安全運転管理者は人事課へ送付すること<br>' +
+            '※ 申請書に記載いただいた情報は、この申請にのみ使用し、他の目的では一切使用しません。' +
+          '</div>' +
+        '</div>' +
+        '<div style="min-width:200px;">' +
+          '<table style="border-collapse:collapse;font-size:8pt;width:100%;">' +
+            '<tr>' +
+              '<td style="border:0.6pt solid #000;padding:3px;text-align:center;width:33%;">部　署　長<br><span style="font-size:7pt;">(受付・審査)</span></td>' +
+              '<td style="border:0.6pt solid #000;padding:3px;text-align:center;width:34%;">安全運転管理者<br><span style="font-size:7pt;">(許可・保管)</span></td>' +
+              '<td style="border:0.6pt solid #000;padding:3px;text-align:center;width:33%;">人　事　課<br><span style="font-size:7pt;">登　録</span></td>' +
+            '</tr>' +
+            '<tr>' +
+              '<td style="border:0.6pt solid #000;height:34px;"></td>' +
+              '<td style="border:0.6pt solid #000;height:34px;"></td>' +
+              '<td style="border:0.6pt solid #000;height:34px;"></td>' +
+            '</tr>' +
+          '</table>' +
+          '<div style="text-align:right;font-size:7.5pt;color:#333;margin-top:4px;">（裏面の通勤経路も記入のこと）<br>ＡＳＴＩ株式会社　改訂 2024.08.01</div>' +
         '</div>' +
       '</div>' +
 
-      // ※2 誓約
-      '<div style="margin-top:6px;font-size:9.5pt;line-height:1.65;">' +
-        '<div><span style="font-weight:700;">※2　【誓約】</span></div>' +
-        '<div style="padding-left:18px;">' +
-          '私は交通法規を遵守し、事故防止に万全を期して常に運転いたします。<br>' +
-          '①制限速度は必ず守る<br>' +
-          '②交差点では必ずあんぜんを確かめ、一時停止は必ずとまる。<br>' +
-          '③横断しようとする歩行者の安全を守る<br>' +
-          '④運転中のスマートフォン及び携帯などの操作は厳禁<br>' +
-          '⑤飲酒運転は絶対にしない。' +
+      '<div style="text-align:right;font-size:7pt;color:#888;margin-top:4px;">安全運転管理規程</div>' +
+    '</div>';
+
+  // ---- ページ2: 誓約書 + 私の通勤経路 ----
+  var page2 =
+    '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;font-size:9pt;font-family:\'游明朝\',\'Yu Mincho\',\'MS Mincho\',\'ＭＳ 明朝\',serif;">' +
+      '<div style="font-size:8pt;color:#444;margin-bottom:4px;">様式－２</div>' +
+
+      // 誓約書 タイトル(枠付き、中央)
+      '<div style="text-align:center;margin:4px 0 8px;">' +
+        '<span style="display:inline-block;border:1pt solid #000;padding:4px 36px;font-size:16pt;font-weight:700;letter-spacing:8px;">誓約書</span>' +
+      '</div>' +
+
+      // ASTI様 (左寄せだが少しインデント)
+      '<div style="font-size:11pt;font-weight:700;letter-spacing:2px;margin-left:50px;">ＡＳＴＩ株式会社　　様</div>' +
+      '<div style="text-align:center;font-size:10pt;margin:8px 0 4px;">私は交通法規を遵守し、事故防止に万全を期して通勤いたします。</div>' +
+      '<div style="text-align:center;font-size:10pt;font-weight:600;">（安全運転５則）</div>' +
+      '<ol style="margin:6px auto 0;width:50%;font-size:10pt;line-height:1.85;padding-left:24px;">' +
+        '<li>制限速度は必ず守る</li>' +
+        '<li>カーブの手前でスピードを落とす</li>' +
+        '<li>交差点では必ず安全を確かめる</li>' +
+        '<li>一時停止で横断歩行者の安全を守る</li>' +
+        '<li>心と体のコンディションを考えて運転する</li>' +
+      '</ol>' +
+
+      // 日付 + 氏名 (本人直筆)
+      '<div style="margin:18px 0 4px;font-size:10.5pt;display:flex;align-items:flex-end;gap:8px;">' +
+        '<div style="margin-left:60px;">' +
+          '<span style="display:inline-block;min-width:60px;border-bottom:0.6pt solid #000;text-align:center;padding:0 6px;">' + v(kinyuYMD.y) + '</span> 年 ' +
+          '<span style="display:inline-block;min-width:30px;border-bottom:0.6pt solid #000;text-align:center;padding:0 6px;">' + v(kinyuYMD.m) + '</span> 月 ' +
+          '<span style="display:inline-block;min-width:30px;border-bottom:0.6pt solid #000;text-align:center;padding:0 6px;">' + v(kinyuYMD.d) + '</span> 日' +
+        '</div>' +
+        '<div style="margin-left:30px;">' +
+          '氏　名　<span style="display:inline-block;min-width:260px;border-bottom:0.6pt solid #000;padding:0 8px;">　</span>' +
+          '<span style="font-size:8pt;color:#666;margin-left:6px;">（本人直筆のこと）</span>' +
         '</div>' +
       '</div>' +
 
-      // 理解確認 + 署名欄
-      '<div style="margin-top:10px;font-size:10pt;">' +
-        '・上記マイカー通勤申請、注意事項、誓約について理解しました。' +
+      // 「私の通勤経路」タイトル
+      '<div style="text-align:center;margin:18px 0 6px;">' +
+        '<span style="display:inline-block;border:1pt solid #000;padding:4px 36px;font-size:14pt;font-weight:700;letter-spacing:6px;">私の通勤経路</span>' +
       '</div>' +
-      '<div style="margin-top:14px;text-align:right;font-size:10.5pt;">' +
-        '<span style="display:inline-block;min-width:50px;text-align:center;border-bottom:0.5pt solid #000;padding:0 6px;">' + v(kinyuYMD.y) + '</span> 年 ' +
-        '<span style="display:inline-block;min-width:30px;text-align:center;border-bottom:0.5pt solid #000;padding:0 6px;">' + v(kinyuYMD.m) + '</span> 月 ' +
-        '<span style="display:inline-block;min-width:30px;text-align:center;border-bottom:0.5pt solid #000;padding:0 6px;">' + v(kinyuYMD.d) + '</span> 日　　　' +
-        '氏名　<span style="display:inline-block;min-width:200px;border-bottom:0.5pt solid #000;padding:0 8px;">' + v(name) + '</span>' +
+      '<div style="text-align:center;font-size:9pt;line-height:1.5;">' +
+        '私は下図のような経路で通勤しています。<br>' +
+        '通勤途中で、危険と思われる<u>箇所（赤〇印）は下図の通りです。</u>特に安全に注意して通勤します。' +
       '</div>' +
+      '<div style="text-align:center;font-size:10pt;font-weight:600;margin-top:8px;">自宅より会社（工場）まで</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:8.5pt;margin:2px 4px 2px;">' +
+        '<span>（経路図）</span>' +
+        '<span style="font-size:8pt;color:#444;">※　往復経路が違う場合は両方記入すること</span>' +
+      '</div>' +
+      // 経路図エリア (大きな空欄)
+      '<div style="border:0.8pt solid #000;height:96mm;background:#fafafa;position:relative;">' +
+        '<div style="position:absolute;bottom:6px;right:8px;font-size:8pt;color:#888;">＊地図（Google Map）を貼付してください</div>' +
+      '</div>' +
+
+      // 通勤方法 + 通勤距離・通勤時間
+      '<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:9pt;">' +
+        '<tr>' +
+          '<td style="vertical-align:top;width:50%;padding:4px 8px;">' +
+            '<div style="font-weight:700;text-decoration:underline;">【通勤方法】</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;padding-left:8px;margin-top:3px;">' +
+              '<span>' + chk(tm1Walk) + '１．徒歩</span>' +
+              '<span>' + chk(tm5Futsu) + '５．普通車</span>' +
+              '<span>' + chk(tm2Bike) + '２．自転車</span>' +
+              '<span>' + chk(tm6Pub) + '６．公共交通機関</span>' +
+              '<span>' + chk(tm3Nirin) + '３．自動二輪/原付</span>' +
+              '<span>' + chk(tm7Other) + '７．その他（　　　　　　）</span>' +
+              '<span>' + chk(tm4Kei) + '４．軽自動車</span>' +
+              '<span></span>' +
+            '</div>' +
+          '</td>' +
+          '<td style="vertical-align:top;width:50%;padding:4px 8px;">' +
+            '<div>・通勤距離　：　<span style="display:inline-block;min-width:48px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;">' + v(tsuKm) + '</span>Km　（片道）</div>' +
+            '<div style="font-size:7.5pt;color:#666;text-align:right;margin-top:1px;">※小数点第一位まで記入ください。</div>' +
+            '<div style="margin-top:8px;">・通勤時間　　：　約　<span style="display:inline-block;min-width:40px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;">' + v(tsuMin) + '</span> 分</div>' +
+          '</td>' +
+        '</tr>' +
+      '</table>' +
+      '<div style="font-weight:700;margin-top:6px;text-align:center;">※公共交通機関の場合、定期券のコピーまたは領収書を添付ください。</div>' +
+      '<div style="text-align:right;font-size:7pt;color:#888;margin-top:6px;">安全運転管理規程</div>' +
     '</div>';
 
   switchScreen('haisenDocScreen');
-  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page1 + '</div>';
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page1 + page2 + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
   ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
