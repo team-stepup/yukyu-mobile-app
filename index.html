@@ -10155,6 +10155,210 @@ async function _doMaicarTsukinASTI() {
   }
 }
 
+// ============================================================
+// マイカー通勤届 経路マップ自動生成
+//   OSRM 公開エンドポイントで運転ルートを取得 → 国土地理院タイル
+//   (CORS対応済) に経路ポリラインと自宅/会社マーカーを重ねた
+//   静止画 (data URL) を生成。距離 (km) と所要時間 (分) も返す。
+// ============================================================
+function _maicarLonToTileX(lon, z) { return (lon + 180) / 360 * Math.pow(2, z); }
+function _maicarLatToTileY(lat, z) {
+  return (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z);
+}
+
+async function _maicarFetchRoute(srcPos, dstPos) {
+  var url = 'https://router.project-osrm.org/route/v1/driving/' +
+    srcPos.lng + ',' + srcPos.lat + ';' + dstPos.lng + ',' + dstPos.lat +
+    '?overview=full&geometries=geojson';
+  var resp = await fetch(url);
+  if (!resp.ok) throw new Error('OSRM HTTP ' + resp.status);
+  var data = await resp.json();
+  if (!data.routes || !data.routes.length) throw new Error('経路が見つかりません');
+  var r = data.routes[0];
+  return { distMeters: r.distance, durSeconds: r.duration, coords: r.geometry.coordinates };
+}
+
+async function _maicarRenderMapImage(srcPos, dstPos, coords) {
+  // 1. bbox 計算 (経路 + 始終点)
+  var lats = coords.map(function(c){ return c[1]; });
+  var lngs = coords.map(function(c){ return c[0]; });
+  lats.push(srcPos.lat, dstPos.lat); lngs.push(srcPos.lng, dstPos.lng);
+  var minLat = Math.min.apply(null, lats), maxLat = Math.max.apply(null, lats);
+  var minLng = Math.min.apply(null, lngs), maxLng = Math.max.apply(null, lngs);
+  // 余白 15%
+  var padLat = (maxLat - minLat) * 0.15 || 0.005;
+  var padLng = (maxLng - minLng) * 0.15 || 0.005;
+  minLat -= padLat; maxLat += padLat; minLng -= padLng; maxLng += padLng;
+
+  // 2. 出力サイズ (経路図ボックスの縦横比に合わせる: 約1.85:1)
+  var W = 1000, H = 540;
+
+  // 3. ズーム決定 (bbox が W×H に収まる最大ズーム)
+  var zoom = 10;
+  for (var z = 17; z >= 5; z--) {
+    var pxW = (_maicarLonToTileX(maxLng, z) - _maicarLonToTileX(minLng, z)) * 256;
+    var pxH = (_maicarLatToTileY(minLat, z) - _maicarLatToTileY(maxLat, z)) * 256;
+    if (pxW <= W && pxH <= H) { zoom = z; break; }
+  }
+
+  // 4. タイル範囲
+  var x1 = Math.floor(_maicarLonToTileX(minLng, zoom));
+  var x2 = Math.floor(_maicarLonToTileX(maxLng, zoom));
+  var y1 = Math.floor(_maicarLatToTileY(maxLat, zoom));
+  var y2 = Math.floor(_maicarLatToTileY(minLat, zoom));
+  var tilesX = x2 - x1 + 1, tilesY = y2 - y1 + 1;
+  if (tilesX * tilesY > 80) throw new Error('範囲が広すぎます');
+
+  var canvasW = tilesX * 256, canvasH = tilesY * 256;
+  var canvas = document.createElement('canvas');
+  canvas.width = canvasW; canvas.height = canvasH;
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#dde4ea';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  // 5. 国土地理院タイル (std) を並列読み込み (CORS対応)
+  var promises = [];
+  for (var tx = x1; tx <= x2; tx++) {
+    for (var ty = y1; ty <= y2; ty++) {
+      (function(_tx, _ty) {
+        promises.push(new Promise(function(resolve) {
+          var img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = function() {
+            try { ctx.drawImage(img, (_tx - x1) * 256, (_ty - y1) * 256); } catch (_) {}
+            resolve(true);
+          };
+          img.onerror = function() { resolve(false); };
+          img.src = 'https://cyberjapandata.gsi.go.jp/xyz/std/' + zoom + '/' + _tx + '/' + _ty + '.png';
+        }));
+      })(tx, ty);
+    }
+  }
+  var loadResults = await Promise.all(promises);
+  if (loadResults.filter(Boolean).length === 0) throw new Error('地図タイル読み込み失敗');
+
+  // 6. lat/lng → canvas pixel 投影
+  function proj(lng, lat) {
+    return { x: (_maicarLonToTileX(lng, zoom) - x1) * 256, y: (_maicarLatToTileY(lat, zoom) - y1) * 256 };
+  }
+
+  // 7. ポリライン描画 (白縁取り + 青本線)
+  function drawPath(width, style) {
+    ctx.strokeStyle = style; ctx.lineWidth = width;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (var i = 0; i < coords.length; i++) {
+      var pt = proj(coords[i][0], coords[i][1]);
+      if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.stroke();
+  }
+  drawPath(11, 'rgba(255,255,255,0.95)');
+  drawPath(6, '#1976d2');
+
+  // 8. マーカー (自宅: 緑、会社: 赤)
+  function marker(lng, lat, color, label) {
+    var pt = proj(lng, lat);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath(); ctx.arc(pt.x + 2, pt.y + 3, 18, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, 18, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px "Yu Gothic","Hiragino Kaku Gothic ProN",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, pt.x, pt.y);
+  }
+  marker(srcPos.lng, srcPos.lat, '#2e7d32', '自');
+  marker(dstPos.lng, dstPos.lat, '#c62828', '会');
+
+  // 9. W×H でセンタリングクロップ
+  var p1 = proj(minLng, minLat), p2 = proj(maxLng, maxLat);
+  var cx = (p1.x + p2.x) / 2, cy = (p1.y + p2.y) / 2;
+  var cropX = Math.max(0, Math.min(canvasW - W, cx - W / 2));
+  var cropY = Math.max(0, Math.min(canvasH - H, cy - H / 2));
+  var out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  out.getContext('2d').drawImage(canvas, cropX, cropY, W, H, 0, 0, W, H);
+
+  try { return out.toDataURL('image/jpeg', 0.85); }
+  catch (e) { throw new Error('画像化失敗 (CORS): ' + e.message); }
+}
+
+// メイン: 社員 emp の住所→派遣先住所 の経路を生成
+async function _maicarBuildRouteForEmployee(emp) {
+  var km = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap) ? hakenKeyMap : {};
+  var homeKey = km['address'];
+  var homeAddr = (homeKey && emp[homeKey] != null) ? String(emp[homeKey]).trim() : '';
+  if (!homeAddr) throw new Error('社員住所が未登録');
+
+  var bukaVal = (typeof getBukaValue === 'function') ? getBukaValue(emp) : '';
+  if (!bukaVal) throw new Error('派遣先 (部課) が未設定');
+  var hakenMap = await loadHakensakiByBukaMap();
+  if (!hakenMap) throw new Error('派遣先住所マップ取得失敗');
+  var workAddr = hakenMap[bukaVal];
+  if (!workAddr) {
+    var num = (bukaVal.match(/^(\d+)/) || [])[1];
+    if (num) {
+      var k2 = Object.keys(hakenMap).find(function(k){ return k.indexOf(num) === 0; });
+      if (k2) workAddr = hakenMap[k2];
+    }
+  }
+  if (!workAddr) throw new Error('派遣先「' + bukaVal + '」の住所が見つかりません');
+
+  var src = await _geocodeJp(homeAddr);
+  if (!src) throw new Error('社員住所のジオコード失敗');
+  var dst = await _geocodeJp(workAddr);
+  if (!dst) throw new Error('派遣先住所のジオコード失敗');
+
+  var route = await _maicarFetchRoute(src, dst);
+  var dataUrl = await _maicarRenderMapImage(src, dst, route.coords);
+  return {
+    dataUrl: dataUrl,
+    distKm: route.distMeters / 1000,
+    durMin: route.durSeconds / 60,
+    homeAddr: homeAddr,
+    workAddr: workAddr
+  };
+}
+
+// レンダー後に呼び出して経路図 + 距離/時間 を自動充填
+async function _maicarTryFillRoute(emp, opts) {
+  opts = opts || {};
+  var box = document.getElementById('maicarRouteMapBox');
+  var status = document.getElementById('maicarRouteStatus');
+  var kmCell = document.getElementById('maicarRouteKmCell');
+  var minCell = document.getElementById('maicarRouteMinCell');
+  if (!box) return;
+  // 既存値があり、強制再取得でなければスキップしない (常に自動取得して上書き)
+  try {
+    if (status) status.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;font-size:10pt;color:#1565c0;"><div>🗺️ 経路図を生成中…</div><div style="font-size:8pt;color:#888;">国土地理院タイル + OSRM</div></div>';
+    var r = await _maicarBuildRouteForEmployee(emp);
+    // 画像差し替え
+    box.innerHTML =
+      '<img src="' + r.dataUrl + '" alt="通勤経路" style="width:100%;height:100%;object-fit:cover;display:block;">' +
+      '<div style="position:absolute;left:6px;bottom:4px;background:rgba(255,255,255,0.85);padding:1px 6px;border-radius:3px;font-size:7pt;color:#444;">地理院タイル / OSRM</div>' +
+      '<div style="position:absolute;right:6px;top:6px;background:rgba(255,255,255,0.92);padding:3px 8px;border-radius:4px;font-size:9pt;color:#222;border:0.4pt solid #999;font-weight:600;">' +
+        '自🟢 → 会🔴　' + r.distKm.toFixed(1) + ' km / 約 ' + Math.round(r.durMin) + ' 分' +
+      '</div>';
+    // 距離/時間 を反映
+    if (kmCell) kmCell.textContent = r.distKm.toFixed(1);
+    if (minCell) minCell.textContent = String(Math.round(r.durMin));
+    if (typeof showToast === 'function') {
+      showToast('✓ 経路図を自動生成 (' + r.distKm.toFixed(1) + ' km / 約 ' + Math.round(r.durMin) + ' 分)', 'success');
+    }
+  } catch (e) {
+    console.warn('maicar route auto fill failed:', e);
+    if (status) {
+      status.innerHTML =
+        '<div style="text-align:center;color:#888;font-size:9pt;line-height:1.6;padding:12px;">' +
+          '<div style="font-size:11pt;margin-bottom:4px;">⚠ 経路の自動取得に失敗</div>' +
+          '<div style="font-size:8pt;color:#999;">' + escHtml(String(e.message || e)) + '</div>' +
+          '<div style="font-size:8pt;color:#999;margin-top:6px;">※ Google Map等から経路図を貼付してください</div>' +
+        '</div>';
+    }
+  }
+}
+
 function renderMaicarTsukinASTI(emp, opts) {
   opts = opts || {};
   window._currentHaisenDocMode = 'maicarASTI';
@@ -10627,9 +10831,9 @@ function renderMaicarTsukinASTI(emp, opts) {
         '<span>（経路図）</span>' +
         '<span style="font-size:8pt;color:#444;">※　往復経路が違う場合は両方記入すること</span>' +
       '</div>' +
-      // 経路図エリア (大きな空欄)
-      '<div style="border:0.8pt solid #000;height:96mm;background:#fafafa;position:relative;">' +
-        '<div style="position:absolute;bottom:6px;right:8px;font-size:8pt;color:#888;">＊地図（Google Map）を貼付してください</div>' +
+      // 経路図エリア (大きな空欄 → 自動で地理院タイルの経路マップを埋め込み)
+      '<div id="maicarRouteMapBox" style="border:0.8pt solid #000;height:96mm;background:#fafafa;position:relative;overflow:hidden;">' +
+        '<div id="maicarRouteStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10pt;color:#888;">⌛ 経路図を準備中…</div>' +
       '</div>' +
 
       // 通勤方法 + 通勤距離・通勤時間
@@ -10649,9 +10853,9 @@ function renderMaicarTsukinASTI(emp, opts) {
             '</div>' +
           '</td>' +
           '<td style="vertical-align:top;width:50%;padding:4px 8px;">' +
-            '<div>・通勤距離　：　<span style="display:inline-block;min-width:48px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;">' + v(tsuKm) + '</span>Km　（片道）</div>' +
+            '<div>・通勤距離　：　<span id="maicarRouteKmCell" style="display:inline-block;min-width:48px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;font-weight:600;">' + v(tsuKm) + '</span>Km　（片道）</div>' +
             '<div style="font-size:7.5pt;color:#666;text-align:right;margin-top:1px;">※小数点第一位まで記入ください。</div>' +
-            '<div style="margin-top:8px;">・通勤時間　　：　約　<span style="display:inline-block;min-width:40px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;">' + v(tsuMin) + '</span> 分</div>' +
+            '<div style="margin-top:8px;">・通勤時間　　：　約　<span id="maicarRouteMinCell" style="display:inline-block;min-width:40px;text-align:right;border-bottom:0.4pt solid #888;padding:0 4px;font-weight:600;">' + v(tsuMin) + '</span> 分</div>' +
           '</td>' +
         '</tr>' +
       '</table>' +
@@ -10672,6 +10876,10 @@ function renderMaicarTsukinASTI(emp, opts) {
   if (tsBtn) { tsBtn.style.display = ''; tsBtn.disabled = false; }
   window._tsukinSaveCtx = { emp: emp, todokeDate: opts.kinyuDate || '', formType: 'maicarASTI' };
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+  // 経路マップ自動生成 (非同期。失敗しても本体は表示済みなので問題なし)
+  setTimeout(function() {
+    if (typeof _maicarTryFillRoute === 'function') _maicarTryFillRoute(emp);
+  }, 120);
 }
 
 // 通勤届 → 社員フォルダに PDF を保存 (ファイル名: 通勤届{YYYY-MM-DD}.pdf)
