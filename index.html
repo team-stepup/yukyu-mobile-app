@@ -8516,14 +8516,54 @@ function _lcsLen(a, b) {
   return max;
 }
 
+// 文字列から年(西暦)を抽出。'2026', '令和8', 'R8' 等に対応
+function _kalendarExtractYear(text) {
+  if (!text) return null;
+  var s = String(text);
+  var m = s.match(/(20[0-9]{2})/);
+  if (m) return parseInt(m[1], 10);
+  m = s.match(/令和\s*([0-9]+)/);
+  if (m) return 2018 + parseInt(m[1], 10);
+  m = s.match(/[Rr](\d+)/);
+  if (m && parseInt(m[1], 10) <= 30) return 2018 + parseInt(m[1], 10);
+  m = s.match(/平成\s*([0-9]+)/);
+  if (m) return 1988 + parseInt(m[1], 10);
+  return null;
+}
+
 // 派遣先名 + 補助情報 (組織単位/部署等) に最も一致するカレンダーファイルを返す
 // primaryName: 派遣先名 (必須)
 // secondaryHints: [部署, 組織単位, ...] 補助文字列 (任意, 上位タイブレイカー用)
-function pickKalendarFileForHakensaki(files, primaryName, secondaryHints) {
+// targetYear: 優先する年 (省略時は当年)。マッチする年のファイルを優先、なければフォールバック
+function pickKalendarFileForHakensaki(files, primaryName, secondaryHints, targetYear) {
   if (!files || !files.length || !primaryName) return null;
   var keyN = _kalendarNorm(primaryName);
   if (!keyN) return null;
   var hintsN = (secondaryHints || []).map(_kalendarNorm).filter(function(s) { return s.length >= 2; });
+
+  // 年フィルタ: 目標年を最優先、見つからなければ最新年で再試行、最終的に全件で再試行
+  if (!targetYear) targetYear = new Date().getFullYear();
+  function _filterByYear(yr) {
+    return files.filter(function(f) {
+      var y = _kalendarExtractYear((f._folder || '') + ' ' + (f.Name || ''));
+      return y === yr;
+    });
+  }
+  // 1段階目: 目標年で絞り込み
+  var workingFiles = _filterByYear(targetYear);
+  if (!workingFiles.length) {
+    // 2段階目: 全ファイルの中で最新年を採用 (古いカレンダーが選ばれないように)
+    var maxYear = 0;
+    files.forEach(function(f) {
+      var y = _kalendarExtractYear((f._folder || '') + ' ' + (f.Name || ''));
+      if (y && y > maxYear) maxYear = y;
+    });
+    if (maxYear > 0) workingFiles = _filterByYear(maxYear);
+  }
+  // 3段階目: それでも見つからなければ全ファイルから探す (年情報なしのファイル等)
+  if (!workingFiles.length) workingFiles = files;
+  files = workingFiles;
+  console.log('[kalendar] year filter: target=' + targetYear + ' → working files=' + files.length);
 
   // 各候補をスコアリング:
   //   primaryScore = LCS(候補, primary) (主スコア)
