@@ -10268,40 +10268,42 @@ function renderSagyoushaBarcode(emp) {
   // ID (QR を後で描画する img + 画面表示用カードの id)
   var qrId = 'sagyoushaQR_' + (Date.now() % 100000);
 
-  // ---- 名札本体: 縦22mm × 横45mm 3 段構成 ----
+  // ---- 名札本体: 縦22mm × 横45mm 3 段構成 (ロゴ大型化) ----
   //   ┌─────────────────────────────────┐
-  //   │   [STEP・UP ロゴ センター]   [QR] │ ← 上段 6mm
+  //   │   [STEP・UP ロゴ 大]      [QR]    │ ← 上段 8.5mm (ロゴが主役)
   //   │─────────────────────────────────│
-  //   │       ナガオ　カルラ              │ ← 中段 9mm (大きく)
+  //   │       ナガオ　カルラ              │ ← 中段 7.5mm (氏名)
   //   │─────────────────────────────────│
-  //   │       NAGAO CARLA                 │ ← 下段 7mm (青帯)
+  //   │       NAGAO CARLA                 │ ← 下段 6mm (青帯)
   //   └─────────────────────────────────┘
-  //   QR は上段右隅にスリムな小型 (4.8mm) で配置し3段の整然さを保つ
+  //   ロゴの文字高さがカタカナと同等になるよう logo height 7.5mm に拡大。
+  //   QR は右上隅の角丸オーバーレイ (3.6mm) で控えめに。
   var cardHtml =
     '<div class="sagyousha-barcode-card" style="' +
       'width:45mm;height:22mm;border:0.5pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
       'font-family:\'Yu Gothic\',\'Yu Gothic UI\',\'メイリオ\',sans-serif;page-break-inside:avoid;' +
       'display:flex;flex-direction:column;overflow:hidden;position:relative;">' +
 
-      // 上段 6mm: ロゴ (中央) + QR (右隅オーバーレイ)
-      '<div style="height:6mm;display:flex;justify-content:center;align-items:center;' +
-            'background:linear-gradient(to bottom,#f5f7fb,#fff);border-bottom:0.3pt solid #e0e4f0;position:relative;">' +
-        '<img src="logo.png" alt="STEP・UP" style="height:4.8mm;width:auto;display:block;">' +
-        '<img id="' + qrId + '" alt="" style="position:absolute;right:0.7mm;top:0.6mm;' +
-              'width:4.8mm;height:4.8mm;display:block;background:#fff;padding:0.1mm;border-radius:0.3mm;">' +
+      // 上段 8.5mm: ロゴ大型 (中央) + QR (右隅小オーバーレイ)
+      '<div style="height:8.5mm;display:flex;justify-content:center;align-items:center;' +
+            'background:linear-gradient(to bottom,#f7f9fc,#fff);border-bottom:0.3pt solid #c5cae9;position:relative;">' +
+        '<img src="logo.png" alt="STEP・UP" style="height:7.5mm;width:auto;display:block;">' +
+        '<img id="' + qrId + '" alt="" style="position:absolute;right:0.5mm;top:0.5mm;' +
+              'width:3.6mm;height:3.6mm;display:block;background:#fff;padding:0.15mm;border-radius:0.3mm;' +
+              'box-shadow:0 0 0 0.2pt #c5cae9;">' +
       '</div>' +
 
-      // 中段 (flex:1 = 約 9mm): カタカナ氏名 (大きく、視認性最優先)
+      // 中段 7.5mm: カタカナ氏名 (紺色)
       '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
-            'padding:0 1.5mm;font-size:11pt;font-weight:700;letter-spacing:1.5px;color:#1a237e;line-height:1;' +
+            'padding:0 1.5mm;font-size:10pt;font-weight:700;letter-spacing:1.2px;color:#1a237e;line-height:1;' +
             'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">' +
         escHtml(name) +
       '</div>' +
 
-      // 下段 7mm: ローマ字氏名 (青帯白文字)
-      '<div style="height:7mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
-            'display:flex;justify-content:center;align-items:center;font-size:8.5pt;font-weight:700;' +
-            'letter-spacing:1.2px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
+      // 下段 6mm: ローマ字氏名 (青帯白文字)
+      '<div style="height:6mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
+            'display:flex;justify-content:center;align-items:center;font-size:7.5pt;font-weight:700;' +
+            'letter-spacing:1px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
             'text-overflow:ellipsis;">' +
         escHtml(romajiName) +
       '</div>' +
@@ -10323,23 +10325,24 @@ function renderSagyoushaBarcode(emp) {
       header +
       cardHtml +
       '<div style="text-align:center;margin:6mm 0 2mm;font-size:7.5pt;color:#666;">― 予備 (同サイズ 45×22mm) ―</div>' +
-      // 予備カード (同サイズ 45×22mm, 3段構成)
+      // 予備カード (同サイズ 45×22mm, 3段構成・ロゴ大型版)
       '<div style="width:45mm;height:22mm;margin:0 auto;border:0.5pt solid #1a237e;background:#fff;' +
             'box-sizing:border-box;page-break-inside:avoid;display:flex;flex-direction:column;overflow:hidden;position:relative;">' +
-        '<div style="height:6mm;display:flex;justify-content:center;align-items:center;' +
-              'background:linear-gradient(to bottom,#f5f7fb,#fff);border-bottom:0.3pt solid #e0e4f0;position:relative;">' +
-          '<img src="logo.png" alt="" style="height:4.8mm;width:auto;display:block;">' +
-          '<img id="' + qrId2 + '" alt="" style="position:absolute;right:0.7mm;top:0.6mm;' +
-                'width:4.8mm;height:4.8mm;display:block;background:#fff;padding:0.1mm;border-radius:0.3mm;">' +
+        '<div style="height:8.5mm;display:flex;justify-content:center;align-items:center;' +
+              'background:linear-gradient(to bottom,#f7f9fc,#fff);border-bottom:0.3pt solid #c5cae9;position:relative;">' +
+          '<img src="logo.png" alt="" style="height:7.5mm;width:auto;display:block;">' +
+          '<img id="' + qrId2 + '" alt="" style="position:absolute;right:0.5mm;top:0.5mm;' +
+                'width:3.6mm;height:3.6mm;display:block;background:#fff;padding:0.15mm;border-radius:0.3mm;' +
+                'box-shadow:0 0 0 0.2pt #c5cae9;">' +
         '</div>' +
         '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
-              'padding:0 1.5mm;font-size:11pt;font-weight:700;letter-spacing:1.5px;color:#1a237e;line-height:1;' +
+              'padding:0 1.5mm;font-size:10pt;font-weight:700;letter-spacing:1.2px;color:#1a237e;line-height:1;' +
               'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">' +
           escHtml(name) +
         '</div>' +
-        '<div style="height:7mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
-              'display:flex;justify-content:center;align-items:center;font-size:8.5pt;font-weight:700;' +
-              'letter-spacing:1.2px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
+        '<div style="height:6mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
+              'display:flex;justify-content:center;align-items:center;font-size:7.5pt;font-weight:700;' +
+              'letter-spacing:1px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
               'text-overflow:ellipsis;">' +
           escHtml(romajiName) +
         '</div>' +
