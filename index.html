@@ -12,6 +12,7 @@
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -10220,55 +10221,70 @@ function renderSagyoushaBarcode(emp) {
     }
   }
   if (!romajiName && typeof kanaToRomaji === 'function') romajiName = kanaToRomaji(name);
-  // 派遣先名 (短縮形)
-  var hakenName = (typeof stripBukaPrefix === 'function')
-    ? stripBukaPrefix((typeof getBukaValue === 'function') ? getBukaValue(emp) : '')
-    : '';
+  romajiName = String(romajiName || '').toUpperCase();
 
-  // SVG ID (JsBarcode が描画する先)
-  var bcId = 'sagyoushaBarcodeSvg_' + (Date.now() % 100000);
+  // QR コードに埋め込む値 (社員番号 + 氏名 を改行区切り)
+  var qrPayload = String(sn || '');
 
-  // 1枚の名札 HTML — 95mm × 38mm (Avery 5160 風シール)
+  // ID (QR を後で描画する canvas + 画面表示用カードの id)
+  var qrId = 'sagyoushaQR_' + (Date.now() % 100000);
+
+  // ---- 名札本体 (サンプルに忠実): ロゴ + QR の横並び、下に氏名 (青帯) ----
+  //   レイアウト想定 (約 95mm × 32mm):
+  //     ┌────────────────────────────────┐
+  //     │  [STEP・UP ロゴ]      [QRコード]   │
+  //     │       フナヤマ　ミレナ              │
+  //     ├────────────────────────────────┤
+  //     │      FUNAYAMA MILENA  (青帯白文字) │
+  //     └────────────────────────────────┘
   var cardHtml =
     '<div class="sagyousha-barcode-card" style="' +
-      'width:95mm;height:38mm;border:1.2pt solid #000;box-sizing:border-box;' +
-      'padding:3mm 4mm;margin:0 auto 8mm;display:flex;flex-direction:column;' +
-      'justify-content:center;align-items:center;gap:1mm;font-family:\'Yu Gothic\',\'メイリオ\',sans-serif;' +
-      'background:#fff;page-break-inside:avoid;">' +
-      // 社員番号 + 派遣先
-      '<div style="display:flex;justify-content:space-between;width:100%;font-size:8pt;color:#666;">' +
-        '<span>社員番号: <b style="color:#000;font-size:10pt;">' + escHtml(sn) + '</b></span>' +
-        '<span style="font-size:8pt;">' + escHtml(hakenName) + '</span>' +
+      'width:95mm;border:1.4pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
+      'font-family:\'Yu Gothic\',\'Yu Gothic UI\',\'メイリオ\',sans-serif;page-break-inside:avoid;' +
+      'display:flex;flex-direction:column;">' +
+
+      // 上段: ロゴ (左) + 中央カタカナ氏名 + QR (右)
+      '<div style="display:flex;align-items:center;padding:2.5mm 3mm 1mm;gap:2mm;">' +
+        '<img src="logo.png" alt="STEP・UP" style="height:11mm;width:auto;flex-shrink:0;">' +
+        '<div style="flex:1;text-align:center;font-size:13pt;font-weight:700;letter-spacing:2px;color:#222;line-height:1.1;">' +
+          escHtml(name) +
+        '</div>' +
+        '<canvas id="' + qrId + '" style="width:13mm;height:13mm;flex-shrink:0;"></canvas>' +
       '</div>' +
-      // カタカナ氏名 (大)
-      '<div style="font-size:14pt;font-weight:700;letter-spacing:2px;line-height:1.1;">' + escHtml(name) + '</div>' +
-      // ローマ字氏名
-      '<div style="font-size:9pt;color:#444;line-height:1;">' + escHtml(romajiName || '') + '</div>' +
-      // バーコード本体 (SVG)
-      '<svg id="' + bcId + '" style="width:80mm;height:14mm;"></svg>' +
+
+      // 下段: ローマ字氏名 (青帯白文字)
+      '<div style="background:#1a237e;color:#fff;text-align:center;padding:2mm 2mm;font-size:13pt;font-weight:700;letter-spacing:3px;line-height:1.1;">' +
+        escHtml(romajiName) +
+      '</div>' +
     '</div>';
 
-  // ヘッダ情報 (画面上だけ。印刷時は表示)
+  // ヘッダ情報 (画面上 + 印刷時のキャプション)
   var header =
-    '<div style="text-align:center;margin-bottom:4mm;font-size:11pt;font-weight:700;">' +
+    '<div style="text-align:center;margin-bottom:3mm;font-size:10pt;font-weight:700;color:#1a237e;">' +
       '作業者バーコード名札' +
     '</div>' +
     '<div style="text-align:center;margin-bottom:6mm;font-size:8.5pt;color:#666;">' +
-      '※ シール台紙へ印刷後、タイムカード等に貼付してください。' +
+      '社員番号: <b>' + escHtml(sn) + '</b>　／　派遣先: ' + escHtml((typeof stripBukaPrefix === 'function' && typeof getBukaValue === 'function') ? stripBukaPrefix(getBukaValue(emp)) : '') +
     '</div>';
 
-  // A4 ページ枠
+  // A4 ページ枠 — メイン名札 + 持ち歩き用 小名札
+  var qrId2 = qrId + '_2';
   var page1 =
     '<div class="haisen-doc-page hd-kobetsu sagyousha-barcode-page" style="font-size:9pt;">' +
       header +
       cardHtml +
-      // 印刷時にもう少し小さなセカンダリーカード (持ち歩き用)
-      '<div style="text-align:center;margin:8mm 0 2mm;font-size:8.5pt;color:#666;">― 持ち歩き用 (小) ―</div>' +
-      '<div style="display:flex;justify-content:center;">' +
-        '<div style="width:60mm;height:25mm;border:1pt solid #000;box-sizing:border-box;padding:2mm;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:0.5mm;font-family:\'Yu Gothic\',\'メイリオ\',sans-serif;">' +
-          '<div style="font-size:10pt;font-weight:700;">' + escHtml(name) + '</div>' +
-          '<div style="font-size:7pt;color:#555;">' + escHtml(sn) + '</div>' +
-          '<svg id="' + bcId + '_2" style="width:50mm;height:8mm;"></svg>' +
+      '<div style="text-align:center;margin:8mm 0 3mm;font-size:8.5pt;color:#666;">― 持ち歩き用 (小) ―</div>' +
+      // 小サイズ版 (60mm 幅)
+      '<div style="width:60mm;margin:0 auto;border:1pt solid #1a237e;background:#fff;page-break-inside:avoid;">' +
+        '<div style="display:flex;align-items:center;padding:1.5mm 2mm 0.5mm;gap:1.5mm;">' +
+          '<img src="logo.png" alt="" style="height:7mm;width:auto;flex-shrink:0;">' +
+          '<div style="flex:1;text-align:center;font-size:9.5pt;font-weight:700;letter-spacing:1px;color:#222;line-height:1.1;">' +
+            escHtml(name) +
+          '</div>' +
+          '<canvas id="' + qrId2 + '" style="width:8mm;height:8mm;flex-shrink:0;"></canvas>' +
+        '</div>' +
+        '<div style="background:#1a237e;color:#fff;text-align:center;padding:1.2mm;font-size:9pt;font-weight:700;letter-spacing:1.5px;line-height:1.1;">' +
+          escHtml(romajiName) +
         '</div>' +
       '</div>' +
     '</div>';
@@ -10286,38 +10302,20 @@ function renderSagyoushaBarcode(emp) {
   window._tsukinSaveCtx = { emp: emp, todokeDate: '', formType: 'sagyoushaBarcode' };
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
 
-  // JsBarcode で SVG にバーコード描画 (Code 128)
-  // 社員番号が空 or 数字以外を含む場合は文字列表現で
+  // QR コード描画 (canvas, Code 128 ではなく QR Code)
   setTimeout(function() {
-    try {
-      var bcVal = String(sn || '').trim() || ' ';
-      JsBarcode('#' + bcId, bcVal, {
-        format: 'CODE128',
-        width: 2,
-        height: 40,
-        displayValue: true,
-        fontSize: 14,
-        margin: 4,
-        textMargin: 2,
-        background: '#fff',
-        lineColor: '#000'
-      });
-      JsBarcode('#' + bcId + '_2', bcVal, {
-        format: 'CODE128',
-        width: 1.4,
-        height: 22,
-        displayValue: true,
-        fontSize: 10,
-        margin: 2,
-        textMargin: 1,
-        background: '#fff',
-        lineColor: '#000'
-      });
-    } catch (e) {
-      console.error('JsBarcode error:', e);
-      showToast('バーコード生成エラー: ' + (e.message || e), 'error');
+    if (typeof QRCode === 'undefined') {
+      showToast('QR コード ライブラリ未ロード。再読み込みしてください', 'error');
+      return;
     }
-  }, 80);
+    var opts = { errorCorrectionLevel: 'M', margin: 1, scale: 6, color: { dark: '#000000', light: '#ffffff' } };
+    QRCode.toCanvas(document.getElementById(qrId), qrPayload, opts, function(err) {
+      if (err) console.error('QR error (main):', err);
+    });
+    QRCode.toCanvas(document.getElementById(qrId2), qrPayload, { ...opts, scale: 4 }, function(err) {
+      if (err) console.error('QR error (small):', err);
+    });
+  }, 100);
 }
 
 // ============================================================
