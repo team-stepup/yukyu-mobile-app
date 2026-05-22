@@ -10268,30 +10268,41 @@ function renderSagyoushaBarcode(emp) {
   // ID (QR を後で描画する img + 画面表示用カードの id)
   var qrId = 'sagyoushaQR_' + (Date.now() % 100000);
 
-  // ---- 名札本体: 縦22mm × 横45mm ピッタリ ----
-  //   レイアウト:
-  //     ┌────────────────────────┐
-  //     │ [Logo] ナガオ カルラ [QR]│ ← 上段 (約 14mm)
-  //     │      NAGAO CARLA       │ ← 下段 青帯白文字 (約 7mm)
-  //     └────────────────────────┘
-  //     枠 0.5pt 含めて 縦 22mm × 横 45mm の名札台紙にフィット
+  // ---- 名札本体: 縦22mm × 横45mm 3 段構成 ----
+  //   ┌─────────────────────────────────┐
+  //   │   [STEP・UP ロゴ センター]   [QR] │ ← 上段 6mm
+  //   │─────────────────────────────────│
+  //   │       ナガオ　カルラ              │ ← 中段 9mm (大きく)
+  //   │─────────────────────────────────│
+  //   │       NAGAO CARLA                 │ ← 下段 7mm (青帯)
+  //   └─────────────────────────────────┘
+  //   QR は上段右隅にスリムな小型 (4.8mm) で配置し3段の整然さを保つ
   var cardHtml =
     '<div class="sagyousha-barcode-card" style="' +
       'width:45mm;height:22mm;border:0.5pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
       'font-family:\'Yu Gothic\',\'Yu Gothic UI\',\'メイリオ\',sans-serif;page-break-inside:avoid;' +
-      'display:flex;flex-direction:column;overflow:hidden;">' +
+      'display:flex;flex-direction:column;overflow:hidden;position:relative;">' +
 
-      // 上段 (高さ 約 14mm): ロゴ + 中央カタカナ氏名 + QR
-      '<div style="flex:1;display:flex;align-items:center;padding:0.6mm 1mm;gap:0.8mm;min-height:0;">' +
-        '<img src="logo.png" alt="STEP・UP" style="height:5mm;width:auto;flex-shrink:0;">' +
-        '<div style="flex:1;text-align:center;font-size:7.5pt;font-weight:700;letter-spacing:0.3px;color:#222;line-height:1.05;overflow:hidden;text-overflow:ellipsis;">' +
-          escHtml(name) +
-        '</div>' +
-        '<img id="' + qrId + '" alt="QR" style="width:6.5mm;height:6.5mm;flex-shrink:0;display:block;">' +
+      // 上段 6mm: ロゴ (中央) + QR (右隅オーバーレイ)
+      '<div style="height:6mm;display:flex;justify-content:center;align-items:center;' +
+            'background:linear-gradient(to bottom,#f5f7fb,#fff);border-bottom:0.3pt solid #e0e4f0;position:relative;">' +
+        '<img src="logo.png" alt="STEP・UP" style="height:4.8mm;width:auto;display:block;">' +
+        '<img id="' + qrId + '" alt="" style="position:absolute;right:0.7mm;top:0.6mm;' +
+              'width:4.8mm;height:4.8mm;display:block;background:#fff;padding:0.1mm;border-radius:0.3mm;">' +
       '</div>' +
 
-      // 下段 (高さ 約 7mm): ローマ字氏名 (青帯白文字)
-      '<div style="background:#1a237e;color:#fff;text-align:center;padding:0.5mm 1mm;font-size:7.5pt;font-weight:700;letter-spacing:0.6px;line-height:1.05;flex-shrink:0;">' +
+      // 中段 (flex:1 = 約 9mm): カタカナ氏名 (大きく、視認性最優先)
+      '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
+            'padding:0 1.5mm;font-size:11pt;font-weight:700;letter-spacing:1.5px;color:#1a237e;line-height:1;' +
+            'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">' +
+        escHtml(name) +
+      '</div>' +
+
+      // 下段 7mm: ローマ字氏名 (青帯白文字)
+      '<div style="height:7mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
+            'display:flex;justify-content:center;align-items:center;font-size:8.5pt;font-weight:700;' +
+            'letter-spacing:1.2px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
+            'text-overflow:ellipsis;">' +
         escHtml(romajiName) +
       '</div>' +
     '</div>';
@@ -10312,16 +10323,24 @@ function renderSagyoushaBarcode(emp) {
       header +
       cardHtml +
       '<div style="text-align:center;margin:6mm 0 2mm;font-size:7.5pt;color:#666;">― 予備 (同サイズ 45×22mm) ―</div>' +
-      // 予備カード (同サイズ 45×22mm)
-      '<div style="width:45mm;height:22mm;margin:0 auto;border:0.5pt solid #1a237e;background:#fff;box-sizing:border-box;page-break-inside:avoid;display:flex;flex-direction:column;overflow:hidden;">' +
-        '<div style="flex:1;display:flex;align-items:center;padding:0.6mm 1mm;gap:0.8mm;min-height:0;">' +
-          '<img src="logo.png" alt="" style="height:5mm;width:auto;flex-shrink:0;">' +
-          '<div style="flex:1;text-align:center;font-size:7.5pt;font-weight:700;letter-spacing:0.3px;color:#222;line-height:1.05;overflow:hidden;text-overflow:ellipsis;">' +
-            escHtml(name) +
-          '</div>' +
-          '<img id="' + qrId2 + '" alt="QR" style="width:6.5mm;height:6.5mm;flex-shrink:0;display:block;">' +
+      // 予備カード (同サイズ 45×22mm, 3段構成)
+      '<div style="width:45mm;height:22mm;margin:0 auto;border:0.5pt solid #1a237e;background:#fff;' +
+            'box-sizing:border-box;page-break-inside:avoid;display:flex;flex-direction:column;overflow:hidden;position:relative;">' +
+        '<div style="height:6mm;display:flex;justify-content:center;align-items:center;' +
+              'background:linear-gradient(to bottom,#f5f7fb,#fff);border-bottom:0.3pt solid #e0e4f0;position:relative;">' +
+          '<img src="logo.png" alt="" style="height:4.8mm;width:auto;display:block;">' +
+          '<img id="' + qrId2 + '" alt="" style="position:absolute;right:0.7mm;top:0.6mm;' +
+                'width:4.8mm;height:4.8mm;display:block;background:#fff;padding:0.1mm;border-radius:0.3mm;">' +
         '</div>' +
-        '<div style="background:#1a237e;color:#fff;text-align:center;padding:0.5mm 1mm;font-size:7.5pt;font-weight:700;letter-spacing:0.6px;line-height:1.05;flex-shrink:0;">' +
+        '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
+              'padding:0 1.5mm;font-size:11pt;font-weight:700;letter-spacing:1.5px;color:#1a237e;line-height:1;' +
+              'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">' +
+          escHtml(name) +
+        '</div>' +
+        '<div style="height:7mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
+              'display:flex;justify-content:center;align-items:center;font-size:8.5pt;font-weight:700;' +
+              'letter-spacing:1.2px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
+              'text-overflow:ellipsis;">' +
           escHtml(romajiName) +
         '</div>' +
       '</div>' +
