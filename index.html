@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -5865,6 +5866,10 @@ select.sankyu-edit-input {
             <span class="asi-card-icon" style="background:#e8f5e9;color:#2e7d32;">📋</span>
             <span class="asi-card-label">入社時教育確認表<span class="asi-card-sub">(ASTI)</span></span>
           </button>
+          <button class="asi-card" onclick="openSagyoushaBarcode()">
+            <span class="asi-card-icon" style="background:#fce4ec;color:#ad1457;">🆔</span>
+            <span class="asi-card-label">作業者バーコード<span class="asi-card-sub">(個別)</span></span>
+          </button>
           <button class="asi-card" onclick="startProcedure('dattai')">
             <span class="asi-card-icon" style="background:#fff3e0;color:#e65100;">📋</span>
             <span class="asi-card-label">脱退連絡票</span>
@@ -9883,6 +9888,10 @@ async function openHaisenDocInNewWindow() {
     await _openHaisenPdfForIOS(null, '入社時教育確認表');
     return;
   }
+  if (window._currentHaisenDocMode === 'sagyoushaBarcode' && window.PDFLib && window.html2canvas) {
+    await _openHaisenPdfForIOS(null, '作業者バーコード');
+    return;
+  }
   // iOS Safari は印刷時にフッターが付き改ページもずれるため PDF を生成して開く
   if (_isIOSDevice && window.PDFLib && window.html2canvas) {
     await _openHaisenPdfForIOS(null, '派遣書類');
@@ -10175,6 +10184,140 @@ function renderTsukinTodoke(emp, todokeDate) {
   // 社員情報を window に保持 (保存・メール時に再利用)
   window._tsukinSaveCtx = { emp: emp, todokeDate: todokeDate || '' };
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+}
+
+// ============================================================
+// 作業者バーコード (個別) — タイムカード/ICカードに貼る用の名札
+//   社員番号をバーコード化 (Code 128) + カタカナ氏名 + ローマ字氏名
+//   1ページに 6枚×2列=12枚の名札がフィット (シール台紙印刷用)
+//   ※今回は「個別」モードのみ — 選択中の社員 1名分を出力
+// ============================================================
+function openSagyoushaBarcode() {
+  if (typeof closeActionSheet === 'function') closeActionSheet();
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  if (typeof JsBarcode !== 'function') {
+    showToast('バーコード生成ライブラリ未ロード。再読み込みしてください', 'error');
+    return;
+  }
+  renderSagyoushaBarcode(emp);
+}
+
+function renderSagyoushaBarcode(emp) {
+  window._currentHaisenDocMode = 'sagyoushaBarcode';
+  window._isshikiGroups = null;
+
+  // 氏名 (カタカナ)
+  var name = emp.Title || '';
+  // 社員番号
+  var sn = emp[F.syainNo] || '';
+  // ローマ字氏名: 在留カード氏名 = 特記事項１
+  var romajiName = '';
+  for (var k6 in emp) {
+    if (k6.indexOf('x7279__x8a18__x4e8b__x9805') >= 0) {
+      var v = emp[k6];
+      if (v && typeof v === 'string' && v.trim()) { romajiName = v.trim(); break; }
+    }
+  }
+  if (!romajiName && typeof kanaToRomaji === 'function') romajiName = kanaToRomaji(name);
+  // 派遣先名 (短縮形)
+  var hakenName = (typeof stripBukaPrefix === 'function')
+    ? stripBukaPrefix((typeof getBukaValue === 'function') ? getBukaValue(emp) : '')
+    : '';
+
+  // SVG ID (JsBarcode が描画する先)
+  var bcId = 'sagyoushaBarcodeSvg_' + (Date.now() % 100000);
+
+  // 1枚の名札 HTML — 95mm × 38mm (Avery 5160 風シール)
+  var cardHtml =
+    '<div class="sagyousha-barcode-card" style="' +
+      'width:95mm;height:38mm;border:1.2pt solid #000;box-sizing:border-box;' +
+      'padding:3mm 4mm;margin:0 auto 8mm;display:flex;flex-direction:column;' +
+      'justify-content:center;align-items:center;gap:1mm;font-family:\'Yu Gothic\',\'メイリオ\',sans-serif;' +
+      'background:#fff;page-break-inside:avoid;">' +
+      // 社員番号 + 派遣先
+      '<div style="display:flex;justify-content:space-between;width:100%;font-size:8pt;color:#666;">' +
+        '<span>社員番号: <b style="color:#000;font-size:10pt;">' + escHtml(sn) + '</b></span>' +
+        '<span style="font-size:8pt;">' + escHtml(hakenName) + '</span>' +
+      '</div>' +
+      // カタカナ氏名 (大)
+      '<div style="font-size:14pt;font-weight:700;letter-spacing:2px;line-height:1.1;">' + escHtml(name) + '</div>' +
+      // ローマ字氏名
+      '<div style="font-size:9pt;color:#444;line-height:1;">' + escHtml(romajiName || '') + '</div>' +
+      // バーコード本体 (SVG)
+      '<svg id="' + bcId + '" style="width:80mm;height:14mm;"></svg>' +
+    '</div>';
+
+  // ヘッダ情報 (画面上だけ。印刷時は表示)
+  var header =
+    '<div style="text-align:center;margin-bottom:4mm;font-size:11pt;font-weight:700;">' +
+      '作業者バーコード名札' +
+    '</div>' +
+    '<div style="text-align:center;margin-bottom:6mm;font-size:8.5pt;color:#666;">' +
+      '※ シール台紙へ印刷後、タイムカード等に貼付してください。' +
+    '</div>';
+
+  // A4 ページ枠
+  var page1 =
+    '<div class="haisen-doc-page hd-kobetsu sagyousha-barcode-page" style="font-size:9pt;">' +
+      header +
+      cardHtml +
+      // 印刷時にもう少し小さなセカンダリーカード (持ち歩き用)
+      '<div style="text-align:center;margin:8mm 0 2mm;font-size:8.5pt;color:#666;">― 持ち歩き用 (小) ―</div>' +
+      '<div style="display:flex;justify-content:center;">' +
+        '<div style="width:60mm;height:25mm;border:1pt solid #000;box-sizing:border-box;padding:2mm;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:0.5mm;font-family:\'Yu Gothic\',\'メイリオ\',sans-serif;">' +
+          '<div style="font-size:10pt;font-weight:700;">' + escHtml(name) + '</div>' +
+          '<div style="font-size:7pt;color:#555;">' + escHtml(sn) + '</div>' +
+          '<svg id="' + bcId + '_2" style="width:50mm;height:8mm;"></svg>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  switchScreen('haisenDocScreen');
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page1 + '</div>';
+  var actions = document.getElementById('haisenDocActions');
+  if (actions) actions.style.display = 'flex';
+  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+    var b = document.getElementById(id); if (b) b.style.display = 'none';
+  });
+  document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
+  var tsBtn = document.getElementById('tsukinSaveBtn');
+  if (tsBtn) { tsBtn.style.display = ''; tsBtn.disabled = false; }
+  window._tsukinSaveCtx = { emp: emp, todokeDate: '', formType: 'sagyoushaBarcode' };
+  if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+
+  // JsBarcode で SVG にバーコード描画 (Code 128)
+  // 社員番号が空 or 数字以外を含む場合は文字列表現で
+  setTimeout(function() {
+    try {
+      var bcVal = String(sn || '').trim() || ' ';
+      JsBarcode('#' + bcId, bcVal, {
+        format: 'CODE128',
+        width: 2,
+        height: 40,
+        displayValue: true,
+        fontSize: 14,
+        margin: 4,
+        textMargin: 2,
+        background: '#fff',
+        lineColor: '#000'
+      });
+      JsBarcode('#' + bcId + '_2', bcVal, {
+        format: 'CODE128',
+        width: 1.4,
+        height: 22,
+        displayValue: true,
+        fontSize: 10,
+        margin: 2,
+        textMargin: 1,
+        background: '#fff',
+        lineColor: '#000'
+      });
+    } catch (e) {
+      console.error('JsBarcode error:', e);
+      showToast('バーコード生成エラー: ' + (e.message || e), 'error');
+    }
+  }, 80);
 }
 
 // ============================================================
@@ -11416,6 +11559,7 @@ async function saveTsukinTodokeToSyainFolder(btn) {
   var prefix = '通勤届_';
   if (ctx.formType === 'maicarASTI') prefix = 'マイカー通勤申請書_';
   else if (ctx.formType === 'nyushaKyouiku') prefix = '入社時教育確認表_';
+  else if (ctx.formType === 'sagyoushaBarcode') prefix = '作業者バーコード_';
   var fileName = prefix + ymd + '.pdf';
   if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ PDFを生成中…'; }
   try {
