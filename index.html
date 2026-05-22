@@ -10213,15 +10213,53 @@ function renderSagyoushaBarcode(emp) {
   var name = emp.Title || '';
   // 社員番号
   var sn = emp[F.syainNo] || '';
-  // ローマ字氏名: 在留カード氏名 = 特記事項１
-  var romajiName = '';
+  // ローマ字氏名: 在留カード氏名 (特記事項１) から「姓+名」だけを抽出
+  //   例: "DA SILVA NAGAO CARLA ROBERTA" + "ナガオ カルラ" → "NAGAO CARLA"
+  //   無ければ kanaToRomaji() で機械的に変換
+  var fullRomaji = '';
   for (var k6 in emp) {
     if (k6.indexOf('x7279__x8a18__x4e8b__x9805') >= 0) {
       var v = emp[k6];
-      if (v && typeof v === 'string' && v.trim()) { romajiName = v.trim(); break; }
+      if (v && typeof v === 'string' && v.trim()) { fullRomaji = v.trim(); break; }
     }
   }
-  if (!romajiName && typeof kanaToRomaji === 'function') romajiName = kanaToRomaji(name);
+  function _simplifyRomaji(katakanaName, fullRom) {
+    if (!fullRom) return '';
+    var kanaParts = String(katakanaName).split(/[\s　]+/).filter(Boolean);
+    var words = fullRom.toUpperCase().split(/\s+/).filter(Boolean);
+    // K↔C, L↔R など発音的に近い文字の等価表
+    var equivMap = { 'K':'KC', 'C':'CK', 'L':'LR', 'R':'RL', 'F':'FPH', 'P':'PFH', 'H':'HFP', 'T':'TD', 'D':'DT', 'S':'SZ', 'Z':'SZ', 'J':'JG', 'G':'GJ', 'B':'BV', 'V':'VB' };
+    var result = [];
+    var used = new Set();
+    for (var i = 0; i < kanaParts.length; i++) {
+      var mech = (typeof kanaToRomaji === 'function' ? kanaToRomaji(kanaParts[i]) : kanaParts[i]).toUpperCase();
+      var firstC = mech.charAt(0);
+      var validFirst = equivMap[firstC] || firstC;
+      // ① 完全一致
+      var hit = -1;
+      for (var j = 0; j < words.length; j++) {
+        if (used.has(j)) continue;
+        if (words[j] === mech) { hit = j; break; }
+      }
+      // ② 先頭文字が等価で長さ ≥ 2
+      if (hit < 0) {
+        for (var j2 = 0; j2 < words.length; j2++) {
+          if (used.has(j2)) continue;
+          if (validFirst.indexOf(words[j2].charAt(0)) >= 0 && words[j2].length >= 2) { hit = j2; break; }
+        }
+      }
+      if (hit >= 0) { result.push(words[hit]); used.add(hit); }
+      else { result.push(mech); }
+    }
+    return result.join(' ');
+  }
+  var romajiName = '';
+  if (fullRomaji) {
+    romajiName = _simplifyRomaji(name, fullRomaji);
+  }
+  if (!romajiName && typeof kanaToRomaji === 'function') {
+    romajiName = kanaToRomaji(name);
+  }
   romajiName = String(romajiName || '').toUpperCase();
 
   // QR コードに埋め込む値: ローマ字氏名 (スキャナで読むと氏名が表示される)
@@ -10230,31 +10268,30 @@ function renderSagyoushaBarcode(emp) {
   // ID (QR を後で描画する img + 画面表示用カードの id)
   var qrId = 'sagyoushaQR_' + (Date.now() % 100000);
 
-  // ---- 名札本体 (サンプルに忠実): ロゴ + QR の横並び、下に氏名 (青帯) ----
-  //   レイアウト想定 (約 95mm × 32mm):
-  //     ┌────────────────────────────────┐
-  //     │  [STEP・UP ロゴ]      [QRコード]   │
-  //     │       フナヤマ　ミレナ              │
-  //     ├────────────────────────────────┤
-  //     │      FUNAYAMA MILENA  (青帯白文字) │
-  //     └────────────────────────────────┘
+  // ---- 名札本体: Excel テンプレートと同サイズ (約 55mm × 25mm) ----
+  //   Excel: 12 cols (2.25 chars width 各) ≒ 50mm 幅、5 rows (14.25pt) ≒ 25mm 高
+  //   レイアウト:
+  //     ┌────────────────────────────┐
+  //     │ [Logo] ナガオ カルラ [QR]  │ ← 上段 (高さ約 16mm)
+  //     │     NAGAO CARLA            │ ← 下段 青帯白文字 (約 8mm)
+  //     └────────────────────────────┘
   var cardHtml =
     '<div class="sagyousha-barcode-card" style="' +
-      'width:95mm;border:1.4pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
+      'width:55mm;border:1pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
       'font-family:\'Yu Gothic\',\'Yu Gothic UI\',\'メイリオ\',sans-serif;page-break-inside:avoid;' +
       'display:flex;flex-direction:column;">' +
 
       // 上段: ロゴ (左) + 中央カタカナ氏名 + QR (右)
-      '<div style="display:flex;align-items:center;padding:2.5mm 3mm 1mm;gap:2mm;">' +
-        '<img src="logo.png" alt="STEP・UP" style="height:11mm;width:auto;flex-shrink:0;">' +
-        '<div style="flex:1;text-align:center;font-size:13pt;font-weight:700;letter-spacing:2px;color:#222;line-height:1.1;">' +
+      '<div style="display:flex;align-items:center;padding:1mm 1.5mm 0.5mm;gap:1mm;">' +
+        '<img src="logo.png" alt="STEP・UP" style="height:6mm;width:auto;flex-shrink:0;">' +
+        '<div style="flex:1;text-align:center;font-size:8.5pt;font-weight:700;letter-spacing:0.5px;color:#222;line-height:1.1;">' +
           escHtml(name) +
         '</div>' +
-        '<img id="' + qrId + '" alt="QR" style="width:13mm;height:13mm;flex-shrink:0;display:block;">' +
+        '<img id="' + qrId + '" alt="QR" style="width:8mm;height:8mm;flex-shrink:0;display:block;">' +
       '</div>' +
 
       // 下段: ローマ字氏名 (青帯白文字)
-      '<div style="background:#1a237e;color:#fff;text-align:center;padding:2mm 2mm;font-size:13pt;font-weight:700;letter-spacing:3px;line-height:1.1;">' +
+      '<div style="background:#1a237e;color:#fff;text-align:center;padding:0.8mm 1.5mm;font-size:8.5pt;font-weight:700;letter-spacing:1px;line-height:1.1;">' +
         escHtml(romajiName) +
       '</div>' +
     '</div>';
@@ -10274,17 +10311,17 @@ function renderSagyoushaBarcode(emp) {
     '<div class="haisen-doc-page hd-kobetsu sagyousha-barcode-page" style="font-size:9pt;">' +
       header +
       cardHtml +
-      '<div style="text-align:center;margin:8mm 0 3mm;font-size:8.5pt;color:#666;">― 持ち歩き用 (小) ―</div>' +
-      // 小サイズ版 (60mm 幅)
-      '<div style="width:60mm;margin:0 auto;border:1pt solid #1a237e;background:#fff;page-break-inside:avoid;">' +
-        '<div style="display:flex;align-items:center;padding:1.5mm 2mm 0.5mm;gap:1.5mm;">' +
-          '<img src="logo.png" alt="" style="height:7mm;width:auto;flex-shrink:0;">' +
-          '<div style="flex:1;text-align:center;font-size:9.5pt;font-weight:700;letter-spacing:1px;color:#222;line-height:1.1;">' +
+      '<div style="text-align:center;margin:6mm 0 2mm;font-size:7.5pt;color:#666;">― 予備 (同サイズ) ―</div>' +
+      // 予備カード (同サイズ — 印刷時の予備や、紛失時の備え用)
+      '<div style="width:55mm;margin:0 auto;border:1pt solid #1a237e;background:#fff;page-break-inside:avoid;display:flex;flex-direction:column;">' +
+        '<div style="display:flex;align-items:center;padding:1mm 1.5mm 0.5mm;gap:1mm;">' +
+          '<img src="logo.png" alt="" style="height:6mm;width:auto;flex-shrink:0;">' +
+          '<div style="flex:1;text-align:center;font-size:8.5pt;font-weight:700;letter-spacing:0.5px;color:#222;line-height:1.1;">' +
             escHtml(name) +
           '</div>' +
           '<img id="' + qrId2 + '" alt="QR" style="width:8mm;height:8mm;flex-shrink:0;display:block;">' +
         '</div>' +
-        '<div style="background:#1a237e;color:#fff;text-align:center;padding:1.2mm;font-size:9pt;font-weight:700;letter-spacing:1.5px;line-height:1.1;">' +
+        '<div style="background:#1a237e;color:#fff;text-align:center;padding:0.8mm 1.5mm;font-size:8.5pt;font-weight:700;letter-spacing:1px;line-height:1.1;">' +
           escHtml(romajiName) +
         '</div>' +
       '</div>' +
