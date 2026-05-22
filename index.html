@@ -27279,7 +27279,10 @@ function openMaebariEdit(itemId) {
     ${isLocked ? '<div style="background:#fff3e0;border:1px solid var(--warning);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--warning);margin-bottom:12px;text-align:center;font-weight:700;">⚠ ' + (hasFee ? '手数料入力済みのため' : '前払日を過ぎているため') + '修正・削除できません</div>' : ''}
 
     <div class="edit-field">
-      <div class="edit-field-label">金額</div>
+      <div class="edit-field-label" style="display:flex;align-items:center;gap:8px;">
+        <span>金額</span>
+        <button type="button" id="copyMaebariAmountBtn" onclick="copyMaebariAmount()" style="background:var(--primary);color:#fff;border:none;border-radius:4px;padding:2px 10px;font-size:11px;cursor:pointer;font-weight:600;">半角コピー</button>
+      </div>
       <select id="editMaebariAmount" onchange="onEditAmountChange()" ${isLocked ? 'disabled' : ''}>
         <option value="">選択してください</option>
         ${[5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].map(a => {
@@ -27397,6 +27400,39 @@ function copyAccountNumber() {
     btn.textContent = '✓'; btn.style.background = 'var(--success)';
     setTimeout(() => { btn.textContent = 'コピー'; btn.style.background = 'var(--primary)'; }, 1500);
   }).catch(() => showToast('コピーに失敗しました', 'error'));
+}
+
+// 前払い 金額を半角数字のみでクリップボードへコピー (例: "30,000円" → "30000")
+function copyMaebariAmount() {
+  // 現在選択中の金額を取得 (select 値、または カスタム入力)
+  var sel = document.getElementById('editMaebariAmount');
+  var raw = '';
+  if (sel) {
+    if (sel.value === '__custom__') {
+      var custom = document.getElementById('editMaebariAmountCustom');
+      raw = custom ? custom.value : '';
+    } else {
+      raw = sel.value;
+    }
+  }
+  // 全角数字→半角、カンマや「円」を除去
+  var halfwidth = String(raw)
+    .replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+    .replace(/[,，円\s]/g, '')
+    .trim();
+  if (!halfwidth) { showToast('金額が未選択です', 'error'); return; }
+  navigator.clipboard.writeText(halfwidth).then(function() {
+    var btn = document.getElementById('copyMaebariAmountBtn');
+    if (btn) {
+      var orig = btn.textContent;
+      btn.textContent = '✓ ' + halfwidth;
+      btn.style.background = 'var(--success)';
+      setTimeout(function() {
+        btn.textContent = orig;
+        btn.style.background = 'var(--primary)';
+      }, 1500);
+    }
+  }).catch(function() { showToast('コピーに失敗しました', 'error'); });
 }
 
 async function saveMaebariEdit() {
