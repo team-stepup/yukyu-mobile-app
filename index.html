@@ -10301,19 +10301,22 @@ function renderSagyoushaBarcode(emp) {
               'background:#fff;padding:0.2mm;border-radius:0.3mm;box-shadow:0 0 0 0.2pt #c5cae9;">' +
       '</div>' +
 
-      // 中段 7mm: カタカナ氏名 (紺色)
+      // 中段 7mm: カタカナ氏名 (紺色) — 内部 span で自動縮小対応
       '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
-            'padding:0 1.5mm;font-size:10pt;font-weight:700;letter-spacing:1.2px;color:#1a237e;line-height:1;' +
-            'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">' +
-        escHtml(name) +
+            'padding:0 1.5mm;color:#1a237e;line-height:1;overflow:hidden;">' +
+        '<span class="autofit-kana" style="font-size:10pt;font-weight:700;letter-spacing:1.2px;' +
+              'white-space:nowrap;display:inline-block;max-width:100%;">' +
+          escHtml(name) +
+        '</span>' +
       '</div>' +
 
-      // 下段 7mm: ローマ字氏名 (青帯白文字、font 拡大)
+      // 下段 7mm: ローマ字氏名 (青帯白文字) — 内部 span で自動縮小対応
       '<div style="height:7mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
-            'display:flex;justify-content:center;align-items:center;font-size:9pt;font-weight:700;' +
-            'letter-spacing:1.2px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
-            'text-overflow:ellipsis;">' +
-        escHtml(romajiName) +
+            'display:flex;justify-content:center;align-items:center;line-height:1;padding:0 1.5mm;overflow:hidden;">' +
+        '<span class="autofit-romaji" style="font-size:9pt;font-weight:700;letter-spacing:1.2px;' +
+              'white-space:nowrap;display:inline-block;max-width:100%;">' +
+          escHtml(romajiName) +
+        '</span>' +
       '</div>' +
     '</div>';
 
@@ -10349,15 +10352,18 @@ function renderSagyoushaBarcode(emp) {
                 'background:#fff;padding:0.2mm;border-radius:0.3mm;box-shadow:0 0 0 0.2pt #c5cae9;">' +
         '</div>' +
         '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
-              'padding:0 1.5mm;font-size:10pt;font-weight:700;letter-spacing:1.2px;color:#1a237e;line-height:1;' +
-              'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">' +
-          escHtml(name) +
+              'padding:0 1.5mm;color:#1a237e;line-height:1;overflow:hidden;">' +
+          '<span class="autofit-kana" style="font-size:10pt;font-weight:700;letter-spacing:1.2px;' +
+                'white-space:nowrap;display:inline-block;max-width:100%;">' +
+            escHtml(name) +
+          '</span>' +
         '</div>' +
         '<div style="height:7mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
-              'display:flex;justify-content:center;align-items:center;font-size:9pt;font-weight:700;' +
-              'letter-spacing:1.2px;line-height:1;padding:0 1.5mm;overflow:hidden;white-space:nowrap;' +
-              'text-overflow:ellipsis;">' +
-          escHtml(romajiName) +
+              'display:flex;justify-content:center;align-items:center;line-height:1;padding:0 1.5mm;overflow:hidden;">' +
+          '<span class="autofit-romaji" style="font-size:9pt;font-weight:700;letter-spacing:1.2px;' +
+                'white-space:nowrap;display:inline-block;max-width:100%;">' +
+            escHtml(romajiName) +
+          '</span>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -10416,6 +10422,38 @@ function renderSagyoushaBarcode(emp) {
     _drawQRImg(qrId,  qrPayload, 8);   // メイン用 (cellSize 8px → 25モジュール ≒ 200px)
     _drawQRImg(qrId2, qrPayload, 5);   // 持ち歩き用 (cellSize 5px → 25モジュール ≒ 125px)
   }, 150);
+
+  // ---- テキスト自動縮小: カタカナ/ローマ字が枠からはみ出す場合は
+  //      font-size を段階的に縮小してピッタリ収まるよう調整 ----
+  function _autoFitText(el, minPt) {
+    if (!el || !el.parentElement) return;
+    var parent = el.parentElement;
+    var maxWidth = parent.clientWidth - 2;  // 2px の安全マージン
+    if (maxWidth <= 0) return;
+    var currentPx = parseFloat(getComputedStyle(el).fontSize);
+    var minPx = (minPt || 5) * 1.333;  // pt → px (96 DPI で 1pt ≈ 1.333px)
+    var guard = 60;
+    while (el.scrollWidth > maxWidth && currentPx > minPx && guard-- > 0) {
+      currentPx -= 0.3;
+      el.style.fontSize = currentPx + 'px';
+    }
+    // letter-spacing も狭めて更にキッチリ収める
+    if (el.scrollWidth > maxWidth) {
+      el.style.letterSpacing = '0';
+      while (el.scrollWidth > maxWidth && currentPx > minPx && guard-- > 0) {
+        currentPx -= 0.3;
+        el.style.fontSize = currentPx + 'px';
+      }
+    }
+  }
+  setTimeout(function() {
+    document.querySelectorAll('.haisen-doc-page .autofit-kana').forEach(function(el) {
+      _autoFitText(el, 5);   // カタカナ最小 5pt
+    });
+    document.querySelectorAll('.haisen-doc-page .autofit-romaji').forEach(function(el) {
+      _autoFitText(el, 4);   // ローマ字最小 4pt
+    });
+  }, 200);
 }
 
 // ============================================================
