@@ -10457,20 +10457,111 @@ function renderSagyoushaBarcode(emp) {
     });
   }, 200);
 
-  // 在留カードのローマ字氏名が未登録の場合、ユーザーに警告
-  // (カタカナから機械変換された値が使われているため、正確でない可能性大)
+  // 在留カードのローマ字氏名が未登録の場合、入力モーダルを直接表示
+  // (カタカナから機械変換された値はフォールバックとして既に描画済み)
+  window._sagyoushaBarcodeEmp = emp;
   if (_romajiMissing) {
-    setTimeout(function() {
-      if (typeof showToast === 'function') {
-        showToast(
-          '⚠ 在留カードのローマ字氏名が未登録です。\n' +
-          '社員詳細 → 特記事項１ に正式名 (例: NAGAO CARLA) を入力してください。\n' +
-          '現在はカタカナを機械変換した値を表示中です。',
-          'warning',
-          8000
-        );
+    setTimeout(function() { _promptInputRomajiName(emp); }, 500);
+  }
+}
+
+// ============================================================
+// 在留カードのローマ字氏名 入力モーダル (作業者バーコード用)
+//   未登録時に表示。入力値はそのまま SharePoint 社員リストの
+//   「特記事項１」フィールドに PATCH (MERGE) で保存し、名札を再描画。
+// ============================================================
+function _promptInputRomajiName(emp) {
+  if (!emp) return;
+  var old = document.getElementById('romajiInputOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'romajiInputOverlay';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#fff8e1;border-radius:12px 12px 0 0;">' +
+        '<h3 style="margin:0;font-size:15px;color:#e65100;">⚠ 在留カードのローマ字氏名 未登録</h3>' +
+        '<button onclick="document.getElementById(\'romajiInputOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:16px 18px;">' +
+        '<div style="font-size:13px;color:#444;margin-bottom:8px;">' +
+          '<b>' + escHtml(emp.Title || '') + '</b>　<span style="color:#888;">(' + escHtml(emp[F.syainNo] || '') + ')</span>' +
+        '</div>' +
+        '<div style="font-size:11.5px;color:#666;margin-bottom:10px;line-height:1.55;background:#f5f5f5;padding:8px 10px;border-radius:6px;">' +
+          '在留カードに記載されている<b>正式なローマ字氏名</b>を入力してください。<br>' +
+          '・例: <code style="background:#fff;padding:1px 4px;border-radius:3px;">NAGAO CARLA</code>　<code style="background:#fff;padding:1px 4px;border-radius:3px;">DA SILVA NAGAO CARLA ROBERTA</code><br>' +
+          '・すべて大文字、スペース区切り<br>' +
+          '・SharePoint「社員」リストの<b>「特記事項１」</b>に保存されます' +
+        '</div>' +
+        '<input type="text" id="romajiInputField" placeholder="例: NAGAO CARLA" autocomplete="off" ' +
+              'style="width:100%;padding:10px 12px;border:1.5px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button onclick="document.getElementById(\'romajiInputOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">後で入力</button>' +
+        '<button onclick="_saveRomajiNameToSP()" id="romajiInputSaveBtn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">💾 保存して再描画</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  setTimeout(function() {
+    var inp = document.getElementById('romajiInputField');
+    if (inp) {
+      inp.focus();
+      // Enter キーで保存
+      inp.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); _saveRomajiNameToSP(); }
+      });
+    }
+  }, 100);
+}
+
+async function _saveRomajiNameToSP() {
+  var emp = window._sagyoushaBarcodeEmp || (typeof currentEmployee !== 'undefined' ? currentEmployee : null);
+  if (!emp || !emp.Id) { showToast('社員データが見つかりません', 'error'); return; }
+  var inputEl = document.getElementById('romajiInputField');
+  if (!inputEl) return;
+  var newVal = String(inputEl.value || '').trim().toUpperCase();
+  if (!newVal) { showToast('ローマ字氏名を入力してください', 'error'); return; }
+
+  var saveBtn = document.getElementById('romajiInputSaveBtn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 保存中…'; }
+
+  try {
+    // 特記事項１ のフィールド internal name を employeeFieldsCache から特定
+    if (typeof fetchEmployeeFields === 'function') await fetchEmployeeFields();
+    var tokki1Internal = null;
+    if (typeof employeeFieldsCache !== 'undefined' && employeeFieldsCache) {
+      for (var fk in employeeFieldsCache) {
+        if (employeeFieldsCache[fk] && employeeFieldsCache[fk].title === '特記事項１') {
+          tokki1Internal = fk;
+          break;
+        }
       }
-    }, 400);
+    }
+    if (!tokki1Internal) {
+      showToast('「特記事項１」フィールドが見つかりません', 'error');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 保存して再描画'; }
+      return;
+    }
+    var body = {};
+    body[tokki1Internal] = newVal;
+    await spPatchEmployee(emp.Id, body);
+    // emp オブジェクトをメモリ更新
+    var odataKey = tokki1Internal.indexOf('_') === 0 ? 'OData_' + tokki1Internal : tokki1Internal;
+    emp[odataKey] = newVal;
+    // currentEmployee も同期 (詳細画面に戻った時に反映)
+    if (typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.Id === emp.Id) {
+      currentEmployee[odataKey] = newVal;
+    }
+    showToast('✓ ' + newVal + ' を SharePoint に保存しました', 'success');
+    // モーダルを閉じて名札を再描画
+    var ov = document.getElementById('romajiInputOverlay');
+    if (ov) ov.remove();
+    renderSagyoushaBarcode(emp);
+  } catch (e) {
+    console.error('Save romaji error:', e);
+    showToast('保存失敗: ' + (e.message || e), 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 保存して再描画'; }
   }
 }
 
