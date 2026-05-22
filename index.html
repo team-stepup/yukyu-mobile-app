@@ -27238,6 +27238,7 @@ function openMaebariEdit(itemId) {
   editingMaebariRecord = record;
 
   // 前払日が過ぎたら修正不可（当日はOK）、手数料入力済みなら修正不可
+  // ただし役員は常に修正可能 (緊急訂正等のため)
   // Convert UTC to JST date string (YYYY-MM-DD)
   let payDateRaw = '';
   if (record[MF.payDate]) {
@@ -27248,7 +27249,9 @@ function openMaebariEdit(itemId) {
   const payDateObj = payDateRaw ? new Date(payDateRaw + 'T00:00:00') : null;
   const hasFee = !!(record[MF.fee] && String(record[MF.fee]).trim());
   const isPastPayDate = payDateObj ? payDateObj.getTime() < today.getTime() : false;
-  const isLocked = isPastPayDate || hasFee;
+  const isAdmin = (typeof isAdminUser === 'function') ? isAdminUser() : false;
+  const isLocked = (isPastPayDate || hasFee) && !isAdmin;
+  const lockReason = isPastPayDate ? '前払日を過ぎているため' : (hasFee ? '手数料入力済みのため' : '');
 
   const payDate = payDateRaw ? formatDateWithDay(payDateRaw) : '';
   let haken = record[MF.hakensaki] || '';
@@ -27276,7 +27279,11 @@ function openMaebariEdit(itemId) {
 
     ${zaiyoku ? '<div class="edit-field"><div class="edit-field-value" style="color:var(--primary);font-weight:700;border-color:var(--primary);">' + escHtml(zaiyoku) + '</div></div>' : ''}
 
-    ${isLocked ? '<div style="background:#fff3e0;border:1px solid var(--warning);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--warning);margin-bottom:12px;text-align:center;font-weight:700;">⚠ ' + (hasFee ? '手数料入力済みのため' : '前払日を過ぎているため') + '修正・削除できません</div>' : ''}
+    ${isLocked
+      ? '<div style="background:#fff3e0;border:1px solid var(--warning);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--warning);margin-bottom:12px;text-align:center;font-weight:700;">⚠ ' + (hasFee ? '手数料入力済みのため' : '前払日を過ぎているため') + '修正・削除できません</div>'
+      : ((isPastPayDate || hasFee) && isAdmin
+          ? '<div style="background:#fff3d4;border:1.5px solid #c8932b;border-radius:8px;padding:8px 12px;font-size:12px;color:#7a5500;margin-bottom:10px;text-align:center;font-weight:700;">🔓 役員権限で上書き編集モード (' + lockReason + '通常はロックされる項目)</div>'
+          : '')}
 
     <div class="edit-field">
       <div class="edit-field-label" style="display:flex;align-items:center;gap:8px;">
