@@ -10223,10 +10223,10 @@ function renderSagyoushaBarcode(emp) {
   if (!romajiName && typeof kanaToRomaji === 'function') romajiName = kanaToRomaji(name);
   romajiName = String(romajiName || '').toUpperCase();
 
-  // QR コードに埋め込む値 (社員番号 + 氏名 を改行区切り)
-  var qrPayload = String(sn || '');
+  // QR コードに埋め込む値: ローマ字氏名 (スキャナで読むと氏名が表示される)
+  var qrPayload = romajiName || String(sn || '') || 'STEP-UP';
 
-  // ID (QR を後で描画する canvas + 画面表示用カードの id)
+  // ID (QR を後で描画する img + 画面表示用カードの id)
   var qrId = 'sagyoushaQR_' + (Date.now() % 100000);
 
   // ---- 名札本体 (サンプルに忠実): ロゴ + QR の横並び、下に氏名 (青帯) ----
@@ -10249,7 +10249,7 @@ function renderSagyoushaBarcode(emp) {
         '<div style="flex:1;text-align:center;font-size:13pt;font-weight:700;letter-spacing:2px;color:#222;line-height:1.1;">' +
           escHtml(name) +
         '</div>' +
-        '<canvas id="' + qrId + '" style="width:13mm;height:13mm;flex-shrink:0;"></canvas>' +
+        '<img id="' + qrId + '" alt="QR" style="width:13mm;height:13mm;flex-shrink:0;display:block;">' +
       '</div>' +
 
       // 下段: ローマ字氏名 (青帯白文字)
@@ -10281,7 +10281,7 @@ function renderSagyoushaBarcode(emp) {
           '<div style="flex:1;text-align:center;font-size:9.5pt;font-weight:700;letter-spacing:1px;color:#222;line-height:1.1;">' +
             escHtml(name) +
           '</div>' +
-          '<canvas id="' + qrId2 + '" style="width:8mm;height:8mm;flex-shrink:0;"></canvas>' +
+          '<img id="' + qrId2 + '" alt="QR" style="width:8mm;height:8mm;flex-shrink:0;display:block;">' +
         '</div>' +
         '<div style="background:#1a237e;color:#fff;text-align:center;padding:1.2mm;font-size:9pt;font-weight:700;letter-spacing:1.5px;line-height:1.1;">' +
           escHtml(romajiName) +
@@ -10302,19 +10302,33 @@ function renderSagyoushaBarcode(emp) {
   window._tsukinSaveCtx = { emp: emp, todokeDate: '', formType: 'sagyoushaBarcode' };
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
 
-  // QR コード描画 (canvas, Code 128 ではなく QR Code)
-  setTimeout(function() {
-    if (typeof QRCode === 'undefined') {
-      showToast('QR コード ライブラリ未ロード。再読み込みしてください', 'error');
+  // QR コード描画 — toDataURL で <img> に貼る (canvas 直接描画より確実)
+  //   ロード遅延に備え 200ms 待機 + ライブラリ未ロード時のリトライ
+  function _drawQRImg(targetId, payload, sizePx) {
+    var el = document.getElementById(targetId);
+    if (!el) { console.warn('QR target not found:', targetId); return; }
+    if (typeof QRCode === 'undefined' || !QRCode.toDataURL) {
+      console.warn('QRCode lib not ready, retrying...');
+      setTimeout(function(){ _drawQRImg(targetId, payload, sizePx); }, 200);
       return;
     }
-    var opts = { errorCorrectionLevel: 'M', margin: 1, scale: 6, color: { dark: '#000000', light: '#ffffff' } };
-    QRCode.toCanvas(document.getElementById(qrId), qrPayload, opts, function(err) {
-      if (err) console.error('QR error (main):', err);
+    QRCode.toDataURL(payload, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: sizePx,
+      color: { dark: '#000000', light: '#ffffff' }
+    }, function(err, url) {
+      if (err) {
+        console.error('QR toDataURL error:', err);
+        showToast('QR 生成失敗: ' + (err.message || err), 'error');
+        return;
+      }
+      el.src = url;
     });
-    QRCode.toCanvas(document.getElementById(qrId2), qrPayload, { ...opts, scale: 4 }, function(err) {
-      if (err) console.error('QR error (small):', err);
-    });
+  }
+  setTimeout(function() {
+    _drawQRImg(qrId,  qrPayload, 300);  // メイン用 (約 13mm でも鮮明)
+    _drawQRImg(qrId2, qrPayload, 180);  // 持ち歩き用 (8mm)
   }, 100);
 }
 
