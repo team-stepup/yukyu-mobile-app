@@ -13,6 +13,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -10302,34 +10303,47 @@ function renderSagyoushaBarcode(emp) {
   window._tsukinSaveCtx = { emp: emp, todokeDate: '', formType: 'sagyoushaBarcode' };
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
 
-  // QR コード描画 — toDataURL で <img> に貼る (canvas 直接描画より確実)
-  //   ロード遅延に備え 200ms 待機 + ライブラリ未ロード時のリトライ
-  function _drawQRImg(targetId, payload, sizePx) {
+  // QR コード描画 — 2つのライブラリを fallback 連鎖で試す:
+  //   ① qrcode-generator (kazuhikoarase, グローバル `qrcode` 関数)
+  //   ② qrcode (soldair, グローバル `QRCode` オブジェクト)
+  //   どちらか動いた方を使う。両方失敗時は console.error。
+  function _drawQRImg(targetId, payload, cellSize) {
     var el = document.getElementById(targetId);
     if (!el) { console.warn('QR target not found:', targetId); return; }
-    if (typeof QRCode === 'undefined' || !QRCode.toDataURL) {
-      console.warn('QRCode lib not ready, retrying...');
-      setTimeout(function(){ _drawQRImg(targetId, payload, sizePx); }, 200);
+
+    // ① qrcode-generator (推奨、シンプルで確実)
+    if (typeof qrcode === 'function') {
+      try {
+        var qr = qrcode(0, 'M');
+        qr.addData(String(payload || ' '));
+        qr.make();
+        el.src = qr.createDataURL(cellSize, 0);   // cellSize px per module, 0 margin
+        return;
+      } catch (e) {
+        console.warn('qrcode-generator failed, trying soldair/qrcode:', e);
+      }
+    }
+
+    // ② soldair/qrcode (fallback)
+    if (typeof QRCode !== 'undefined' && QRCode.toDataURL) {
+      QRCode.toDataURL(String(payload || ' '), {
+        errorCorrectionLevel: 'M', margin: 1, width: cellSize * 25,
+        color: { dark: '#000000', light: '#ffffff' }
+      }, function(err, url) {
+        if (err) { console.error('QR fallback error:', err); return; }
+        el.src = url;
+      });
       return;
     }
-    QRCode.toDataURL(payload, {
-      errorCorrectionLevel: 'M',
-      margin: 1,
-      width: sizePx,
-      color: { dark: '#000000', light: '#ffffff' }
-    }, function(err, url) {
-      if (err) {
-        console.error('QR toDataURL error:', err);
-        showToast('QR 生成失敗: ' + (err.message || err), 'error');
-        return;
-      }
-      el.src = url;
-    });
+
+    // どちらも未ロード → リトライ
+    console.warn('No QR library loaded yet, retrying in 300ms...');
+    setTimeout(function() { _drawQRImg(targetId, payload, cellSize); }, 300);
   }
   setTimeout(function() {
-    _drawQRImg(qrId,  qrPayload, 300);  // メイン用 (約 13mm でも鮮明)
-    _drawQRImg(qrId2, qrPayload, 180);  // 持ち歩き用 (8mm)
-  }, 100);
+    _drawQRImg(qrId,  qrPayload, 8);   // メイン用 (cellSize 8px → 25モジュール ≒ 200px)
+    _drawQRImg(qrId2, qrPayload, 5);   // 持ち歩き用 (cellSize 5px → 25モジュール ≒ 125px)
+  }, 150);
 }
 
 // ============================================================
