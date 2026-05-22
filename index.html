@@ -2967,12 +2967,15 @@ select.sankyu-edit-input {
   cursor: pointer;
   transition: all 0.15s;
 }
+.fee-btn-0   { color: #555;    border-color: #ccc;    background: #f5f5f5; }
+.fee-btn-0.selected   { background: #555;    color: #fff; border-color: #555;    box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
 .fee-btn-275 { color: #1976d2; border-color: #90caf9; background: #e3f2fd; }
 .fee-btn-275.selected { background: #1976d2; color: #fff; border-color: #1976d2; box-shadow: 0 2px 6px rgba(25,118,210,0.4); }
 .fee-btn-440 { color: #e65100; border-color: #ffcc80; background: #fff3e0; }
 .fee-btn-440.selected { background: #e65100; color: #fff; border-color: #e65100; box-shadow: 0 2px 6px rgba(230,81,0,0.4); }
 .fee-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .fee-locked-display { padding: 14px 18px; font-size: 18px; font-weight: 700; border-radius: 10px; text-align: center; border: 2px solid var(--border); background: #f5f5f5; }
+.fee-locked-display.fee-locked-0   { color: #555;    border-color: #555;    background: #f5f5f5; }
 .fee-locked-display.fee-locked-275 { color: #1976d2; border-color: #1976d2; background: #e3f2fd; }
 .fee-locked-display.fee-locked-440 { color: #e65100; border-color: #e65100; background: #fff3e0; }
 
@@ -27310,6 +27313,7 @@ function openMaebariEdit(itemId) {
             ? '<div class="fee-locked-display fee-locked-' + escHtml(fee) + '">' + escHtml(fee) + '円</div>'
             : '<div class="fee-locked-display" style="color:var(--text-light);">未設定</div>')
         : `<div class="fee-button-group">
+            <button type="button" class="fee-btn fee-btn-0${fee === '0' ? ' selected' : ''}" data-fee="0" onclick="selectMaebariFee('0')">0円</button>
             <button type="button" class="fee-btn fee-btn-275${fee === '275' ? ' selected' : ''}" data-fee="275" onclick="selectMaebariFee('275')">275円</button>
             <button type="button" class="fee-btn fee-btn-440${fee === '440' ? ' selected' : ''}" data-fee="440" onclick="selectMaebariFee('440')">440円</button>
           </div>`}
@@ -27321,7 +27325,7 @@ function openMaebariEdit(itemId) {
       ${bank ? '<div>' + escHtml(bank) + '</div>' : ''}
       ${branch ? '<div>' + escHtml(branch) + '</div>' : ''}
       ${account ? '<div style="display:flex;align-items:center;gap:6px;margin:4px 0;"><b style="font-size:16px;">' + escHtml(account) + '</b><button onclick="copyAccountNumber()" style="background:var(--primary);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;" id="copyAccBtn">コピー</button></div>' : ''}
-      ${meigi ? '<div style="font-size:18px;font-weight:700;margin-top:4px;">' + escHtml(meigi) + '</div>' : ''}
+      ${meigi ? '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;"><div style="font-size:18px;font-weight:700;">' + escHtml(meigi) + '</div><button onclick="copyMeigiFirst10()" id="copyMeigiBtn" style="background:var(--primary);color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">左10字 全角コピー</button></div>' : ''}
       ${!bank && !branch && !account ? '<span style="color:var(--warning);">口座情報なし</span>' : ''}
     </div>
 
@@ -27407,6 +27411,63 @@ function copyAccountNumber() {
     btn.textContent = '✓'; btn.style.background = 'var(--success)';
     setTimeout(() => { btn.textContent = 'コピー'; btn.style.background = 'var(--primary)'; }, 1500);
   }).catch(() => showToast('コピーに失敗しました', 'error'));
+}
+
+// 前払い 口座名義の左10文字を全角カタカナへ変換してクリップボードへコピー
+//   例: "ｺﾊﾞﾔｼ ﾀﾞﾝﾉ ﾙｲｽ ｶﾐﾗ ｱｹﾐ" → 全角化 → "コバヤシ ダンノ ル" (左10文字)
+//   半角カタカナ + 濁点/半濁点を結合し、英数字も全角化する
+function copyMeigiFirst10() {
+  if (!editingMaebariRecord) return;
+  var meigi = String(editingMaebariRecord[MF.meigi] || '').trim();
+  if (!meigi) { showToast('口座名義が空です', 'error'); return; }
+
+  // 1. 半角カタカナ → 全角カタカナ (濁点・半濁点を1文字に結合)
+  var kanaMap = {
+    'ｶﾞ':'ガ','ｷﾞ':'ギ','ｸﾞ':'グ','ｹﾞ':'ゲ','ｺﾞ':'ゴ',
+    'ｻﾞ':'ザ','ｼﾞ':'ジ','ｽﾞ':'ズ','ｾﾞ':'ゼ','ｿﾞ':'ゾ',
+    'ﾀﾞ':'ダ','ﾁﾞ':'ヂ','ﾂﾞ':'ヅ','ﾃﾞ':'デ','ﾄﾞ':'ド',
+    'ﾊﾞ':'バ','ﾋﾞ':'ビ','ﾌﾞ':'ブ','ﾍﾞ':'ベ','ﾎﾞ':'ボ',
+    'ﾊﾟ':'パ','ﾋﾟ':'ピ','ﾌﾟ':'プ','ﾍﾟ':'ペ','ﾎﾟ':'ポ',
+    'ｳﾞ':'ヴ',
+    'ｱ':'ア','ｲ':'イ','ｳ':'ウ','ｴ':'エ','ｵ':'オ',
+    'ｶ':'カ','ｷ':'キ','ｸ':'ク','ｹ':'ケ','ｺ':'コ',
+    'ｻ':'サ','ｼ':'シ','ｽ':'ス','ｾ':'セ','ｿ':'ソ',
+    'ﾀ':'タ','ﾁ':'チ','ﾂ':'ツ','ﾃ':'テ','ﾄ':'ト',
+    'ﾅ':'ナ','ﾆ':'ニ','ﾇ':'ヌ','ﾈ':'ネ','ﾉ':'ノ',
+    'ﾊ':'ハ','ﾋ':'ヒ','ﾌ':'フ','ﾍ':'ヘ','ﾎ':'ホ',
+    'ﾏ':'マ','ﾐ':'ミ','ﾑ':'ム','ﾒ':'メ','ﾓ':'モ',
+    'ﾔ':'ヤ','ﾕ':'ユ','ﾖ':'ヨ',
+    'ﾗ':'ラ','ﾘ':'リ','ﾙ':'ル','ﾚ':'レ','ﾛ':'ロ',
+    'ﾜ':'ワ','ｦ':'ヲ','ﾝ':'ン',
+    'ｧ':'ァ','ｨ':'ィ','ｩ':'ゥ','ｪ':'ェ','ｫ':'ォ',
+    'ｬ':'ャ','ｭ':'ュ','ｮ':'ョ','ｯ':'ッ',
+    'ｰ':'ー','｡':'。','｢':'「','｣':'」','､':'、','･':'・'
+  };
+  // ペアになる濁点付き文字を先に置換 (2文字→1文字)
+  var zenkaku = meigi.replace(/[ｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾊﾋﾌﾍﾎｳ][ﾞﾟ]/g, function(m) { return kanaMap[m] || m; });
+  // 残りの半角カナを置換
+  zenkaku = zenkaku.replace(/[ｱ-ﾝｦｧ-ｯｰ｡｢｣､･]/g, function(m) { return kanaMap[m] || m; });
+  // 半角スペース → 全角スペース、半角英数 → 全角
+  zenkaku = zenkaku.replace(/ /g, '　');
+  zenkaku = zenkaku.replace(/[A-Za-z0-9]/g, function(c) {
+    return String.fromCharCode(c.charCodeAt(0) + 0xFEE0);
+  });
+
+  // 2. 左から10文字を抽出
+  var first10 = zenkaku.slice(0, 10);
+
+  navigator.clipboard.writeText(first10).then(function() {
+    var btn = document.getElementById('copyMeigiBtn');
+    if (btn) {
+      var orig = btn.textContent;
+      btn.textContent = '✓ ' + first10;
+      btn.style.background = 'var(--success)';
+      setTimeout(function() {
+        btn.textContent = orig;
+        btn.style.background = 'var(--primary)';
+      }, 2000);
+    }
+  }).catch(function() { showToast('コピーに失敗しました', 'error'); });
 }
 
 // 前払い 金額を半角数字のみでクリップボードへコピー (例: "30,000円" → "30000")
