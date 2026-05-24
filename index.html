@@ -40880,11 +40880,34 @@ async function openDattaiForm() {
   var taishaDate = yukyuTaishaDate || hakenTaishaDate;
   var taishaLabel = yukyuTaishaDate ? "退社日(有給後)" : "退社日(派遣先)";
 
-  // 扶養情報を社員データから取得
+  // 扶養情報を社員データから取得 (syahoHuyou①〜④ の構造化フィールド)
   var huyouStatus = emp[keyMap['shahoHuyou']] || '';
   var huyouBaai = emp[keyMap['shahoHuyouBaai']] || '';
   var huyouFurigana = emp[keyMap['shahoFurigana']] || '';
   var hasFuyou = huyouStatus && huyouStatus.indexOf('あり') >= 0;
+
+  // 構造化された扶養者データを 4 人分すべて抽出
+  //   syahoHuyou1Name / syahoHuyou1Zokugara / syahoHuyou1Birthday /
+  //   syahoHuyou1Kaisi / syahoHuyou1Soushitsu (および 2,3,4 番)
+  function _dattaiExtractFuyou(idx) {
+    var prefix = 'syahoHuyou' + idx;
+    var status = emp[keyMap[prefix]] || '';
+    var name   = emp[keyMap[prefix + 'Name']] || '';
+    var zoku   = emp[keyMap[prefix + 'Zokugara']] || '';
+    var bd     = emp[keyMap[prefix + 'Birthday']] ? String(emp[keyMap[prefix + 'Birthday']]).substring(0, 10) : '';
+    var kaisi  = emp[keyMap[prefix + 'Kaisi']]    ? String(emp[keyMap[prefix + 'Kaisi']]).substring(0, 10)    : '';
+    var soshu  = emp[keyMap[prefix + 'Soushitsu']]? String(emp[keyMap[prefix + 'Soushitsu']]).substring(0, 10) : '';
+    // 何らかのデータがあれば対象 (status が「加入中」「あり」等 / name が入っているケース)
+    var hasData = (status && /加入|あり/.test(status)) || (name && String(name).trim());
+    return hasData ? { idx: idx, status: status, name: name, zoku: zoku, bd: bd, kaisi: kaisi, soshu: soshu } : null;
+  }
+  var fuyouList = [];
+  for (var __i = 1; __i <= 4; __i++) {
+    var __f = _dattaiExtractFuyou(__i);
+    if (__f) fuyouList.push(__f);
+  }
+  // 構造化データが 1 件もなければ、旧来の huyouFurigana 文字列を fallback として使う
+  var useStructured = fuyouList.length > 0;
 
   // 記号は健保被保険者から取得
   var kigou = '';
@@ -40902,11 +40925,20 @@ async function openDattaiForm() {
       '</div>';
   }
 
-  // 扶養者プリセット情報
+  // 扶養者プリセット情報 (構造化データの件数 or 文字列フォールバック)
   var fuyouPresetHtml = '';
-  if (hasFuyou && huyouFurigana) {
-    fuyouPresetHtml = '<div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#2e7d32;">' +
-      '✅ 社員データから扶養情報を取得しました（' + escHtml(huyouBaai || huyouStatus) + '）' +
+  if (useStructured) {
+    var __namesHtml = fuyouList.map(function(f) {
+      return '<b>' + escHtml(f.name || '(無名)') + '</b>' + (f.zoku ? '<span style="color:#555;font-weight:400;">(' + escHtml(f.zoku) + ')</span>' : '');
+    }).join('　');
+    fuyouPresetHtml = '<div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#2e7d32;line-height:1.6;">' +
+      '✅ 社員データから扶養者 <b>' + fuyouList.length + '名</b> を自動抽出しました' +
+      '<div style="margin-top:4px;font-size:11.5px;">' + __namesHtml + '</div>' +
+    '</div>';
+  } else if (hasFuyou && huyouFurigana) {
+    fuyouPresetHtml = '<div style="background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#7a5500;">' +
+      '⚠ 扶養者の構造化データが未登録のため、フリガナのみから自動抽出します（' + escHtml(huyouBaai || huyouStatus) + '）。<br>' +
+      '<span style="font-size:11px;">社員詳細 → 社保扶養① 等で 加入日/喪失日/続柄/生年月日 を登録すると次回からそれが使われます。</span>' +
     '</div>';
   }
 
@@ -40983,7 +41015,13 @@ async function openDattaiForm() {
   if (panel) panel.scrollTop = 0;
 
   // 扶養者データがある場合、自動で行を追加
-  if (hasFuyou && huyouFurigana) {
+  //   ① 優先: 構造化フィールド syahoHuyou①〜④ から完全抽出
+  //   ② フォールバック: huyouFurigana の文字列 (名前のみ)
+  if (useStructured) {
+    fuyouList.forEach(function(f) {
+      addDattaiFuyouRowWithData(f.name, f.bd, f.kaisi, f.soshu, f.zoku);
+    });
+  } else if (hasFuyou && huyouFurigana) {
     var fNames = huyouFurigana.split(/[,、\n\r]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s; });
     fNames.forEach(function(fname) {
       addDattaiFuyouRowWithData(fname, '', '', '', '');
