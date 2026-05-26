@@ -5477,6 +5477,7 @@ select.sankyu-edit-input {
       <button onclick="switchScreen('hakensakiListScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <div style="flex:1;"></div>
       <button onclick="openHakenKeiyakuFromHakensaki()" style="background:linear-gradient(135deg,#2e7d32,#66bb6a);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.25);">📋 派遣契約</button>
+      <button onclick="openHakensakiKakuninDoc()" style="background:linear-gradient(135deg,#5e35b1,#7e57c2);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(94,53,177,0.25);" title="新規派遣先確認用に通知書・個別契約書・管理台帳の原本(空欄)を作成">📑 確認用書類</button>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
     <div id="hakensakiDetailBody"></div>
@@ -17889,6 +17890,85 @@ async function _saveNewHakensaki() {
     console.error('Save new hakensaki error:', e);
     showToast('登録失敗: ' + (e.message || e), 'error');
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 派遣先を登録'; }
+  }
+}
+
+// ============================================================
+// 新規派遣先向け 確認用書類(原本) 一式作成
+//   - 派遣個別契約書 (haken 情報のみ、人員数 1 名想定)
+//   - 派遣元事業主から派遣先への通知書 (氏名欄は空欄プレースホルダ)
+//   - 派遣先管理台帳 (氏名・社保情報は空欄、確認用)
+//   → haisenDocScreen に 3 ページ表示、既存の PDF 保存パイプラインで
+//     PDF 化・印刷可能
+// ============================================================
+function openHakensakiKakuninDoc() {
+  var h = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!h) { showToast('派遣先を選択してください', 'error'); return; }
+  showToast('確認用書類(原本)を生成中…', 'info');
+
+  // プレースホルダ社員 (氏名欄等を空欄/【記入欄】で生成)
+  var placeholderEmp = {
+    Id: 0,
+    Title: '（派遣労働者氏名）',
+    'OData__x751f__x5e74__x6708__x65e5_': null,
+    'OData__x6027__x5225_': '',
+  };
+  // F.koyoStart / F.koyoEnd は契約期間。haken 側の期間と一致でよい
+  placeholderEmp[F.koyoStart] = h[HF.haken_period_start] || null;
+  placeholderEmp[F.koyoEnd]   = h[HF.haken_period_end] || null;
+  placeholderEmp[F.syainNo] = '';
+
+  // 空欄の社保データ
+  var blankShaho = { kenpo: '有', kounen: '有', koyou: '有' };
+  var todayStr = (new Date()).toISOString().substring(0, 10);
+
+  try {
+    // ① 個別契約書 (haken 情報のみ、人員 1 名想定で template 化)
+    var kobetsuHtml = renderHakenKobetsuKeiyakusho(h, {
+      count: 1, perPerson: false, noOvertime: false,
+      sakuseiDate: todayStr, returnHtml: true
+    });
+
+    // ② 派遣先への通知書 (空欄プレースホルダで)
+    var tsuuchiHtml = renderHakenTsuuchisho(h, [placeholderEmp], {
+      shahoMap: [blankShaho], sakuseiDate: todayStr, returnHtml: true
+    });
+
+    // ③ 派遣先管理台帳 (空欄)
+    var kanriboHtml = renderHakenSakiKanribo(h, placeholderEmp, true, blankShaho, todayStr);
+
+    // すべて結合して haisenDocScreen に表示
+    var allHtml = kobetsuHtml + tsuuchiHtml + kanriboHtml;
+    // 「確認用」スタンプを各ページ右上に重ねる (印刷後に見間違いを防ぐ)
+    allHtml = allHtml.replace(/<div class="haisen-doc-page/g,
+      '<div class="haisen-doc-page kakunin-template-page" data-kakunin="1" ' +
+      'style="position:relative;') + '';
+    // 末尾の page-break-before:always; を保持するため、class 後の style 属性を消さずに上書き
+    // (元コードに既に style=" がある場合は属性が重複するため代替アプローチ)
+    // → 代わりに wrapping で「確認用」バナーをトップに付ける
+    var bannerHtml = '<div style="background:#fff3e0;border:2px solid #e65100;border-radius:10px;padding:10px 14px;margin:0 0 12px;text-align:center;font-size:14px;font-weight:700;color:#e65100;">' +
+      '📑 新規派遣先 確認用書類 (原本) — ' + escHtml(h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '') +
+      '<div style="font-size:11px;font-weight:500;color:#7a5500;margin-top:4px;">' +
+        '実際に派遣する労働者の氏名・契約期間・社保情報等は<b>空欄</b>です。派遣先様へ書式確認用にご提示ください。' +
+      '</div>' +
+    '</div>';
+
+    switchScreen('haisenDocScreen');
+    document.getElementById('haisenDocBody').innerHTML =
+      '<div class="haisen-doc-wrapper">' + bannerHtml + allHtml + '</div>';
+    var actions = document.getElementById('haisenDocActions');
+    if (actions) actions.style.display = 'flex';
+    ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+      var b = document.getElementById(id); if (b) b.style.display = 'none';
+    });
+    document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
+    window._isshikiGroups = null;  // 一式作成のフローと混在しないようリセット
+    window._currentHaisenDocMode = 'hakensakiKakunin';
+    if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+    showToast('✓ 確認用書類を作成。「🖨 印刷 / PDF保存」から印刷できます', 'success');
+  } catch (e) {
+    console.error('openHakensakiKakuninDoc error:', e);
+    showToast('生成エラー: ' + (e.message || String(e)), 'error');
   }
 }
 
