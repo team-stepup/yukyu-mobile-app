@@ -5477,7 +5477,7 @@ select.sankyu-edit-input {
       <button onclick="switchScreen('hakensakiListScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <div style="flex:1;"></div>
       <button onclick="openHakenKeiyakuFromHakensaki()" style="background:linear-gradient(135deg,#2e7d32,#66bb6a);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.25);">📋 派遣契約</button>
-      <button class="admin-only" onclick="openHakensakiKakuninDoc()" style="display:none;background:linear-gradient(135deg,#5e35b1,#7e57c2);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(94,53,177,0.25);" title="新規派遣先確認用に通知書・個別契約書・管理台帳の原本(空欄)を作成。役員専用">📑 確認用書類 <span style="font-size:9px;background:rgba(255,255,255,0.2);padding:1px 4px;border-radius:3px;margin-left:2px;">役員</span></button>
+      <button class="admin-only" onclick="_promptHakensakiKakuninMode()" style="display:none;background:linear-gradient(135deg,#5e35b1,#7e57c2);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(94,53,177,0.25);" title="新規派遣先確認用に通知書・個別契約書・管理台帳の原本(空欄)を作成。役員専用">📑 確認用書類 <span style="font-size:9px;background:rgba(255,255,255,0.2);padding:1px 4px;border-radius:3px;margin-left:2px;">役員</span></button>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
     <div id="hakensakiDetailBody"></div>
@@ -17894,6 +17894,57 @@ async function _saveNewHakensaki() {
 }
 
 // ============================================================
+// 確認用書類モード選択モーダル
+//   役員に対し「派遣先名を入れる/入れない」の 2 モードを提示
+// ============================================================
+function _promptHakensakiKakuninMode() {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) {
+    showToast('この機能は役員のみ利用できます', 'error');
+    return;
+  }
+  var h = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!h) { showToast('派遣先を選択してください', 'error'); return; }
+  var label = h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '（派遣先）';
+
+  var old = document.getElementById('kakuninModeOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'kakuninModeOverlay';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:440px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#ede7f6;border-radius:12px 12px 0 0;">' +
+        '<h3 style="margin:0;font-size:15px;color:#5e35b1;">📑 確認用書類 — モード選択</h3>' +
+        '<button onclick="document.getElementById(\'kakuninModeOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:14px 18px;">' +
+        '<div style="font-size:12.5px;color:#666;margin-bottom:12px;">どちらのパターンで原本を生成しますか？</div>' +
+
+        '<button onclick="openHakensakiKakuninDoc(true)" style="display:block;width:100%;text-align:left;background:#f3eaff;border:1.5px solid #b39ddb;border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;">' +
+          '<div style="font-size:13.5px;font-weight:700;color:#5e35b1;margin-bottom:2px;">A. 派遣先名 入り (バナーに会社名表示)</div>' +
+          '<div style="font-size:11px;color:#555;line-height:1.5;">' +
+            'バナーに <b>' + escHtml(label) + '</b> と表示。書類本文の項目は全て空欄。<br>' +
+            '<span style="color:#888;">「この派遣先様用の確認原本」と明示したい時。</span>' +
+          '</div>' +
+        '</button>' +
+
+        '<button onclick="openHakensakiKakuninDoc(false)" style="display:block;width:100%;text-align:left;background:#fff;border:1.5px solid #ccc;border-radius:10px;padding:12px 14px;cursor:pointer;">' +
+          '<div style="font-size:13.5px;font-weight:700;color:#333;margin-bottom:2px;">B. 完全空欄 (派遣先名も入れない)</div>' +
+          '<div style="font-size:11px;color:#555;line-height:1.5;">' +
+            '会社名も含めて 一切の情報を入れない汎用テンプレート。<br>' +
+            '<span style="color:#888;">複数の派遣先様で同じ原本を使い回したい時。</span>' +
+          '</div>' +
+        '</button>' +
+      '</div>' +
+      '<div style="padding:10px 18px;border-top:1px solid #eee;text-align:right;">' +
+        '<button onclick="document.getElementById(\'kakuninModeOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+// ============================================================
 // 新規派遣先向け 確認用書類(原本・完全空欄) 一式作成
 //   派遣情報・労働者情報を一切記入していない 完全に空欄の様式 を生成。
 //   - 派遣個別契約書 (完全空欄)
@@ -17901,19 +17952,27 @@ async function _saveNewHakensaki() {
 //   - 派遣先管理台帳 (空欄)
 //   → 派遣先様への様式確認用。haisenDocScreen に 3 ページ表示し、
 //     既存の PDF 保存パイプラインで PDF 化・印刷可能。
+//   includeName: true = バナーに派遣先名を表示、false = 完全匿名
 // ============================================================
-function openHakensakiKakuninDoc() {
+function openHakensakiKakuninDoc(includeName) {
   // 役員のみアクセス可
   if (typeof isAdminUser === 'function' && !isAdminUser()) {
     showToast('この機能は役員のみ利用できます', 'error');
     return;
   }
+  // モード選択モーダルが開いていれば閉じる
+  var modeOv = document.getElementById('kakuninModeOverlay'); if (modeOv) modeOv.remove();
   var h = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
   if (!h) { showToast('派遣先を選択してください', 'error'); return; }
   showToast('確認用書類(原本・空欄)を生成中…', 'info');
 
-  // 派遣先名だけは保持し、それ以外の haken 情報は空欄にする
-  var hakensaki_label = h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '（派遣先）';
+  // includeName が指定されない (古い呼び出し) 場合は true をデフォルトに
+  if (typeof includeName === 'undefined') includeName = true;
+
+  // 派遣先名を保持するか
+  var hakensaki_label = includeName
+    ? (h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '（派遣先）')
+    : '';
   var blankH = {};   // 完全空欄の haken オブジェクト
   blankH[HF.hakensaki_name] = hakensaki_label;
   // 期間・住所・業務内容 等はすべて空欄のまま (renderer は v()→"(未設定)" を返すが
@@ -17960,10 +18019,12 @@ function openHakensakiKakuninDoc() {
     allHtml = allHtml.replace(/<td([^>]*)>\s*<\/td>/g, '<td$1>&nbsp;</td>');
 
     var bannerHtml = '<div style="background:#fff3e0;border:2px solid #e65100;border-radius:10px;padding:10px 14px;margin:0 0 12px;text-align:center;font-size:14px;font-weight:700;color:#e65100;" class="no-print">' +
-      '📑 新規派遣先 確認用書類 (原本・完全空欄) — ' + escHtml(hakensaki_label) +
+      '📑 新規派遣先 確認用書類 (原本・完全空欄)' +
+      (hakensaki_label ? ' — ' + escHtml(hakensaki_label) : '') +
       '<div style="font-size:11px;font-weight:500;color:#7a5500;margin-top:4px;">' +
         '派遣情報・労働者情報を一切記入していない<b>空欄テンプレート</b>です。<br>' +
         '派遣先様へ「こういう書式の書類を扱います」とお見せする確認用。' +
+        (hakensaki_label ? '' : '<br><b>（完全匿名モード）</b> 派遣先名も含めず汎用原本として生成。') +
       '</div>' +
     '</div>';
 
