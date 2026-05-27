@@ -17894,62 +17894,71 @@ async function _saveNewHakensaki() {
 }
 
 // ============================================================
-// 新規派遣先向け 確認用書類(原本) 一式作成
-//   - 派遣個別契約書 (haken 情報のみ、人員数 1 名想定)
-//   - 派遣元事業主から派遣先への通知書 (氏名欄は空欄プレースホルダ)
-//   - 派遣先管理台帳 (氏名・社保情報は空欄、確認用)
-//   → haisenDocScreen に 3 ページ表示、既存の PDF 保存パイプラインで
-//     PDF 化・印刷可能
+// 新規派遣先向け 確認用書類(原本・完全空欄) 一式作成
+//   派遣情報・労働者情報を一切記入していない 完全に空欄の様式 を生成。
+//   - 派遣個別契約書 (完全空欄)
+//   - 派遣元事業主から派遣先への通知書 (氏名・社保すべて空欄)
+//   - 派遣先管理台帳 (空欄)
+//   → 派遣先様への様式確認用。haisenDocScreen に 3 ページ表示し、
+//     既存の PDF 保存パイプラインで PDF 化・印刷可能。
 // ============================================================
 function openHakensakiKakuninDoc() {
   var h = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
   if (!h) { showToast('派遣先を選択してください', 'error'); return; }
-  showToast('確認用書類(原本)を生成中…', 'info');
+  showToast('確認用書類(原本・空欄)を生成中…', 'info');
 
-  // プレースホルダ社員 (氏名欄等を空欄/【記入欄】で生成)
-  var placeholderEmp = {
+  // 派遣先名だけは保持し、それ以外の haken 情報は空欄にする
+  var hakensaki_label = h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '（派遣先）';
+  var blankH = {};   // 完全空欄の haken オブジェクト
+  blankH[HF.hakensaki_name] = hakensaki_label;
+  // 期間・住所・業務内容 等はすべて空欄のまま (renderer は v()→"(未設定)" を返すが
+  // 後で文字列置換で除去するので最終的に空白セルになる)
+
+  // プレースホルダ社員 (一切の労働者情報なし)
+  var blankEmp = {
     Id: 0,
-    Title: '（派遣労働者氏名）',
+    Title: '',
     'OData__x751f__x5e74__x6708__x65e5_': null,
-    'OData__x6027__x5225_': '',
+    'OData__x6027__x5225_': ''
   };
-  // F.koyoStart / F.koyoEnd は契約期間。haken 側の期間と一致でよい
-  placeholderEmp[F.koyoStart] = h[HF.haken_period_start] || null;
-  placeholderEmp[F.koyoEnd]   = h[HF.haken_period_end] || null;
-  placeholderEmp[F.syainNo] = '';
+  blankEmp[F.koyoStart] = null;
+  blankEmp[F.koyoEnd]   = null;
+  blankEmp[F.syainNo]   = '';
 
-  // 空欄の社保データ
-  var blankShaho = { kenpo: '有', kounen: '有', koyou: '有' };
-  var todayStr = (new Date()).toISOString().substring(0, 10);
+  // 空欄の社保データ (チェック欄を未選択にする)
+  var blankShaho = { kenpo: '', kounen: '', koyou: '' };
+  var todayStr = '';   // 作成日も空欄
 
   try {
-    // ① 個別契約書 (haken 情報のみ、人員 1 名想定で template 化)
-    var kobetsuHtml = renderHakenKobetsuKeiyakusho(h, {
-      count: 1, perPerson: false, noOvertime: false,
+    // ① 個別契約書 (完全空欄)
+    var kobetsuHtml = renderHakenKobetsuKeiyakusho(blankH, {
+      count: '', perPerson: false, noOvertime: false,
       sakuseiDate: todayStr, returnHtml: true
     });
 
-    // ② 派遣先への通知書 (空欄プレースホルダで)
-    var tsuuchiHtml = renderHakenTsuuchisho(h, [placeholderEmp], {
+    // ② 派遣先への通知書 (氏名・社保すべて空欄)
+    var tsuuchiHtml = renderHakenTsuuchisho(blankH, [blankEmp], {
       shahoMap: [blankShaho], sakuseiDate: todayStr, returnHtml: true
     });
 
     // ③ 派遣先管理台帳 (空欄)
-    var kanriboHtml = renderHakenSakiKanribo(h, placeholderEmp, true, blankShaho, todayStr);
+    var kanriboHtml = renderHakenSakiKanribo(blankH, blankEmp, true, blankShaho, todayStr);
 
-    // すべて結合して haisenDocScreen に表示
+    // 結合 + 「(未設定)」プレースホルダを除去して 真っ白な記入欄に
     var allHtml = kobetsuHtml + tsuuchiHtml + kanriboHtml;
-    // 「確認用」スタンプを各ページ右上に重ねる (印刷後に見間違いを防ぐ)
-    allHtml = allHtml.replace(/<div class="haisen-doc-page/g,
-      '<div class="haisen-doc-page kakunin-template-page" data-kakunin="1" ' +
-      'style="position:relative;') + '';
-    // 末尾の page-break-before:always; を保持するため、class 後の style 属性を消さずに上書き
-    // (元コードに既に style=" がある場合は属性が重複するため代替アプローチ)
-    // → 代わりに wrapping で「確認用」バナーをトップに付ける
-    var bannerHtml = '<div style="background:#fff3e0;border:2px solid #e65100;border-radius:10px;padding:10px 14px;margin:0 0 12px;text-align:center;font-size:14px;font-weight:700;color:#e65100;">' +
-      '📑 新規派遣先 確認用書類 (原本) — ' + escHtml(h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '') +
+    // <span style="color:#bbb;">(未設定)</span> → 空文字に置換
+    allHtml = allHtml.replace(/<span\s+style="color:#bbb;">\(未設定\)<\/span>/g, '');
+    // 念のため裸の「(未設定)」も除去
+    allHtml = allHtml.replace(/\(未設定\)/g, '');
+    // 空の表セルが折り畳まれないよう、最低限の高さを持つよう nbsp を入れる
+    // (空 td/th だと一部ブラウザで罫線が出ない)
+    allHtml = allHtml.replace(/<td([^>]*)>\s*<\/td>/g, '<td$1>&nbsp;</td>');
+
+    var bannerHtml = '<div style="background:#fff3e0;border:2px solid #e65100;border-radius:10px;padding:10px 14px;margin:0 0 12px;text-align:center;font-size:14px;font-weight:700;color:#e65100;" class="no-print">' +
+      '📑 新規派遣先 確認用書類 (原本・完全空欄) — ' + escHtml(hakensaki_label) +
       '<div style="font-size:11px;font-weight:500;color:#7a5500;margin-top:4px;">' +
-        '実際に派遣する労働者の氏名・契約期間・社保情報等は<b>空欄</b>です。派遣先様へ書式確認用にご提示ください。' +
+        '派遣情報・労働者情報を一切記入していない<b>空欄テンプレート</b>です。<br>' +
+        '派遣先様へ「こういう書式の書類を扱います」とお見せする確認用。' +
       '</div>' +
     '</div>';
 
