@@ -5477,7 +5477,7 @@ select.sankyu-edit-input {
       <button onclick="switchScreen('hakensakiListScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <div style="flex:1;"></div>
       <button onclick="openHakenKeiyakuFromHakensaki()" style="background:linear-gradient(135deg,#2e7d32,#66bb6a);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.25);">📋 派遣契約</button>
-      <button onclick="openHakensakiKakuninDoc()" style="background:linear-gradient(135deg,#5e35b1,#7e57c2);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(94,53,177,0.25);" title="新規派遣先確認用に通知書・個別契約書・管理台帳の原本(空欄)を作成">📑 確認用書類</button>
+      <button class="admin-only" onclick="openHakensakiKakuninDoc()" style="display:none;background:linear-gradient(135deg,#5e35b1,#7e57c2);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(94,53,177,0.25);" title="新規派遣先確認用に通知書・個別契約書・管理台帳の原本(空欄)を作成。役員専用">📑 確認用書類 <span style="font-size:9px;background:rgba(255,255,255,0.2);padding:1px 4px;border-radius:3px;margin-left:2px;">役員</span></button>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
     <div id="hakensakiDetailBody"></div>
@@ -17903,6 +17903,11 @@ async function _saveNewHakensaki() {
 //     既存の PDF 保存パイプラインで PDF 化・印刷可能。
 // ============================================================
 function openHakensakiKakuninDoc() {
+  // 役員のみアクセス可
+  if (typeof isAdminUser === 'function' && !isAdminUser()) {
+    showToast('この機能は役員のみ利用できます', 'error');
+    return;
+  }
   var h = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
   if (!h) { showToast('派遣先を選択してください', 'error'); return; }
   showToast('確認用書類(原本・空欄)を生成中…', 'info');
