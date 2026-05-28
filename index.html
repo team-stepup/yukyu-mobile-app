@@ -507,6 +507,75 @@ body {
   letter-spacing: -0.3px;
 }
 
+/* 前払い申請 承認カード (employee-portal 経由) */
+.maebari-pending-card {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-left: 4px solid #ff9800;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+.maebari-pending-card .row1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.maebari-pending-card .amount {
+  font-size: 1.3em;
+  font-weight: 700;
+  color: var(--primary);
+}
+.maebari-pending-card .shain {
+  font-size: 0.85em;
+  color: #666;
+}
+.maebari-pending-card .row2 {
+  font-size: 0.85em;
+  color: #555;
+  margin-bottom: 4px;
+}
+.maebari-pending-card .row-reason {
+  background: #fff8e1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.85em;
+  margin: 6px 0;
+  color: #6d4c00;
+}
+.maebari-pending-card .row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.maebari-pending-card .btn-approve,
+.maebari-pending-card .btn-reject {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 0.95em;
+}
+.maebari-pending-card .btn-approve {
+  background: #43a047;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(67,160,71,0.3);
+}
+.maebari-pending-card .btn-reject {
+  background: #e53935;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(229,57,53,0.3);
+}
+.maebari-pending-card .btn-approve:active,
+.maebari-pending-card .btn-reject:active {
+  transform: translateY(1px);
+  opacity: 0.85;
+}
+
 /* ============================================================
    総務部 ダッシュボード - 洗練されたカードレイアウト
    ============================================================ */
@@ -5211,6 +5280,11 @@ select.sankyu-edit-input {
         <span id="maebariBadgeCount" class="ql-badge" style="background:#f57c00;display:none;top:4px;right:4px;"></span>
         <div id="maebariBadgeTotal" class="maebari-amt-chip" style="display:none;top:22px;right:4px;"></div>
       </button>
+      <button class="quick-link-btn maebari-approver-only" onclick="openMaebariApprovalScreen()" style="position:relative;display:none;">
+        <span class="ql-icon">✅</span>
+        <span class="ql-text">前払承認</span>
+        <span id="maebariApprovalBadge" class="ql-badge" style="background:#e91e63;display:none;top:4px;right:4px;"></span>
+      </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
         <span class="ql-text">有給確認</span>
@@ -5747,6 +5821,16 @@ select.sankyu-edit-input {
     <div id="maebariListFooter" class="list-footer" style="display:none;"></div>
   </div>
 
+  <!-- Screen: 前払い申請 承認 (employee-portal 経由) -->
+  <div class="screen" id="maebariApprovalScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">💴 前払い申請 承認待ち</h2>
+      <button class="refresh-btn" onclick="loadMaebariPending()" style="margin-left:auto;">&#x21bb; 更新</button>
+    </div>
+    <div id="maebariPendingList" style="padding:8px 12px;"></div>
+  </div>
+
   <!-- Screen: 有給確認一覧 -->
   <div class="screen" id="yukyuListScreen">
     <div class="list-screen-header">
@@ -6008,6 +6092,26 @@ const LIST_LEAVE_GUID = 'fe50ad49-5069-401d-ab2f-8d94fa826d1d';
 const LIST_MAEBARI_GUID = 'd34be315-365a-460f-976e-fb8da6977cec';
 const LIST_ITEM_ENTITY = 'SP.Data.List10ListItem';
 const LIST_MAEBARI_ENTITY = 'SP.Data.List1ListItem';
+
+// 前払い申請 (employee-portal 経由の本人申請) — 承認用
+const LIST_MAEBARI_SHINSEI_GUID = '9e84553c-73ec-405b-862f-6caaae65900f';
+// 承認権限を持つメアド (テスト中は山下浩俊のみ)
+const MAEBARI_APPROVERS = ['h.yamashita@team-stepup.com'];
+
+// 前払い申請 field names (新規 List) — POST 時は OData_ プレフィックスを外す
+const MS = {
+  shainNo: 'OData__x793e__x54e1__x756a__x53f7_',
+  amount: 'OData__x91d1__x984d_',
+  kiboubi: 'OData__x5e0c__x671b__x65e5_',
+  riyuu: 'OData__x7533__x8acb__x7406__x7531_',
+  hakensaki: 'OData__x6d3e__x9063__x5148_',
+  tantou: 'OData__x62c5__x5f53__x8005_',
+  status: 'Status',
+  approvedAt: 'OData__x627f__x8a8d__x65e5__x6642_',
+  approver: 'OData__x627f__x8a8d__x8005_',
+  rejectReason: 'OData__x5374__x4e0b__x7406__x7531_',
+  existingListItemId: 'OData__x65e2__x5b58_ListItemId',
+};
 
 // 前払い field names
 const MF = {
@@ -16926,6 +17030,8 @@ function categoryHasAlert(emp, keyMap, category) {
 async function loadHomeBadges() {
   // 最低賃金チェックとリマインダーバナー (APIコール不要なので先に描画)
   try { renderMinWageBanner(); } catch(e) { console.warn('minWage banner error:', e); }
+  // 前払い申請 承認権限ボタン (employee-portal 経由の本人申請)
+  try { refreshMaebariApproverUI(); updateMaebariApprovalBadge(); } catch(e) { console.warn('approver UI error:', e); }
   var today = new Date();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
@@ -32822,6 +32928,286 @@ function isAllowedUser() {
     // if (hasCompanyId(email)) return true;
     return false;
   } catch (e) { return false; }
+}
+
+// ============================================================
+// 前払い申請 承認 (employee-portal 経由の本人申請を 役員 が処理)
+// ============================================================
+function isMaebariApprover() {
+  try {
+    const email = getLoggedInEmail();
+    if (!email) return false;
+    return MAEBARI_APPROVERS.indexOf(email) >= 0;
+  } catch (e) { return false; }
+}
+
+// 承認権限ボタン/UIの表示切替 (ログイン後に呼ぶ)
+function refreshMaebariApproverUI() {
+  const ok = isMaebariApprover();
+  document.querySelectorAll('.maebari-approver-only').forEach(el => {
+    el.style.display = ok ? '' : 'none';
+  });
+}
+
+async function openMaebariApprovalScreen() {
+  if (!isMaebariApprover()) { showToast('承認権限がありません', 'error'); return; }
+  switchScreen('maebariApprovalScreen');
+  await loadMaebariPending();
+}
+
+async function loadMaebariPending() {
+  const listEl = document.getElementById('maebariPendingList');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#666;">読み込み中...</div>';
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    const filter = encodeURIComponent("Status eq 'pending'");
+    const select = encodeURIComponent(['Id', MS.shainNo, MS.amount, MS.kiboubi, MS.riyuu, MS.hakensaki, MS.tantou, MS.status, 'Created'].join(','));
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items?$filter=" + filter + "&$select=" + select + "&$orderby=Id desc&$top=200";
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('一覧取得失敗: ' + resp.status);
+    const data = await resp.json();
+    const items = (data.d && data.d.results) || [];
+    renderMaebariPending(items);
+  } catch (e) {
+    console.error('loadMaebariPending error:', e);
+    listEl.innerHTML = '<div style="background:#ffebee;color:#c62828;padding:14px;border-radius:8px;">読み込みエラー: ' + e.message + '</div>';
+  }
+}
+
+function _esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+function renderMaebariPending(items) {
+  const listEl = document.getElementById('maebariPendingList');
+  if (!items || items.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">承認待ちの申請はありません</div>';
+    return;
+  }
+  const html = items.map(it => {
+    const kibou = it[MS.kiboubi] ? new Date(it[MS.kiboubi]) : null;
+    const kibouStr = kibou ? (kibou.getFullYear() + '/' + String(kibou.getMonth() + 1).padStart(2, '0') + '/' + String(kibou.getDate()).padStart(2, '0') + ' (金)') : '―';
+    const created = it.Created ? new Date(it.Created) : null;
+    const createdStr = created ? (created.getMonth() + 1) + '/' + created.getDate() + ' ' + String(created.getHours()).padStart(2, '0') + ':' + String(created.getMinutes()).padStart(2, '0') : '―';
+    return '<div class="maebari-pending-card" data-id="' + it.Id + '">'
+      + '<div class="row1"><span class="amount">¥' + Number(it[MS.amount] || 0).toLocaleString() + '</span><span class="shain">No.' + _esc(it[MS.shainNo] || '') + '</span></div>'
+      + '<div class="row2">希望日: <b>' + kibouStr + '</b></div>'
+      + '<div class="row2">派遣先: ' + _esc(it[MS.hakensaki] || '―') + ' ｜ 担当: ' + _esc(it[MS.tantou] || '―') + '</div>'
+      + '<div class="row2" style="color:#888;">申請: ' + createdStr + '</div>'
+      + (it[MS.riyuu] ? '<div class="row-reason">理由: ' + _esc(it[MS.riyuu]) + '</div>' : '')
+      + '<div class="row-actions">'
+      + '<button class="btn-approve" onclick="confirmApproveMaebari(' + it.Id + ')">承認</button>'
+      + '<button class="btn-reject" onclick="confirmRejectMaebari(' + it.Id + ')">却下</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+  listEl.innerHTML = html;
+}
+
+async function confirmApproveMaebari(shinseiId) {
+  if (!confirm('この申請を承認しますか？\n承認すると既存の「前払い」リストに自動追加されます。')) return;
+  await approveMaebariShinsei(shinseiId);
+}
+
+async function confirmRejectMaebari(shinseiId) {
+  const reason = prompt('却下理由を入力してください (本人に通知されます):');
+  if (reason === null) return;
+  if (!reason.trim()) { alert('理由は必須です。'); return; }
+  await rejectMaebariShinsei(shinseiId, reason.trim());
+}
+
+async function approveMaebariShinsei(shinseiId) {
+  if (!isMaebariApprover()) { showToast('承認権限がありません', 'error'); return; }
+  try {
+    const token = await getToken();
+    if (!token) throw new Error('認証エラー');
+
+    // 1. 申請データを取得
+    const shinseiUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items(" + shinseiId + ")";
+    const resp1 = await fetch(shinseiUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp1.ok) throw new Error('申請取得失敗 ' + resp1.status);
+    const shinsei = (await resp1.json()).d;
+    const shainNo = shinsei[MS.shainNo];
+    if (!shainNo) throw new Error('社員番号なし');
+
+    // 2. 社員データを取得 (在職を優先)
+    const empUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items?$filter="
+      + encodeURIComponent(F.syainNo + " eq " + shainNo) + "&$top=10&$orderby=Id desc";
+    const resp2 = await fetch(empUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp2.ok) throw new Error('社員取得失敗 ' + resp2.status);
+    const emps = ((await resp2.json()).d && (await resp2.json()).d.results) || [];
+    // resp2 already consumed — re-fetch JSON since we can't call .json() twice
+    const resp2b = await fetch(empUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    const data2 = await resp2b.json();
+    const empsList = (data2.d && data2.d.results) || [];
+    if (empsList.length === 0) throw new Error('社員データが見つかりません: ' + shainNo);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let emp = empsList.find(e => {
+      const t = e[F.hakenTaisha];
+      if (!t) return true;
+      const td = new Date(t); td.setHours(0, 0, 0, 0);
+      return td >= today;
+    }) || empsList[0];
+
+    // 3. 既存「前払い」 List に INSERT
+    const maebariEntity = await getListItemEntityType(LIST_MAEBARI_GUID);
+    const kibouDate = shinsei[MS.kiboubi] ? new Date(shinsei[MS.kiboubi]) : null;
+    if (!kibouDate || isNaN(kibouDate.getTime())) throw new Error('希望日なし');
+    const kibouISO = kibouDate.toISOString();
+
+    // 社員 List のフィールドキー (employee-portal Functions と合わせる)
+    const E_GINKO = 'OData__x7d66__x4e0e__xff1a__x9280__x88';
+    const E_SHITEN = 'OData__x7d66__x4e0e__xff1a__x652f__x5e';
+    const E_KOUZA = 'OData__x7d66__x4e0e__xff1a__x53e3__x5e';
+    const E_MEIGI = 'OData__x53e3__x5ea7__x6c0f__x540d__x30';
+    const E_BUKA = 'OData__x90e8__x8ab2_';
+    const E_ZAIYOKU = 'OData__x63a1__x7528__x7a2e__x5225_syub';
+
+    const insertBody = { '__metadata': { type: maebariEntity } };
+    // Title (= No、テキスト型)
+    insertBody['Title'] = String(shainNo);
+    // 支払日 (希望日)
+    insertBody[MF.payDate.replace(/^OData_/, '')] = kibouISO;
+    // 社員番号 (NO_x002e_, Text)
+    insertBody[MF.syainNo] = String(shainNo);
+    // 名前name
+    insertBody[MF.name.replace(/^OData_/, '')] = emp.Title || '';
+    // 金額 (Choice テキスト値)
+    insertBody[MF.amount.replace(/^OData_/, '')] = String(shinsei[MS.amount] || '');
+    // 派遣先
+    insertBody[MF.hakensaki.replace(/^OData_/, '')] = shinsei[MS.hakensaki] || stripBukaPrefix(emp[E_BUKA] || '');
+    // 銀行/支店/口座/名義
+    insertBody[MF.bank.replace(/^OData_/, '')] = emp[E_GINKO] || '';
+    insertBody[MF.branch.replace(/^OData_/, '')] = emp[E_SHITEN] || '';
+    insertBody[MF.account.replace(/^OData_/, '')] = emp[E_KOUZA] || '';
+    insertBody[MF.meigi.replace(/^OData_/, '')] = emp[E_MEIGI] || '';
+    // zaiyokusyubetu / zaisyoku (Text)
+    insertBody['zaiyokusyubetu'] = emp[E_ZAIYOKU] || '';
+    insertBody['zaisyoku'] = emp['zaisyoku'] || '';
+    // 手数料・備考 は空 (既存運用通り、振込時に手動入力)
+
+    const insertUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items";
+    const insResp = await fetch(insertUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+      },
+      body: JSON.stringify(insertBody),
+    });
+    if (!insResp.ok) {
+      const errTxt = await insResp.text();
+      throw new Error('既存「前払い」 INSERT 失敗: ' + insResp.status + ' ' + errTxt.substring(0, 300));
+    }
+    const newMaebari = await insResp.json();
+    const newMaebariId = newMaebari.d.Id;
+
+    // 4. 「前払い申請」 PATCH (Status=approved + 承認情報 + 既存ListItemId)
+    const shinseiEntity = await getListItemEntityType(LIST_MAEBARI_SHINSEI_GUID);
+    const approverName = (function () {
+      try {
+        const acct = (typeof msalInstance !== 'undefined' && msalInstance) ? msalInstance.getAllAccounts()[0] : null;
+        return (acct && (acct.name || acct.username)) || getLoggedInEmail() || '';
+      } catch (e) { return getLoggedInEmail() || ''; }
+    })();
+    const patchBody = { '__metadata': { type: shinseiEntity } };
+    patchBody['Status'] = 'approved';
+    patchBody[MS.approvedAt.replace(/^OData_/, '')] = new Date().toISOString();
+    patchBody[MS.approver.replace(/^OData_/, '')] = approverName;
+    patchBody[MS.existingListItemId.replace(/^OData_/, '')] = newMaebariId;
+
+    const patchResp = await fetch(shinseiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE',
+      },
+      body: JSON.stringify(patchBody),
+    });
+    if (!patchResp.ok) {
+      const errTxt = await patchResp.text();
+      console.warn('申請 PATCH 失敗 (前払い INSERT は成功):', patchResp.status, errTxt);
+      showToast('承認しましたが、ステータス更新に失敗しました', 'success');
+    } else {
+      showToast('承認しました (前払い#' + newMaebariId + ')', 'success');
+    }
+    loadMaebariPending();
+    updateMaebariApprovalBadge();
+  } catch (e) {
+    console.error('approveMaebariShinsei error:', e);
+    showToast('承認エラー: ' + e.message, 'error');
+  }
+}
+
+async function rejectMaebariShinsei(shinseiId, reason) {
+  if (!isMaebariApprover()) { showToast('承認権限がありません', 'error'); return; }
+  try {
+    const token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items(" + shinseiId + ")";
+    const entity = await getListItemEntityType(LIST_MAEBARI_SHINSEI_GUID);
+    const approverName = (function () {
+      try {
+        const acct = (typeof msalInstance !== 'undefined' && msalInstance) ? msalInstance.getAllAccounts()[0] : null;
+        return (acct && (acct.name || acct.username)) || getLoggedInEmail() || '';
+      } catch (e) { return getLoggedInEmail() || ''; }
+    })();
+    const body = { '__metadata': { type: entity } };
+    body['Status'] = 'rejected';
+    body[MS.approvedAt.replace(/^OData_/, '')] = new Date().toISOString();
+    body[MS.approver.replace(/^OData_/, '')] = approverName;
+    body[MS.rejectReason.replace(/^OData_/, '')] = reason;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const errTxt = await resp.text();
+      throw new Error('却下失敗 ' + resp.status + ' ' + errTxt.substring(0, 300));
+    }
+    showToast('却下しました', 'success');
+    loadMaebariPending();
+    updateMaebariApprovalBadge();
+  } catch (e) {
+    console.error('rejectMaebariShinsei error:', e);
+    showToast('却下エラー: ' + e.message, 'error');
+  }
+}
+
+async function updateMaebariApprovalBadge() {
+  if (!isMaebariApprover()) return;
+  const badge = document.getElementById('maebariApprovalBadge');
+  if (!badge) return;
+  try {
+    const token = await getToken();
+    if (!token) return;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items?$filter="
+      + encodeURIComponent("Status eq 'pending'") + "&$select=Id&$top=200";
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const count = ((data.d && data.d.results) || []).length;
+    if (count > 0) {
+      badge.textContent = String(count);
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (e) { /* silent */ }
 }
 
 // ===== 👑 雇用保険資格喪失届CSV 作成依頼 (役員のみ) =====
