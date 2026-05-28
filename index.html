@@ -5731,12 +5731,15 @@ select.sankyu-edit-input {
 
   <div class="screen" id="maebariListScreen">
     <div class="list-screen-header" style="padding:6px 10px;margin-bottom:4px;">
-      <div class="list-date-row" style="margin-bottom:0;">
-        <label>前払日</label>
-        <div class="date-display-wrap">
-          <span class="date-display-text" id="maebariListDateDisplay" onclick="document.getElementById('maebariListDate').showPicker()" style="font-weight:700;color:var(--primary);padding:6px 10px;font-size:14px;"></span>
+      <div class="list-date-row" style="margin-bottom:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <label style="margin:0;">前払日</label>
+        <button type="button" onclick="shiftMaebariListDate(-7)" title="前週の金曜" style="background:#eef2ff;color:#3949ab;border:1px solid #c5cae9;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;line-height:1;">← 前週</button>
+        <div class="date-display-wrap" style="flex:1;">
+          <span class="date-display-text" id="maebariListDateDisplay" onclick="document.getElementById('maebariListDate').showPicker()" style="font-weight:700;color:var(--primary);padding:6px 10px;font-size:14px;cursor:pointer;"></span>
           <input type="date" id="maebariListDate" class="date-hidden-input" onchange="onMaebariListDateChange()">
         </div>
+        <button type="button" onclick="shiftMaebariListDate(7)" title="次週の金曜" style="background:#eef2ff;color:#3949ab;border:1px solid #c5cae9;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;line-height:1;">次週 →</button>
+        <button type="button" onclick="resetMaebariListDate()" title="次の金曜日に戻す" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">📅 今週</button>
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:2px 8px;"><span id="maebariListCount" style="font-size:13px;color:var(--text-light);"></span></div>
@@ -28179,6 +28182,28 @@ function initMaebariListDate() {
 
 function onMaebariListDateChange() {
   const inp = document.getElementById('maebariListDate');
+  onDateInputChange('maebariListDate', 'maebariListDateDisplay');
+  loadMaebariList();
+}
+
+// 前払一覧 — 「← 前週」「次週 →」ボタン: N 日シフトしてリロード
+function shiftMaebariListDate(days) {
+  const inp = document.getElementById('maebariListDate');
+  if (!inp || !inp.value) return;
+  const d = new Date(inp.value + 'T00:00:00');
+  if (isNaN(d.getTime())) return;
+  d.setDate(d.getDate() + days);
+  inp.value = toLocalDateStr(d);
+  onDateInputChange('maebariListDate', 'maebariListDateDisplay');
+  loadMaebariList();
+}
+
+// 「📅 今週」ボタン — 次の金曜日 (今日含む) にリセット
+function resetMaebariListDate() {
+  const inp = document.getElementById('maebariListDate');
+  if (!inp) return;
+  const fri = getNextFriday();
+  inp.value = toLocalDateStr(fri);
   onDateInputChange('maebariListDate', 'maebariListDateDisplay');
   loadMaebariList();
 }
