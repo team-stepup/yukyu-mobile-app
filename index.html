@@ -32970,18 +32970,44 @@ async function loadMaebariPending() {
     const data = await resp.json();
     const items = (data.d && data.d.results) || [];
 
-    // 氏名を一括取得 (社員番号で社員Listを引く、同じ社員番号は在職を優先)
+    // 氏名 & 今月前払い合計を並列で一括取得
     const nameMap = {};
+    const totalsMap = {};  // shainNo (string) → 今月の前払い合計
     const shainNos = Array.from(new Set(items.map(it => it[MS.shainNo]).filter(x => x != null)));
     if (shainNos.length > 0) {
-      // OR フィルタで一括取得
-      const orFilter = shainNos.map(n => F.syainNo + " eq " + n).join(' or ');
+      const orFilterEmp = shainNos.map(n => F.syainNo + " eq " + n).join(' or ');
       const empSelect = ['Id', 'Title', F.syainNo, F.hakenTaisha].join(',');
       const empUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items?$filter="
-        + encodeURIComponent(orFilter) + "&$select=" + encodeURIComponent(empSelect) + "&$orderby=Id desc&$top=500";
+        + encodeURIComponent(orFilterEmp) + "&$select=" + encodeURIComponent(empSelect) + "&$orderby=Id desc&$top=500";
+
+      // 今月分前払い (期間: getMaebariPeriod(0) と同じ)
+      let mUrl = null;
       try {
-        const respE = await fetch(empUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-        if (respE.ok) {
+        const period = getMaebariPeriod(0);
+        if (period && period.start && period.end) {
+          const startISO = new Date(period.start).toISOString();
+          // 期間終わりの23:59:59まで含める
+          const endDay = new Date(period.end);
+          endDay.setHours(23, 59, 59, 999);
+          const endISO = endDay.toISOString();
+          const orFilterM = shainNos.map(n => MF.syainNo + " eq '" + String(n) + "'").join(' or ');
+          const dateFilter = MF.payDate + " ge datetime'" + startISO + "' and " + MF.payDate + " le datetime'" + endISO + "'";
+          const mFilter = "(" + orFilterM + ") and (" + dateFilter + ")";
+          const mSelect = ['Id', MF.syainNo, MF.amount, MF.payDate].join(',');
+          mUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items?$filter="
+            + encodeURIComponent(mFilter) + "&$select=" + encodeURIComponent(mSelect) + "&$top=500";
+        }
+      } catch (eP) { console.warn('期間計算失敗 (続行):', eP); }
+
+      try {
+        const reqs = [
+          fetch(empUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } }),
+        ];
+        if (mUrl) {
+          reqs.push(fetch(mUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } }));
+        }
+        const [respE, respM] = await Promise.all(reqs);
+        if (respE && respE.ok) {
           const dataE = await respE.json();
           const emps = (dataE.d && dataE.d.results) || [];
           const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -32992,18 +33018,27 @@ async function loadMaebariPending() {
             const taishaD = taisha ? new Date(taisha) : null;
             const isActive = !taishaD || isNaN(taishaD.getTime()) || taishaD >= today;
             const existing = nameMap[sno];
-            // 在職レコードを優先 (Id降順なので最新の在職)
             if (!existing || (existing.retired && isActive)) {
               nameMap[sno] = { name: e.Title || '', retired: !isActive };
             }
           });
         }
+        if (respM && respM.ok) {
+          const dataM = await respM.json();
+          const recs = (dataM.d && dataM.d.results) || [];
+          recs.forEach(r => {
+            const sno = String(r[MF.syainNo] || '');
+            const amt = Number(r[MF.amount] || 0);
+            if (!sno || isNaN(amt)) return;
+            totalsMap[sno] = (totalsMap[sno] || 0) + amt;
+          });
+        }
       } catch (e2) {
-        console.warn('氏名取得失敗 (続行):', e2);
+        console.warn('氏名/合計取得失敗 (続行):', e2);
       }
     }
 
-    renderMaebariPending(items, nameMap);
+    renderMaebariPending(items, nameMap, totalsMap);
   } catch (e) {
     console.error('loadMaebariPending error:', e);
     listEl.innerHTML = '<div style="background:#ffebee;color:#c62828;padding:14px;border-radius:8px;">読み込みエラー: ' + e.message + '</div>';
@@ -33015,13 +33050,14 @@ function _esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-function renderMaebariPending(items, nameMap) {
+function renderMaebariPending(items, nameMap, totalsMap) {
   const listEl = document.getElementById('maebariPendingList');
   if (!items || items.length === 0) {
     listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">承認待ちの申請はありません</div>';
     return;
   }
   nameMap = nameMap || {};
+  totalsMap = totalsMap || {};
   const html = items.map(it => {
     const kibou = it[MS.kiboubi] ? new Date(it[MS.kiboubi]) : null;
     const kibouStr = kibou ? (kibou.getFullYear() + '/' + String(kibou.getMonth() + 1).padStart(2, '0') + '/' + String(kibou.getDate()).padStart(2, '0') + ' (金)') : '―';
@@ -33031,9 +33067,15 @@ function renderMaebariPending(items, nameMap) {
     const meta = nameMap[shainNo] || nameMap[String(shainNo)] || null;
     const empName = meta ? meta.name : '';
     const retiredBadge = (meta && meta.retired) ? ' <span style="background:#9e9e9e;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:4px;">退社済</span>' : '';
+    const monthTotal = Number(totalsMap[String(shainNo)] || 0);
+    const totalChip = '<div class="month-total-chip" onclick="event.stopPropagation();openEmployeeMaebariFromApproval(\'' + _esc(String(shainNo) || '') + '\')" '
+      + 'style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;background:#ede7f6;color:#5e35b1;padding:6px 12px;border-radius:10px;font-size:0.9em;font-weight:700;margin:6px 0;border:1px solid #d1c4e9;">'
+      + '📊 今月分前払合計: ¥' + monthTotal.toLocaleString() + ' <span style="font-size:0.8em;opacity:0.7;">▶ 詳細</span>'
+      + '</div>';
     return '<div class="maebari-pending-card" data-id="' + it.Id + '">'
       + '<div class="row1"><span class="amount">¥' + Number(it[MS.amount] || 0).toLocaleString() + '</span><span class="shain">No.' + _esc(shainNo || '') + retiredBadge + '</span></div>'
       + (empName ? '<div class="emp-name" style="font-size:1.05em;font-weight:700;color:#1f3864;margin:2px 0 6px;">' + _esc(empName) + '</div>' : '')
+      + totalChip
       + '<div class="row2">希望日: <b>' + kibouStr + '</b></div>'
       + '<div class="row2">派遣先: ' + _esc(it[MS.hakensaki] || '―') + ' ｜ 担当: ' + _esc(it[MS.tantou] || '―') + '</div>'
       + '<div class="row2" style="color:#888;">申請: ' + createdStr + '</div>'
@@ -33045,6 +33087,40 @@ function renderMaebariPending(items, nameMap) {
       + '</div>';
   }).join('');
   listEl.innerHTML = html;
+}
+
+// 承認カードから「今月分前払合計」チップをクリック → 該当社員の前払い詳細画面へ
+async function openEmployeeMaebariFromApproval(shainNo) {
+  if (!shainNo) return;
+  try {
+    showSpinner();
+    const token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    const filter = F.syainNo + " eq " + shainNo;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items?$filter="
+      + encodeURIComponent(filter) + "&$top=10&$orderby=Id desc";
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('社員取得失敗 ' + resp.status);
+    const data = await resp.json();
+    const emps = (data.d && data.d.results) || [];
+    if (emps.length === 0) { showToast('社員データが見つかりません', 'error'); return; }
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let emp = emps.find(e => {
+      const t = e[F.hakenTaisha];
+      if (!t) return true;
+      const td = new Date(t); td.setHours(0, 0, 0, 0);
+      return td >= today;
+    }) || emps[0];
+    // selectEmployee は switchScreen('detailScreen') を呼ぶ → screenHistory に承認画面が積まれる → 戻れる
+    await selectEmployee(emp);
+    // 詳細画面ロード後、前払いタブに切り替える
+    setTimeout(function () { try { switchTopTab('maebari'); } catch (e) { } }, 200);
+  } catch (e) {
+    console.error('openEmployeeMaebariFromApproval error:', e);
+    showToast('遷移エラー: ' + e.message, 'error');
+  } finally {
+    hideSpinner();
+  }
 }
 
 async function confirmApproveMaebari(shinseiId) {
@@ -33078,10 +33154,7 @@ async function approveMaebariShinsei(shinseiId) {
       + encodeURIComponent(F.syainNo + " eq " + shainNo) + "&$top=10&$orderby=Id desc";
     const resp2 = await fetch(empUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     if (!resp2.ok) throw new Error('社員取得失敗 ' + resp2.status);
-    const emps = ((await resp2.json()).d && (await resp2.json()).d.results) || [];
-    // resp2 already consumed — re-fetch JSON since we can't call .json() twice
-    const resp2b = await fetch(empUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-    const data2 = await resp2b.json();
+    const data2 = await resp2.json();
     const empsList = (data2.d && data2.d.results) || [];
     if (empsList.length === 0) throw new Error('社員データが見つかりません: ' + shainNo);
     const today = new Date(); today.setHours(0, 0, 0, 0);
