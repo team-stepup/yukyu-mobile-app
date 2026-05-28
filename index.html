@@ -8131,6 +8131,28 @@ async function loadLeaveDetails() {
           _html += '<div><span style="color:#888;font-size:11px;">次回の採用:</span> <span style="font-weight:700;color:#555;">' + escHtml(String(_jikai)) + '</span></div>';
         }
         _html += '</div></div>';
+        // 👑 役員のみ: 雇用喪失届CSV 作成依頼ボタン
+        if (typeof isAdminUser === 'function' && isAdminUser()) {
+          var _koyouSoshitsuKey = _km['soumuKoyouSoshitsu'] || 'OData__x7dcf__x52d9__x002d__x96c7__x75';
+          var _currentStatus = String(emp[_koyouSoshitsuKey] || '');
+          var _empName = String(emp.Title || '').replace(/'/g, "\\'");
+          var _btn = '';
+          if (_currentStatus === '✓完了') {
+            _btn = '<div style="font-size:12px;color:#2e7d32;font-weight:700;">✓ 雇用喪失届CSV 作成済</div>';
+          } else if (_currentStatus === '処理依頼') {
+            _btn = '<div style="font-size:12px;color:#f57c00;font-weight:700;margin-bottom:6px;">⏳ 雇用喪失届CSV 処理待ち</div>';
+            _btn += '<button onclick="cancelKoyouSoshitsuRequest(' + emp.Id + ')" style="font-size:11px;padding:4px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#555;cursor:pointer;">依頼をキャンセル</button>';
+          } else if (_currentStatus === 'エラー') {
+            _btn = '<div style="font-size:12px;color:#c62828;font-weight:700;margin-bottom:6px;">⚠ 前回処理エラー</div>';
+            _btn += '<button onclick="requestKoyouSoshitsuCsv(' + emp.Id + ',\'' + _empName + '\')" style="font-size:12px;padding:6px 12px;border:none;border-radius:8px;background:linear-gradient(135deg,#ff9800,#f57c00);color:#fff;font-weight:700;cursor:pointer;">📋 雇用喪失届CSV 再依頼</button>';
+          } else {
+            _btn = '<button onclick="requestKoyouSoshitsuCsv(' + emp.Id + ',\'' + _empName + '\')" style="font-size:12px;padding:6px 12px;border:none;border-radius:8px;background:linear-gradient(135deg,#ff9800,#f57c00);color:#fff;font-weight:700;cursor:pointer;">📋 雇用喪失届CSV 作成依頼</button>';
+          }
+          _html += '<div style="margin-top:8px;padding:8px 12px;background:#fff8e1;border-radius:8px;border:1px dashed #ffb74d;">';
+          _html += '<div style="font-size:10px;font-weight:700;color:#e65100;margin-bottom:4px;">👑 役員操作</div>';
+          _html += _btn;
+          _html += '</div>';
+        }
         _rEl.innerHTML = _html;
         _rEl.style.display = 'block';
       } catch (_e) { console.log('retire reason render error:', _e); }
@@ -16457,6 +16479,7 @@ const PROFILE_CATEGORIES = [
       { key: 'soumuKoyou', label: '総務・雇用', format: 'badge', group: 'soumu' },
       { key: 'soumuShaho', label: '総務-社保', format: 'badge', group: 'soumu' },
       { key: 'soumuRishoku', label: '総務-離職票', format: 'badge', group: 'soumu' },
+      { key: 'soumuKoyouSoshitsu', label: '総務-雇用喪失', format: 'badge', group: 'soumu' },
       // ── 📄 離職票 ──
       { key: 'rishokuhyou', label: '離職票', format: 'badge', group: 'rishoku' },
       { key: 'rishokuWatashi', label: '離職票渡し方', format: 'badge', group: 'rishoku' },
@@ -16598,6 +16621,7 @@ function buildFieldKeyMap(fieldsMeta) {
     soumuKoyou: '総務・雇用',
     soumuShaho: '総務-社保',
     soumuRishoku: '総務-離職票',
+    soumuKoyouSoshitsu: '総務-雇用喪失',
     rishokuhyou: '離職票risyokuhyou',
     rishokuWatashi: '離職票渡し方risyokuhyou watashikata',
     taisyokuRiyuu: '退職理由',
@@ -32771,6 +32795,52 @@ function isAllowedUser() {
     // if (hasCompanyId(email)) return true;
     return false;
   } catch (e) { return false; }
+}
+
+// ===== 👑 雇用保険資格喪失届CSV 作成依頼 (役員のみ) =====
+async function requestKoyouSoshitsuCsv(itemId, empName) {
+  if (!isAdminUser()) { showToast('役員権限が必要です', 'error'); return; }
+  const ok = confirm('「' + empName + '」さんの雇用保険資格喪失届CSV作成を依頼しますか？\n\n依頼後、役員PCのデスクトップ「雇用喪失届 CSV 処理.lnk」を実行すると一括処理されます。');
+  if (!ok) return;
+  await setKoyouSoshitsuStatus(itemId, '処理依頼', '雇用喪失届CSV作成を依頼しました');
+}
+
+async function cancelKoyouSoshitsuRequest(itemId) {
+  if (!isAdminUser()) { showToast('役員権限が必要です', 'error'); return; }
+  if (!confirm('処理依頼をキャンセルして「未処理」に戻しますか？')) return;
+  await setKoyouSoshitsuStatus(itemId, '未処理', 'キャンセルしました');
+}
+
+async function setKoyouSoshitsuStatus(itemId, value, successMsg) {
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    const entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+    const body = { '__metadata': { type: entityType } };
+    // 「総務-雇用喪失」の EntityPropertyName (SP REST 書込用)
+    body['OData__x7dcf__x52d9__x002d__x96c7__x75'] = value;
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'MERGE',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(resp.status + ' ' + err);
+    }
+    showToast(successMsg, 'success');
+    setTimeout(() => location.reload(), 1500);
+  } catch (e) {
+    console.error('setKoyouSoshitsuStatus error:', e);
+    showToast('変更エラー: ' + e.message, 'error');
+  }
 }
 
 function showAccessDeniedOverlay(email) {
