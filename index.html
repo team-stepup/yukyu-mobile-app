@@ -20588,7 +20588,8 @@ function renderSoumuDashboard() {
     return count;
   })();
 
-  // 雇用加入: soumukoyou="未加入" AND zaisyoku="在職" AND 入社日<今日
+  // 雇用加入: soumukoyou="未加入" AND zaisyoku="在職" AND 入社日<=今日
+  //   入社日が「今日」の社員も加入対象に含める (即時 加入処理ができるよう)
   var koyouInCount = (function() {
     if (!_soumuAllEmps || !_soumuKeyMap) return 0;
     var odKoyou = _soumuKeyMap['soumuKoyou'];
@@ -20600,11 +20601,11 @@ function renderSoumuDashboard() {
       if (empZaisyoku(emp) !== '在職') return;
       var v = String(emp[odKoyou] || '');
       if (v !== '未加入') return;
-      // 入社日<今日
+      // 入社日<=今日 (未来の入社予定は除外)
       var ndVal = F.nyushaDate ? emp[F.nyushaDate] : null;
       if (!ndVal) return;
       var nd = new Date(ndVal); nd.setHours(0,0,0,0);
-      if (isNaN(nd.getTime()) || nd >= today) return;
+      if (isNaN(nd.getTime()) || nd > today) return;
       count++;
     });
     return count;
@@ -21204,7 +21205,8 @@ function openKoyouKanyuuDownloadList() {
     var ndVal = F.nyushaDate ? emp[F.nyushaDate] : null;
     if (!ndVal) return false;
     var nd = new Date(ndVal); nd.setHours(0,0,0,0);
-    if (isNaN(nd.getTime()) || nd >= today) return false;
+    // 入社日<=今日 (今日入社は加入対象に含める。未来入社は除外)
+    if (isNaN(nd.getTime()) || nd > today) return false;
     return true;
   });
   renderKoyouKanyuuDownloadOverlay(filteredList);
