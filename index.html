@@ -33179,25 +33179,19 @@ async function approveMaebariShinsei(shinseiId) {
     const E_BUKA = 'OData__x90e8__x8ab2_';
     const E_ZAIYOKU = 'OData__x63a1__x7528__x7a2e__x5225_syub';
 
+    // ※ SP verbose POST body は EntityPropertyName (OData_ プレフィックス付き) を使う。
+    //   既存の changeRowPayDate も `body[MF.payDate]` をそのまま使っている。
     const insertBody = { '__metadata': { type: maebariEntity } };
-    // Title (= No、テキスト型)
     insertBody['Title'] = String(shainNo);
-    // 支払日 (希望日)
-    insertBody[MF.payDate.replace(/^OData_/, '')] = kibouISO;
-    // 社員番号 (NO_x002e_, Text)
-    insertBody[MF.syainNo] = String(shainNo);
-    // 名前name
-    insertBody[MF.name.replace(/^OData_/, '')] = emp.Title || '';
-    // 金額 (Choice テキスト値)
-    insertBody[MF.amount.replace(/^OData_/, '')] = String(shinsei[MS.amount] || '');
-    // 派遣先
-    insertBody[MF.hakensaki.replace(/^OData_/, '')] = shinsei[MS.hakensaki] || stripBukaPrefix(emp[E_BUKA] || '');
-    // 銀行/支店/口座/名義
-    insertBody[MF.bank.replace(/^OData_/, '')] = emp[E_GINKO] || '';
-    insertBody[MF.branch.replace(/^OData_/, '')] = emp[E_SHITEN] || '';
-    insertBody[MF.account.replace(/^OData_/, '')] = emp[E_KOUZA] || '';
-    insertBody[MF.meigi.replace(/^OData_/, '')] = emp[E_MEIGI] || '';
-    // zaiyokusyubetu / zaisyoku (Text)
+    insertBody[MF.payDate] = kibouISO;
+    insertBody[MF.syainNo] = String(shainNo);  // NO_x002e_ (no OData_ prefix)
+    insertBody[MF.name] = emp.Title || '';
+    insertBody[MF.amount] = String(shinsei[MS.amount] || '');
+    insertBody[MF.hakensaki] = shinsei[MS.hakensaki] || stripBukaPrefix(emp[E_BUKA] || '');
+    insertBody[MF.bank] = emp[E_GINKO] || '';
+    insertBody[MF.branch] = emp[E_SHITEN] || '';
+    insertBody[MF.account] = emp[E_KOUZA] || '';
+    insertBody[MF.meigi] = emp[E_MEIGI] || '';
     insertBody['zaiyokusyubetu'] = emp[E_ZAIYOKU] || '';
     insertBody['zaisyoku'] = emp['zaisyoku'] || '';
     // 手数料・備考 は空 (既存運用通り、振込時に手動入力)
@@ -33229,9 +33223,9 @@ async function approveMaebariShinsei(shinseiId) {
     })();
     const patchBody = { '__metadata': { type: shinseiEntity } };
     patchBody['Status'] = 'approved';
-    patchBody[MS.approvedAt.replace(/^OData_/, '')] = new Date().toISOString();
-    patchBody[MS.approver.replace(/^OData_/, '')] = approverName;
-    patchBody[MS.existingListItemId.replace(/^OData_/, '')] = newMaebariId;
+    patchBody[MS.approvedAt] = new Date().toISOString();
+    patchBody[MS.approver] = approverName;
+    patchBody[MS.existingListItemId] = newMaebariId;
 
     const patchResp = await fetch(shinseiUrl, {
       method: 'POST',
@@ -33274,9 +33268,9 @@ async function rejectMaebariShinsei(shinseiId, reason) {
     })();
     const body = { '__metadata': { type: entity } };
     body['Status'] = 'rejected';
-    body[MS.approvedAt.replace(/^OData_/, '')] = new Date().toISOString();
-    body[MS.approver.replace(/^OData_/, '')] = approverName;
-    body[MS.rejectReason.replace(/^OData_/, '')] = reason;
+    body[MS.approvedAt] = new Date().toISOString();
+    body[MS.approver] = approverName;
+    body[MS.rejectReason] = reason;
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
