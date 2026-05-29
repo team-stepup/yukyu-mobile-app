@@ -15183,10 +15183,21 @@ function renderHakenTsuuchisho(h, emps, opts) {
 async function openHakenIsshikiFlow(h) {
   try {
     if (!h) { showToast('派遣契約データが見つかりません', 'error'); return; }
+    // ── 過去の一式作成結果が残っているとボタンが反応しなくなる事象への対策 ──
+    //   前回作った window._isshikiGroups や _isshikiSaved 等の状態は
+    //   新しい契約を作る前にリセットしておく
+    window._isshikiGroups = null;
+    window._isshikiSaved = false;
+    // 残った overlay を念のため除去
+    ['hkIsshikiOverlay', 'isshikiLinkOverlay', 'hkKobetsuConfirmOverlay'].forEach(function(id) {
+      var el = document.getElementById(id); if (el) el.remove();
+    });
     var bangoFull = String(h[HF.bango] || '').trim();
     var bango = (bangoFull.match(/^\d+/) || [''])[0];
     if (!bango) { showToast('派遣先番号が特定できません', 'error'); return; }
     showToast('社員データを取得中…', 'info');
+    // 社員データは毎回フレッシュ取得 (前回の有期/無期・雇用期間 等の編集を反映)
+    //   キャッシュがあっても 1 時間以上経過 or null なら再取得
     if (!_hkAllEmpsCache) {
       _hkAllEmpsCache = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
     }
@@ -15835,8 +15846,17 @@ async function _submitHakenIsshiki() {
         var newItem = await nresp.json();
         showToast('✓ 新規契約「' + newBango + '」を派遣先情報に追加しました', 'success');
         // キャッシュをクリア (次回 派遣先一覧 表示時に再取得)
+        // 注: _hakensakiItems は null にしない (ボタン onclick が壊れる)
+        //     代わりに 新規 item を items 配列に push して即時反映
         if (typeof _hakensakiByBuka !== 'undefined') { _hakensakiByBuka = null; }
-        if (typeof _hakensakiItems !== 'undefined') { _hakensakiItems = null; }
+        if (typeof _hkAllEmpsCache !== 'undefined') { _hkAllEmpsCache = null; }   // 社員データも再取得
+        try {
+          // 新規 item をリストに加える (newItem.d は SP のレスポンス body)
+          var addedItem = (newItem && newItem.d) || newItem;
+          if (addedItem && typeof _hakensakiItems !== 'undefined' && Array.isArray(_hakensakiItems)) {
+            _hakensakiItems.push(addedItem);
+          }
+        } catch (_) {}
         // 以降の書類生成は新しい h (期間・番号反映済み) を使用
         ctx.h = nbody;
       } catch (ne) {
@@ -18163,8 +18183,10 @@ async function _saveNewHakensaki() {
     showToast('✓ 派遣先「' + name + '」を登録しました', 'success');
 
     // 派遣先住所マップのキャッシュをクリア (次回参照時に最新を取得)
+    // 注: _hakensakiItems は null にしない (ボタン onclick が壊れる)
+    //     代わりに loadHakensakiList() で最新を再取得して上書きする
     if (typeof _hakensakiByBuka !== 'undefined') { _hakensakiByBuka = null; }
-    if (typeof _hakensakiItems !== 'undefined') { _hakensakiItems = null; }
+    if (typeof _hkAllEmpsCache !== 'undefined') { _hkAllEmpsCache = null; }
 
     var ov = document.getElementById('newHakensakiOverlay'); if (ov) ov.remove();
 
