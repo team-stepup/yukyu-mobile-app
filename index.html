@@ -18383,6 +18383,14 @@ function _promptDeleteHakensakiItem() {
   var pStart = fmt(h[HF.haken_period_start]);
   var pEnd   = fmt(h[HF.haken_period_end]);
   var ninzu  = h[HF.hakenNinzu] || 0;
+  var modBy  = (h.Editor && h.Editor.Title) ? String(h.Editor.Title) : '';
+  function fmtDT(v) {
+    if (!v) return '—';
+    var d = new Date(v); if (isNaN(d)) return String(v);
+    return d.getFullYear() + '/' + (d.getMonth()+1) + '/' + d.getDate() +
+           ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  }
+  var modAt = fmtDT(h.Modified);
 
   var old = document.getElementById('hkDeleteOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
@@ -18404,6 +18412,9 @@ function _promptDeleteHakensakiItem() {
           (soshiki ? '<div><b>組織単位:</b> ' + escHtml(soshiki) + '</div>' : '') +
           '<div><b>派遣期間:</b> ' + pStart + ' 〜 ' + pEnd + '</div>' +
           '<div><b>派遣人数:</b> ' + ninzu + ' 名</div>' +
+          '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #ddd;color:#666;font-size:11.5px;">' +
+            '<b>最終更新:</b> ' + modAt + (modBy ? ' (' + escHtml(modBy) + ')' : '') +
+          '</div>' +
         '</div>' +
         '<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5;">' +
           'SharePoint「派遣先情報」リストから この行を完全に削除します。<br>' +
@@ -18728,10 +18739,16 @@ async function loadHakensakiList() {
         fieldTypes[odKey] = f.TypeAsString;
       });
     }
-    // アイテム取得
-    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500";
+    // アイテム取得 (更新者 Editor/Title も取得)
+    var itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500&$expand=Editor&$select=*,Editor/Title,Editor/Id";
     var resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    if (!resp.ok) {
+      // フォールバック: $expand=Editor が拒否された場合は plain で再取得
+      console.warn('Editor expand failed, retrying plain:', resp.status);
+      itemsUrl = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500";
+      resp = await fetch(itemsUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    }
     var data = await resp.json();
     var items = (data.d && data.d.results) || [];
     _hakensakiLoaded = true;
@@ -19594,6 +19611,14 @@ function drawHakensakiCards(filterKey) {
       var dateStr = (start || end) ? start + '～' + end : '';
       var modifiedStr = fmtModified(item.Modified);
       var modHL = modifiedHighlight(item.Modified);
+      // 更新者 (Editor) — 苗字だけ抽出して表示 (yukyu-app から更新された場合は MSAL の表示名)
+      var editorName = '';
+      if (item.Editor && item.Editor.Title) {
+        editorName = String(item.Editor.Title);
+        // 「山下 亜実」「Yamashita Ami」のように space で区切られていれば最初の語のみ
+        var sp = editorName.split(/[\s　]+/);
+        if (sp.length > 1 && sp[0]) editorName = sp[0];
+      }
       var s = _hakenItemStatus(item);
 
       var rowBg = '', textColor = 'var(--text-dark)', subColor = 'var(--text-light)';
@@ -19616,7 +19641,7 @@ function drawHakensakiCards(filterKey) {
       html += '<div style="flex:1;min-width:0;">';
       if (soshiki) html += '<div style="font-size:13px;color:' + textColor + ';overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
       if (dateStr) html += '<div style="font-size:11px;color:' + subColor + ';margin-top:2px;">' + escHtml(dateStr) + '</div>';
-      // 番号 + 最終更新日を 1 行に
+      // 番号 + 最終更新日 + 更新者を 1 行に
       var bottomLine = '';
       if (bango) bottomLine += '<span style="color:#999;">#' + escHtml(bango) + '</span>';
       if (modifiedStr) {
@@ -19626,6 +19651,9 @@ function drawHakensakiCards(filterKey) {
         } else {
           bottomLine += '<span style="color:#999;">📝 ' + escHtml(modifiedStr) + '</span>';
         }
+      }
+      if (editorName) {
+        bottomLine += '<span style="color:#bbb;margin-left:3px;">by ' + escHtml(editorName) + '</span>';
       }
       if (bottomLine) html += '<div style="font-size:10.5px;margin-top:3px;display:flex;align-items:center;flex-wrap:wrap;gap:4px;">' + bottomLine + '</div>';
       html += '</div>';
