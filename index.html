@@ -5555,6 +5555,7 @@ select.sankyu-edit-input {
       <div style="flex:1;"></div>
       <button onclick="openHakenKeiyakuFromHakensaki()" style="background:linear-gradient(135deg,#2e7d32,#66bb6a);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.25);">📋 派遣契約</button>
       <button class="admin-only" onclick="_promptHakensakiKakuninMode()" style="display:none;background:linear-gradient(135deg,#5e35b1,#7e57c2);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(94,53,177,0.25);" title="新規派遣先確認用に通知書・個別契約書・管理台帳の原本(空欄)を作成。役員専用">📑 確認用書類 <span style="font-size:9px;background:rgba(255,255,255,0.2);padding:1px 4px;border-radius:3px;margin-left:2px;">役員</span></button>
+      <button class="admin-only" onclick="_promptDeleteHakensakiItem()" style="display:none;background:linear-gradient(135deg,#c62828,#b71c1c);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(198,40,40,0.25);" title="この派遣契約行を削除。元に戻せません。役員専用">🗑 削除 <span style="font-size:9px;background:rgba(255,255,255,0.2);padding:1px 4px;border-radius:3px;margin-left:2px;">役員</span></button>
       <button onclick="window.open('https://teamstepupcom774.sharepoint.com/sites/PowerApps/Lists/040623/Allitemsg.aspx','_blank','noopener')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--primary);cursor:pointer;">SP ↗</button>
     </div>
     <div id="hakensakiDetailBody"></div>
@@ -18360,6 +18361,112 @@ function openHakensakiKakuninDoc(includeName) {
   }
 }
 
+// ============================================================
+// 派遣契約 削除 — 派遣先情報リスト から行を削除 (役員専用)
+//   間違って作成した契約行を取り消し可能にする
+// ============================================================
+function _promptDeleteHakensakiItem() {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) {
+    showToast('この機能は役員のみ利用できます', 'error');
+    return;
+  }
+  var h = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!h) { showToast('派遣先を選択してください', 'error'); return; }
+  var label = h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '（派遣先）';
+  var bango = h[HF.bango] ? String(h[HF.bango]) : '';
+  var soshiki = h[HF.soshiki] ? String(h[HF.soshiki]) : '';
+  function fmt(v) {
+    if (!v) return '—';
+    var d = new Date(v); if (isNaN(d)) return String(v);
+    return d.getFullYear() + '/' + (d.getMonth()+1) + '/' + d.getDate();
+  }
+  var pStart = fmt(h[HF.haken_period_start]);
+  var pEnd   = fmt(h[HF.haken_period_end]);
+  var ninzu  = h[HF.hakenNinzu] || 0;
+
+  var old = document.getElementById('hkDeleteOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'hkDeleteOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:440px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#ffebee;border-radius:12px 12px 0 0;">' +
+        '<h3 style="margin:0;font-size:15px;color:#c62828;">⚠ 派遣契約 削除確認</h3>' +
+        '<button onclick="document.getElementById(\'hkDeleteOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
+      '</div>' +
+      '<div style="padding:16px 18px;">' +
+        '<div style="background:#fff3e0;border:1.5px solid #ffb74d;border-radius:8px;padding:10px 12px;margin-bottom:12px;color:#bf360c;font-size:12px;font-weight:600;">' +
+          '⚠ この操作は<u>元に戻せません</u>。本当に削除しますか？' +
+        '</div>' +
+        '<div style="background:#f5f5f5;border-radius:8px;padding:12px;font-size:12.5px;line-height:1.7;">' +
+          '<div><b>派遣先:</b> ' + escHtml(label) + '</div>' +
+          (bango ? '<div><b>番号:</b> ' + escHtml(bango) + '</div>' : '') +
+          (soshiki ? '<div><b>組織単位:</b> ' + escHtml(soshiki) + '</div>' : '') +
+          '<div><b>派遣期間:</b> ' + pStart + ' 〜 ' + pEnd + '</div>' +
+          '<div><b>派遣人数:</b> ' + ninzu + ' 名</div>' +
+        '</div>' +
+        '<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5;">' +
+          'SharePoint「派遣先情報」リストから この行を完全に削除します。<br>' +
+          '元の社員データには影響しません。' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button onclick="document.getElementById(\'hkDeleteOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+        '<button onclick="_doDeleteHakensakiItem()" id="hkDeleteGoBtn" style="background:linear-gradient(135deg,#c62828,#b71c1c);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">🗑 削除する</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+async function _doDeleteHakensakiItem() {
+  var h = _hakensakiItems && _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!h || !h.Id) { showToast('削除対象が見つかりません', 'error'); return; }
+  var btn = document.getElementById('hkDeleteGoBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 削除中…'; }
+
+  try {
+    var token = await getToken();
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items(" + h.Id + ")";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'DELETE'
+      }
+    });
+    if (!resp.ok) {
+      var t = ''; try { t = await resp.text(); } catch (_) {}
+      throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 150));
+    }
+    showToast('✓ 派遣契約を削除しました', 'success');
+
+    // メモリ上の配列からも削除
+    var idx = _hakensakiCurrentItemIdx;
+    if (typeof _hakensakiItems !== 'undefined' && Array.isArray(_hakensakiItems) && idx >= 0 && idx < _hakensakiItems.length) {
+      _hakensakiItems.splice(idx, 1);
+    }
+    if (typeof _hakensakiByBuka !== 'undefined') { _hakensakiByBuka = null; }
+    if (typeof _hkAllEmpsCache !== 'undefined') { _hkAllEmpsCache = null; }
+
+    // モーダル閉じる + 派遣先一覧へ戻る
+    var ov = document.getElementById('hkDeleteOverlay'); if (ov) ov.remove();
+    switchScreen('hakensakiListScreen');
+    // 一覧再描画
+    if (typeof drawHakensakiCards === 'function') {
+      drawHakensakiCards(window._hakensakiCurrentTab || 'all');
+    } else if (typeof loadHakensakiList === 'function') {
+      loadHakensakiList();
+    }
+  } catch (e) {
+    console.error('Delete hakensaki error:', e);
+    showToast('削除失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑 削除する'; }
+  }
+}
+
 // 派遣契約 画面で扱っている派遣先(現在開いている item)
 var _currentKeiyakuHakenItem = null;
 var _currentKeiyakuHakenFieldMap = null;
@@ -19340,6 +19447,35 @@ function drawHakensakiCards(filterKey) {
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
   }
 
+  // 最終更新日を相対形式 (今日 / 昨日 / N日前) または日付で表示
+  function fmtModified(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var that = new Date(d); that.setHours(0, 0, 0, 0);
+    var diffDays = Math.round((today.getTime() - that.getTime()) / 86400000);
+    var hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    if (diffDays === 0) return '今日 ' + hhmm;
+    if (diffDays === 1) return '昨日 ' + hhmm;
+    if (diffDays < 7) return diffDays + '日前';
+    if (diffDays < 31) return Math.floor(diffDays / 7) + '週間前';
+    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  }
+  // Modified 日付の判定 (今日/昨日/今週 → 強調表示)
+  function modifiedHighlight(v) {
+    if (!v) return null;
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return null;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var that = new Date(d); that.setHours(0, 0, 0, 0);
+    var diffDays = Math.round((today.getTime() - that.getTime()) / 86400000);
+    if (diffDays === 0) return { bg: '#fff3e0', color: '#e65100', label: '🆕 今日' };
+    if (diffDays === 1) return { bg: '#fff8e1', color: '#f57f17', label: '昨日' };
+    if (diffDays < 7) return { bg: '#fffde7', color: '#fbc02d', label: diffDays + '日前' };
+    return null;
+  }
+
   // 検索キーワード取得
   var searchInput = document.getElementById('hakensakiSearch');
   var searchQ = searchInput ? String(searchInput.value || '').trim().toLowerCase() : '';
@@ -19440,14 +19576,24 @@ function drawHakensakiCards(filterKey) {
     }
     html += '</div>';
 
+    // 最終更新日でソート (新しい順) — 最近作成 / 更新した契約が上に来る
+    gItems.sort(function(a, b) {
+      var ma = a.Modified ? new Date(a.Modified).getTime() : 0;
+      var mb = b.Modified ? new Date(b.Modified).getTime() : 0;
+      return mb - ma;
+    });
+
     // ボディ (初期は非表示)
     html += '<div class="hk-acc-body" style="display:none;">';
     gItems.forEach(function(item) {
       var soshiki = F.soshiki ? String(item[F.soshiki] || '').trim() : '';
+      var bango = item[HF.bango] ? String(item[HF.bango]) : '';
       var start = F.start ? fmtDate(item[F.start]) : '';
       var end = F.end ? fmtDate(item[F.end]) : '';
       var ninzu = F.ninzu ? (Number(item[F.ninzu]) || 0) : '';
       var dateStr = (start || end) ? start + '～' + end : '';
+      var modifiedStr = fmtModified(item.Modified);
+      var modHL = modifiedHighlight(item.Modified);
       var s = _hakenItemStatus(item);
 
       var rowBg = '', textColor = 'var(--text-dark)', subColor = 'var(--text-light)';
@@ -19470,6 +19616,18 @@ function drawHakensakiCards(filterKey) {
       html += '<div style="flex:1;min-width:0;">';
       if (soshiki) html += '<div style="font-size:13px;color:' + textColor + ';overflow:hidden;text-overflow:ellipsis;">' + escHtml(soshiki) + '</div>';
       if (dateStr) html += '<div style="font-size:11px;color:' + subColor + ';margin-top:2px;">' + escHtml(dateStr) + '</div>';
+      // 番号 + 最終更新日を 1 行に
+      var bottomLine = '';
+      if (bango) bottomLine += '<span style="color:#999;">#' + escHtml(bango) + '</span>';
+      if (modifiedStr) {
+        if (bottomLine) bottomLine += '<span style="color:#ddd;margin:0 5px;">|</span>';
+        if (modHL) {
+          bottomLine += '<span style="background:' + modHL.bg + ';color:' + modHL.color + ';font-weight:700;padding:1px 6px;border-radius:4px;font-size:10px;">' + escHtml(modHL.label) + '</span>';
+        } else {
+          bottomLine += '<span style="color:#999;">📝 ' + escHtml(modifiedStr) + '</span>';
+        }
+      }
+      if (bottomLine) html += '<div style="font-size:10.5px;margin-top:3px;display:flex;align-items:center;flex-wrap:wrap;gap:4px;">' + bottomLine + '</div>';
       html += '</div>';
       if (F.ninzu) {
         html += '<div style="background:' + ninzuBg + ';color:' + ninzuColor + ';font-weight:700;font-size:15px;min-width:36px;text-align:center;padding:4px 10px;border-radius:8px;">' + ninzu + '</div>';
