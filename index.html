@@ -48,7 +48,10 @@ body {
   max-width: 500px;
   margin: 0 auto;
   position: relative;
+  /* iOS Safari の URL バー表示で 100vh が viewport より大きくなる問題を回避
+     → 100dvh (dynamic viewport height) を使用、未対応ブラウザは 100vh */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -7015,11 +7018,26 @@ function switchScreen(screenId, skipHistory) {
 
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
-  // 画面遷移時はスクロール位置を最上部にリセット。
-  // 実スクロールコンテナは .main-content (overflow-y:auto) なのでそれも対象にする。
-  window.scrollTo(0, 0);
+  // 画面遷移時はスクロール位置を最上部にリセット (戻るボタン等が隠れない様に)
+  //   即時 + requestAnimationFrame で 2 回実行し、iOS Safari の URL バー
+  //   表示状態の変化や遷移直後のレイアウト計算後にも確実にリセット。
+  function _resetScrollAll() {
+    try {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      var mc = document.querySelector('.main-content');
+      if (mc) mc.scrollTop = 0;
+    } catch (_) {}
+  }
+  _resetScrollAll();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function() {
+      _resetScrollAll();
+      requestAnimationFrame(_resetScrollAll);
+    });
+  }
   var _mainContent = document.querySelector('.main-content');
-  if (_mainContent) _mainContent.scrollTop = 0;
 
   const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
@@ -15280,6 +15298,41 @@ function _showHakenIsshikiModal(h, emps) {
       '</div>' +
       '<div style="padding:14px 18px;font-size:12px;">' +
         '<div style="color:#888;margin-bottom:10px;">個別契約書＋派遣先台帳＋派遣元台帳をまとめて作成し、PDF保存します。</div>' +
+
+        // ── 作成モード選択 ──
+        '<div style="background:#f5f6fa;border-radius:8px;padding:10px 12px;margin-bottom:10px;border:1.5px solid #e0e4ee;">' +
+          '<div style="font-weight:700;color:#283593;font-size:12.5px;margin-bottom:6px;">📑 作成モード</div>' +
+          '<label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;padding:5px 0;border-bottom:1px solid #e0e4ee;">' +
+            '<input type="radio" name="hkiss_mode" value="update" checked onchange="_hkIssModeChange()">' +
+            '<div style="flex:1;">' +
+              '<div style="font-weight:700;color:#283593;">🔄 既存契約を更新</div>' +
+              '<div style="font-size:10.5px;color:#666;margin-top:2px;line-height:1.4;">' +
+                '派遣期間・人数等の変更を <b>派遣先情報Lists の現在の契約行に上書き</b>。<br>' +
+                '通常の契約期間更新時に使用。' +
+              '</div>' +
+            '</div>' +
+          '</label>' +
+          '<label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;padding:5px 0;">' +
+            '<input type="radio" name="hkiss_mode" value="new" onchange="_hkIssModeChange()">' +
+            '<div style="flex:1;">' +
+              '<div style="font-weight:700;color:#2e7d32;">🆕 新規契約として作成 (コピー)</div>' +
+              '<div style="font-size:10.5px;color:#666;margin-top:2px;line-height:1.4;">' +
+                '現契約を <b>コピーして派遣先情報Lists に新規追加</b>。<br>' +
+                '元契約はそのまま、契約期間と人数を変えて新規契約 (例: 077-1 → 077-4)。' +
+              '</div>' +
+            '</div>' +
+          '</label>' +
+          // 新番号入力 (新規モード選択時のみ表示)
+          '<div id="hkiss_newBangoBlock" style="display:none;margin-top:6px;padding-top:6px;border-top:1px solid #e0e4ee;">' +
+            '<div style="font-size:11px;color:#666;font-weight:600;margin-bottom:3px;">新規契約の番号</div>' +
+            '<input type="text" id="hkiss_newBango" placeholder="例: 077-4" ' +
+            'style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box;">' +
+            '<div style="font-size:10px;color:#888;margin-top:3px;">' +
+              '現在: <b>' + escHtml(String(h[HF.bango] || '')) + '</b>　→　新番号を入力 (空欄なら自動で「現番号-枝番」を生成)' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
         '<div style="margin-bottom:8px;"><div style="color:#666;font-weight:600;margin-bottom:3px;">作成日</div>' +
           '<input type="date" id="hkiss_date" value="' + todayIso + '" ' +
           'style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;box-sizing:border-box;"></div>' +
@@ -15360,6 +15413,21 @@ function _hkIssOtChange() {
   var sel = document.querySelector('input[name="hkiss_ot"]:checked');
   var blk = document.getElementById('hkiss_36block');
   if (blk) blk.style.display = (sel && sel.value === 'yes') ? '' : 'none';
+}
+
+// 作成モード ラジオ変更: 新規モード時は「新番号」入力ブロックを表示
+function _hkIssModeChange() {
+  var sel = document.querySelector('input[name="hkiss_mode"]:checked');
+  var blk = document.getElementById('hkiss_newBangoBlock');
+  var goBtn = document.getElementById('hkIsshikiGoBtn');
+  var isNew = !!(sel && sel.value === 'new');
+  if (blk) blk.style.display = isNew ? '' : 'none';
+  if (goBtn) {
+    goBtn.textContent = isNew ? '🆕 新規契約として作成' : '作成（プレビュー）';
+    goBtn.style.background = isNew
+      ? 'linear-gradient(135deg,#43a047,#2e7d32)'
+      : 'linear-gradient(135deg,#3949ab,#283593)';
+  }
 }
 
 // 有期/無期 を切り替えたら雇用期間欄の表示を切替
@@ -15688,8 +15756,97 @@ async function _submitHakenIsshiki() {
         _recordKoyouUndo('派遣契約書類一式: 有期無期・雇用期間', undoItems);
       }
     }
-    // 派遣先情報Lists の更新 (派遣期間・派遣先責任者・苦情処理担当者・請求単価)
-    if (ctx.h.Id) {
+    // 作成モード判定 (update = 既存契約更新 / new = 新規契約コピー作成)
+    var modeEl = document.querySelector('input[name="hkiss_mode"]:checked');
+    var isNewMode = !!(modeEl && modeEl.value === 'new');
+
+    if (isNewMode) {
+      // ── 新規モード: ctx.h をコピーして派遣期間・番号を差し替え、新規 POST ──
+      if (goBtn) goBtn.textContent = '⏳ 新規契約を派遣先情報に作成中…';
+      try {
+        var newBangoEl = document.getElementById('hkiss_newBango');
+        var newBango = newBangoEl ? String(newBangoEl.value || '').trim() : '';
+        if (!newBango) {
+          // 自動生成: 現番号の最後の数字+1 (例: 077-1 → 077-2)
+          var curBango = String(ctx.h[HF.bango] || '');
+          var m = curBango.match(/^(.+?-)(\d+)$/);
+          newBango = m ? (m[1] + (parseInt(m[2], 10) + 1)) : (curBango + '-NEW');
+        }
+        // h2 に派遣期間 + 番号 + 36協定 + ryokin を反映済み。これを POST 用 body に複製
+        var nbody = {};
+        // 既存 ctx.h から書き込み可能なフィールド (System や OData_計算列を除外) をコピー
+        var skipKeys = { Id: 1, ID: 1, __metadata: 1, __deferred: 1, Modified: 1, Created: 1,
+          AuthorId: 1, EditorId: 1, GUID: 1, OData__UIVersionString: 1, OData__ColorTag: 1,
+          ContentTypeId: 1, FileSystemObjectType: 1, ServerRedirectedEmbedUri: 1,
+          ServerRedirectedEmbedUrl: 1, OData__Level: 1, OData__ModerationStatus: 1,
+          ComplianceAssetId: 1, Attachments: 1 };
+        Object.keys(ctx.h).forEach(function(k) {
+          if (skipKeys[k]) return;
+          if (k.indexOf('__') === 0 && k !== '__metadata') return;
+          if (/Id$/.test(k) && k !== 'AuthorId' && k !== 'EditorId') {/* lookup IDs */}
+          var v = ctx.h[k];
+          if (v && typeof v === 'object') return;  // lookup や Collection は除外
+          nbody[k] = v;
+        });
+        // h2 の編集内容で上書き (派遣期間・責任者・36協定・ryokin)
+        nbody[HF.haken_period_start] = psV ? (psV + 'T00:00:00Z') : null;
+        nbody[HF.haken_period_end]   = peV ? (peV + 'T00:00:00Z') : null;
+        if (h2[HF.hakensakiSekBusho] != null)     nbody[HF.hakensakiSekBusho] = h2[HF.hakensakiSekBusho];
+        if (h2[HF.hakensakiSekYakushoku] != null) nbody[HF.hakensakiSekYakushoku] = h2[HF.hakensakiSekYakushoku];
+        if (h2[HF.hakensakiSekName] != null)      nbody[HF.hakensakiSekName] = h2[HF.hakensakiSekName];
+        if (h2[HF.kujouSakiBusho] != null)        nbody[HF.kujouSakiBusho] = h2[HF.kujouSakiBusho];
+        if (h2[HF.kujouSakiYakushoku] != null)    nbody[HF.kujouSakiYakushoku] = h2[HF.kujouSakiYakushoku];
+        if (h2[HF.kujouSakiName] != null)         nbody[HF.kujouSakiName] = h2[HF.kujouSakiName];
+        nbody[HF.jikangai_1day]   = ot36.day;
+        nbody[HF.jikangai_1month] = ot36.month;
+        nbody[HF.jikangai_1year]  = ot36.year;
+        nbody[HF.kyujitsu_1month] = ot36.kyujitsu;
+        // ryokin (人数最多のグループ)
+        var __rk = Object.keys(ryokinGroups);
+        if (__rk.length) {
+          var __top = __rk[0];
+          __rk.forEach(function(rk) { if ((ryokinGroups[rk] || []).length > (ryokinGroups[__top] || []).length) __top = rk; });
+          var __rn = Number(__top) || 0;
+          if (__rn) nbody[HF.hakenRyokin] = __rn;
+        }
+        // 派遣人数 (選択した人数)
+        try {
+          var ninzuKey = (HF.hakenNinzu || 'OData__x6d3e__x9063__x4eba__x6570_');
+          nbody[ninzuKey] = sel.length;
+        } catch (_) {}
+        // 新番号
+        nbody[HF.bango] = newBango;
+
+        var newHToken = await getToken();
+        nbody.__metadata = { type: await getListItemEntityType(LIST_HAKENSAKI_GUID) };
+        var nurl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items";
+        var nresp = await fetch(nurl, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + newHToken, 'Accept': 'application/json;odata=verbose',
+            'Content-Type': 'application/json;odata=verbose'
+          },
+          body: JSON.stringify(nbody)
+        });
+        if (!nresp.ok) {
+          var nt = ''; try { nt = await nresp.text(); } catch (_) {}
+          throw new Error('HTTP ' + nresp.status + ' ' + nt.substring(0, 200));
+        }
+        var newItem = await nresp.json();
+        showToast('✓ 新規契約「' + newBango + '」を派遣先情報に追加しました', 'success');
+        // キャッシュをクリア (次回 派遣先一覧 表示時に再取得)
+        if (typeof _hakensakiByBuka !== 'undefined') { _hakensakiByBuka = null; }
+        if (typeof _hakensakiItems !== 'undefined') { _hakensakiItems = null; }
+        // 以降の書類生成は新しい h (期間・番号反映済み) を使用
+        ctx.h = nbody;
+      } catch (ne) {
+        console.error('新規契約 POST 失敗:', ne);
+        showToast('新規契約の作成に失敗: ' + (ne.message || ne), 'error');
+        if (goBtn) { goBtn.disabled = false; goBtn.textContent = '🆕 新規契約として作成'; }
+        return;
+      }
+    } else if (ctx.h.Id) {
+      // ── 既存モード: 派遣先情報Lists の更新 (派遣期間・派遣先責任者・苦情処理担当者・請求単価) ──
       var curPS = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_start]) : '';
       var curPE = (typeof _toDateInputVal === 'function') ? _toDateInputVal(ctx.h[HF.haken_period_end]) : '';
       var hbody = {};
