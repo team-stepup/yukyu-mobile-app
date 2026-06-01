@@ -24661,6 +24661,56 @@ function toggleSankyuEdit() {
   window.scrollTo(0, 0);
 }
 
+// 状況: 休業中 → 休業終了 に切替 (復職時)
+//   状況フィールドは classifySankyuField で 'hidden' 扱いのため、編集モードでは表示されない。
+//   そこで詳細ヘッダー上の専用ボタンから 1 タップで切替できるようにする。
+async function setSankyuStatusOwari() {
+  if (!_sankyuCurrentItem) return;
+  var no = '';
+  var name = '';
+  try {
+    var kNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+    var kNm = sankyuKeyByTitle('氏名') || sankyuKeyByTitle('社員氏名');
+    no = String(_sankyuCurrentItem[kNo] || '');
+    name = String(_sankyuCurrentItem[kNm] || '');
+  } catch(_) {}
+  if (!confirm('休業終了に切り替えますか？\n\n対象: ' + (name || '(氏名なし)') + ' (No.' + no + ')\n\n切替後:\n- 産休育休一覧の「休業終了」タブに移動します\n- ホームの🌸産休育休バッジから 1 名減ります\n- 実働数カウントに復帰します')) return;
+  await _sankyuSetStatusAndRefresh('休業終了');
+}
+
+async function setSankyuStatusKyugyo() {
+  if (!_sankyuCurrentItem) return;
+  if (!confirm('休業終了 → 休業中に戻しますか？\n(誤操作のリカバリ用)')) return;
+  await _sankyuSetStatusAndRefresh('休業中');
+}
+
+async function _sankyuSetStatusAndRefresh(newStatus) {
+  try {
+    var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+    if (!kStatus) { showToast('状況フィールドが見つかりません', 'error'); return; }
+    var body = {};
+    body[kStatus] = newStatus;
+    await spPatchSankyuItem(_sankyuCurrentItem.Id, body);
+    _sankyuCurrentItem[kStatus] = newStatus;
+    // _sankyuItems 配列内も同期
+    if (_sankyuItems) {
+      for (var i = 0; i < _sankyuItems.length; i++) {
+        if (_sankyuItems[i].Id === _sankyuCurrentItem.Id) {
+          _sankyuItems[i][kStatus] = newStatus;
+          break;
+        }
+      }
+    }
+    _soumuSankyuSummary = null;  // ホームバッジ再計算用
+    showToast('✓ 状況を「' + newStatus + '」に更新しました', 'success');
+    renderSankyuDetail(_sankyuCurrentItem);
+    window.scrollTo(0, 0);
+  } catch (e) {
+    console.error('setSankyuStatus error:', e);
+    showToast('更新失敗: ' + (e.message || String(e)), 'error');
+  }
+}
+
 // 編集をキャンセル
 function cancelSankyuEdit() {
   if (_sankyuNewMode) {
@@ -26691,6 +26741,20 @@ function renderSankyuDetail(item) {
     if (isMale) html += ' <span class="sankyu-papa-badge">👨 パパ</span>';
     html += '</div>';
     if (status) html += '<div class="sankyu-detail-status">' + escHtml(status) + '</div>';
+    // 状況切替ボタン (新規ではなく既存行のみ)
+    //   - 休業中 → 「✅ 休業終了に切替 (復職)」ボタンを表示
+    //   - 休業終了 → 「↩ 休業中に戻す」ボタン (誤操作リカバリ用)
+    if (!isNew && _sankyuCurrentItem && _sankyuCurrentItem.Id) {
+      var rawStatus = String(_sankyuCurrentItem[kStatus] || '');
+      var isOwariRaw = (rawStatus.indexOf('終了') >= 0 || rawStatus.indexOf('完了') >= 0);
+      html += '<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">';
+      if (!isOwariRaw) {
+        html += '<button onclick="setSankyuStatusOwari()" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 6px rgba(67,160,71,0.3);">✅ 休業終了に切替 <span style="font-size:10px;opacity:0.85;font-weight:500;">(復職時)</span></button>';
+      } else {
+        html += '<button onclick="setSankyuStatusKyugyo()" style="background:#fff;color:#d81b60;border:1.5px solid #f48fb1;border-radius:8px;padding:8px 14px;font-weight:600;font-size:12px;cursor:pointer;">↩ 休業中に戻す</button>';
+      }
+      html += '</div>';
+    }
     // 社員フォルダ ボタン (社員プロフィールと同じビューアで開く)
     if (folderUrl) {
       try {
