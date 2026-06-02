@@ -36972,6 +36972,124 @@ const IDOU_INHERIT_CATEGORIES = [
   'vehicle', 'license', 'carInsurance', 'insurance'
 ];
 
+// 再入社手続き: 引継ぎ事項の「必須」項目 (空欄なら "未入力" アラート)
+const IDOU_REQUIRED_KEYS = {
+  birthday: 1, keitai: 1, address: 1,
+  emergencyName: 1, emergencyTel: 1,
+  bankName: 1, bankAccount: 1, bankMeigi: 1
+};
+// 外国籍の場合のみ必須 (在留関連)
+const IDOU_REQUIRED_IF_FOREIGN = {
+  zairyuShikaku: 1, zairyuKigen: 1, zairyuBikou: 1
+};
+
+// 引継ぎ事項フィールドの問題判定
+//   戻り値: null | { level:'danger'|'warn'|'soon'|'missing', label, sub }
+function _idouFieldIssue(field, val, isRequired) {
+  const v = (val === null || val === undefined) ? '' : String(val).trim();
+  // 期限切れ / 期限間近 (dateExpiry のみ・値がある場合)
+  if (field.format === 'dateExpiry' && v) {
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) {
+      const diffDays = Math.ceil((d.getTime() - Date.now()) / 86400000);
+      if (diffDays < 0)   return { level: 'danger', label: '期限切れ', sub: Math.abs(diffDays) + '日経過' };
+      if (diffDays <= 30) return { level: 'warn',   label: '残り' + diffDays + '日', sub: '' };
+      if (diffDays <= 60) return { level: 'soon',   label: '残り' + diffDays + '日', sub: '' };
+    }
+  }
+  // 必須未入力
+  if (isRequired && !v) return { level: 'missing', label: '未入力', sub: '' };
+  return null;
+}
+
+// バッジ内側のHTML (アイコン + ラベル)
+function _idouBadgeInner(issue) {
+  if (!issue) return '';
+  let icon = '⚠️';
+  if (issue.level === 'missing') icon = '✏️';
+  else if (issue.level === 'soon') icon = '⏳';
+  return icon + ' ' + escHtml(issue.label) + (issue.sub ? ' <span style="opacity:.8;font-weight:600;">' + escHtml(issue.sub) + '</span>' : '');
+}
+
+// 引継ぎ事項サマリーバナーのHTML生成 (問題がある時だけ表示)
+function _idouBuildSummaryHtml(issues) {
+  if (!issues || issues.length === 0) return '';
+  const order = { danger: 0, warn: 1, soon: 2, missing: 3 };
+  issues = issues.slice().sort(function(a, b) { return (order[a.level] != null ? order[a.level] : 9) - (order[b.level] != null ? order[b.level] : 9); });
+  const rows = issues.map(function(it) {
+    let c = '#c62828', ic = '⚠️';
+    if (it.level === 'warn')    { c = '#e65100'; ic = '⚠️'; }
+    else if (it.level === 'soon')    { c = '#f9a825'; ic = '⏳'; }
+    else if (it.level === 'missing') { c = '#ef6c00'; ic = '✏️'; }
+    return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;line-height:1.4;">' +
+      '<span style="font-size:13px;flex-shrink:0;">' + ic + '</span>' +
+      '<span style="font-weight:800;color:' + c + ';font-size:12px;min-width:60px;flex-shrink:0;">' + escHtml(it.text) + '</span>' +
+      '<span style="color:#555;font-size:12px;">' + escHtml(it.catLabel) + ' › ' + escHtml(it.fieldLabel) + '</span>' +
+    '</div>';
+  }).join('');
+  return '<div style="background:#fff8e1;border:1.5px solid #ffca28;border-radius:10px;padding:11px 13px;margin-bottom:12px;">' +
+    '<div style="font-weight:800;color:#e65100;font-size:12.5px;margin-bottom:5px;">⚠️ 確認が必要な引継ぎ項目 (' + issues.length + '件)</div>' +
+    '<div style="font-size:10.5px;color:#999;margin-bottom:7px;line-height:1.5;">該当セクションは自動で開いています。期限切れ・未入力の項目をその場で修正してください。</div>' +
+    rows +
+  '</div>';
+}
+
+// 引継ぎ入力欄が変更されたら 1 項目だけ再判定 (ハイライト/バッジ更新)
+function _idouRevalidateInherit(wrap) {
+  if (!wrap) return;
+  const key = wrap.getAttribute('data-fieldkey');
+  const format = wrap.getAttribute('data-format') || '';
+  const isReq = wrap.getAttribute('data-required') === '1';
+  const input = wrap.querySelector('input,select,textarea');
+  const val = input ? input.value : '';
+  const issue = _idouFieldIssue({ key: key, format: format }, val, isReq);
+  wrap.classList.remove('idou-issue-danger', 'idou-issue-warn', 'idou-issue-soon', 'idou-issue-missing');
+  if (issue) wrap.classList.add('idou-issue-' + issue.level);
+  wrap.setAttribute('data-issuetext', issue ? (issue.label + (issue.sub ? ' ' + issue.sub : '')) : '');
+  const badge = document.getElementById('idou_inh_badge_' + key);
+  if (badge) badge.innerHTML = issue ? _idouBadgeInner(issue) : '';
+}
+
+// 入力イベント (委譲) → 該当フィールドを再判定 + サマリー更新
+function _idouOnInheritChange(e) {
+  const t = e.target;
+  if (!t || !(t.matches && t.matches('input,select,textarea'))) return;
+  const wrap = t.closest ? t.closest('.idou-inh-field[data-fieldkey]') : null;
+  if (!wrap) return;
+  _idouRevalidateInherit(wrap);
+  _idouRefreshInheritSummary();
+}
+
+// 全引継ぎフィールドを走査してサマリーバナーを再構築
+function _idouRefreshInheritSummary() {
+  const cont = document.getElementById('idouInheritSummary');
+  if (!cont) return;
+  const wraps = document.querySelectorAll('#idouOverlay .idou-inh-field[data-fieldkey]');
+  const issues = [];
+  wraps.forEach(function(w) {
+    let lvl = null;
+    if (w.classList.contains('idou-issue-danger')) lvl = 'danger';
+    else if (w.classList.contains('idou-issue-warn')) lvl = 'warn';
+    else if (w.classList.contains('idou-issue-soon')) lvl = 'soon';
+    else if (w.classList.contains('idou-issue-missing')) lvl = 'missing';
+    if (!lvl) return;
+    const labelEl = w.querySelector('label');
+    let fieldLabel = w.getAttribute('data-fieldkey') || '';
+    if (labelEl && labelEl.childNodes[0] && labelEl.childNodes[0].nodeValue) {
+      fieldLabel = labelEl.childNodes[0].nodeValue.trim();
+    }
+    const det = w.closest('details.idou-acc');
+    let catLabel = '';
+    if (det) {
+      const s = det.querySelector('summary');
+      if (s) catLabel = s.textContent.replace(/\s*\(.*$/, '').replace(/⚠️.*$/, '').trim();
+    }
+    const txt = w.getAttribute('data-issuetext') || lvl;
+    issues.push({ catLabel: catLabel, fieldLabel: fieldLabel, level: lvl, text: txt });
+  });
+  cont.innerHTML = _idouBuildSummaryHtml(issues);
+}
+
 // 引継ぎ用のシンプルな入力HTML生成 (getEditInputHtml の軽量版、ID prefix 違い)
 function _buildIdouInheritInput(field, val, fieldsMeta, keyMap) {
   const id = 'idou_inh_' + field.key;
@@ -37014,14 +37132,23 @@ function _buildIdouInheritInput(field, val, fieldsMeta, keyMap) {
 }
 
 // 引継ぎカテゴリのアコーディオンHTML生成
+//   + 期限切れ/期限間近(dateExpiry) と 必須未入力 を検出してハイライト・自動展開・サマリー表示
 function _buildIdouInheritHtml(emp, fieldsMeta, keyMap) {
+  // 外国籍判定 (在留関連の必須チェック用)
+  const natKey = keyMap['nationality'];
+  const natVal = natKey ? String(emp[natKey] || '') : '';
+  const isForeign = !!natVal && !/日本|JAPAN/i.test(natVal);
+
   let html = '';
+  let allIssues = [];  // サマリー用 { catLabel, fieldLabel, level, text }
+
   IDOU_INHERIT_CATEGORIES.forEach(function(catId) {
     const cat = (typeof PROFILE_CATEGORIES !== 'undefined') ? PROFILE_CATEGORIES.find(c => c.id === catId) : null;
     if (!cat) return;
     // 入力フィールドが1つもない場合はスキップ
     let fieldsHtml = '';
     let cnt = 0;
+    let catIssueCnt = 0;
     cat.fields.forEach(function(field) {
       if (field.key && field.key.startsWith('_calc')) return;
       if (field.format === 'spUrl') return;
@@ -37039,18 +37166,38 @@ function _buildIdouInheritHtml(emp, fieldsMeta, keyMap) {
       if (!odKey) return;
       const val = emp[odKey];
       cnt++;
-      fieldsHtml += '<div class="idou-inh-field">';
-      fieldsHtml +=   '<label>' + escHtml(field.label) + '</label>';
+
+      const isReq = !!(IDOU_REQUIRED_KEYS[field.key] || (isForeign && IDOU_REQUIRED_IF_FOREIGN[field.key]));
+      const issue = _idouFieldIssue(field, val, isReq);
+      let issueCls = '';
+      if (issue) {
+        catIssueCnt++;
+        issueCls = ' idou-issue-' + issue.level;
+        allIssues.push({ catLabel: cat.label, fieldLabel: field.label, level: issue.level, text: issue.label + (issue.sub ? ' ' + issue.sub : '') });
+      }
+      const issueText = issue ? (issue.label + (issue.sub ? ' ' + issue.sub : '')) : '';
+      const badgeHtml = '<span class="idou-issue-badge" id="idou_inh_badge_' + escHtml(field.key) + '">' + (issue ? _idouBadgeInner(issue) : '') + '</span>';
+      const reqMark = isReq ? ' <span style="color:#e53935;font-size:9px;font-weight:700;">必須</span>' : '';
+
+      fieldsHtml += '<div class="idou-inh-field' + issueCls + '" id="idou_inh_wrap_' + escHtml(field.key) + '" data-fieldkey="' + escHtml(field.key) + '" data-format="' + escHtml(field.format || '') + '" data-required="' + (isReq ? '1' : '0') + '" data-issuetext="' + escHtml(issueText) + '">';
+      fieldsHtml +=   '<label>' + escHtml(field.label) + reqMark + badgeHtml + '</label>';
       fieldsHtml +=   _buildIdouInheritInput(field, val, fieldsMeta, keyMap);
       fieldsHtml += '</div>';
     });
     if (cnt === 0) return;
-    html += '<details class="idou-acc">';
-    html +=   '<summary>' + (cat.icon || '📋') + ' ' + escHtml(cat.label) + ' <span style="margin-left:6px;font-size:10px;color:#888;font-weight:400;">(' + cnt + '項目)</span></summary>';
+    // 問題があるセクションは初期展開
+    const openAttr = catIssueCnt > 0 ? ' open' : '';
+    const catBadge = catIssueCnt > 0 ? ' <span class="idou-cat-issue-badge">⚠️ ' + catIssueCnt + '</span>' : '';
+    html += '<details class="idou-acc"' + openAttr + '>';
+    html +=   '<summary>' + (cat.icon || '📋') + ' ' + escHtml(cat.label) + ' <span style="margin-left:6px;font-size:10px;color:#888;font-weight:400;">(' + cnt + '項目)</span>' + catBadge + '</summary>';
     html +=   '<div class="idou-acc-body">' + fieldsHtml + '</div>';
     html += '</details>';
   });
-  return html;
+
+  // サマリーバナー (問題がある時だけ中身が入る・後で動的更新)
+  const summaryHtml = '<div id="idouInheritSummary">' + _idouBuildSummaryHtml(allIssues) + '</div>';
+
+  return summaryHtml + html;
 }
 
 async function openIdouForm(opts) {
@@ -37200,11 +37347,23 @@ async function openIdouForm(opts) {
       '#idouOverlay .idou-inh-field { margin-bottom:10px; }' +
       '#idouOverlay .idou-inh-field label { display:block;font-size:11px;font-weight:600;color:#6a1b9a;margin-bottom:4px; }' +
       '#idouOverlay .idou-inh-field input,#idouOverlay .idou-inh-field select { width:100%;box-sizing:border-box;padding:9px 11px;font-size:14px;border:1px solid #e0d4f5;border-radius:8px;background:#fff;-webkit-appearance:none;appearance:none; }' +
+      // 引継ぎ事項の問題ハイライト (期限切れ / 期限間近 / 未入力)
+      '#idouOverlay .idou-issue-badge:empty { display:none; }' +
+      '#idouOverlay .idou-issue-badge { display:inline-block;margin-left:6px;font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px;vertical-align:middle; }' +
+      '#idouOverlay .idou-issue-danger .idou-issue-badge { background:#ffebee;color:#c62828; }' +
+      '#idouOverlay .idou-issue-warn .idou-issue-badge { background:#fff3e0;color:#e65100; }' +
+      '#idouOverlay .idou-issue-soon .idou-issue-badge { background:#fffde7;color:#f9a825; }' +
+      '#idouOverlay .idou-issue-missing .idou-issue-badge { background:#fff3e0;color:#ef6c00; }' +
+      '#idouOverlay .idou-issue-danger input,#idouOverlay .idou-issue-danger select { border:2px solid #e53935 !important;background:#fff5f5 !important; }' +
+      '#idouOverlay .idou-issue-warn input,#idouOverlay .idou-issue-warn select { border:2px solid #fb8c00 !important;background:#fffaf3 !important; }' +
+      '#idouOverlay .idou-issue-soon input,#idouOverlay .idou-issue-soon select { border:2px solid #fdd835 !important;background:#fffef5 !important; }' +
+      '#idouOverlay .idou-issue-missing input,#idouOverlay .idou-issue-missing select { border:2px dashed #fb8c00 !important;background:#fffaf3 !important; }' +
+      '#idouOverlay .idou-cat-issue-badge { background:#ffebee;color:#c62828;font-size:10px;font-weight:800;padding:1px 7px;border-radius:8px;margin-left:4px; }' +
     '</style>' +
     '<div class="taisha-panel">' +
       '<div class="taisha-header" style="background:linear-gradient(135deg,' + (isRejoin ? '#006064 0%,#0097a7 50%,#26c6da' : '#6a1b9a 0%,#8e24aa 50%,#ab47bc') + ' 100%);">' +
         '<div class="taisha-header-bar">' +
-          '<span class="taisha-title">' + (isRejoin ? '🔁 再入社報告' : '🔄 退社移動・入社報告') + '</span>' +
+          '<span class="taisha-title">' + (isRejoin ? '🔁 再入社手続き' : '🔄 退社移動・入社報告') + '</span>' +
           '<button class="taisha-close" onclick="closeIdouForm()">✕</button>' +
         '</div>' +
         '<div class="taisha-emp-info">' +
@@ -37321,7 +37480,7 @@ async function openIdouForm(opts) {
       // ───── 自動引継ぎ事項（編集可能） ─────
       '<div class="idou-section-title">📋 自動引継ぎ事項 (必要に応じて編集)</div>' +
       '<div style="font-size:11px;color:#888;margin-bottom:10px;line-height:1.6;">' +
-        '旧レコードから自動引き継ぎされます。修正が必要な項目だけ各セクションを開いて編集してください。' +
+        '旧レコードから自動引き継ぎされます。<b style="color:#e65100;">期限切れ・期限間近・必須未入力</b>の項目は色付きで強調表示され、該当セクションが自動で開きます。その場で修正できます。' +
       '</div>' +
       _buildIdouInheritHtml(emp, fieldsMeta, keyMap) +
 
@@ -37332,6 +37491,9 @@ async function openIdouForm(opts) {
     '</div>';
 
   document.body.appendChild(overlay);
+  // 引継ぎ事項の入力欄を変更したら その場で再判定 (ハイライト/バッジ/サマリーを更新)
+  overlay.addEventListener('input', _idouOnInheritChange, true);
+  overlay.addEventListener('change', _idouOnInheritChange, true);
   var panel = overlay.querySelector('.taisha-panel');
   if (panel) panel.scrollTop = 0;
 }
@@ -37429,7 +37591,7 @@ async function submitIdouForm() {
   overlay.className = 'confirm-overlay';
   overlay.style.zIndex = '99999';
   overlay.innerHTML = '<div class="confirm-box">' +
-    '<div class="confirm-title">' + (isRejoin ? '🔁 再入社報告 確認' : '🔄 退社移動・入社報告 確認') + '</div>' +
+    '<div class="confirm-title">' + (isRejoin ? '🔁 再入社手続き 確認' : '🔄 退社移動・入社報告 確認') + '</div>' +
     '<div class="confirm-msg" style="text-align:left;">' +
     '<strong>' + escHtml(no + ' ' + name) + '</strong><br><br>' +
     (isRejoin
