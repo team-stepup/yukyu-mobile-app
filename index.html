@@ -33969,7 +33969,8 @@ const PROGRAM_MASTER = [
   { id:'asti_kyuyo',      emoji:'💴', name:'ASTI 給料計算用データ作成（給食費込）', freq:'monthly' },
   { id:'asti_kyushoku',   emoji:'🍱', name:'ASTI 給食エクセルを入れる',            freq:'manual'  },
   { id:'asti_kintai_csv', emoji:'📥', name:'ASTI 勤怠CSV ダウンロード',            freq:'monthly' },
-  { id:'asti_timecard',   emoji:'🕒', name:'ASTIタイムカード作成→月次自動',       freq:'monthly' },
+  { id:'asti_timecard',   emoji:'🕒', name:'ASTIタイムカード作成→月次自動',       freq:'scheduled',
+    schedule:[ { label:'1回目', nth:1, time:'10:00' }, { label:'2回目', nth:2, time:'13:00' } ] },
   { id:'dakoku_check',    emoji:'✅', name:'タイムカードチェック（打刻）',         freq:'multi'   },
   { id:'dakoku_v6',       emoji:'🔁', name:'dakoku_v6_auto',                       freq:'multi'   },
   { id:'yushin_all',      emoji:'🏭', name:'ユーシン 月次 全部（TC+請求計算書）',  freq:'monthly' },
@@ -33979,6 +33980,89 @@ const PROGRAM_MASTER = [
 ];
 var _progLogMonth = null; // 'YYYY-MM'
 var _progLogItems = [];
+
+// ===== ステップアップ稼働日 (土日 + 国民の祝日 + 会社休日リスト を除く) =====
+// 会社休日リスト (asti-kintai 月初パイプラインと同じ GUID)。日付は UTC保存→+9hでJST。
+const LIST_KAISHA_KYUJITSU_GUID = '37973404-3c0a-4e02-a64a-6d15b633d072';
+var _companyHolidaysCache = null; // Set('YYYY-MM-DD')
+
+// JP祝日計算（2020年以降ルール・振替休日・国民の休日）。jpholidayと2025-2030で一致検証済み。
+function _whKey(y, m, d) { return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+function _whNthMonday(year, month, n) {
+  var dow = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  return 1 + ((1 - dow + 7) % 7) + (n - 1) * 7;
+}
+function _whEquinox(year, kind) {
+  var base = kind === 'spring' ? 20.8431 : 23.2488;
+  return Math.floor(base + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+}
+function _whDow(y, m, d) { return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); }
+function _whIso(dt) { return dt.getUTCFullYear() + '-' + String(dt.getUTCMonth() + 1).padStart(2, '0') + '-' + String(dt.getUTCDate()).padStart(2, '0'); }
+var _jpHolCache = {};
+function jpHolidaysOfYear(year) {
+  if (_jpHolCache[year]) return _jpHolCache[year];
+  var base = {};
+  var add = function (m, d) { if (d >= 1) base[_whKey(year, m, d)] = true; };
+  add(1, 1); add(1, _whNthMonday(year, 1, 2)); add(2, 11); add(2, 23);
+  add(3, _whEquinox(year, 'spring')); add(4, 29); add(5, 3); add(5, 4); add(5, 5);
+  add(7, _whNthMonday(year, 7, 3)); add(8, 11); add(9, _whNthMonday(year, 9, 3));
+  add(9, _whEquinox(year, 'autumn')); add(10, _whNthMonday(year, 10, 2)); add(11, 3); add(11, 23);
+  var result = Object.assign({}, base);
+  Object.keys(base).sort().forEach(function (k) {
+    var p = k.split('-').map(Number);
+    if (_whDow(p[0], p[1], p[2]) === 0) {
+      var nd = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+      do { nd.setUTCDate(nd.getUTCDate() + 1); } while (result[_whIso(nd)] || base[_whIso(nd)]);
+      result[_whIso(nd)] = true;
+    }
+  });
+  for (var m = 1; m <= 12; m++) {
+    var dim = new Date(Date.UTC(year, m, 0)).getUTCDate();
+    for (var d = 2; d < dim; d++) {
+      var k = _whKey(year, m, d);
+      if (result[k] || _whDow(year, m, d) === 0) continue;
+      var prev = new Date(Date.UTC(year, m - 1, d - 1)), next = new Date(Date.UTC(year, m - 1, d + 1));
+      if ((result[_whIso(prev)] || base[_whIso(prev)]) && (result[_whIso(next)] || base[_whIso(next)])) result[k] = true;
+    }
+  }
+  _jpHolCache[year] = result;
+  return result;
+}
+// 会社休日リストを取得して Set('YYYY-MM-DD') にキャッシュ
+async function fetchCompanyHolidays() {
+  if (_companyHolidaysCache) return _companyHolidaysCache;
+  var s = new Set();
+  try {
+    var items = await spGetAll(LIST_KAISHA_KYUJITSU_GUID, "$select=_x65e5__x4ed8_&$top=2000");
+    items.forEach(function (it) {
+      var raw = it._x65e5__x4ed8_ || it.OData__x65e5__x4ed8_;
+      if (!raw) return;
+      var d = new Date(raw);            // UTC
+      if (isNaN(d)) return;
+      var j = new Date(d.getTime() + 9 * 3600 * 1000); // JST
+      s.add(_whIso(j));
+    });
+  } catch (e) { console.warn('会社休日取得失敗(土日+祝日のみで判定):', e); }
+  _companyHolidaysCache = s;
+  return s;
+}
+function _isWorkday(y, m, d, compSet) {
+  var dow = _whDow(y, m, d);
+  if (dow === 0 || dow === 6) return false;
+  var k = _whKey(y, m, d);
+  if (jpHolidaysOfYear(y)[k]) return false;
+  if (compSet && compSet.has(k)) return false;
+  return true;
+}
+// その月の第 nth 稼働日の Date(ローカル) を返す。無ければ null。
+function nthWorkdayDate(year, month, nth, compSet) {
+  var dim = new Date(year, month, 0).getDate();
+  var idx = 0;
+  for (var d = 1; d <= dim; d++) {
+    if (_isWorkday(year, month, d, compSet)) { idx++; if (idx === nth) return new Date(year, month - 1, d); }
+  }
+  return null;
+}
 
 function progLogYM(d) {
   d = d || new Date();
@@ -34023,6 +34107,7 @@ async function loadProgramLog() {
     var q = "$select=Title,ProgKey,ProgName,Status,RunBy,TargetMonth,Note,DurationSec,Created"
           + "&$orderby=Created desc&$top=2000";
     _progLogItems = await spGetAll(LIST_PROGLOG_GUID, q);
+    await fetchCompanyHolidays(); // 稼働日計算用（キャッシュ）。render は同期なので先に温めておく
     renderProgramLog();
   } catch (e) {
     console.error('loadProgramLog error:', e);
@@ -34030,6 +34115,63 @@ async function loadProgramLog() {
   } finally {
     hideSpinner();
   }
+}
+
+var _WD_JP = ['日', '月', '火', '水', '木', '金', '土'];
+function _fmtSlotDate(dt) {
+  if (!dt) return '日付未定';
+  return (dt.getMonth() + 1) + '/' + dt.getDate() + '(' + _WD_JP[dt.getDay()] + ')';
+}
+
+// スケジュール型（月N回・稼働日指定）のカードを描画し、集計を tally に加算
+function _renderScheduledCard(p, logsAsc, month, tally) {
+  var parts = month.split('-'); var year = parseInt(parts[0]), mon = parseInt(parts[1]);
+  var comp = _companyHolidaysCache;
+  var now = new Date();
+  var anyOverdue = false, anyFail = false, doneSlots = 0;
+
+  var slotRows = p.schedule.map(function (slot, i) {
+    var log = logsAsc[i] || null;
+    var dt = nthWorkdayDate(year, mon, slot.nth, comp);
+    var dateLabel = _fmtSlotDate(dt) + ' ' + slot.time + '頃';
+    var icon, color, right;
+    if (log) {
+      doneSlots++;
+      if (log.Status === '失敗') { anyFail = true; icon = '⚠️'; color = '#e53935'; right = '失敗 (' + _progLogFmt(log.Created) + ')'; }
+      else if (log.Status === '警告') { anyFail = true; icon = '⚠️'; color = '#fb8c00'; right = '警告 (' + _progLogFmt(log.Created) + ')'; }
+      else { icon = '✅'; color = '#43a047'; right = '完了 ' + _progLogFmt(log.Created) + (log.RunBy ? ' · ' + escHtml(log.RunBy) : ''); }
+    } else {
+      var due = dt ? new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), parseInt(slot.time.split(':')[0]), parseInt(slot.time.split(':')[1])) : null;
+      if (due && now > due) { anyOverdue = true; icon = '🔴'; color = '#e53935'; right = '未実行'; }
+      else { icon = '⏳'; color = '#90a4ae'; right = '予定'; }
+    }
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;margin-top:5px;">'
+      + '<span style="font-size:13px;">' + icon + '</span>'
+      + '<span style="font-weight:700;color:#555;min-width:34px;">' + slot.label + '</span>'
+      + '<span style="color:var(--text-light);flex:1;min-width:0;">' + dateLabel + '</span>'
+      + '<span style="font-weight:700;color:' + color + ';white-space:nowrap;">' + right + '</span>'
+      + '</div>';
+  }).join('');
+
+  var headDot, headTxt;
+  if (doneSlots >= p.schedule.length && !anyFail) { tally.done++; headDot = '#43a047'; headTxt = '完了'; }
+  else if (anyOverdue) { tally.missing++; headDot = '#e53935'; headTxt = doneSlots + '/' + p.schedule.length; }
+  else if (anyFail) { tally.warn++; headDot = '#fb8c00'; headTxt = doneSlots + '/' + p.schedule.length; }
+  else { headDot = '#90a4ae'; headTxt = doneSlots + '/' + p.schedule.length; }
+
+  var extra = logsAsc.length > p.schedule.length ? ('<span style="background:#eef;color:#3949ab;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;">+' + (logsAsc.length - p.schedule.length) + '回</span>') : '';
+  return '<div class="card" style="padding:11px 12px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;">'
+    + '<span style="width:10px;height:10px;border-radius:50%;background:' + headDot + ';margin-top:5px;flex:0 0 auto;"></span>'
+    + '<div style="flex:1;min-width:0;">'
+    +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+    +     '<span style="font-size:15px;">' + p.emoji + '</span>'
+    +     '<span style="font-weight:700;font-size:13px;">' + escHtml(p.name) + '</span>'
+    +     '<span style="background:#fff3d4;color:#a07a00;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;border:1px solid #f0c040;">月' + p.schedule.length + '回</span>' + extra
+    +   '</div>'
+    +   slotRows
+    + '</div>'
+    + '<span style="font-size:11px;font-weight:700;color:' + headDot + ';white-space:nowrap;">' + headTxt + '</span>'
+    + '</div>';
 }
 
 function renderProgramLog() {
@@ -34047,20 +34189,26 @@ function renderProgramLog() {
     (byKey[k] = byKey[k] || []).push(it);
   });
 
-  var doneCnt = 0, warnCnt = 0, missingCnt = 0;
+  var tally = { done: 0, warn: 0, missing: 0 };
   var rows = PROGRAM_MASTER.map(function (p) {
-    var logs = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
-    var last = logs[0];
-    var cnt = logs.length;
+    var logsDesc = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
+
+    if (p.freq === 'scheduled' && p.schedule) {
+      var logsAsc = logsDesc.slice().reverse(); // 古い順に各回へ割当
+      return _renderScheduledCard(p, logsAsc, month, tally);
+    }
+
+    var last = logsDesc[0];
+    var cnt = logsDesc.length;
     var statusTxt, dot;
     if (!last) {
-      if (p.freq === 'monthly') { missingCnt++; statusTxt = '未実行'; dot = '#e53935'; }
+      if (p.freq === 'monthly') { tally.missing++; statusTxt = '未実行'; dot = '#e53935'; }
       else if (p.freq === 'manual') { statusTxt = '未完了'; dot = '#fb8c00'; }
       else { statusTxt = '実行なし'; dot = '#bdbdbd'; }
     } else {
-      doneCnt++;
-      if (last.Status === '失敗') { warnCnt++; dot = '#e53935'; }
-      else if (last.Status === '警告') { warnCnt++; dot = '#fb8c00'; }
+      tally.done++;
+      if (last.Status === '失敗') { tally.warn++; dot = '#e53935'; }
+      else if (last.Status === '警告') { tally.warn++; dot = '#fb8c00'; }
       else { dot = '#43a047'; }
       statusTxt = last.Status || '成功';
     }
@@ -34090,9 +34238,9 @@ function renderProgramLog() {
   var sumEl = document.getElementById('progLogSummary');
   if (sumEl) {
     sumEl.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:600;">'
-      + '<span>✅ 実行済 <b>' + doneCnt + '</b>/' + PROGRAM_MASTER.length + '</span>'
-      + (missingCnt ? '<span style="color:#c62828;">⚠️ 月1未実行 <b>' + missingCnt + '</b></span>' : '')
-      + (warnCnt ? '<span style="color:#ef6c00;">❗ 失敗/警告 <b>' + warnCnt + '</b></span>' : '')
+      + '<span>✅ 実行済 <b>' + tally.done + '</b>/' + PROGRAM_MASTER.length + '</span>'
+      + (tally.missing ? '<span style="color:#c62828;">⚠️ 未実行 <b>' + tally.missing + '</b></span>' : '')
+      + (tally.warn ? '<span style="color:#ef6c00;">❗ 失敗/警告 <b>' + tally.warn + '</b></span>' : '')
       + '</div>';
   }
 }
