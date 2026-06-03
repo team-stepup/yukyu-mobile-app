@@ -5344,12 +5344,12 @@ select.sankyu-edit-input {
         <div class="home-section-icon search">🔍</div>
         <div class="home-section-titles">
           <div class="home-section-title">社員検索</div>
-          <div class="home-section-sub">番号・名前・生年月日・ローマ字で検索</div>
+          <div class="home-section-sub">番号・名前・生年月日・ローマ字・整理番号で検索</div>
         </div>
       </div>
       <div class="home-search-wrap">
         <div style="position:relative;flex:1;">
-          <input id="searchInput" type="text" placeholder="例: 60124 / 田中 / 1985-04-01 / TANAKA" style="width:100%;padding-right:30px;">
+          <input id="searchInput" type="text" placeholder="例: 60124 / 850(整理番号) / 田中 / 1985-04-01 / TANAKA" style="width:100%;padding-right:30px;">
           <button id="searchClearBtn" onclick="resetSearch()"
             style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#bbb;cursor:pointer;padding:0;line-height:1;">&times;</button>
         </div>
@@ -6165,6 +6165,7 @@ const F = {
   tsukinTeate:   'OData__x901a__x52e4__x624b__x5f53_',   // 通勤手当(1日)
   mukikoyouDate: 'OData__x7121__x671f__x96c7__x7528__x30', // 無期雇用になった日付
   seikyu:        'OData__x8acb__x6c42__x5358__x4fa1_',   // 請求単価(派遣先への請求額)
+  seiriNo:       'OData__x88ab__x4fdd__x967a__x8005__x65', // 健康保険証の整理番号 (Number)
 };
 
 let msalInstance = null;
@@ -7193,6 +7194,7 @@ async function searchEmployee() {
   showSpinner();
   let isRomajiSearch = false;
   let romajiODataKey = null;
+  let seiriMatchNum = null;  // 数字検索時、整理番号一致を表示するための値
   try {
     let filter;
     const dateQ = parseDateQuery(query);
@@ -7212,8 +7214,9 @@ async function searchEmployee() {
         filter = "$filter=" + bdField + " ge datetime'" + dateQ.year + "-01-01T00:00:00Z' and " + bdField + " lt datetime'" + (dateQ.year + 1) + "-01-01T00:00:00Z'&$top=50";
       }
     } else if (/^\d+$/.test(query)) {
-      // Number only → search by employee number
-      filter = "$filter=" + F.syainNo + " eq " + query + "&$top=10";
+      // Number only → 社員番号 または 健康保険証の整理番号 で検索 (どちらも数値型)
+      filter = "$filter=" + F.syainNo + " eq " + query + " or " + F.seiriNo + " eq " + query + "&$top=20";
+      seiriMatchNum = query;
     } else if (/^[a-zA-Z][a-zA-Z\s'.\-]*$/.test(query)) {
       // ローマ字検索 (特記事項１ = 在留カードのローマ字氏名 を含む)
       isRomajiSearch = true;
@@ -7287,6 +7290,11 @@ async function searchEmployee() {
           romajiChipHtml = '<div style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:1px solid #ffcc80;border-radius:8px;padding:2px 9px;font-size:11px;font-weight:700;color:#e65100;margin-bottom:6px;letter-spacing:0.5px;">📋 ' + escHtml(rj) + '</div>';
         }
       }
+      // 整理番号で一致した場合は 健康保険証の整理番号 を表示
+      let seiriChipHtml = '';
+      if (seiriMatchNum != null && emp[F.seiriNo] != null && String(emp[F.seiriNo]) === String(seiriMatchNum)) {
+        seiriChipHtml = '<div style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:1px solid #a5d6a7;border-radius:8px;padding:2px 9px;font-size:11px;font-weight:700;color:#2e7d32;margin-bottom:6px;letter-spacing:0.3px;">🏥 整理番号 ' + escHtml(String(emp[F.seiriNo])) + '</div>';
+      }
       return `
         <div class="card card-clickable" style="position:relative;padding-right:28px;${resignedStyle}" onclick='selectEmployee(${empJson})'>
           <span style="position:absolute;top:14px;right:12px;color:var(--primary);font-size:22px;line-height:1;">&#8250;</span>
@@ -7296,6 +7304,7 @@ async function searchEmployee() {
             <span style="display:inline-flex;align-items:center;padding:2px 9px;background:#eef0f8;border-radius:10px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.3px;">№ ${escHtml(String(syainNo))}</span>
           </div>
           ${romajiChipHtml}
+          ${seiriChipHtml}
           ${hakensaki ? '<div style="display:inline-flex;align-items:center;gap:4px;background:rgba(98,100,167,0.1);border:1px solid rgba(98,100,167,0.2);border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600;color:var(--primary);margin-bottom:6px;">🏭 ' + escHtml(hakensaki) + '</div>' : ''}
           <div style="display:flex;gap:4px 14px;font-size:12px;color:var(--text-light);flex-wrap:wrap;align-items:center;line-height:1.5;">
             <span>📅 入社 ${formatDate(nyushaRaw)}${tenureHtml}</span>
