@@ -5429,6 +5429,12 @@ select.sankyu-edit-input {
           <span style="flex:1;font-weight:600;">有給データ バックアップ (CSV)</span>
           <span style="color:#bbb;font-size:14px;">↓</span>
         </button>
+        <button type="button" onclick="openProgramLogScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">📊</span>
+          <span style="flex:1;font-weight:600;">プログラム実行状況</span>
+          <span id="progLogMenuBadge" style="display:none;background:#e53935;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;"></span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
       </div>
     </div>
   </div>
@@ -5482,6 +5488,22 @@ select.sankyu-edit-input {
     <div style="margin-bottom:20px;">
       <button onclick="downloadAnalyticsExcel()" style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:#fff;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(46,125,50,0.3);">📥 Excel ダウンロード</button>
     </div>
+  </div>
+
+  <!-- Screen: プログラム実行状況 (役員専用) -->
+  <div class="screen" id="programLogScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;flex:1;">📊 プログラム実行状況</h2>
+      <button onclick="loadProgramLog()" title="更新" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 10px;font-size:13px;color:var(--primary);cursor:pointer;">⟳</button>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:10px;">
+      <button onclick="changeProgLogMonth(-1)" style="background:none;border:1px solid #ddd;border-radius:8px;padding:5px 12px;font-size:13px;cursor:pointer;">◀</button>
+      <span id="progLogMonthLabel" style="font-size:14px;font-weight:700;color:var(--primary);min-width:90px;text-align:center;"></span>
+      <button onclick="changeProgLogMonth(1)" style="background:none;border:1px solid #ddd;border-radius:8px;padding:5px 12px;font-size:13px;cursor:pointer;">▶</button>
+    </div>
+    <div id="progLogSummary" style="padding:12px 14px;margin-bottom:12px;background:linear-gradient(135deg,#fff9e6,#fff3d4);border-radius:12px;border:1px solid #f0c040;"></div>
+    <div id="progLogBody" style="margin-bottom:20px;"></div>
   </div>
 
   <!-- Screen: 役員ダッシュボード (派遣先別/担当別在職者分析) -->
@@ -33933,6 +33955,194 @@ function openHakensakiDashboardExcel() {
   if (!isAdminUser()) { showToast('役員権限が必要です', 'error'); return; }
   var url = 'https://teamstepupcom774.sharepoint.com/:x:/r/sites/TeamStepup-58/_layouts/15/Doc.aspx?sourcedoc=%7BF8748FEC-7D41-4F8E-A1C7-3F2C661ADF69%7D&file=%E6%B4%BE%E9%81%A3%E5%85%88%E5%88%A5%E6%9C%88%E6%AC%A1%E5%88%86%E6%9E%90_%E3%83%80%E3%83%83%E3%82%B7%E3%83%A5%E3%83%9C%E3%83%BC%E3%83%89.xlsx&action=default&mobileredirect=true';
   window.open(url, '_blank', 'noopener');
+}
+
+// ============================================================
+// 📊 プログラム実行状況 (役員専用)
+// 自動化バッチの実行ログ List「プログラム実行ログ」(List65) を月単位で集計表示。
+// 各バッチは Invoke-Logged.ps1 → program_log.py から1行ずつ記録される。
+// ============================================================
+const LIST_PROGLOG_GUID = '37f8bdd0-90ab-4e29-8852-28428188197a';
+const PROGLOG_LIST_PATH = '/sites/PowerApps/Lists/List65';
+// program_log.py の PROGRAMS とミラー。freq: monthly=月1 / multi=随時(月数回) / manual=手動完了
+const PROGRAM_MASTER = [
+  { id:'asti_kyuyo',      emoji:'💴', name:'ASTI 給料計算用データ作成（給食費込）', freq:'monthly' },
+  { id:'asti_kyushoku',   emoji:'🍱', name:'ASTI 給食エクセルを入れる',            freq:'manual'  },
+  { id:'asti_kintai_csv', emoji:'📥', name:'ASTI 勤怠CSV ダウンロード',            freq:'monthly' },
+  { id:'asti_timecard',   emoji:'🕒', name:'ASTIタイムカード作成→月次自動',       freq:'monthly' },
+  { id:'dakoku_check',    emoji:'✅', name:'タイムカードチェック（打刻）',         freq:'multi'   },
+  { id:'dakoku_v6',       emoji:'🔁', name:'dakoku_v6_auto',                       freq:'multi'   },
+  { id:'yushin_all',      emoji:'🏭', name:'ユーシン 月次 全部（TC+請求計算書）',  freq:'monthly' },
+  { id:'yushin_seikyuu',  emoji:'🧾', name:'ユーシン請求用タイムカード作成',       freq:'monthly' },
+  { id:'jidouka_backup',  emoji:'💾', name:'自動化バックアップ',                   freq:'multi'   },
+  { id:'seikyu_tougou',   emoji:'📑', name:'請求計算書 統合処理',                  freq:'monthly' },
+];
+var _progLogMonth = null; // 'YYYY-MM'
+var _progLogItems = [];
+
+function progLogYM(d) {
+  d = d || new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+// Created は UTC。+9h して JST の値に直す
+function _progLogJst(createdStr) {
+  var d = new Date(createdStr);
+  if (isNaN(d)) return null;
+  return new Date(d.getTime() + 9 * 3600 * 1000);
+}
+function _progLogJstYM(createdStr) {
+  var j = _progLogJst(createdStr);
+  return j ? (j.getUTCFullYear() + '-' + String(j.getUTCMonth() + 1).padStart(2, '0')) : '';
+}
+function _progLogFmt(createdStr) {
+  var j = _progLogJst(createdStr);
+  if (!j) return '-';
+  return String(j.getUTCMonth() + 1).padStart(2, '0') + '/' + String(j.getUTCDate()).padStart(2, '0')
+    + ' ' + String(j.getUTCHours()).padStart(2, '0') + ':' + String(j.getUTCMinutes()).padStart(2, '0');
+}
+
+async function openProgramLogScreen() {
+  if (!isAdminUser()) { showToast('役員のみアクセス可能です', 'error'); return; }
+  if (!_progLogMonth) _progLogMonth = progLogYM();
+  switchScreen('programLogScreen');
+  await loadProgramLog();
+}
+
+function changeProgLogMonth(delta) {
+  var p = (_progLogMonth || progLogYM()).split('-');
+  _progLogMonth = progLogYM(new Date(parseInt(p[0]), parseInt(p[1]) - 1 + delta, 1));
+  loadProgramLog();
+}
+
+async function loadProgramLog() {
+  if (!isAdminUser()) return;
+  showSpinner();
+  try {
+    var token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    var q = "$select=Title,ProgKey,ProgName,Status,RunBy,TargetMonth,Note,DurationSec,Created"
+          + "&$orderby=Created desc&$top=2000";
+    _progLogItems = await spGetAll(LIST_PROGLOG_GUID, q);
+    renderProgramLog();
+  } catch (e) {
+    console.error('loadProgramLog error:', e);
+    showToast('読み込みエラー: ' + (e.message || e), 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
+function renderProgramLog() {
+  var month = _progLogMonth || progLogYM();
+  var lbl = document.getElementById('progLogMonthLabel');
+  if (lbl) lbl.textContent = month.split('-')[0] + '年' + month.split('-')[1] + '月';
+
+  var monthItems = _progLogItems.filter(function (it) {
+    var ym = it.TargetMonth || _progLogJstYM(it.Created);
+    return ym === month;
+  });
+  var byKey = {};
+  monthItems.forEach(function (it) {
+    var k = it.ProgKey || '';
+    (byKey[k] = byKey[k] || []).push(it);
+  });
+
+  var doneCnt = 0, warnCnt = 0, missingCnt = 0;
+  var rows = PROGRAM_MASTER.map(function (p) {
+    var logs = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
+    var last = logs[0];
+    var cnt = logs.length;
+    var statusTxt, dot;
+    if (!last) {
+      if (p.freq === 'monthly') { missingCnt++; statusTxt = '未実行'; dot = '#e53935'; }
+      else if (p.freq === 'manual') { statusTxt = '未完了'; dot = '#fb8c00'; }
+      else { statusTxt = '実行なし'; dot = '#bdbdbd'; }
+    } else {
+      doneCnt++;
+      if (last.Status === '失敗') { warnCnt++; dot = '#e53935'; }
+      else if (last.Status === '警告') { warnCnt++; dot = '#fb8c00'; }
+      else { dot = '#43a047'; }
+      statusTxt = last.Status || '成功';
+    }
+    var freqLabel = p.freq === 'monthly' ? '月1回' : (p.freq === 'multi' ? '随時' : '手動');
+    var lastInfo = last ? (_progLogFmt(last.Created) + ' · ' + escHtml(last.RunBy || '')) : 'ー';
+    var cntBadge = cnt > 0 ? ('<span style="background:#eef;color:#3949ab;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;">' + cnt + '回</span>') : '';
+    var manualBtn = (p.freq === 'manual')
+      ? '<div><button onclick="markProgramDone(\'' + p.id + '\')" style="margin-top:7px;font-size:11px;padding:6px 12px;border:none;border-radius:8px;background:' + (last ? '#eceff1' : 'linear-gradient(135deg,#43a047,#2e7d32)') + ';color:' + (last ? '#607d8b' : '#fff') + ';font-weight:700;cursor:pointer;">' + (last ? '✓ 完了済み（再記録）' : '✅ 今月を完了にする') + '</button></div>'
+      : '';
+    var noteHtml = (last && last.Note) ? ('<div style="font-size:10px;color:#c62828;margin-top:2px;">' + escHtml(last.Note) + '</div>') : '';
+    return '<div class="card" style="padding:11px 12px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;">'
+      + '<span style="width:10px;height:10px;border-radius:50%;background:' + dot + ';margin-top:5px;flex:0 0 auto;"></span>'
+      + '<div style="flex:1;min-width:0;">'
+      +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+      +     '<span style="font-size:15px;">' + p.emoji + '</span>'
+      +     '<span style="font-weight:700;font-size:13px;">' + escHtml(p.name) + '</span>' + cntBadge
+      +   '</div>'
+      +   '<div style="font-size:11px;color:var(--text-light);margin-top:3px;">最終: ' + lastInfo + '　<span style="color:#90a4ae;">[' + freqLabel + ']</span></div>'
+      +   noteHtml + manualBtn
+      + '</div>'
+      + '<span style="font-size:11px;font-weight:700;color:' + dot + ';white-space:nowrap;">' + statusTxt + '</span>'
+      + '</div>';
+  }).join('');
+  var bodyEl = document.getElementById('progLogBody');
+  if (bodyEl) bodyEl.innerHTML = rows;
+
+  var sumEl = document.getElementById('progLogSummary');
+  if (sumEl) {
+    sumEl.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:600;">'
+      + '<span>✅ 実行済 <b>' + doneCnt + '</b>/' + PROGRAM_MASTER.length + '</span>'
+      + (missingCnt ? '<span style="color:#c62828;">⚠️ 月1未実行 <b>' + missingCnt + '</b></span>' : '')
+      + (warnCnt ? '<span style="color:#ef6c00;">❗ 失敗/警告 <b>' + warnCnt + '</b></span>' : '')
+      + '</div>';
+  }
+}
+
+// 手動完了タスク（給食Excel等）を「手動完了」として1行記録
+async function markProgramDone(progId) {
+  if (!isAdminUser()) { showToast('役員権限が必要です', 'error'); return; }
+  var p = PROGRAM_MASTER.find(function (x) { return x.id === progId; }) || { name: progId };
+  if (!confirm('「' + p.name + '」を ' + _progLogMonth + ' の完了として記録しますか？')) return;
+  try {
+    showSpinner();
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var digestResp = await fetch(SP_SITE_URL + '/_api/contextinfo', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    var dj = await digestResp.json();
+    var digest = (dj.d && dj.d.GetContextWebInformation && dj.d.GetContextWebInformation.FormDigestValue) || dj.FormDigestValue;
+    if (!digest) throw new Error('Digest取得失敗');
+    var listApi = SP_SITE_URL + "/_api/web/GetList('" + PROGLOG_LIST_PATH + "')";
+    var who = (typeof getLoggedInEmail === 'function' ? getLoggedInEmail() : '') || '役員';
+    var payload = {
+      listItemCreateInfo: { FolderPath: { DecodedUrl: PROGLOG_LIST_PATH }, UnderlyingObjectType: 0 },
+      formValues: [
+        { FieldName: 'Title', FieldValue: p.name },
+        { FieldName: 'ProgKey', FieldValue: progId },
+        { FieldName: 'ProgName', FieldValue: p.name },
+        { FieldName: 'Status', FieldValue: '手動完了' },
+        { FieldName: 'TargetMonth', FieldValue: _progLogMonth },
+        { FieldName: 'RunBy', FieldValue: who }
+      ],
+      bNewDocumentUpdate: false
+    };
+    var resp = await fetch(listApi + '/AddValidateUpdateItemUsingPath', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=nometadata', 'Content-Type': 'application/json;odata=nometadata', 'X-RequestDigest': digest },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error('記録失敗 ' + resp.status);
+    var rj = await resp.json();
+    var errs = (rj.value || []).filter(function (r) { return r.HasException; });
+    if (errs.length) throw new Error(errs.map(function (e) { return e.FieldName; }).join(','));
+    hideSpinner();
+    showToast('✓ 完了として記録しました', 'success');
+    loadProgramLog();
+  } catch (e) {
+    hideSpinner();
+    console.error('markProgramDone error', e);
+    showToast('記録エラー: ' + (e.message || e), 'error');
+  }
 }
 
 // ============================================================
