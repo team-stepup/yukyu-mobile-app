@@ -33982,8 +33982,10 @@ const PROGRAM_MASTER = [
     schedule:[ { label:'実行', week:1, weekday:5, time:'12:00' } ] },
   // 🤖 自動処理（無人）
   { id:'dakoku_v6',       emoji:'🔁', name:'dakoku_v6_auto',                       section:'auto', freq:'multi', when:'稼働日 毎日 9:00頃' },
-  { id:'dakoku_check',    emoji:'✅', name:'タイムカードチェック（打刻）',         section:'auto', freq:'multi'  },
+  { id:'shukkinritsu_sync', emoji:'📊', name:'出勤率 月次同期',                    section:'auto', freq:'multi', when:'毎月16日 12:00' },
+  { id:'hmc_keiyaku',     emoji:'📋', name:'hmc 契約チェック',                     section:'auto', freq:'multi', when:'月末3・1営業日前 10:30' },
   // 📂 その他
+  { id:'dakoku_check',    emoji:'✅', name:'タイムカードチェック（打刻）',         section:'other', freq:'multi'  },
   { id:'asti_kyushoku',   emoji:'🍱', name:'ASTI 給食エクセルを入れる',            section:'other', freq:'manual'  },
   { id:'asti_kintai_csv', emoji:'📥', name:'ASTI 勤怠CSV ダウンロード',            section:'other', freq:'monthly' },
   { id:'yushin_seikyuu',  emoji:'🧾', name:'ユーシン請求用タイムカード作成',       section:'other', freq:'monthly' },
@@ -34227,24 +34229,25 @@ function renderProgramLog() {
   }
   var rows = PROGRAM_MASTER.map(function (p) {
     var hdr = _sectionHeader(p);
+    var tl = (p.section === 'main') ? tally : { done: 0, warn: 0, missing: 0 }; // 集計は月次メインのみ
     var logsDesc = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
 
     if (p.freq === 'scheduled' && p.schedule) {
       var logsAsc = logsDesc.slice().reverse(); // 古い順に各回へ割当
-      return hdr + _renderScheduledCard(p, logsAsc, month, tally);
+      return hdr + _renderScheduledCard(p, logsAsc, month, tl);
     }
 
     var last = logsDesc[0];
     var cnt = logsDesc.length;
     var statusTxt, dot;
     if (!last) {
-      if (p.freq === 'monthly') { tally.missing++; statusTxt = '未実行'; dot = '#e53935'; }
+      if (p.freq === 'monthly') { tl.missing++; statusTxt = '未実行'; dot = '#e53935'; }
       else if (p.freq === 'manual') { statusTxt = '未完了'; dot = '#fb8c00'; }
       else { statusTxt = '実行なし'; dot = '#bdbdbd'; }
     } else {
-      tally.done++;
-      if (last.Status === '失敗') { tally.warn++; dot = '#e53935'; }
-      else if (last.Status === '警告') { tally.warn++; dot = '#fb8c00'; }
+      tl.done++;
+      if (last.Status === '失敗') { tl.warn++; dot = '#e53935'; }
+      else if (last.Status === '警告') { tl.warn++; dot = '#fb8c00'; }
       else { dot = '#43a047'; }
       statusTxt = last.Status || '成功';
     }
@@ -34274,8 +34277,10 @@ function renderProgramLog() {
 
   var sumEl = document.getElementById('progLogSummary');
   if (sumEl) {
+    var mainCount = PROGRAM_MASTER.filter(function (x) { return x.section === 'main'; }).length;
     sumEl.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:600;">'
-      + '<span>✅ 実行済 <b>' + tally.done + '</b>/' + PROGRAM_MASTER.length + '</span>'
+      + '<span style="color:#7e57c2;font-weight:800;">🎯月次メイン</span>'
+      + '<span>✅ 実行済 <b>' + tally.done + '</b>/' + mainCount + '</span>'
       + (tally.missing ? '<span style="color:#c62828;">⚠️ 未実行 <b>' + tally.missing + '</b></span>' : '')
       + (tally.warn ? '<span style="color:#ef6c00;">❗ 失敗/警告 <b>' + tally.warn + '</b></span>' : '')
       + '</div>';
