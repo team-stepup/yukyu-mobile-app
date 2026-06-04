@@ -33986,10 +33986,11 @@ const PROGRAM_MASTER = [
     schedule:[ { label:'実行', week:1, weekday:5, time:'12:00' } ] },
   { id:'px_yukyu_input',  emoji:'📝', name:'PXへ有給取得日・日数入力（Power Automate）', section:'main', freq:'scheduled', manualDone:true,
     schedule:[ { label:'実行', nth:6, time:'10:00' } ] },
+  { id:'hmc_keiyaku',     emoji:'📋', name:'hmc 契約チェック',                     section:'main', freq:'scheduled',
+    schedule:[ { label:'3営業日前', lastNth:3, time:'10:30' }, { label:'1営業日前', lastNth:1, time:'10:30' } ] },
   // 🤖 自動処理（無人）
   { id:'dakoku_v6',       emoji:'🔁', name:'dakoku_v6_auto',                       section:'auto', freq:'multi', when:'稼働日 毎日 9:00頃' },
   { id:'shukkinritsu_sync', emoji:'📊', name:'出勤率 月次同期',                    section:'auto', freq:'multi', when:'毎月16日 12:00' },
-  { id:'hmc_keiyaku',     emoji:'📋', name:'hmc 契約チェック',                     section:'auto', freq:'multi', when:'月末3・1営業日前 10:30' },
   // 📂 その他
   { id:'dakoku_check',    emoji:'✅', name:'タイムカードチェック（打刻）',         section:'other', freq:'multi'  },
   { id:'asti_kyushoku',   emoji:'🍱', name:'ASTI 給食エクセルを入れる',            section:'other', freq:'manual'  },
@@ -34094,6 +34095,27 @@ function nthWeekdayOfMonthDate(year, month, weekday, week) {
   return null;
 }
 
+// 月末から第lastNth稼働日（1=最終稼働日）。無ければ null。
+function nthLastWorkdayDate(year, month, lastNth, compSet) {
+  var dim = new Date(year, month, 0).getDate();
+  var cnt = 0;
+  for (var d = dim; d >= 1; d--) {
+    if (_isWorkday(year, month, d, compSet)) { cnt++; if (cnt === lastNth) return new Date(year, month - 1, d); }
+  }
+  return null;
+}
+
+// 指定日が稼働日（土日祝・会社休日を除く）でなければ、前の稼働日まで遡る（最大15日）。
+function _prevWorkday(dt, compSet) {
+  var y = dt.getFullYear(), m = dt.getMonth() + 1, d = dt.getDate();
+  for (var i = 0; i < 15; i++) {
+    if (_isWorkday(y, m, d, compSet)) return new Date(y, m - 1, d);
+    var prev = new Date(y, m - 1, d - 1);
+    y = prev.getFullYear(); m = prev.getMonth() + 1; d = prev.getDate();
+  }
+  return dt;
+}
+
 function progLogYM(d) {
   d = d || new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
@@ -34163,13 +34185,16 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
   var slotRows = p.schedule.map(function (slot, i) {
     var log = logsAsc[i] || null;
     var dt;
-    if (slot.day != null) {
+    if (slot.lastNth != null) {
+      dt = nthLastWorkdayDate(year, mon, slot.lastNth, comp);
+    } else if (slot.day != null) {
       dt = (slot.day <= new Date(year, mon, 0).getDate()) ? new Date(year, mon - 1, slot.day) : null;
     } else if (slot.week != null && slot.weekday != null) {
       dt = nthWeekdayOfMonthDate(year, mon, slot.weekday, slot.week);
     } else {
       dt = nthWorkdayDate(year, mon, slot.nth, comp);
     }
+    if (dt) dt = _prevWorkday(dt, comp); // 稼働日でなければ前の稼働日へ寄せる
     var dateLabel = _fmtSlotDate(dt) + ' ' + slot.time + '頃';
     var icon, color, right;
     if (log) {
