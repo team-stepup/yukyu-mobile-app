@@ -34470,17 +34470,21 @@ function renderProgramLog() {
     mainHtml += '</div></details>';
   }
 
-  // === auto/other セクション (既存通り) ===
-  var _last = null;
-  PROGRAM_MASTER.forEach(function (p) {
-    if (p.section === 'main' || !p.section) return;
-    if (p.section !== _last) {
-      _last = p.section;
-      mainHtml += '<div style="font-size:12px;font-weight:800;color:#5e35b1;margin:16px 2px 7px;padding-bottom:4px;border-bottom:2px solid #ede7f6;">' + (SECTION_LABELS[p.section] || '') + '</div>';
-    }
-    var tl = { done: 0, warn: 0, missing: 0 }; // 集計外
-    mainHtml += _renderNonMainCard(p, tl);
-  });
+  // === auto セクション (展開) + other セクション (アコーディオン折りたたみ) ===
+  var autoCards = PROGRAM_MASTER.filter(function (x) { return x.section === 'auto'; });
+  var otherCards = PROGRAM_MASTER.filter(function (x) { return x.section === 'other'; });
+  if (autoCards.length) {
+    mainHtml += '<div style="font-size:12px;font-weight:800;color:#5e35b1;margin:16px 2px 7px;padding-bottom:4px;border-bottom:2px solid #ede7f6;">' + SECTION_LABELS.auto + '</div>';
+    autoCards.forEach(function (p) { mainHtml += _renderNonMainCard(p, { done:0,warn:0,missing:0 }); });
+  }
+  if (otherCards.length) {
+    mainHtml += '<details style="margin:16px 0 8px;">'
+      + '<summary style="font-size:12px;font-weight:800;color:#5e35b1;padding:4px 0;border-bottom:2px solid #ede7f6;cursor:pointer;list-style:none;">'
+      + SECTION_LABELS.other + ' （' + otherCards.length + '件）▾ <span style="font-size:10px;font-weight:600;color:#9e9e9e;">クリックで開く</span>'
+      + '</summary><div style="margin-top:8px;">';
+    otherCards.forEach(function (p) { mainHtml += _renderNonMainCard(p, { done:0,warn:0,missing:0 }); });
+    mainHtml += '</div></details>';
+  }
 
   var bodyEl = document.getElementById('progLogBody');
   if (bodyEl) bodyEl.innerHTML = mainHtml;
