@@ -33966,18 +33966,24 @@ const LIST_PROGLOG_GUID = '37f8bdd0-90ab-4e29-8852-28428188197a';
 const PROGLOG_LIST_PATH = '/sites/PowerApps/Lists/List65';
 // program_log.py の PROGRAMS とミラー。freq: monthly=月1 / multi=随時(月数回) / manual=手動完了
 const PROGRAM_MASTER = [
-  { id:'asti_kyuyo',      emoji:'💴', name:'ASTI 給料計算用データ作成（給食費込）', freq:'monthly' },
-  { id:'asti_kyushoku',   emoji:'🍱', name:'ASTI 給食エクセルを入れる',            freq:'manual'  },
-  { id:'asti_kintai_csv', emoji:'📥', name:'ASTI 勤怠CSV ダウンロード',            freq:'monthly' },
-  { id:'asti_timecard',   emoji:'🕒', name:'ASTIタイムカード作成→月次自動',       freq:'scheduled',
+  // 🎯 月次メインタスク
+  { id:'asti_timecard',   emoji:'🕒', name:'ASTIタイムカード作成→月次自動',       section:'main', freq:'scheduled',
     schedule:[ { label:'1回目', nth:1, time:'10:00' }, { label:'2回目', nth:2, time:'13:00' } ] },
-  { id:'dakoku_check',    emoji:'✅', name:'タイムカードチェック（打刻）',         freq:'multi'   },
-  { id:'dakoku_v6',       emoji:'🔁', name:'dakoku_v6_auto',                       freq:'multi'   },
-  { id:'yushin_all',      emoji:'🏭', name:'ユーシン 月次 全部（TC+請求計算書）',  freq:'monthly' },
-  { id:'yushin_seikyuu',  emoji:'🧾', name:'ユーシン請求用タイムカード作成',       freq:'monthly' },
-  { id:'tc_yukyu_stamp',  emoji:'🖍️', name:'タイムカード有給スタンプ（ASTI・ユーシン以外）', freq:'manual' },
-  { id:'jidouka_backup',  emoji:'💾', name:'自動化バックアップ',                   freq:'multi'   },
-  { id:'seikyu_tougou',   emoji:'📑', name:'請求計算書 統合処理',                  freq:'monthly' },
+  { id:'asti_kyuyo',      emoji:'💴', name:'ASTI 給料計算用データ作成（給食費込）', section:'main', freq:'scheduled',
+    schedule:[ { label:'実行', nth:3, time:'10:00' } ] },
+  { id:'yushin_all',      emoji:'🏭', name:'ユーシン 月次 全部（TC+請求計算書）',  section:'main', freq:'scheduled',
+    schedule:[ { label:'実行', nth:2, time:'13:00' } ] },
+  { id:'tc_yukyu_stamp',  emoji:'🖍️', name:'タイムカード有給スタンプ（ASTI・ユーシン以外）', section:'main', freq:'manual' },
+  { id:'seikyu_tougou',   emoji:'📑', name:'請求計算書 統合処理',                  section:'main', freq:'scheduled',
+    schedule:[ { label:'実行', week:1, weekday:5, time:'10:00' } ] },
+  // 🤖 自動処理（無人）
+  { id:'dakoku_v6',       emoji:'🔁', name:'dakoku_v6_auto',                       section:'auto', freq:'multi', when:'稼働日 毎日 9:00頃' },
+  { id:'dakoku_check',    emoji:'✅', name:'タイムカードチェック（打刻）',         section:'auto', freq:'multi'  },
+  // 📂 その他
+  { id:'asti_kyushoku',   emoji:'🍱', name:'ASTI 給食エクセルを入れる',            section:'other', freq:'manual'  },
+  { id:'asti_kintai_csv', emoji:'📥', name:'ASTI 勤怠CSV ダウンロード',            section:'other', freq:'monthly' },
+  { id:'yushin_seikyuu',  emoji:'🧾', name:'ユーシン請求用タイムカード作成',       section:'other', freq:'monthly' },
+  { id:'jidouka_backup',  emoji:'💾', name:'自動化バックアップ',                   section:'other', freq:'multi'   },
 ];
 var _progLogMonth = null; // 'YYYY-MM'
 var _progLogItems = [];
@@ -34065,6 +34071,16 @@ function nthWorkdayDate(year, month, nth, compSet) {
   return null;
 }
 
+// その月の第week週の指定曜日(weekday: 0=日..6=土)の Date を返す。例: 第1週の金曜=nthWeekdayOfMonthDate(y,m,5,1)。無ければ null。
+function nthWeekdayOfMonthDate(year, month, weekday, week) {
+  var dim = new Date(year, month, 0).getDate();
+  var cnt = 0;
+  for (var d = 1; d <= dim; d++) {
+    if (new Date(year, month - 1, d).getDay() === weekday) { cnt++; if (cnt === week) return new Date(year, month - 1, d); }
+  }
+  return null;
+}
+
 function progLogYM(d) {
   d = d || new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
@@ -34133,7 +34149,9 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
 
   var slotRows = p.schedule.map(function (slot, i) {
     var log = logsAsc[i] || null;
-    var dt = nthWorkdayDate(year, mon, slot.nth, comp);
+    var dt = (slot.week != null && slot.weekday != null)
+      ? nthWeekdayOfMonthDate(year, mon, slot.weekday, slot.week)
+      : nthWorkdayDate(year, mon, slot.nth, comp);
     var dateLabel = _fmtSlotDate(dt) + ' ' + slot.time + '頃';
     var icon, color, right;
     if (log) {
@@ -34191,12 +34209,20 @@ function renderProgramLog() {
   });
 
   var tally = { done: 0, warn: 0, missing: 0 };
+  var SECTION_LABELS = { main: '🎯 月次メインタスク', auto: '🤖 自動処理（無人）', other: '📂 その他' };
+  var _lastSection = null;
+  function _sectionHeader(p) {
+    if (!p.section || p.section === _lastSection) return '';
+    _lastSection = p.section;
+    return '<div style="font-size:12px;font-weight:800;color:#5e35b1;margin:16px 2px 7px;padding-bottom:4px;border-bottom:2px solid #ede7f6;">' + (SECTION_LABELS[p.section] || '') + '</div>';
+  }
   var rows = PROGRAM_MASTER.map(function (p) {
+    var hdr = _sectionHeader(p);
     var logsDesc = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
 
     if (p.freq === 'scheduled' && p.schedule) {
       var logsAsc = logsDesc.slice().reverse(); // 古い順に各回へ割当
-      return _renderScheduledCard(p, logsAsc, month, tally);
+      return hdr + _renderScheduledCard(p, logsAsc, month, tally);
     }
 
     var last = logsDesc[0];
@@ -34214,13 +34240,14 @@ function renderProgramLog() {
       statusTxt = last.Status || '成功';
     }
     var freqLabel = p.freq === 'monthly' ? '月1回' : (p.freq === 'multi' ? '随時' : '手動');
+    if (p.when) freqLabel += ' · ' + p.when;
     var lastInfo = last ? (_progLogFmt(last.Created) + ' · ' + escHtml(last.RunBy || '')) : 'ー';
     var cntBadge = cnt > 0 ? ('<span style="background:#eef;color:#3949ab;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;">' + cnt + '回</span>') : '';
     var manualBtn = (p.freq === 'manual')
       ? '<div><button onclick="markProgramDone(\'' + p.id + '\')" style="margin-top:7px;font-size:11px;padding:6px 12px;border:none;border-radius:8px;background:' + (last ? '#eceff1' : 'linear-gradient(135deg,#43a047,#2e7d32)') + ';color:' + (last ? '#607d8b' : '#fff') + ';font-weight:700;cursor:pointer;">' + (last ? '✓ 完了済み（再記録）' : '✅ 今月を完了にする') + '</button></div>'
       : '';
     var noteHtml = (last && last.Note) ? ('<div style="font-size:10px;color:#c62828;margin-top:2px;">' + escHtml(last.Note) + '</div>') : '';
-    return '<div class="card" style="padding:11px 12px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;">'
+    return hdr + '<div class="card" style="padding:11px 12px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;">'
       + '<span style="width:10px;height:10px;border-radius:50%;background:' + dot + ';margin-top:5px;flex:0 0 auto;"></span>'
       + '<div style="flex:1;min-width:0;">'
       +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
