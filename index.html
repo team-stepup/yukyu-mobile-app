@@ -34177,6 +34177,33 @@ function _fmtSlotDate(dt) {
 }
 
 // スケジュール型（月N回・稼働日指定）のカードを描画し、集計を tally に加算
+// スロット定義（{nth}/{day}/{week+weekday}/{lastNth}）→ 指定月の実行予定日
+// 稼働日でなければ前の稼働日に寄せる。
+function _computeSlotDate(slot, year, mon, comp) {
+  var dt;
+  if (slot.lastNth != null) {
+    dt = nthLastWorkdayDate(year, mon, slot.lastNth, comp);
+  } else if (slot.day != null) {
+    dt = (slot.day <= new Date(year, mon, 0).getDate()) ? new Date(year, mon - 1, slot.day) : null;
+  } else if (slot.week != null && slot.weekday != null) {
+    dt = nthWeekdayOfMonthDate(year, mon, slot.weekday, slot.week);
+  } else {
+    dt = nthWorkdayDate(year, mon, slot.nth, comp);
+  }
+  if (dt) dt = _prevWorkday(dt, comp);
+  return dt;
+}
+
+// プログラムの今月の「最も早いスロット日」。main セクションの日付順ソート用。
+// scheduledでない or schedule無しの場合は null（並び順で最後に配置）。
+function _earliestSlotDate(p, year, mon, comp) {
+  if (p.freq !== 'scheduled' || !p.schedule || !p.schedule.length) return null;
+  var dates = p.schedule.map(function (s) { return _computeSlotDate(s, year, mon, comp); })
+                       .filter(function (d) { return d != null; });
+  if (!dates.length) return null;
+  return new Date(Math.min.apply(null, dates.map(function (d) { return d.getTime(); })));
+}
+
 function _renderScheduledCard(p, logsAsc, month, tally) {
   var parts = month.split('-'); var year = parseInt(parts[0]), mon = parseInt(parts[1]);
   var comp = _companyHolidaysCache;
@@ -34185,17 +34212,7 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
 
   var slotRows = p.schedule.map(function (slot, i) {
     var log = logsAsc[i] || null;
-    var dt;
-    if (slot.lastNth != null) {
-      dt = nthLastWorkdayDate(year, mon, slot.lastNth, comp);
-    } else if (slot.day != null) {
-      dt = (slot.day <= new Date(year, mon, 0).getDate()) ? new Date(year, mon - 1, slot.day) : null;
-    } else if (slot.week != null && slot.weekday != null) {
-      dt = nthWeekdayOfMonthDate(year, mon, slot.weekday, slot.week);
-    } else {
-      dt = nthWorkdayDate(year, mon, slot.nth, comp);
-    }
-    if (dt) dt = _prevWorkday(dt, comp); // 稼働日でなければ前の稼働日へ寄せる
+    var dt = _computeSlotDate(slot, year, mon, comp);
     var dateLabel = _fmtSlotDate(dt) + ' ' + slot.time + '頃';
     var icon, color, right;
     if (log) {
@@ -34263,7 +34280,27 @@ function renderProgramLog() {
     _lastSection = p.section;
     return '<div style="font-size:12px;font-weight:800;color:#5e35b1;margin:16px 2px 7px;padding-bottom:4px;border-bottom:2px solid #ede7f6;">' + (SECTION_LABELS[p.section] || '') + '</div>';
   }
-  var rows = PROGRAM_MASTER.map(function (p) {
+  // main セクション内を「今月の実行日順」で並び替え（auto/otherは元の宣言順保持）。
+  // 16日/28日のような暦日指定タスクが第N稼働日/週指定タスクと混ざって日付順に表示されるようにする。
+  var _sortParts = month.split('-'); var _sortYear = parseInt(_sortParts[0]), _sortMon = parseInt(_sortParts[1]);
+  var _sortComp = _companyHolidaysCache;
+  var SECTION_ORDER = { main: 0, auto: 1, other: 2 };
+  var sortedPrograms = PROGRAM_MASTER.slice().sort(function (a, b) {
+    var sa = SECTION_ORDER[a.section] != null ? SECTION_ORDER[a.section] : 99;
+    var sb = SECTION_ORDER[b.section] != null ? SECTION_ORDER[b.section] : 99;
+    if (sa !== sb) return sa - sb;
+    if (a.section === 'main') {
+      var da = _earliestSlotDate(a, _sortYear, _sortMon, _sortComp);
+      var db = _earliestSlotDate(b, _sortYear, _sortMon, _sortComp);
+      // 予定日なし（manual等）は main の末尾に
+      if (da == null && db == null) return 0;
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return da.getTime() - db.getTime();
+    }
+    return 0; // 安定ソートで宣言順を保持
+  });
+  var rows = sortedPrograms.map(function (p) {
     var hdr = _sectionHeader(p);
     var tl = (p.section === 'main') ? tally : { done: 0, warn: 0, missing: 0 }; // 集計は月次メインのみ
     var logsDesc = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
