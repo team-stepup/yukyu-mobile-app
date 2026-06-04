@@ -34211,8 +34211,15 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
   var now = new Date();
   var anyOverdue = false, anyFail = false, doneSlots = 0;
 
+  // ログを「自動実行」と「手動実行」に分離。手動はNote/Statusに「手動」または「強制」を含むもの。
+  var autoLogs = [], manualLogs = [];
+  logsAsc.forEach(function (l) {
+    var s = (l.Note || '') + ' ' + (l.Status || '');
+    if (/手動|強制/.test(s)) manualLogs.push(l); else autoLogs.push(l);
+  });
+
   var slotRows = p.schedule.map(function (slot, i) {
-    var log = logsAsc[i] || null;
+    var log = autoLogs[i] || null; // スロット割当は自動実行のみ
     var dt = _computeSlotDate(slot, year, mon, comp);
     var dateLabel = _fmtSlotDate(dt) + ' ' + slot.time + '頃';
     var icon, color, right;
@@ -34240,7 +34247,20 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
   else if (anyFail) { tally.warn++; headDot = '#fb8c00'; headTxt = doneSlots + '/' + p.schedule.length; }
   else { headDot = '#90a4ae'; headTxt = doneSlots + '/' + p.schedule.length; }
 
-  var extra = logsAsc.length > p.schedule.length ? ('<span style="background:#eef;color:#3949ab;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;">+' + (logsAsc.length - p.schedule.length) + '回</span>') : '';
+  var extra = autoLogs.length > p.schedule.length ? ('<span style="background:#eef;color:#3949ab;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;">自動+' + (autoLogs.length - p.schedule.length) + '回</span>') : '';
+  // 手動実行ログを別行で表示（薄い紫の上罫線で区切る）
+  var manualRows = manualLogs.length ? manualLogs.map(function (l) {
+    var ok = l.Status !== '失敗' && l.Status !== '警告';
+    var icon = ok ? '✋' : '⚠️';
+    var color = ok ? '#7e57c2' : '#e53935';
+    var note = l.Note ? '<span style="color:var(--text-light);font-size:10px;">' + escHtml(l.Note) + '</span>' : '';
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;margin-top:5px;padding-top:5px;border-top:1px dashed #d1c4e9;">'
+      + '<span style="font-size:13px;">' + icon + '</span>'
+      + '<span style="font-weight:700;color:' + color + ';min-width:34px;">手動</span>'
+      + '<span style="color:var(--text-light);flex:1;min-width:0;">' + note + '</span>'
+      + '<span style="font-weight:700;color:' + color + ';white-space:nowrap;">' + _progLogFmt(l.Created) + (l.RunBy ? ' · ' + escHtml(l.RunBy) : '') + '</span>'
+      + '</div>';
+  }).join('') : '';
   var manualBtn = p.manualDone
     ? '<div><button onclick="markProgramDone(\'' + p.id + '\')" style="margin-top:8px;font-size:11px;padding:6px 12px;border:none;border-radius:8px;background:' + (doneSlots ? '#eceff1' : 'linear-gradient(135deg,#43a047,#2e7d32)') + ';color:' + (doneSlots ? '#607d8b' : '#fff') + ';font-weight:700;cursor:pointer;">' + (doneSlots ? '✓ 完了済み（再記録）' : '✅ 今月を完了にする') + '</button></div>'
     : '';
@@ -34252,8 +34272,9 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
     +     '<span style="font-size:15px;">' + p.emoji + '</span>'
     +     '<span style="font-weight:700;font-size:13px;">' + escHtml(p.name) + '</span>'
     +     '<span style="background:#fff3d4;color:#a07a00;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;border:1px solid #f0c040;">月' + p.schedule.length + '回</span>' + extra + autoBadge
+    +     (manualLogs.length ? '<span style="background:#ede7f6;color:#5e35b1;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;border:1px solid #d1c4e9;">✋手動 ' + manualLogs.length + '回</span>' : '')
     +   '</div>'
-    +   slotRows + manualBtn
+    +   slotRows + manualRows + manualBtn
     + '</div>'
     + '<span style="font-size:11px;font-weight:700;color:' + headDot + ';white-space:nowrap;">' + headTxt + '</span>'
     + '</div>';
