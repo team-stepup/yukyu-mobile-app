@@ -33975,11 +33975,14 @@ const PROGRAM_MASTER = [
     schedule:[ { label:'実行', nth:3, time:'10:00' } ] },
   { id:'yushin_all',      emoji:'🏭', name:'ユーシン 月次 全部（TC+請求計算書）',  section:'main', freq:'scheduled',
     schedule:[ { label:'実行', nth:2, time:'13:00' } ] },
+  { id:'yushin_kyuyo',    emoji:'💴', name:'ユーシン 給料月初処理',                section:'main', freq:'manual' },
   { id:'tc_yukyu_stamp',  emoji:'🖍️', name:'タイムカード有給スタンプ（ASTI・ユーシン以外）', section:'main', freq:'manual' },
   { id:'seikyu_tougou',   emoji:'📑', name:'請求計算書 統合処理',                  section:'main', freq:'scheduled',
     schedule:[ { label:'実行', week:1, weekday:5, time:'10:00' } ] },
   { id:'sousai_hyou',     emoji:'⚖️', name:'相殺表作成',                            section:'main', freq:'scheduled',
     schedule:[ { label:'実行', week:1, weekday:5, time:'12:00' } ] },
+  { id:'px_yukyu_input',  emoji:'📝', name:'PXへ有給取得日・日数入力（Power Automate）', section:'main', freq:'scheduled', manualDone:true,
+    schedule:[ { label:'実行', nth:6, time:'10:00' } ] },
   // 🤖 自動処理（無人）
   { id:'dakoku_v6',       emoji:'🔁', name:'dakoku_v6_auto',                       section:'auto', freq:'multi', when:'稼働日 毎日 9:00頃' },
   { id:'shukkinritsu_sync', emoji:'📊', name:'出勤率 月次同期',                    section:'auto', freq:'multi', when:'毎月16日 12:00' },
@@ -34190,6 +34193,9 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
   else { headDot = '#90a4ae'; headTxt = doneSlots + '/' + p.schedule.length; }
 
   var extra = logsAsc.length > p.schedule.length ? ('<span style="background:#eef;color:#3949ab;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;">+' + (logsAsc.length - p.schedule.length) + '回</span>') : '';
+  var manualBtn = p.manualDone
+    ? '<div><button onclick="markProgramDone(\'' + p.id + '\')" style="margin-top:8px;font-size:11px;padding:6px 12px;border:none;border-radius:8px;background:' + (doneSlots ? '#eceff1' : 'linear-gradient(135deg,#43a047,#2e7d32)') + ';color:' + (doneSlots ? '#607d8b' : '#fff') + ';font-weight:700;cursor:pointer;">' + (doneSlots ? '✓ 完了済み（再記録）' : '✅ 今月を完了にする') + '</button></div>'
+    : '';
   return '<div class="card" style="padding:11px 12px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;">'
     + '<span style="width:10px;height:10px;border-radius:50%;background:' + headDot + ';margin-top:5px;flex:0 0 auto;"></span>'
     + '<div style="flex:1;min-width:0;">'
@@ -34198,7 +34204,7 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
     +     '<span style="font-weight:700;font-size:13px;">' + escHtml(p.name) + '</span>'
     +     '<span style="background:#fff3d4;color:#a07a00;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;border:1px solid #f0c040;">月' + p.schedule.length + '回</span>' + extra
     +   '</div>'
-    +   slotRows
+    +   slotRows + manualBtn
     + '</div>'
     + '<span style="font-size:11px;font-weight:700;color:' + headDot + ';white-space:nowrap;">' + headTxt + '</span>'
     + '</div>';
