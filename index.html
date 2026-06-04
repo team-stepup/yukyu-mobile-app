@@ -34208,6 +34208,27 @@ function _earliestSlotDate(p, year, mon, comp) {
 // ===== B+A ミックス: メインカードのサブセクション分類 + 日付チップ =====
 var _WD_JP_SHORT = ['日','月','火','水','木','金','土'];
 
+// autoLogs をスロットにマッチング。ログ作成日が「スロット予定日 -1日 〜 +5日」のものだけ充当。
+// 過去ログで未来スロットを誤って埋めないための保護ロジック。
+function _matchAutoLogsToSlots(p, autoLogs, year, mon, comp) {
+  var slotDates = p.schedule.map(function (s) { return _computeSlotDate(s, year, mon, comp); });
+  var slotLogs = new Array(p.schedule.length).fill(null);
+  var used = {};
+  for (var i = 0; i < p.schedule.length; i++) {
+    if (!slotDates[i]) continue;
+    var sD = new Date(slotDates[i].getFullYear(), slotDates[i].getMonth(), slotDates[i].getDate());
+    for (var j = 0; j < autoLogs.length; j++) {
+      if (used[j]) continue;
+      var lc = _progLogJst(autoLogs[j].Created);
+      if (!lc) continue;
+      var lcD = new Date(lc.getUTCFullYear(), lc.getUTCMonth(), lc.getUTCDate());
+      var diff = Math.round((lcD - sD) / 86400000);
+      if (diff >= -1 && diff <= 5) { used[j] = true; slotLogs[i] = autoLogs[j]; break; }
+    }
+  }
+  return slotLogs;
+}
+
 // メインカードを over/today/future/done に分類。next: 次に実行すべき日付。
 function _classifyMainCard(p, logsAsc, year, mon, comp, today0) {
   var autoLogs = [], manualLogs = [];
@@ -34222,8 +34243,9 @@ function _classifyMainCard(p, logsAsc, year, mon, comp, today0) {
   if (p.freq === 'scheduled' && p.schedule) {
     if (p.manualDone && manualLogs.length) return { status:'done', nextDate:null };
     var nextDate = null, doneCount = 0;
+    var slotLogs = _matchAutoLogsToSlots(p, autoLogs, year, mon, comp);
     p.schedule.forEach(function (slot, i) {
-      if (autoLogs[i]) { doneCount++; return; }
+      if (slotLogs[i]) { doneCount++; return; }
       var dt = _computeSlotDate(slot, year, mon, comp);
       if (dt && (!nextDate || dt < nextDate)) nextDate = dt;
     });
@@ -34276,8 +34298,10 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
     if (/手動|強制/.test(s)) manualLogs.push(l); else autoLogs.push(l);
   });
 
+  // ログ作成日と予定日の近さで自動充当（過去ログで未来スロットを埋めない）
+  var _slotLogs = _matchAutoLogsToSlots(p, autoLogs, year, mon, comp);
   var slotRows = p.schedule.map(function (slot, i) {
-    var log = autoLogs[i] || null; // スロット割当は自動実行のみ
+    var log = _slotLogs[i] || null; // スロット割当は自動実行のみ
     var dt = _computeSlotDate(slot, year, mon, comp);
     var dateLabel = _fmtSlotDate(dt) + ' ' + slot.time + '頃';
     var icon, color, right;
@@ -34465,9 +34489,12 @@ function renderProgramLog() {
   });
   if (mainBySection.done.length) {
     var s = SUB.done;
-    mainHtml += '<details style="margin:10px 0;"><summary style="font-size:11.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:5px 10px;border-radius:6px;cursor:pointer;list-style:none;display:inline-block;">' + s.icon + ' ' + s.text + ' ' + mainBySection.done.length + '件 ▾</summary><div style="margin-top:6px;">';
-    mainBySection.done.forEach(function (c) { mainHtml += _renderMainCardWithChip(c.p, tally); });
-    mainHtml += '</div></details>';
+    mainHtml += '<div style="font-size:11.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:5px 10px;border-radius:6px;margin:12px 0 6px;display:inline-block;">' + s.icon + ' ' + s.text + ' ' + mainBySection.done.length + '件（消し込み済み）</div>';
+    mainBySection.done.forEach(function (c) {
+      mainHtml += '<div style="opacity:0.42;filter:grayscale(0.7);text-decoration:line-through;text-decoration-color:rgba(0,0,0,0.3);text-decoration-thickness:1px;">'
+        + _renderMainCardWithChip(c.p, tally)
+        + '</div>';
+    });
   }
 
   // === auto セクション (展開) + other セクション (アコーディオン折りたたみ) ===
