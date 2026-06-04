@@ -34205,6 +34205,64 @@ function _earliestSlotDate(p, year, mon, comp) {
   return new Date(Math.min.apply(null, dates.map(function (d) { return d.getTime(); })));
 }
 
+// ===== B+A ミックス: メインカードのサブセクション分類 + 日付チップ =====
+var _WD_JP_SHORT = ['日','月','火','水','木','金','土'];
+
+// メインカードを over/today/future/done に分類。next: 次に実行すべき日付。
+function _classifyMainCard(p, logsAsc, year, mon, comp, today0) {
+  var autoLogs = [], manualLogs = [];
+  logsAsc.forEach(function (l) {
+    var s = (l.Note || '') + ' ' + (l.Status || '');
+    if (/手動|強制/.test(s)) manualLogs.push(l); else autoLogs.push(l);
+  });
+  if (p.freq === 'manual') {
+    if (manualLogs.length || autoLogs.length) return { status:'done', nextDate:null };
+    return { status:'today', nextDate: today0 };
+  }
+  if (p.freq === 'scheduled' && p.schedule) {
+    if (p.manualDone && manualLogs.length) return { status:'done', nextDate:null };
+    var nextDate = null, doneCount = 0;
+    p.schedule.forEach(function (slot, i) {
+      if (autoLogs[i]) { doneCount++; return; }
+      var dt = _computeSlotDate(slot, year, mon, comp);
+      if (dt && (!nextDate || dt < nextDate)) nextDate = dt;
+    });
+    if (doneCount >= p.schedule.length) return { status:'done', nextDate:null };
+    if (!nextDate) return { status:'future', nextDate:null };
+    var nd = new Date(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate());
+    if (nd < today0) return { status:'over', nextDate:nextDate };
+    if (nd.getTime() === today0.getTime()) return { status:'today', nextDate:nextDate };
+    return { status:'future', nextDate:nextDate };
+  }
+  if (logsAsc.length) return { status:'done', nextDate:null };
+  return { status:'over', nextDate:null };
+}
+
+function _dateChipHtml(date, status, time) {
+  var COLOR = { over:'#e53935', today:'#1976d2', future:'#90a4ae', done:'#43a047' };
+  var bg = COLOR[status] || '#90a4ae';
+  var dayStr = date ? (date.getMonth()+1) + '/' + date.getDate() : '—';
+  var dowStr = date ? _WD_JP_SHORT[date.getDay()] : '';
+  return '<div style="width:54px;flex:0 0 auto;background:' + bg + ';color:#fff;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 3px;font-weight:800;">'
+    + '<span style="font-size:15px;line-height:1;">' + dayStr + '</span>'
+    + (dowStr ? '<span style="font-size:9.5px;margin-top:2px;opacity:.95;">' + dowStr + '</span>' : '')
+    + (time ? '<span style="font-size:9px;margin-top:3px;opacity:.95;padding:1px 5px;background:rgba(255,255,255,.25);border-radius:6px;">' + time + '</span>' : '')
+    + '</div>';
+}
+
+function _statusBadge(date, status, today0) {
+  if (status === 'done') return '<span style="font-size:11px;font-weight:700;color:#43a047;white-space:nowrap;">✅ 完了</span>';
+  if (!date) {
+    if (status === 'today') return '<span style="font-size:11px;font-weight:700;color:#1976d2;white-space:nowrap;">🎯 未完了</span>';
+    return '<span style="font-size:11px;font-weight:700;color:#e53935;white-space:nowrap;">🔴 未実行</span>';
+  }
+  var d0 = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  var diff = Math.round((d0 - today0) / 86400000);
+  if (diff < 0) return '<span style="font-size:11px;font-weight:700;color:#e53935;white-space:nowrap;">🔴 ' + (-diff) + '日前</span>';
+  if (diff === 0) return '<span style="font-size:11px;font-weight:700;color:#1976d2;white-space:nowrap;">🎯 今日</span>';
+  return '<span style="font-size:11px;font-weight:700;color:#90a4ae;white-space:nowrap;">⏳ あと' + diff + '日</span>';
+}
+
 function _renderScheduledCard(p, logsAsc, month, tally) {
   var parts = month.split('-'); var year = parseInt(parts[0]), mon = parseInt(parts[1]);
   var comp = _companyHolidaysCache;
@@ -34296,43 +34354,18 @@ function renderProgramLog() {
   });
 
   var tally = { done: 0, warn: 0, missing: 0 };
-  var SECTION_LABELS = { main: '🎯 月次メインタスク', auto: '🤖 自動処理（無人）', other: '📂 その他' };
-  var _lastSection = null;
-  function _sectionHeader(p) {
-    if (!p.section || p.section === _lastSection) return '';
-    _lastSection = p.section;
-    return '<div style="font-size:12px;font-weight:800;color:#5e35b1;margin:16px 2px 7px;padding-bottom:4px;border-bottom:2px solid #ede7f6;">' + (SECTION_LABELS[p.section] || '') + '</div>';
-  }
-  // main セクション内を「今月の実行日順」で並び替え（auto/otherは元の宣言順保持）。
-  // 16日/28日のような暦日指定タスクが第N稼働日/週指定タスクと混ざって日付順に表示されるようにする。
+  var SECTION_LABELS = { auto: '🤖 自動処理（無人）', other: '📂 その他' };
   var _sortParts = month.split('-'); var _sortYear = parseInt(_sortParts[0]), _sortMon = parseInt(_sortParts[1]);
   var _sortComp = _companyHolidaysCache;
-  var SECTION_ORDER = { main: 0, auto: 1, other: 2 };
-  var sortedPrograms = PROGRAM_MASTER.slice().sort(function (a, b) {
-    var sa = SECTION_ORDER[a.section] != null ? SECTION_ORDER[a.section] : 99;
-    var sb = SECTION_ORDER[b.section] != null ? SECTION_ORDER[b.section] : 99;
-    if (sa !== sb) return sa - sb;
-    if (a.section === 'main') {
-      var da = _earliestSlotDate(a, _sortYear, _sortMon, _sortComp);
-      var db = _earliestSlotDate(b, _sortYear, _sortMon, _sortComp);
-      // 予定日なし（manual等）は main の末尾に
-      if (da == null && db == null) return 0;
-      if (da == null) return 1;
-      if (db == null) return -1;
-      return da.getTime() - db.getTime();
-    }
-    return 0; // 安定ソートで宣言順を保持
-  });
-  var rows = sortedPrograms.map(function (p) {
-    var hdr = _sectionHeader(p);
-    var tl = (p.section === 'main') ? tally : { done: 0, warn: 0, missing: 0 }; // 集計は月次メインのみ
+  var today0 = new Date(); today0.setHours(0, 0, 0, 0);
+
+  // 非main(auto/other) カードを描画する内部関数（既存ロジックを抽出）
+  function _renderNonMainCard(p, tl) {
     var logsDesc = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
-
     if (p.freq === 'scheduled' && p.schedule) {
-      var logsAsc = logsDesc.slice().reverse(); // 古い順に各回へ割当
-      return hdr + _renderScheduledCard(p, logsAsc, month, tl);
+      var logsAsc = logsDesc.slice().reverse();
+      return _renderScheduledCard(p, logsAsc, month, tl);
     }
-
     var last = logsDesc[0];
     var cnt = logsDesc.length;
     var statusTxt, dot;
@@ -34355,7 +34388,7 @@ function renderProgramLog() {
       ? '<div><button onclick="markProgramDone(\'' + p.id + '\')" style="margin-top:7px;font-size:11px;padding:6px 12px;border:none;border-radius:8px;background:' + (last ? '#eceff1' : 'linear-gradient(135deg,#43a047,#2e7d32)') + ';color:' + (last ? '#607d8b' : '#fff') + ';font-weight:700;cursor:pointer;">' + (last ? '✓ 完了済み（再記録）' : '✅ 今月を完了にする') + '</button></div>'
       : '';
     var noteHtml = (last && last.Note) ? ('<div style="font-size:10px;color:#c62828;margin-top:2px;">' + escHtml(last.Note) + '</div>') : '';
-    return hdr + '<div class="card" style="padding:11px 12px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;">'
+    return '<div class="card" style="padding:11px 12px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;">'
       + '<span style="width:10px;height:10px;border-radius:50%;background:' + dot + ';margin-top:5px;flex:0 0 auto;"></span>'
       + '<div style="flex:1;min-width:0;">'
       +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
@@ -34367,18 +34400,99 @@ function renderProgramLog() {
       + '</div>'
       + '<span style="font-size:11px;font-weight:700;color:' + dot + ';white-space:nowrap;">' + statusTxt + '</span>'
       + '</div>';
-  }).join('');
+  }
+
+  // mainカードを「日付チップ＋既存カード」で描画
+  function _renderMainCardWithChip(p, tl) {
+    var logsDesc = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
+    var logsAsc = logsDesc.slice().reverse();
+    var cls = _classifyMainCard(p, logsAsc, _sortYear, _sortMon, _sortComp, today0);
+    var time = null;
+    if (p.freq === 'scheduled' && p.schedule && cls.nextDate) {
+      // 次の予定スロットの時刻を採用
+      for (var i = 0; i < p.schedule.length; i++) {
+        var dt = _computeSlotDate(p.schedule[i], _sortYear, _sortMon, _sortComp);
+        if (dt && dt.getTime() === cls.nextDate.getTime()) { time = p.schedule[i].time; break; }
+      }
+    }
+    var chip = _dateChipHtml(cls.nextDate, cls.status, time);
+    var badge = _statusBadge(cls.nextDate, cls.status, today0);
+    var inner;
+    if (p.freq === 'scheduled' && p.schedule) {
+      inner = _renderScheduledCard(p, logsAsc, month, tl);
+    } else {
+      inner = _renderNonMainCard(p, tl);
+    }
+    // 既存カードを左チップでラップ
+    return '<div style="display:flex;gap:8px;align-items:stretch;margin-bottom:8px;">'
+      + chip
+      + '<div style="flex:1;min-width:0;display:flex;flex-direction:column;">'
+      +   '<div style="font-size:11px;margin-bottom:3px;text-align:right;">' + badge + '</div>'
+      +   '<div style="flex:1;">' + inner.replace('margin-bottom:8px;', 'margin-bottom:0;') + '</div>'
+      + '</div></div>';
+    }
+
+  // === mainセクション: サブセクション分け ===
+  var mainBySection = { over:[], today:[], future:[], done:[] };
+  PROGRAM_MASTER.forEach(function (p) {
+    if (p.section !== 'main') return;
+    var logsDesc = (byKey[p.id] || []).slice().sort(function (a, b) { return new Date(b.Created) - new Date(a.Created); });
+    var logsAsc = logsDesc.slice().reverse();
+    var cls = _classifyMainCard(p, logsAsc, _sortYear, _sortMon, _sortComp, today0);
+    mainBySection[cls.status].push({ p: p, nextDate: cls.nextDate });
+  });
+  ['over','today','future','done'].forEach(function (k) {
+    mainBySection[k].sort(function (a, b) {
+      if (!a.nextDate && !b.nextDate) return 0;
+      if (!a.nextDate) return 1;
+      if (!b.nextDate) return -1;
+      return a.nextDate - b.nextDate;
+    });
+  });
+
+  var mainHtml = '<div style="font-size:12px;font-weight:800;color:#5e35b1;margin:12px 2px 7px;padding-bottom:4px;border-bottom:2px solid #ede7f6;">🎯 月次メインタスク</div>';
+  var SUB = {
+    over:   { icon:'🚨', text:'期限超過', color:'#c62828', bg:'#ffebee' },
+    today:  { icon:'🎯', text:'今日',     color:'#1565c0', bg:'#e3f2fd' },
+    future: { icon:'📅', text:'これから', color:'#546e7a', bg:'#eceff1' },
+    done:   { icon:'✅', text:'完了',     color:'#2e7d32', bg:'#e8f5e9' }
+  };
+  ['over','today','future'].forEach(function (k) {
+    if (!mainBySection[k].length) return;
+    var s = SUB[k];
+    mainHtml += '<div style="font-size:11.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:5px 10px;border-radius:6px;margin:12px 0 6px;display:inline-block;">' + s.icon + ' ' + s.text + ' ' + mainBySection[k].length + '件</div>';
+    mainBySection[k].forEach(function (c) { mainHtml += _renderMainCardWithChip(c.p, tally); });
+  });
+  if (mainBySection.done.length) {
+    var s = SUB.done;
+    mainHtml += '<details style="margin:10px 0;"><summary style="font-size:11.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:5px 10px;border-radius:6px;cursor:pointer;list-style:none;display:inline-block;">' + s.icon + ' ' + s.text + ' ' + mainBySection.done.length + '件 ▾</summary><div style="margin-top:6px;">';
+    mainBySection.done.forEach(function (c) { mainHtml += _renderMainCardWithChip(c.p, tally); });
+    mainHtml += '</div></details>';
+  }
+
+  // === auto/other セクション (既存通り) ===
+  var _last = null;
+  PROGRAM_MASTER.forEach(function (p) {
+    if (p.section === 'main' || !p.section) return;
+    if (p.section !== _last) {
+      _last = p.section;
+      mainHtml += '<div style="font-size:12px;font-weight:800;color:#5e35b1;margin:16px 2px 7px;padding-bottom:4px;border-bottom:2px solid #ede7f6;">' + (SECTION_LABELS[p.section] || '') + '</div>';
+    }
+    var tl = { done: 0, warn: 0, missing: 0 }; // 集計外
+    mainHtml += _renderNonMainCard(p, tl);
+  });
+
   var bodyEl = document.getElementById('progLogBody');
-  if (bodyEl) bodyEl.innerHTML = rows;
+  if (bodyEl) bodyEl.innerHTML = mainHtml;
 
   var sumEl = document.getElementById('progLogSummary');
   if (sumEl) {
     var mainCount = PROGRAM_MASTER.filter(function (x) { return x.section === 'main'; }).length;
-    sumEl.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:600;">'
-      + '<span style="color:#7e57c2;font-weight:800;">🎯月次メイン</span>'
-      + '<span>✅ 実行済 <b>' + tally.done + '</b>/' + mainCount + '</span>'
-      + (tally.missing ? '<span style="color:#c62828;">⚠️ 未実行 <b>' + tally.missing + '</b></span>' : '')
-      + (tally.warn ? '<span style="color:#ef6c00;">❗ 失敗/警告 <b>' + tally.warn + '</b></span>' : '')
+    sumEl.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;font-weight:700;">'
+      + (mainBySection.over.length   ? '<span style="background:#ffebee;color:#c62828;padding:4px 9px;border-radius:6px;">🚨 期限超過 ' + mainBySection.over.length + '</span>' : '')
+      + (mainBySection.today.length  ? '<span style="background:#e3f2fd;color:#1565c0;padding:4px 9px;border-radius:6px;">🎯 今日 ' + mainBySection.today.length + '</span>' : '')
+      + (mainBySection.future.length ? '<span style="background:#eceff1;color:#546e7a;padding:4px 9px;border-radius:6px;">📅 これから ' + mainBySection.future.length + '</span>' : '')
+      + '<span style="background:#e8f5e9;color:#2e7d32;padding:4px 9px;border-radius:6px;">✅ 完了 ' + mainBySection.done.length + '/' + mainCount + '</span>'
       + '</div>';
   }
 }
