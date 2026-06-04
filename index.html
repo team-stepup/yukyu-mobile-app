@@ -34249,7 +34249,11 @@ function _classifyMainCard(p, logsAsc, year, mon, comp, today0) {
       var dt = _computeSlotDate(slot, year, mon, comp);
       if (dt && (!nextDate || dt < nextDate)) nextDate = dt;
     });
-    if (doneCount >= p.schedule.length) return { status:'done', nextDate:null };
+    if (doneCount >= p.schedule.length) {
+      // 完了でも日付順ソート用に最初のスロット予定日を保持
+      var firstDate = _computeSlotDate(p.schedule[0], year, mon, comp);
+      return { status:'done', nextDate: firstDate };
+    }
     if (!nextDate) return { status:'future', nextDate:null };
     var nd = new Date(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate());
     if (nd < today0) return { status:'over', nextDate:nextDate };
@@ -34481,21 +34485,33 @@ function renderProgramLog() {
     future: { icon:'📅', text:'これから', color:'#546e7a', bg:'#eceff1' },
     done:   { icon:'✅', text:'完了',     color:'#2e7d32', bg:'#e8f5e9' }
   };
-  ['over','today','future'].forEach(function (k) {
-    if (!mainBySection[k].length) return;
-    var s = SUB[k];
-    mainHtml += '<div style="font-size:11.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:5px 10px;border-radius:6px;margin:12px 0 6px;display:inline-block;">' + s.icon + ' ' + s.text + ' ' + mainBySection[k].length + '件</div>';
-    mainBySection[k].forEach(function (c) { mainHtml += _renderMainCardWithChip(c.p, tally); });
-  });
-  if (mainBySection.done.length) {
-    var s = SUB.done;
-    mainHtml += '<div style="font-size:11.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:5px 10px;border-radius:6px;margin:12px 0 6px;display:inline-block;">' + s.icon + ' ' + s.text + ' ' + mainBySection.done.length + '件（消し込み済み）</div>';
-    mainBySection.done.forEach(function (c) {
-      mainHtml += '<div style="opacity:0.42;filter:grayscale(0.7);text-decoration:line-through;text-decoration-color:rgba(0,0,0,0.3);text-decoration-thickness:1px;">'
-        + _renderMainCardWithChip(c.p, tally)
-        + '</div>';
+  // 全カードを統合して日付順に並べる（done も含む。done はその場でグレーアウト）
+  var allMainCards = [];
+  ['over','today','future','done'].forEach(function (k) {
+    mainBySection[k].forEach(function (c) {
+      allMainCards.push({ p: c.p, nextDate: c.nextDate, status: k });
     });
-  }
+  });
+  allMainCards.sort(function (a, b) {
+    if (!a.nextDate && !b.nextDate) return 0;
+    if (!a.nextDate) return 1;
+    if (!b.nextDate) return -1;
+    return a.nextDate - b.nextDate;
+  });
+  // ステータスヘッダーは状態が変わったときだけ挿入。完了見出しは出さない（消し込みで分かるため）
+  var _lastK = null;
+  allMainCards.forEach(function (c) {
+    if (c.status !== 'done' && c.status !== _lastK) {
+      _lastK = c.status;
+      var s = SUB[c.status];
+      mainHtml += '<div style="font-size:11.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:5px 10px;border-radius:6px;margin:12px 0 6px;display:inline-block;">' + s.icon + ' ' + s.text + ' ' + mainBySection[c.status].length + '件</div>';
+    }
+    var html = _renderMainCardWithChip(c.p, tally);
+    if (c.status === 'done') {
+      html = '<div style="opacity:0.42;filter:grayscale(0.7);text-decoration:line-through;text-decoration-color:rgba(0,0,0,0.3);text-decoration-thickness:1px;">' + html + '</div>';
+    }
+    mainHtml += html;
+  });
 
   // === auto セクション (展開) + other セクション (アコーディオン折りたたみ) ===
   var autoCards = PROGRAM_MASTER.filter(function (x) { return x.section === 'auto'; });
