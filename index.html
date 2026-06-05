@@ -33964,6 +33964,9 @@ function openHakensakiDashboardExcel() {
 // ============================================================
 const LIST_PROGLOG_GUID = '37f8bdd0-90ab-4e29-8852-28428188197a';
 const PROGLOG_LIST_PATH = '/sites/PowerApps/Lists/List65';
+// プログラムスケジュール（スロット日付編集の永続化）
+const LIST_SCHEDULE_OVERRIDE_GUID = '29869501-2bf6-47e5-9fab-60e49281dc8d';
+const SCHEDULE_OVERRIDE_LIST_PATH = '/sites/PowerApps/Lists/List66';
 // program_log.py の PROGRAMS とミラー。freq: monthly=月1 / multi=随時(月数回) / manual=手動完了
 const PROGRAM_MASTER = [
   // 🎯 月次メインタスク
@@ -34152,6 +34155,133 @@ function changeProgLogMonth(delta) {
   loadProgramLog();
 }
 
+// プログラムスケジュール（SP List66）から各スロットの日付/時刻オーバーライドを読み込み、
+// PROGRAM_MASTER.schedule を上書きする。Idも記憶しておき編集時の更新で使う。
+async function loadScheduleOverrides() {
+  try {
+    var token = await getToken();
+    if (!token) return;
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_SCHEDULE_OVERRIDE_GUID + "')/items?$select=Id,ProgKey,SlotIndex,SlotType,Value1,Weekday,Time,SlotLabel&$top=500";
+    var r = await fetch(url, { headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=nometadata'}});
+    if (!r.ok) return;
+    var d = await r.json();
+    var items = d.value || [];
+    var byProg = {};
+    items.forEach(function (it) {
+      var prog = it.ProgKey; if (!prog) return;
+      if (!byProg[prog]) byProg[prog] = [];
+      var slot = { label: it.SlotLabel || '実行', time: it.Time || '10:00', _itemId: it.Id };
+      if (it.SlotType === 'nth') slot.nth = it.Value1;
+      else if (it.SlotType === 'day') slot.day = it.Value1;
+      else if (it.SlotType === 'week') { slot.week = it.Value1; slot.weekday = it.Weekday; }
+      else if (it.SlotType === 'lastNth') slot.lastNth = it.Value1;
+      byProg[prog][it.SlotIndex] = slot;
+    });
+    PROGRAM_MASTER.forEach(function (p) {
+      if (!byProg[p.id]) return;
+      var arr = byProg[p.id].filter(function (x) { return !!x; });
+      if (arr.length > 0) p.schedule = arr;
+    });
+  } catch (e) { console.error('loadScheduleOverrides', e); }
+}
+
+// 各スロットの日付タイプを編集して SP List66 に保存
+async function editSchedule(progId, slotIndex) {
+  if (!isAdminUser()) { showToast('役員のみ', 'error'); return; }
+  var prog = PROGRAM_MASTER.find(function (x) { return x.id === progId; });
+  if (!prog || !prog.schedule || !prog.schedule[slotIndex]) return;
+  var slot = prog.schedule[slotIndex];
+  var curType = slot.nth != null ? 'nth' : (slot.day != null ? 'day' : (slot.week != null ? 'week' : (slot.lastNth != null ? 'lastNth' : 'nth')));
+  var typeNames = { nth:'稼働日基準(第N稼働日)', day:'暦日(毎月N日)', week:'第N週の曜日', lastNth:'月末から第N稼働日' };
+  var ans = prompt(
+    '【日付タイプ】\n' +
+    '1 = 稼働日基準（第N稼働日。例: 1=月初）\n' +
+    '2 = 暦日（毎月N日。例: 16, 28）\n' +
+    '3 = 第N週の曜日（例: 第1金曜）\n' +
+    '4 = 月末から第N稼働日（例: 1=最終, 3=3営業日前）\n\n' +
+    '現在: ' + typeNames[curType] + '\n\n' +
+    '1〜4 を入力:'
+  );
+  if (!ans) return;
+  var t = parseInt(ans);
+  var newType, val1, val2 = null;
+  if (t === 1) {
+    newType = 'nth';
+    val1 = parseInt(prompt('第何稼働日？ (1〜20)', slot.nth || 1));
+  } else if (t === 2) {
+    newType = 'day';
+    val1 = parseInt(prompt('何日？ (1〜31)', slot.day || 16));
+  } else if (t === 3) {
+    newType = 'week';
+    val1 = parseInt(prompt('第何週？ (1〜5)', slot.week || 1));
+    if (!val1) return;
+    val2 = parseInt(prompt('曜日 (0=日, 1=月, 2=火, 3=水, 4=木, 5=金, 6=土)', slot.weekday != null ? slot.weekday : 5));
+  } else if (t === 4) {
+    newType = 'lastNth';
+    val1 = parseInt(prompt('月末から第何稼働日？ (1=最終稼働日, 3=3営業日前)', slot.lastNth || 1));
+  } else { showToast('1〜4 を入力', 'error'); return; }
+  if (!val1 || isNaN(val1)) { showToast('値が無効', 'error'); return; }
+  if (newType === 'week' && (val2 == null || isNaN(val2))) { showToast('曜日が無効', 'error'); return; }
+  var newTime = prompt('時刻 (HH:MM)', slot.time || '10:00') || slot.time || '10:00';
+
+  showSpinner();
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var digestResp = await fetch(SP_SITE_URL + '/_api/contextinfo', {
+      method:'POST', headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=verbose'}
+    });
+    var dj = await digestResp.json();
+    var digest = dj.d.GetContextWebInformation.FormDigestValue;
+    var listApi = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_SCHEDULE_OVERRIDE_GUID + "')";
+
+    // 既存検索
+    var existingId = slot._itemId || null;
+    if (!existingId) {
+      var qUrl = listApi + "/items?$filter=ProgKey eq '" + progId + "' and SlotIndex eq " + slotIndex + "&$select=Id&$top=1";
+      var qR = await fetch(qUrl, { headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=nometadata'}});
+      var qD = await qR.json();
+      if (qD.value && qD.value[0]) existingId = qD.value[0].Id;
+    }
+
+    var formValues = [
+      { FieldName: 'Title', FieldValue: progId + ':' + slotIndex },
+      { FieldName: 'ProgKey', FieldValue: progId },
+      { FieldName: 'SlotIndex', FieldValue: String(slotIndex) },
+      { FieldName: 'SlotType', FieldValue: newType },
+      { FieldName: 'Value1', FieldValue: String(val1) },
+      { FieldName: 'Time', FieldValue: newTime },
+      { FieldName: 'SlotLabel', FieldValue: slot.label || '実行' }
+    ];
+    if (val2 != null) formValues.push({ FieldName: 'Weekday', FieldValue: String(val2) });
+
+    var url, body;
+    if (existingId) {
+      url = listApi + "/items(" + existingId + ")/ValidateUpdateListItem";
+      body = { formValues: formValues, bNewDocumentUpdate: false };
+    } else {
+      url = listApi + "/AddValidateUpdateItemUsingPath";
+      body = {
+        listItemCreateInfo: { FolderPath: { DecodedUrl: SCHEDULE_OVERRIDE_LIST_PATH }, UnderlyingObjectType: 0 },
+        formValues: formValues, bNewDocumentUpdate: false
+      };
+    }
+    var sR = await fetch(url, {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=nometadata', 'Content-Type':'application/json;odata=nometadata', 'X-RequestDigest': digest},
+      body: JSON.stringify(body)
+    });
+    if (!sR.ok) { var et = await sR.text(); throw new Error('保存失敗 ' + sR.status + ' ' + et.slice(0,200)); }
+    showToast('日付を更新しました', 'success');
+    await loadScheduleOverrides();
+    renderProgramLog();
+  } catch (e) {
+    showToast('エラー: ' + (e.message || e), 'error');
+  } finally {
+    hideSpinner();
+  }
+}
+
 async function loadProgramLog() {
   if (!isAdminUser()) return;
   showSpinner();
@@ -34162,6 +34292,7 @@ async function loadProgramLog() {
           + "&$orderby=Created desc&$top=2000";
     _progLogItems = await spGetAll(LIST_PROGLOG_GUID, q);
     await fetchCompanyHolidays(); // 稼働日計算用（キャッシュ）。render は同期なので先に温めておく
+    await loadScheduleOverrides(); // 日付オーバーライドを反映
     renderProgramLog();
   } catch (e) {
     console.error('loadProgramLog error:', e);
@@ -34319,11 +34450,12 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
       if (due && now > due) { anyOverdue = true; icon = '🔴'; color = '#e53935'; right = '未実行'; }
       else { icon = '⏳'; color = '#90a4ae'; right = '予定'; }
     }
-    return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;margin-top:5px;">'
+    return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:5px;">'
       + '<span style="font-size:13px;">' + icon + '</span>'
       + '<span style="font-weight:700;color:#555;min-width:34px;">' + slot.label + '</span>'
       + '<span style="color:var(--text-light);flex:1;min-width:0;">' + dateLabel + '</span>'
       + '<span style="font-weight:700;color:' + color + ';white-space:nowrap;">' + right + '</span>'
+      + '<button onclick="event.stopPropagation();editSchedule(\'' + p.id + '\',' + i + ')" title="日付を編集" style="border:none;background:transparent;cursor:pointer;font-size:12px;padding:0 2px;color:#9e9e9e;">✏️</button>'
       + '</div>';
   }).join('');
 
