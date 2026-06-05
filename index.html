@@ -34495,11 +34495,21 @@ function _classifyMainCard(p, logsAsc, year, mon, comp, today0) {
     if (/手動|強制/.test(s)) manualLogs.push(l); else autoLogs.push(l);
   });
   if (p.freq === 'manual') {
-    if (manualLogs.length || autoLogs.length) return { status:'done', nextDate:null };
+    // 完了したら、その完了日（手動 or 自動）を nextDate に → 日付順に消し込み表示
+    if (manualLogs.length || autoLogs.length) {
+      var lastLog = manualLogs[manualLogs.length - 1] || autoLogs[autoLogs.length - 1];
+      var lc = _progLogJst(lastLog.Created);
+      var doneDate = lc ? new Date(lc.getUTCFullYear(), lc.getUTCMonth(), lc.getUTCDate()) : null;
+      return { status:'done', nextDate: doneDate };
+    }
     return { status:'today', nextDate: today0 };
   }
   if (p.freq === 'scheduled' && p.schedule) {
-    if (p.manualDone && manualLogs.length) return { status:'done', nextDate:null };
+    if (p.manualDone && manualLogs.length) {
+      // 「今月を完了にする」ボタン押下完了。日付順ソート用に最初のスロット予定日を保持
+      var firstDateMd = _computeSlotDate(p.schedule[0], year, mon, comp);
+      return { status:'done', nextDate: firstDateMd };
+    }
     var nextDate = null, doneCount = 0;
     var slotLogs = _matchAutoLogsToSlots(p, autoLogs, year, mon, comp);
     p.schedule.forEach(function (slot, i) {
