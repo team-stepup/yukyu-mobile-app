@@ -34159,32 +34159,149 @@ function changeProgLogMonth(delta) {
 
 // プログラムスケジュール（SP List66）から各スロットの日付/時刻オーバーライドを読み込み、
 // PROGRAM_MASTER.schedule を上書きする。Idも記憶しておき編集時の更新で使う。
+// SP List66 の全 override 行を保持。読み込み時にキャッシュ → renderProgramLog 内で表示月にマッチするものだけ適用
+var _scheduleOverrides = [];
 async function loadScheduleOverrides() {
   try {
     var token = await getToken();
     if (!token) return;
-    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_SCHEDULE_OVERRIDE_GUID + "')/items?$select=Id,ProgKey,SlotIndex,SlotType,Value1,Weekday,Time,SlotLabel&$top=500";
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_SCHEDULE_OVERRIDE_GUID + "')/items?$select=Id,ProgKey,SlotIndex,SlotType,Value1,Weekday,Time,SlotLabel,TargetMonth,SpecificDate&$top=500";
     var r = await fetch(url, { headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=nometadata'}});
     if (!r.ok) return;
     var d = await r.json();
-    var items = d.value || [];
-    var byProg = {};
-    items.forEach(function (it) {
-      var prog = it.ProgKey; if (!prog) return;
-      if (!byProg[prog]) byProg[prog] = [];
-      var slot = { label: it.SlotLabel || '実行', time: it.Time || '10:00', _itemId: it.Id };
-      if (it.SlotType === 'nth') slot.nth = it.Value1;
-      else if (it.SlotType === 'day') slot.day = it.Value1;
-      else if (it.SlotType === 'week') { slot.week = it.Value1; slot.weekday = it.Weekday; }
-      else if (it.SlotType === 'lastNth') slot.lastNth = it.Value1;
-      byProg[prog][it.SlotIndex] = slot;
-    });
-    PROGRAM_MASTER.forEach(function (p) {
-      if (!byProg[p.id]) return;
-      var arr = byProg[p.id].filter(function (x) { return !!x; });
-      if (arr.length > 0) p.schedule = arr;
-    });
+    _scheduleOverrides = d.value || [];
   } catch (e) { console.error('loadScheduleOverrides', e); }
+}
+
+// 表示月（YYYY-MM）に該当する override を適用して PROGRAM_MASTER の schedule を返却用に変形
+// PROGRAM_MASTER 自体は変更せず、毎回 _applyOverridesForMonth() で派生スケジュールを得る
+// 優先順位: SpecificDate(その月固定日) > TargetMonth マッチ > TargetMonth 空(=全月共通)
+function _applyOverridesForMonth(monthStr) {
+  // monthStr "YYYY-MM"
+  var byProgSlot = {}; // "progId|slotIdx" -> override
+  // 全月共通(空)を先に適用、月特定を後で上書き
+  ['', monthStr].forEach(function (tm) {
+    _scheduleOverrides.forEach(function (it) {
+      if ((it.TargetMonth || '') !== tm) return;
+      if (!it.ProgKey) return;
+      byProgSlot[it.ProgKey + '|' + it.SlotIndex] = it;
+    });
+  });
+  PROGRAM_MASTER.forEach(function (p) {
+    if (!p.schedule || !p.schedule.length) return;
+    // 元の schedule（コードに書いた配列）を _baseSchedule として保持
+    if (!p._baseSchedule) p._baseSchedule = p.schedule.slice();
+    p.schedule = p._baseSchedule.map(function (s, i) {
+      var ov = byProgSlot[p.id + '|' + i];
+      if (!ov) return s; // override なし → デフォルト
+      var ns = { label: ov.SlotLabel || s.label || '実行',
+                 time: ov.Time || s.time || '10:00',
+                 _itemId: ov.Id,
+                 _targetMonth: ov.TargetMonth || '',
+                 _specificDate: ov.SpecificDate || null };
+      // SpecificDate があれば、それを最優先で使う（type 系は不要）
+      if (ov.SpecificDate) return ns;
+      if (ov.SlotType === 'nth') ns.nth = ov.Value1;
+      else if (ov.SlotType === 'day') ns.day = ov.Value1;
+      else if (ov.SlotType === 'week') { ns.week = ov.Value1; ns.weekday = ov.Weekday; }
+      else if (ov.SlotType === 'lastNth') ns.lastNth = ov.Value1;
+      else return s; // 不正 → デフォルト
+      return ns;
+    });
+  });
+}
+
+// 日付チップクリック専用: カレンダーピッカーで当月のみの日付変更を保存
+// 翌月以降はデフォルトの schedule のまま（TargetMonth=当月YYYY-MM 付きで保存）
+async function editDateFromCalendar(progId, slotIndex) {
+  if (!isAdminUser()) { showToast('役員のみ', 'error'); return; }
+  var prog = PROGRAM_MASTER.find(function (x) { return x.id === progId; });
+  if (!prog || !prog.schedule || !prog.schedule[slotIndex]) return;
+  var slot = prog.schedule[slotIndex];
+  var month = _progLogMonth || progLogYM();
+  var ymParts = month.split('-').map(Number);
+  // 現在の予定日（あれば初期値に）
+  var curDt = _computeSlotDate(slot, ymParts[0], ymParts[1], _companyHolidaysCache);
+  var defaultIso = curDt
+    ? curDt.getFullYear() + '-' + String(curDt.getMonth()+1).padStart(2,'0') + '-' + String(curDt.getDate()).padStart(2,'0')
+    : month + '-01';
+  // 動的に input[type=date] を生成して showPicker
+  var inp = document.createElement('input');
+  inp.type = 'date';
+  inp.value = defaultIso;
+  inp.min = month + '-01';
+  inp.max = month + '-' + String(new Date(ymParts[0], ymParts[1], 0).getDate()).padStart(2,'0');
+  inp.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);font-size:16px;padding:8px;z-index:99999;border:2px solid #673ab7;border-radius:8px;background:#fff;';
+  document.body.appendChild(inp);
+  inp.focus();
+  // 一旦は input が DOM にあり、ユーザーが日付選択 → change イベントで保存
+  inp.addEventListener('change', async function () {
+    var picked = inp.value; // "YYYY-MM-DD"
+    document.body.removeChild(inp);
+    if (!picked) return;
+    if (picked.slice(0, 7) !== month) { showToast('当月内の日付を選んでください', 'error'); return; }
+    await _saveSpecificDateOverride(progId, slotIndex, slot, picked, month);
+  });
+  inp.addEventListener('blur', function () {
+    setTimeout(function () { if (inp.parentNode) inp.parentNode.removeChild(inp); }, 200);
+  });
+  // showPicker (Chrome/Edge/Safari 17+)
+  try { inp.showPicker(); } catch (e) { /* 非対応ブラウザ → 通常の入力欄として表示 */ }
+}
+
+async function _saveSpecificDateOverride(progId, slotIndex, slot, dateIso, monthStr) {
+  showSpinner();
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var digestResp = await fetch(SP_SITE_URL + '/_api/contextinfo', {
+      method:'POST', headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=verbose'}
+    });
+    var dj = await digestResp.json();
+    var digest = dj.d.GetContextWebInformation.FormDigestValue;
+    var listApi = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_SCHEDULE_OVERRIDE_GUID + "')";
+    // 既存検索: progId+slotIdx+TargetMonth=当月 のもの
+    var qUrl = listApi + "/items?$filter=ProgKey eq '" + progId + "' and SlotIndex eq " + slotIndex + " and TargetMonth eq '" + monthStr + "'&$select=Id&$top=1";
+    var qR = await fetch(qUrl, { headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=nometadata'}});
+    var qD = await qR.json();
+    var existingId = (qD.value && qD.value[0]) ? qD.value[0].Id : null;
+    var formValues = [
+      { FieldName: 'Title', FieldValue: progId + ':' + slotIndex + ':' + monthStr },
+      { FieldName: 'ProgKey', FieldValue: progId },
+      { FieldName: 'SlotIndex', FieldValue: String(slotIndex) },
+      { FieldName: 'TargetMonth', FieldValue: monthStr },
+      { FieldName: 'SpecificDate', FieldValue: dateIso },
+      { FieldName: 'Time', FieldValue: slot.time || '10:00' },
+      { FieldName: 'SlotLabel', FieldValue: slot.label || '実行' },
+      // SlotType/Value1 は SpecificDate がある場合は使われないが、必須フィールド扱いを避けて空でも可
+      { FieldName: 'SlotType', FieldValue: 'day' },
+      { FieldName: 'Value1', FieldValue: String(parseInt(dateIso.slice(8, 10))) }
+    ];
+    var url, body;
+    if (existingId) {
+      url = listApi + "/items(" + existingId + ")/ValidateUpdateListItem";
+      body = { formValues: formValues, bNewDocumentUpdate: false };
+    } else {
+      url = listApi + "/AddValidateUpdateItemUsingPath";
+      body = {
+        listItemCreateInfo: { FolderPath: { DecodedUrl: SCHEDULE_OVERRIDE_LIST_PATH }, UnderlyingObjectType: 0 },
+        formValues: formValues, bNewDocumentUpdate: false
+      };
+    }
+    var sR = await fetch(url, {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + token, 'Accept':'application/json;odata=nometadata', 'Content-Type':'application/json;odata=nometadata', 'X-RequestDigest': digest},
+      body: JSON.stringify(body)
+    });
+    if (!sR.ok) { var et = await sR.text(); throw new Error('保存失敗 ' + sR.status + ' ' + et.slice(0,200)); }
+    showToast('日付を更新しました（当月のみ）', 'success');
+    await loadScheduleOverrides();
+    renderProgramLog();
+  } catch (e) {
+    showToast('エラー: ' + (e.message || e), 'error');
+  } finally {
+    hideSpinner();
+  }
 }
 
 // 各スロットの日付タイプを編集して SP List66 に保存（opts.skipTime=trueなら時刻は変更しない）
@@ -34316,6 +34433,13 @@ function _fmtSlotDate(dt) {
 // 稼働日でなければ前の稼働日に寄せる。
 function _computeSlotDate(slot, year, mon, comp) {
   var dt;
+  // SpecificDate（カレンダー選択保存）が当月分なら最優先で使用
+  if (slot._specificDate) {
+    var sp = slot._specificDate.split('-').map(Number);
+    if (sp.length === 3 && sp[0] === year && sp[1] === mon) {
+      return new Date(sp[0], sp[1] - 1, sp[2]);
+    }
+  }
   if (slot.lastNth != null) {
     dt = nthLastWorkdayDate(year, mon, slot.lastNth, comp);
   } else if (slot.day != null) {
@@ -34505,6 +34629,7 @@ function _renderScheduledCard(p, logsAsc, month, tally) {
 
 function renderProgramLog() {
   var month = _progLogMonth || progLogYM();
+  _applyOverridesForMonth(month); // 表示月のオーバーライドを反映（翌月は影響を受けない）
   var lbl = document.getElementById('progLogMonthLabel');
   if (lbl) lbl.textContent = month.split('-')[0] + '年' + month.split('-')[1] + '月';
 
@@ -34583,7 +34708,7 @@ function renderProgramLog() {
     }
     // 日付チップに onclick（編集権限ありなら）。日付のみ編集（時刻は据え置き）
     var chipOnclick = (p.freq === 'scheduled' && p.schedule && (typeof isAdminUser === 'function' && isAdminUser()))
-      ? ("event.stopPropagation();editSchedule('" + p.id + "'," + nextSlotIdx + ",{skipTime:true});")
+      ? ("event.stopPropagation();editDateFromCalendar('" + p.id + "'," + nextSlotIdx + ");")
       : null;
     var chip = _dateChipHtml(cls.nextDate, cls.status, time, chipOnclick);
     var badge = _statusBadge(cls.nextDate, cls.status, today0);
