@@ -34187,8 +34187,9 @@ async function loadScheduleOverrides() {
   } catch (e) { console.error('loadScheduleOverrides', e); }
 }
 
-// 各スロットの日付タイプを編集して SP List66 に保存
-async function editSchedule(progId, slotIndex) {
+// 各スロットの日付タイプを編集して SP List66 に保存（opts.skipTime=trueなら時刻は変更しない）
+async function editSchedule(progId, slotIndex, opts) {
+  opts = opts || {};
   if (!isAdminUser()) { showToast('役員のみ', 'error'); return; }
   var prog = PROGRAM_MASTER.find(function (x) { return x.id === progId; });
   if (!prog || !prog.schedule || !prog.schedule[slotIndex]) return;
@@ -34224,7 +34225,7 @@ async function editSchedule(progId, slotIndex) {
   } else { showToast('1〜4 を入力', 'error'); return; }
   if (!val1 || isNaN(val1)) { showToast('値が無効', 'error'); return; }
   if (newType === 'week' && (val2 == null || isNaN(val2))) { showToast('曜日が無効', 'error'); return; }
-  var newTime = prompt('時刻 (HH:MM)', slot.time || '10:00') || slot.time || '10:00';
+  var newTime = opts.skipTime ? (slot.time || '10:00') : (prompt('時刻 (HH:MM)', slot.time || '10:00') || slot.time || '10:00');
 
   showSpinner();
   try {
@@ -34397,15 +34398,17 @@ function _classifyMainCard(p, logsAsc, year, mon, comp, today0) {
   return { status:'over', nextDate:null };
 }
 
-function _dateChipHtml(date, status, time) {
+function _dateChipHtml(date, status, time, onclickStr) {
   var COLOR = { over:'#e53935', today:'#1976d2', future:'#90a4ae', done:'#43a047' };
   var bg = COLOR[status] || '#90a4ae';
   var dayStr = date ? (date.getMonth()+1) + '/' + date.getDate() : '—';
   var dowStr = date ? _WD_JP_SHORT[date.getDay()] : '';
-  return '<div style="width:54px;flex:0 0 auto;background:' + bg + ';color:#fff;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 3px;font-weight:800;">'
+  var ck = onclickStr ? (' onclick="' + onclickStr + '" title="クリックで日付編集" style="cursor:pointer;') : ' style="';
+  return '<div' + ck + 'width:54px;flex:0 0 auto;background:' + bg + ';color:#fff;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 3px;font-weight:800;position:relative;">'
     + '<span style="font-size:15px;line-height:1;">' + dayStr + '</span>'
     + (dowStr ? '<span style="font-size:9.5px;margin-top:2px;opacity:.95;">' + dowStr + '</span>' : '')
     + (time ? '<span style="font-size:9px;margin-top:3px;opacity:.95;padding:1px 5px;background:rgba(255,255,255,.25);border-radius:6px;">' + time + '</span>' : '')
+    + (onclickStr ? '<span style="position:absolute;bottom:1px;right:2px;font-size:9px;opacity:.7;">✏️</span>' : '')
     + '</div>';
 }
 
@@ -34570,14 +34573,19 @@ function renderProgramLog() {
     var logsAsc = logsDesc.slice().reverse();
     var cls = _classifyMainCard(p, logsAsc, _sortYear, _sortMon, _sortComp, today0);
     var time = null;
+    var nextSlotIdx = 0;
     if (p.freq === 'scheduled' && p.schedule && cls.nextDate) {
-      // 次の予定スロットの時刻を採用
+      // 次の予定スロットの時刻＆インデックスを採用
       for (var i = 0; i < p.schedule.length; i++) {
         var dt = _computeSlotDate(p.schedule[i], _sortYear, _sortMon, _sortComp);
-        if (dt && dt.getTime() === cls.nextDate.getTime()) { time = p.schedule[i].time; break; }
+        if (dt && dt.getTime() === cls.nextDate.getTime()) { time = p.schedule[i].time; nextSlotIdx = i; break; }
       }
     }
-    var chip = _dateChipHtml(cls.nextDate, cls.status, time);
+    // 日付チップに onclick（編集権限ありなら）。日付のみ編集（時刻は据え置き）
+    var chipOnclick = (p.freq === 'scheduled' && p.schedule && (typeof isAdminUser === 'function' && isAdminUser()))
+      ? ("event.stopPropagation();editSchedule('" + p.id + "'," + nextSlotIdx + ",{skipTime:true});")
+      : null;
+    var chip = _dateChipHtml(cls.nextDate, cls.status, time, chipOnclick);
     var badge = _statusBadge(cls.nextDate, cls.status, today0);
     var inner;
     if (p.freq === 'scheduled' && p.schedule) {
