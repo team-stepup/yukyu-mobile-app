@@ -18185,25 +18185,23 @@ async function _saveNewHakensaki() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 登録中…'; }
 
   try {
-    // HF 定数の OData_ プレフィックスを除去して InternalName を取得
-    function internalOf(odataKey) {
-      if (!odataKey) return null;
-      if (odataKey === 'Title') return 'Title';
-      return odataKey.indexOf('OData_') === 0 ? odataKey.substring(6) : odataKey;
-    }
+    // ⚠ SharePoint REST の書き込みキーは EntityPropertyName (OData_ プレフィックス付き) を
+    //   そのまま使う。InternalName へ変換 (OData_ 除去) すると POST が 400
+    //   「プロパティ '_x...' は型に存在しません」で失敗する。
+    //   HF 定数は EntityPropertyName なので、変換せず直接 body のキーにする。
     var body = {};
     if (tanto) body['Title'] = tanto;
-    body[internalOf(HF.bango)]               = bango;
-    body[internalOf(HF.hakensaki_keiyaku)]   = keiyaku;
-    body[internalOf(HF.hakensaki_name)]      = name;
-    if (jusho)  body[internalOf(HF.haken_jusho)]    = jusho;
-    if (jusho)  body[internalOf(HF.kinmu_jusho)]    = jusho;  // 就業場所住所も同住所で初期化
-    if (busho)  body[internalOf(HF.syuugyou_busho)] = busho;
+    body[HF.bango]               = bango;
+    body[HF.hakensaki_keiyaku]   = keiyaku;
+    body[HF.hakensaki_name]      = name;
+    if (jusho)  body[HF.haken_jusho]    = jusho;
+    if (jusho)  body[HF.kinmu_jusho]    = jusho;  // 就業場所住所も同住所で初期化
+    if (busho)  body[HF.syuugyou_busho] = busho;
     if (gyoumu) {
-      body[internalOf(HF.gyoumu)]  = gyoumu;
-      body[internalOf(HF.gyoumu5)] = gyoumu;
+      body[HF.gyoumu]  = gyoumu;
+      body[HF.gyoumu5] = gyoumu;
     }
-    if (ryokinStr) body[internalOf(HF.hakenRyokin)] = Number(ryokinStr) || 0;
+    if (ryokinStr) body[HF.hakenRyokin] = Number(ryokinStr) || 0;
 
     var result = await spPost(LIST_HAKENSAKI_GUID, body);
     showToast('✓ 派遣先「' + name + '」を登録しました', 'success');
