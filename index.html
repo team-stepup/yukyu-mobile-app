@@ -18106,102 +18106,187 @@ function _getHakenTantoRaw(hakenName) {
 //   ・必須: 番号 / 派遣先会社番号 (例: "099:ABC㈱浜松") / 派遣先会社名
 //   ・任意: 派遣先住所 / 就業場所部署 / 業務内容 / 派遣元責任者 / 派遣料金
 // ============================================================
-function openNewHakensakiForm() {
+async function openNewHakensakiForm() {
   var old = document.getElementById('newHakensakiOverlay'); if (old) old.remove();
+  if (typeof showSpinner === 'function') showSpinner();
+
+  // 派遣先情報リストの編集可能フィールドを全件取得 (= 全項目を一気に入力できるように)
+  var fields = [];
+  try {
+    var token = await getToken();
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=Title,InternalName,EntityPropertyName,TypeAsString,Choices&$top=300";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (resp.ok) { var data = await resp.json(); fields = (data.d && data.d.results) || []; }
+  } catch (e) { console.warn('hk fields fetch failed', e); }
+  if (typeof hideSpinner === 'function') hideSpinner();
+
+  var fieldStyle = 'width:100%;padding:8px 10px;border:1.5px solid #ccd;border-radius:6px;font-size:13px;box-sizing:border-box;';
+  var SKIP_INTERNAL = { 'Attachments':1, 'ContentType':1, '_ColorTag':1, 'Order':1, 'TaxCatchAll':1, 'TaxCatchAllLabel':1, '_ModerationStatus':1, '_ModerationComments':1 };
+  var SKIP_TYPE = { 'Computed':1, 'Calculated':1, 'Lookup':1, 'LookupMulti':1, 'User':1, 'UserMulti':1, 'Attachments':1 };
+
+  // セクション定義 (基本のみ初期展開)
+  var sections = {
+    basic:  { icon:'🏢', label:'基本情報',            open:true,  html:'' },
+    place:  { icon:'📍', label:'就業場所・業務',        open:false, html:'' },
+    period: { icon:'📅', label:'派遣期間・人数・契約',    open:false, html:'' },
+    time:   { icon:'🕐', label:'就業時間・休憩',        open:false, html:'' },
+    resp:   { icon:'👤', label:'責任者・指揮命令・苦情',  open:false, html:'' },
+    ot36:   { icon:'⏱️', label:'時間外・36協定',       open:false, html:'' },
+    fee:    { icon:'💴', label:'料金・締め支払い',       open:false, html:'' },
+    other:  { icon:'📋', label:'その他',              open:false, html:'' }
+  };
+  var sectionOrder = ['basic','place','period','time','resp','ot36','fee','other'];
+
+  // フィールド → {section, label, required, hint}
+  function meta(title, epn) {
+    var t = String(title || '').replace(/\s+/g, '');
+    if (epn === HF.bango)             return { section:'basic', label:'番号', required:true, hint:'例: 099-1（派遣会社番号-枝番）' };
+    if (epn === HF.hakensaki_keiyaku) return { section:'basic', label:'派遣先会社番号 (buka)', required:true, hint:'部課識別子。社員データの buka と一致させる。例: 099:ABC株式会社浜松' };
+    if (epn === HF.hakensaki_name)    return { section:'basic', label:'派遣先会社名', required:true, hint:'例: ＡＢＣ株式会社　浜松工場' };
+    if (epn === 'Title')              return { section:'basic', label:'派遣元責任者 (担当者氏名)', hint:'Title フィールドに保存されます' };
+    var lbl = String(title || '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/苦情|指揮命令|責任者/.test(t))                       return { section:'resp',   label: lbl };
+    if (/時間外|休日労働|36協定|深夜|割増|法定休日/.test(t))     return { section:'ot36',   label: lbl };
+    if (/就業時間|実働|休憩|就業日/.test(t))                  return { section:'time',   label: lbl };
+    if (/派遣期間|契約期間|派遣人数|抵触日/.test(t))            return { section:'period', label: lbl };
+    if (/就業場所|就業部署|業務内容|職種|責任の程度|組織単位/.test(t)) return { section:'place', label: lbl };
+    if (/料金|計算単位|締め|締日|支払|給料/.test(t))           return { section:'fee',    label: lbl };
+    if (/住所|電話|ホームページ|会社名/.test(t))               return { section:'basic',  label: lbl };
+    return { section:'other', label: lbl };
+  }
+
+  // 型に応じた入力欄 (data-epn / data-type を保持 → 保存時に動的読取)
+  function buildInput(epn, type, choices) {
+    var common = 'id="newHkF_' + escHtml(epn) + '" data-epn="' + escHtml(epn) + '" data-type="' + escHtml(type || 'Text') + '" style="' + fieldStyle + '"';
+    if (type === 'Note')     return '<textarea ' + common + ' rows="2"></textarea>';
+    if (type === 'DateTime') return '<input type="date" ' + common + '>';
+    if (type === 'Number' || type === 'Currency') return '<input type="number" ' + common + '>';
+    if (type === 'URL')      return '<input type="url" ' + common + ' placeholder="https://...">';
+    if (type === 'Choice' && choices && choices.length) {
+      var opts = '<option value="">(未選択)</option>';
+      choices.forEach(function(c) { if (/^選択肢/.test(String(c))) return; opts += '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>'; });
+      return '<select ' + common + '>' + opts + '</select>';
+    }
+    return '<input type="text" ' + common + '>';
+  }
+
+  var placed = {};
+  function epnOf(f) { var er = f.EntityPropertyName || f.InternalName || ''; return (er.charAt(0) === '_') ? 'OData_' + er : er; }
+  function placeField(f) {
+    var iname = f.InternalName || '';
+    if (SKIP_INTERNAL[iname]) return;
+    if (SKIP_TYPE[f.TypeAsString]) return;
+    var epn = epnOf(f);
+    if (!epn || placed[epn]) return; placed[epn] = 1;
+    var m = meta(f.Title || iname, epn);
+    var choices = f.Choices ? (f.Choices.results || f.Choices) : null;
+    var html = '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;">' +
+      (m.required ? '<span style="color:#c62828;">★</span> ' : '') + escHtml(m.label) + '</div>' +
+      buildInput(epn, f.TypeAsString, choices) +
+      (m.hint ? '<div style="font-size:10.5px;color:#888;margin-top:2px;">' + escHtml(m.hint) + '</div>' : '');
+    sections[m.section].html += html;
+  }
+
+  // 必須・特殊フィールドを先頭固定 → 残りを分類
+  [HF.bango, HF.hakensaki_keiyaku, HF.hakensaki_name, 'Title'].forEach(function(pe) {
+    var f = fields.find(function(x) { return epnOf(x) === pe; });
+    if (f) placeField(f);
+  });
+  fields.forEach(placeField);
+
+  // フォールバック: フィールド取得失敗時は最低限の必須3項目を出す
+  if (!sections.basic.html) {
+    sections.basic.html =
+      '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:6px 0 3px;"><span style="color:#c62828;">★</span> 番号</div>' +
+      '<input type="text" id="newHkF_' + escHtml(HF.bango) + '" data-epn="' + escHtml(HF.bango) + '" data-type="Text" style="' + fieldStyle + '">' +
+      '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;"><span style="color:#c62828;">★</span> 派遣先会社番号 (buka)</div>' +
+      '<input type="text" id="newHkF_' + escHtml(HF.hakensaki_keiyaku) + '" data-epn="' + escHtml(HF.hakensaki_keiyaku) + '" data-type="Text" style="' + fieldStyle + '">' +
+      '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;"><span style="color:#c62828;">★</span> 派遣先会社名</div>' +
+      '<input type="text" id="newHkF_' + escHtml(HF.hakensaki_name) + '" data-epn="' + escHtml(HF.hakensaki_name) + '" data-type="Text" style="' + fieldStyle + '">';
+  }
+
+  var formHtml = '';
+  sectionOrder.forEach(function(sid) {
+    var s = sections[sid];
+    if (!s.html) return;
+    formHtml += '<details' + (s.open ? ' open' : '') + ' style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;overflow:hidden;">' +
+      '<summary style="padding:9px 12px;cursor:pointer;font-weight:700;font-size:13px;color:#2e7d32;background:#f1f8f2;">' + s.icon + ' ' + escHtml(s.label) + '</summary>' +
+      '<div style="padding:4px 14px 12px;">' + s.html + '</div>' +
+    '</details>';
+  });
+
   var ov = document.createElement('div');
   ov.id = 'newHakensakiOverlay';
   ov.className = 'no-print';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:14px;';
-  var fieldStyle = 'width:100%;padding:8px 10px;border:1.5px solid #ccd;border-radius:6px;font-size:13px;box-sizing:border-box;';
   ov.innerHTML =
-    '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
-      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#e8f5e9;border-radius:12px 12px 0 0;">' +
+    '<div style="background:#fff;border-radius:12px;max-width:540px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#e8f5e9;border-radius:12px 12px 0 0;flex-shrink:0;">' +
         '<h3 style="margin:0;font-size:15px;color:#2e7d32;">🏭 新規派遣先登録</h3>' +
         '<button onclick="document.getElementById(\'newHakensakiOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
       '</div>' +
-      '<div style="padding:16px 18px;">' +
+      '<div style="padding:14px 18px;overflow-y:auto;flex:1;">' +
         '<div style="font-size:11.5px;color:#666;margin-bottom:12px;line-height:1.55;background:#f5f5f5;padding:8px 10px;border-radius:6px;">' +
           'SharePoint「派遣先情報」リストに新しい行を追加します。<br>' +
-          '<b style="color:#c62828;">★</b> は必須項目です。' +
+          '<b style="color:#c62828;">★</b> は必須。その他の項目も全てこの画面で入力できます（後から編集も可）。' +
         '</div>' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:6px 0 3px;"><span style="color:#c62828;">★</span> 番号</div>' +
-        '<input type="text" id="newHk_bango" placeholder="例: 099-1（派遣会社番号-枝番）" style="' + fieldStyle + '">' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;"><span style="color:#c62828;">★</span> 派遣先会社番号 (buka)</div>' +
-        '<input type="text" id="newHk_keiyaku" placeholder="例: 099:ABC株式会社浜松" style="' + fieldStyle + '">' +
-        '<div style="font-size:10.5px;color:#888;margin-top:2px;">部課識別子。社員データの buka フィールドと一致させてください。</div>' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;"><span style="color:#c62828;">★</span> 派遣先会社名</div>' +
-        '<input type="text" id="newHk_name" placeholder="例: ＡＢＣ株式会社　浜松工場" style="' + fieldStyle + '">' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;">派遣先住所</div>' +
-        '<input type="text" id="newHk_jusho" placeholder="例: 静岡県浜松市中央区○○ 1-2-3" style="' + fieldStyle + '">' +
-        '<div style="font-size:10.5px;color:#888;margin-top:2px;">マイカー通勤届の経路図生成に使用します。</div>' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;">就業場所 (部署)</div>' +
-        '<input type="text" id="newHk_busho" placeholder="例: 製造部 第1組立係" style="' + fieldStyle + '">' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;">業務内容</div>' +
-        '<input type="text" id="newHk_gyoumu" placeholder="例: 自動車部品の組立・検査作業" style="' + fieldStyle + '">' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;">派遣元責任者 (担当者氏名)</div>' +
-        '<input type="text" id="newHk_tanto" placeholder="例: 森 まこと" style="' + fieldStyle + '">' +
-        '<div style="font-size:10.5px;color:#888;margin-top:2px;">Title フィールドにそのまま保存されます。</div>' +
-
-        '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;">派遣料金単価 (請求単価)</div>' +
-        '<input type="number" id="newHk_ryokin" placeholder="例: 1550" style="' + fieldStyle + '">' +
-        '<div style="font-size:10.5px;color:#888;margin-top:2px;">時給ベース。後で詳細編集も可能です。</div>' +
+        formHtml +
       '</div>' +
-
-      '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:0;background:#fff;border-radius:0 0 12px 12px;">' +
+      '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;background:#fff;border-radius:0 0 12px 12px;flex-shrink:0;">' +
         '<button onclick="document.getElementById(\'newHakensakiOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
         '<button onclick="_saveNewHakensaki()" id="newHkSaveBtn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">💾 派遣先を登録</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(ov);
   setTimeout(function() {
-    var inp = document.getElementById('newHk_bango');
+    var inp = document.getElementById('newHkF_' + HF.bango);
     if (inp) inp.focus();
   }, 100);
 }
 
-async function _saveNewHakensaki() {
-  function val(id) { var el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; }
-  var bango   = val('newHk_bango');
-  var keiyaku = val('newHk_keiyaku');
-  var name    = val('newHk_name');
-  var jusho   = val('newHk_jusho');
-  var busho   = val('newHk_busho');
-  var gyoumu  = val('newHk_gyoumu');
-  var tanto   = val('newHk_tanto');
-  var ryokinStr = val('newHk_ryokin');
+// 指定 EPN の入力欄へフォーカス (必要ならセクションを開く)
+function _hkFocusEpn(epn) {
+  var el = document.getElementById('newHkF_' + epn);
+  if (!el) return;
+  var d = el.closest('details'); if (d) d.open = true;
+  el.focus();
+  if (el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+}
 
-  if (!bango)   { showToast('「番号」を入力してください', 'error'); return; }
-  if (!keiyaku) { showToast('「派遣先会社番号」を入力してください', 'error'); return; }
-  if (!name)    { showToast('「派遣先会社名」を入力してください', 'error'); return; }
+async function _saveNewHakensaki() {
+  function valEpn(epn) { var el = document.getElementById('newHkF_' + epn); return el ? String(el.value || '').trim() : ''; }
+  var bango   = valEpn(HF.bango);
+  var keiyaku = valEpn(HF.hakensaki_keiyaku);
+  var name    = valEpn(HF.hakensaki_name);
+
+  if (!bango)   { showToast('「番号」を入力してください', 'error'); _hkFocusEpn(HF.bango); return; }
+  if (!keiyaku) { showToast('「派遣先会社番号 (buka)」を入力してください', 'error'); _hkFocusEpn(HF.hakensaki_keiyaku); return; }
+  if (!name)    { showToast('「派遣先会社名」を入力してください', 'error'); _hkFocusEpn(HF.hakensaki_name); return; }
 
   var saveBtn = document.getElementById('newHkSaveBtn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 登録中…'; }
 
   try {
-    // ⚠ SharePoint REST の書き込みキーは EntityPropertyName (OData_ プレフィックス付き) を
-    //   そのまま使う。InternalName へ変換 (OData_ 除去) すると POST が 400
-    //   「プロパティ '_x...' は型に存在しません」で失敗する。
-    //   HF 定数は EntityPropertyName なので、変換せず直接 body のキーにする。
+    // ⚠ SharePoint REST の書き込みキーは EntityPropertyName (OData_ プレフィックス付き)。
+    //   入力欄は data-epn に EntityPropertyName、data-type に型を保持しているので
+    //   それを使って全フィールドを動的に収集する (空欄はスキップ=null で上書きしない)。
     var body = {};
-    if (tanto) body['Title'] = tanto;
-    body[HF.bango]               = bango;
-    body[HF.hakensaki_keiyaku]   = keiyaku;
-    body[HF.hakensaki_name]      = name;
-    if (jusho)  body[HF.haken_jusho]    = jusho;
-    if (jusho)  body[HF.kinmu_jusho]    = jusho;  // 就業場所住所も同住所で初期化
-    if (busho)  body[HF.syuugyou_busho] = busho;
-    if (gyoumu) {
-      body[HF.gyoumu]  = gyoumu;
-      body[HF.gyoumu5] = gyoumu;
-    }
-    if (ryokinStr) body[HF.hakenRyokin] = Number(ryokinStr) || 0;
+    var els = document.querySelectorAll('#newHakensakiOverlay [data-epn]');
+    els.forEach(function(el) {
+      var epn = el.getAttribute('data-epn');
+      var type = el.getAttribute('data-type') || 'Text';
+      var v = String(el.value || '').trim();
+      if (v === '') return;
+      if (type === 'DateTime') {
+        body[epn] = v + 'T00:00:00Z';
+      } else if (type === 'Number' || type === 'Currency') {
+        var n = Number(v); if (!isNaN(n)) body[epn] = n;
+      } else if (type === 'URL') {
+        body[epn] = { '__metadata': { type: 'SP.FieldUrlValue' }, 'Url': v, 'Description': v };
+      } else {
+        body[epn] = v;  // Text / Note / Choice
+      }
+    });
 
     var result = await spPost(LIST_HAKENSAKI_GUID, body);
     showToast('✓ 派遣先「' + name + '」を登録しました', 'success');
