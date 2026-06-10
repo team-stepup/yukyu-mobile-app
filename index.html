@@ -31821,6 +31821,11 @@ function onDocCapture(docId, input) {
     reader.onload = function(e) {
       capturedDocs[docId].push({ file: file, dataUrl: e.target.result });
       renderDocPreview(docId);
+      // 在留カード・免許証は撮影/選択したら自動でOCR→フォーム自動入力(プレビュー付き)
+      //   (1枚目だけ自動。複数枚は手動の🔍ボタンで)
+      if ((docId === 'zairyu' || docId === 'license') && capturedDocs[docId].length === 1) {
+        setTimeout(function() { runOcr(docId, 0, true); }, 200);
+      }
     };
     reader.readAsDataURL(file);
   });
@@ -31855,9 +31860,11 @@ function renderDocPreview(docId) {
     html += '</div>';
   });
   html += '</div>';
-  html += '<div style="display:flex;gap:6px;margin-top:6px;">';
+  html += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">';
+  var _ocrAuto = (docId === 'zairyu' || docId === 'license');
   imgs.forEach((img, i) => {
-    html += '<button class="doc-ocr-btn" onclick="runOcr(\'' + docId + '\',' + i + ')">🔍 ' + (i + 1) + '枚目</button>';
+    var lbl = _ocrAuto ? ('🔍 ' + (i + 1) + '枚目をOCR読み取り→自動入力') : ('🔍 ' + (i + 1) + '枚目');
+    html += '<button class="doc-ocr-btn" onclick="runOcr(\'' + docId + '\',' + i + ',' + (_ocrAuto ? 'true' : 'false') + ')">' + lbl + '</button>';
   });
   html += '</div>';
   html += '<div id="docOcrResult_' + docId + '"></div>';
@@ -31876,11 +31883,11 @@ function removeDocCapture(docId) {
   renderDocPreview(docId);
 }
 
-async function runOcr(docId, idx) {
+async function runOcr(docId, idx, autoFill) {
   const imgs = capturedDocs[docId];
   if (!imgs || !imgs[idx]) return;
   const resultDiv = document.getElementById('docOcrResult_' + docId);
-  resultDiv.innerHTML = '<div class="doc-ocr-progress">⏳ ' + (idx + 1) + '枚目テキスト抽出中...</div>';
+  resultDiv.innerHTML = '<div class="doc-ocr-progress">📷 在留カードを読み取り中… (OCR)</div>';
 
   try {
     const worker = await Tesseract.createWorker('jpn+eng', 1, {
@@ -31905,12 +31912,16 @@ async function runOcr(docId, idx) {
         // 抽出済みテキストを window に保持 (autoFill 関数が読む)
         window._lastOcrText = window._lastOcrText || {};
         window._lastOcrText[docId] = data.text;
-        html += '<button class="doc-ocr-btn" style="background:#2e7d32;" onclick="autoFillFromOcr(\'' + docId + '\')">🤖 フォームに自動入力</button>';
+        html += '<button class="doc-ocr-btn" style="background:#2e7d32;color:#fff;" onclick="autoFillFromOcr(\'' + docId + '\')">🤖 読み取り結果をフォームに入力</button>';
       }
       html += '</div>';
       resultDiv.innerHTML = html;
+      // 自動呼び出し時はそのまま自動入力プレビューを開く
+      if (autoFill && (docId === 'zairyu' || docId === 'license')) {
+        autoFillFromOcr(docId, true);
+      }
     } else {
-      resultDiv.innerHTML = '<div class="doc-ocr-progress">テキストを検出できませんでした</div>';
+      resultDiv.innerHTML = '<div class="doc-ocr-progress">テキストを検出できませんでした。明るい場所で正面から撮り直すと精度が上がります。</div>';
     }
   } catch (e) {
     console.error('OCR error:', e);
@@ -32010,13 +32021,14 @@ function parseLicenseText(text) {
 }
 
 // 抽出した値を addField_* 入力欄に流し込む
-async function autoFillFromOcr(docId) {
+async function autoFillFromOcr(docId, auto) {
   const text = (window._lastOcrText || {})[docId];
-  if (!text) { showToast('OCR テキストがありません', 'error'); return; }
+  if (!text) { if (!auto) showToast('OCR テキストがありません', 'error'); return; }
   const parsed = (docId === 'zairyu') ? parseZairyuCardText(text) : parseLicenseText(text);
   const keys = Object.keys(parsed);
   if (keys.length === 0) {
-    showToast('抽出可能な項目が見つかりませんでした', 'error');
+    // 自動呼び出し時は黙ってOCRテキストだけ残す(手動の🤖ボタンは表示済み)
+    showToast(auto ? '自動で項目を読み取れませんでした。写真を撮り直すか手入力してください' : '抽出可能な項目が見つかりませんでした', auto ? 'warn' : 'error');
     return;
   }
   // 適用前に確認ダイアログ表示
