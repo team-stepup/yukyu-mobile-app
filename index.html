@@ -32737,16 +32737,24 @@ async function renderAddEmployeeForm() {
       }
       if (j) node._allSyokusyu.add(j);
     });
-    // 社員が居ない新規派遣先は、派遣先情報リストの「組織単位」を連動マップに補完
-    //   → 選択時に その派遣先の組織単位だけが出る (全社の組織単位が出るのを防ぐ)
-    //   ※職種は 派遣先情報の番号体系(例 07409)と社員側(例 575:…)が別系統で
-    //     一致しないため補完せず、下のフォールバック(全社員の職種distinct)を使う
+    // 社員が居ない新規派遣先は、派遣先情報リストの「組織単位」「職種」を連動マップに補完
+    //   → 選択時に その派遣先の組織単位・職種だけが出る (全社のものが出るのを防ぐ)
+    //   職種は 派遣先情報の「職種番号名称」(例 07409…) と「職種名」(例 電子機械…) を
+    //   両方候補に出し、ユーザーが選べるようにする。
+    const SYOKUSYU_MEI_KEY = 'OData__x8077__x7a2e__x540d_';  // 派遣先情報「職種名」
     (window._addHakensakiItems || []).forEach(function(it) {
       const b = String(it[HF.hakensaki_keiyaku] || '').trim();
       if (!b || window._addCascade[b]) return;   // 社員由来があればそちらを優先
       const node = { _allSyokusyu: new Set() };
       const s = String(it[HF.soshiki] || '').trim();
-      if (s) node[s] = new Set();
+      const jCode = String(it[HF.syokushu_meishou] || '').trim();  // 職種番号名称
+      const jName = String(it[SYOKUSYU_MEI_KEY] || '').trim();      // 職種名
+      const jList = [jCode, jName].filter(Boolean);
+      jList.forEach(function(j) { node._allSyokusyu.add(j); });
+      if (s) {
+        node[s] = new Set();
+        jList.forEach(function(j) { node[s].add(j); });
+      }
       window._addCascade[b] = node;
     });
     // フォールバック値: SP Choice 列 → 空なら 既存社員の実値(distinct)。
