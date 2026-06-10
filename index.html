@@ -33041,9 +33041,13 @@ async function loadHakensakiByBukaMap() {
 async function computeCommuteAllowance(homeAddress, workAddress) {
   if (!homeAddress || !homeAddress.trim()) return { error: '自宅住所が空です' };
   if (!workAddress || !workAddress.trim()) return { error: '派遣先住所が取得できません' };
-  var home = await geocodeAddressJp(homeAddress);
+  // ジオコーディングは通勤申請(マイカー通勤届)と同じ国土地理院(GSI)優先の
+  // _geocodeJp を使う。日本の住所に高精度で、番地で失敗しても大まかな住所で
+  // 再試行 → Nominatim フォールバックするため成功率が高い。
+  var geo = (typeof _geocodeJp === 'function') ? _geocodeJp : geocodeAddressJp;
+  var home = await geo(homeAddress);
   if (!home) return { error: '自宅住所のジオコーディングに失敗: ' + homeAddress };
-  var work = await geocodeAddressJp(workAddress);
+  var work = await geo(workAddress);
   if (!work) return { error: '派遣先住所のジオコーディングに失敗: ' + workAddress, homeFound: true };
   var meters = await osrmDrivingDistance(home, work);
   if (meters === null) return { error: '運転距離の計算に失敗 (OSRM)', homeFound: true, workFound: true };
