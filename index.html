@@ -19039,6 +19039,7 @@ function clearHakensakiSearch() {
 // 派遣先詳細: 現在表示中のアイテムID
 var _hakensakiCurrentItemIdx = -1;
 var _hakensakiEditMode = false;
+var _hakenGroupEditMode = null;  // まとめて編集中のグループ id (null=通常表示)
 
 // 派遣先フィールドのグループ定義 (派遣元/派遣先で分割)
 //   重要: 苦情の申出を受ける者 は「派遣先」「派遣元」両側にあるので個別に振分が必要。
@@ -19105,6 +19106,7 @@ var HAKEN_GROUP_DEFS = [
 function openHakensakiDetail(itemIdx) {
   _hakensakiCurrentItemIdx = itemIdx;
   _hakensakiEditMode = false;
+  _hakenGroupEditMode = null;
   renderHakensakiDetail();
   switchScreen('hakensakiDetailScreen');
 }
@@ -19272,15 +19274,28 @@ function renderHakensakiDetail() {
   HAKEN_GROUP_DEFS.forEach(function(g) {
     var fields = groupedFields[g.id] || [];
     if (fields.length === 0) return;
-    html += '<div style="background:#fff;border:1px solid #e8e8f0;border-radius:12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.04);overflow:hidden;">';
+    var editing = (_hakenGroupEditMode === g.id);
+    html += '<div style="background:#fff;border:1px solid ' + (editing ? g.color : '#e8e8f0') + ';border-radius:12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.04);overflow:hidden;">';
     html += '<div style="background:' + g.bg + ';color:' + g.color + ';padding:10px 14px;display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;border-bottom:1px solid #f0f0f5;">';
     html += '<span style="font-size:16px;">' + g.icon + '</span><span>' + g.label + '</span>';
-    html += '<span style="margin-left:auto;font-size:10px;color:' + g.color + ';opacity:0.7;">' + fields.length + '項目</span>';
+    html += '<span style="font-size:10px;color:' + g.color + ';opacity:0.7;">' + fields.length + '項目</span>';
+    // まとめて編集ボタン (編集中でない & 他グループ編集中でない時のみ)
+    if (!editing && !_hakenGroupEditMode) {
+      html += '<button onclick="startHakenGroupEdit(\'' + g.id + '\')" style="margin-left:auto;background:rgba(255,255,255,0.7);border:1px solid ' + g.color + ';color:' + g.color + ';border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">✏️ まとめて編集</button>';
+    } else if (editing) {
+      html += '<span style="margin-left:auto;font-size:10px;font-weight:700;color:' + g.color + ';">編集中…</span>';
+    }
     html += '</div>';
     html += '<div style="padding:6px 14px 10px;">';
-    fields.forEach(function(f) {
-      html += _hakenRowHtml(item, f);
-    });
+    if (editing) {
+      fields.forEach(function(f) { html += _hakenFieldEditRowHtml(item, f); });
+      html += '<div style="display:flex;gap:8px;margin-top:12px;">' +
+        '<button onclick="saveHakenGroupEdit(\'' + g.id + '\')" id="hkGEsaveBtn_' + g.id + '" style="flex:1;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:11px;font-weight:700;font-size:13px;cursor:pointer;">💾 まとめて保存</button>' +
+        '<button onclick="cancelHakenGroupEdit()" style="background:#9e9e9e;color:#fff;border:none;border-radius:8px;padding:11px 16px;font-weight:600;font-size:13px;cursor:pointer;">キャンセル</button>' +
+      '</div>';
+    } else {
+      fields.forEach(function(f) { html += _hakenRowHtml(item, f); });
+    }
     html += '</div>';
     html += '</div>';
   });
@@ -19367,6 +19382,126 @@ function cancelEditHakenField(odKey) {
   if (wrap && wrap.dataset.originalHtml) {
     wrap.innerHTML = wrap.dataset.originalHtml;
     delete wrap.dataset.originalHtml;
+  }
+}
+
+// ===== グループ単位の「まとめて編集」 =====
+// 関連項目(就業部署・組織単位・業務内容・職種 等)を同時に編集し、1回のMERGEで
+// 派遣先情報リストへ保存する。保存後そのまま上部の契約書作成ボタンへ進める。
+
+// 1フィールドの編集行 (ラベル + 型に応じた入力欄、id = hkGE_<odKey>)
+function _hakenFieldEditRowHtml(item, f) {
+  var v = item[f.odKey];
+  var isEmpty = (v === null || v === undefined || v === '');
+  var inputId = 'hkGE_' + f.odKey;
+  var st = 'width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #d8d8e0;border-radius:7px;font-size:13.5px;';
+  var inputHtml;
+  if (f.type === 'DateTime') {
+    inputHtml = '<input type="date" id="' + inputId + '" value="' + fmtHakenDateInput(v) + '" style="' + st + '">';
+  } else if (f.type === 'Number' || f.type === 'Currency') {
+    inputHtml = '<input type="number" id="' + inputId + '" value="' + (isEmpty ? '' : String(v).replace(/,/g, '')) + '" style="' + st + '">';
+  } else if (f.type === 'Note') {
+    inputHtml = '<textarea id="' + inputId + '" rows="2" style="' + st + 'resize:vertical;">' + escHtml(isEmpty ? '' : String(v)) + '</textarea>';
+  } else if (f.type === 'Boolean') {
+    inputHtml = '<select id="' + inputId + '" style="' + st + '">' +
+      '<option value=""' + (isEmpty ? ' selected' : '') + '>—</option>' +
+      '<option value="true"' + (v === true || String(v) === 'true' ? ' selected' : '') + '>はい</option>' +
+      '<option value="false"' + (v === false || String(v) === 'false' ? ' selected' : '') + '>いいえ</option>' +
+      '</select>';
+  } else {
+    inputHtml = '<input type="text" id="' + inputId + '" value="' + escHtml(isEmpty ? '' : String(v)) + '" style="' + st + '">';
+  }
+  return '<div style="padding:7px 0;border-bottom:1px solid #f5f5f8;">' +
+    '<div style="font-size:11.5px;color:var(--text-light);font-weight:600;margin-bottom:4px;">' + escHtml(f.title) + '</div>' +
+    inputHtml +
+  '</div>';
+}
+
+function startHakenGroupEdit(gid) {
+  _hakenGroupEditMode = gid;
+  renderHakensakiDetail();
+}
+
+function cancelHakenGroupEdit() {
+  _hakenGroupEditMode = null;
+  renderHakensakiDetail();
+}
+
+async function saveHakenGroupEdit(gid) {
+  var item = _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!item) { showToast('派遣先データが見つかりません', 'error'); return; }
+  var fields = (_hakensakiAllFields || []).filter(function(f) { return _hakenFieldGroupOf(f.title) === gid; });
+  var btn = document.getElementById('hkGEsaveBtn_' + gid);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
+  try {
+    var body = {};
+    var changed = 0;
+    fields.forEach(function(f) {
+      var el = document.getElementById('hkGE_' + f.odKey);
+      if (!el) return;
+      var raw = el.value;
+      var newVal;
+      if (f.type === 'DateTime') {
+        newVal = raw ? new Date(raw + 'T00:00:00').toISOString() : null;
+      } else if (f.type === 'Number' || f.type === 'Currency') {
+        if (raw === '') newVal = null;
+        else { var num = Number(raw); newVal = isNaN(num) ? null : num; }
+      } else if (f.type === 'Boolean') {
+        newVal = (raw === '') ? null : (raw === 'true');
+      } else {
+        newVal = (raw === '') ? null : raw;
+      }
+      // 変更検出
+      var orig = item[f.odKey];
+      if (f.type === 'DateTime') {
+        var origIso = orig ? new Date(orig).toISOString().substring(0, 10) : '';
+        if (raw === origIso) return;
+      } else {
+        var origStr = (orig === null || orig === undefined) ? '' : String(orig);
+        var newStr = (newVal === null || newVal === undefined) ? '' : String(newVal);
+        if (origStr === newStr) return;
+      }
+      body[f.odKey] = newVal;  // 書込キーは EntityPropertyName(OData_付き)のまま
+      changed++;
+    });
+    if (changed === 0) {
+      showToast('変更はありません', 'info');
+      _hakenGroupEditMode = null;
+      renderHakensakiDetail();
+      return;
+    }
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var entityType = await getHakensakiEntityType();
+    if (!entityType) throw new Error('リスト型取得失敗');
+    body['__metadata'] = { type: entityType };
+    var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items(" + item.Id + ")";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      var t = ''; try { t = await resp.text(); } catch (_) {}
+      throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 150));
+    }
+    // ローカル item も更新 (契約書作成が最新値を使うように)
+    Object.keys(body).forEach(function(k) { if (k !== '__metadata') item[k] = body[k]; });
+    _hakensakiLoaded = false;  // 一覧は次回再読込
+    showToast('✓ ' + changed + '項目を保存しました。上部の「契約書作成」へ進めます', 'success');
+    _hakenGroupEditMode = null;
+    renderHakensakiDetail();
+    // 契約書作成ボタンが見えるよう上部へ
+    var sc = document.getElementById('hakensakiDetailScreen');
+    if (sc && sc.scrollTo) sc.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) {
+    console.error('saveHakenGroupEdit error:', e);
+    showToast('保存エラー: ' + (e.message || String(e)), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 まとめて保存'; }
   }
 }
 
