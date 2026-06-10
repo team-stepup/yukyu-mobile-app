@@ -18161,19 +18161,25 @@ async function openNewHakensakiForm() {
     return { section:'other', label: lbl };
   }
 
+  // 新規登録時の初期値 (EPN キー)
+  var fieldDefaults = {};
+  fieldDefaults[HF.sekinin_teido] = '役職を有さない（部下なし）';  // 責任の程度
+
   // 型に応じた入力欄 (data-epn / data-type を保持 → 保存時に動的読取)
-  function buildInput(epn, type, choices) {
+  function buildInput(epn, type, choices, defVal) {
+    defVal = defVal || '';
     var common = 'id="newHkF_' + escHtml(epn) + '" data-epn="' + escHtml(epn) + '" data-type="' + escHtml(type || 'Text') + '" style="' + fieldStyle + '"';
-    if (type === 'Note')     return '<textarea ' + common + ' rows="2"></textarea>';
-    if (type === 'DateTime') return '<input type="date" ' + common + '>';
-    if (type === 'Number' || type === 'Currency') return '<input type="number" ' + common + '>';
-    if (type === 'URL')      return '<input type="url" ' + common + ' placeholder="https://...">';
+    var valAttr = defVal ? (' value="' + escHtml(defVal) + '"') : '';
+    if (type === 'Note')     return '<textarea ' + common + ' rows="2">' + escHtml(defVal) + '</textarea>';
+    if (type === 'DateTime') return '<input type="date" ' + common + valAttr + '>';
+    if (type === 'Number' || type === 'Currency') return '<input type="number" ' + common + valAttr + '>';
+    if (type === 'URL')      return '<input type="url" ' + common + ' placeholder="https://..."' + valAttr + '>';
     if (type === 'Choice' && choices && choices.length) {
       var opts = '<option value="">(未選択)</option>';
-      choices.forEach(function(c) { if (/^選択肢/.test(String(c))) return; opts += '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>'; });
+      choices.forEach(function(c) { if (/^選択肢/.test(String(c))) return; opts += '<option value="' + escHtml(c) + '"' + (String(c) === defVal ? ' selected' : '') + '>' + escHtml(c) + '</option>'; });
       return '<select ' + common + '>' + opts + '</select>';
     }
-    return '<input type="text" ' + common + '>';
+    return '<input type="text" ' + common + valAttr + '>';
   }
 
   var placed = {};
@@ -18188,7 +18194,7 @@ async function openNewHakensakiForm() {
     var choices = f.Choices ? (f.Choices.results || f.Choices) : null;
     var html = '<div style="font-size:12px;font-weight:700;color:#2e7d32;margin:10px 0 3px;">' +
       (m.required ? '<span style="color:#c62828;">★</span> ' : '') + escHtml(m.label) + '</div>' +
-      buildInput(epn, f.TypeAsString, choices) +
+      buildInput(epn, f.TypeAsString, choices, fieldDefaults[epn]) +
       (m.hint ? '<div style="font-size:10.5px;color:#888;margin-top:2px;">' + escHtml(m.hint) + '</div>' : '');
     sections[m.section].html += html;
   }
