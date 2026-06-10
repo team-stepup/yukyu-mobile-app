@@ -16741,9 +16741,9 @@ const PROFILE_CATEGORIES = [
       { key: 'syokusyu', label: '職種', group: 'duty' },
       { key: 'seikyu', label: '請求単価', format: 'currency', group: 'duty' },
       { key: 'kyuyoTaikei', label: '給与体系', format: 'currency', group: 'duty' },
-      // ── 🚃 通勤 ──
-      { key: 'tsukinTeate', label: '通勤手当', format: 'currency', group: 'commute' },
+      // ── 🚃 通勤 ── (通勤方法を先に。方法が車/バイクのとき通勤手当の距離自動計算が効く)
       { key: 'tsukinHouhou', label: '通勤方法', group: 'commute' },
+      { key: 'tsukinTeate', label: '通勤手当', format: 'currency', group: 'commute' },
     ]
   },
   {
@@ -30632,19 +30632,27 @@ document.addEventListener('click', function(e) {
 }, true);
 
 function getHakensakiCode(emp) {
-  const val = emp[F.hakensaki];
+  let val = emp[F.hakensaki];
+  // 旧フィールド(ﾊｹﾝｻｷID)が空なら 部課 を使う (新規フォーム作成社員は部課のみ)
+  //   例: "114:ASTI㈱浜松" / "188-アポロ電気株式会社"
+  if ((!val || !String(val).trim()) && typeof getBukaValue === 'function') {
+    val = getBukaValue(emp);
+  }
   if (!val) return '';
-  const match = val.match(/(\d+:[^\d].+)/);
-  if (!match) return '';
-  return match[1].replace(/\d+$/, '');
+  val = String(val);
+  // 番号の区切りは : ： - － いずれも許容 (アポロは "188-" のハイフン区切り)
+  const match = val.match(/(\d+\s*[:：\-－]\s*[^\d\s].+)/);
+  if (!match) return val.trim();   // 区切りが無くてもそのまま会社名として返す
+  return match[1].replace(/\s*\d+$/, '').trim();
 }
 
 function getHakensaki(emp) {
   const code = getHakensakiCode(emp);
   if (!code) return '';
-  const colonIdx = code.indexOf(':');
-  if (colonIdx < 0) return code;
-  return code.substring(colonIdx + 1);
+  // 先頭の "番号:" / "番号-" / 全角区切り を除去して会社名部分を返す
+  const m = String(code).match(/^\s*\d+\s*[:：\-－]\s*(.+)$/);
+  if (m) return m[1].trim();
+  return code;
 }
 
 function getRetireDateStr(emp) {
@@ -32839,6 +32847,10 @@ async function renderAddEmployeeForm() {
   html += '<tr><th>職種 <span style="font-size:10px;color:var(--text-light);">(派遣先+組織で絞込)</span></th>' +
           '<td><select class="edit-select" id="addField_syokusyu"><option value="">先に派遣先を選択</option></select></td></tr>';
   html += '<tr><th>社員番号 <span style="color:var(--danger);">*</span></th><td><div style="display:flex;gap:6px;align-items:center;"><input type="number" class="edit-input" id="addField_syainNo" placeholder="部課選択で自動入力" style="flex:1;"><span id="addSyainNoStatus" style="font-size:11px;white-space:nowrap;"></span></div></td></tr>';
+  // 社会保険 加入日 (健保 資格取得日) — SP「健保：資格取得日」に保存。総務の社保管理で参照
+  html += '<tr><th>社会保険 加入日 <span style="font-size:10px;color:var(--text-light);font-weight:400;">(任意)</span></th>' +
+          '<td><input type="date" class="edit-input" id="addField_kenpoShutoku" data-format="date">' +
+          '<div style="font-size:10.5px;color:#888;margin-top:2px;">健保・厚年の資格取得日。後から入力でもOK（総務の社保画面でも確認・編集できます）。</div></td></tr>';
   html += '</table></div>';
 
   // 派遣先×組織×職種 連動マップを社員データから構築 (移動入社フォームと同じロジック)
