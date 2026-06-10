@@ -18112,7 +18112,10 @@ function _getHakenTantoRaw(hakenName) {
 //   ・必須: 番号 / 派遣先会社番号 (例: "099:ABC㈱浜松") / 派遣先会社名
 //   ・任意: 派遣先住所 / 就業場所部署 / 業務内容 / 派遣元責任者 / 派遣料金
 // ============================================================
-async function openNewHakensakiForm() {
+async function openNewHakensakiForm(sourceItem) {
+  // sourceItem を渡すと「複製して新規追加」モード: 元レコードの値で初期化し、
+  //   組織単位・番号などを変えて 新しい行として登録 (元レコードは上書きしない)
+  var isDup = !!(sourceItem && sourceItem.Id);
   var old = document.getElementById('newHakensakiOverlay'); if (old) old.remove();
   if (typeof showSpinner === 'function') showSpinner();
 
@@ -18164,6 +18167,29 @@ async function openNewHakensakiForm() {
   // 新規登録時の初期値 (EPN キー)
   var fieldDefaults = {};
   fieldDefaults[HF.sekinin_teido] = '役職を有さない（部下なし）';  // 責任の程度
+
+  // 複製モード: 元レコードの全項目を初期値にコピー (型に応じて入力欄用に整形)
+  if (isDup) {
+    fields.forEach(function(f) {
+      var er = f.EntityPropertyName || f.InternalName || '';
+      var ep = (er.charAt(0) === '_') ? 'OData_' + er : er;
+      var v = sourceItem[ep];
+      if (v === null || v === undefined || v === '') return;
+      var ty = f.TypeAsString;
+      if (ty === 'DateTime') {
+        var d = new Date(v);
+        if (!isNaN(d.getTime())) fieldDefaults[ep] = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      } else if (ty === 'URL') {
+        fieldDefaults[ep] = (typeof v === 'object' && v.Url) ? v.Url : String(v);
+      } else {
+        fieldDefaults[ep] = String(v);
+      }
+    });
+    // 番号は重複防止のため末尾数字を +1 (例 188-1 → 188-2)。要確認の意味で残す
+    var _bv = fieldDefaults[HF.bango] || '';
+    var _bm = _bv.match(/^(.*?)(\d+)(\D*)$/);
+    if (_bm) fieldDefaults[HF.bango] = _bm[1] + (parseInt(_bm[2], 10) + 1) + _bm[3];
+  }
 
   // 型に応じた入力欄 (data-epn / data-type を保持 → 保存時に動的読取)
   function buildInput(epn, type, choices, defVal) {
@@ -18233,26 +18259,28 @@ async function openNewHakensakiForm() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:14px;';
   ov.innerHTML =
     '<div style="background:#fff;border-radius:12px;max-width:540px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
-      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#e8f5e9;border-radius:12px 12px 0 0;flex-shrink:0;">' +
-        '<h3 style="margin:0;font-size:15px;color:#2e7d32;">🏭 新規派遣先登録</h3>' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:' + (isDup ? '#e3f2fd' : '#e8f5e9') + ';border-radius:12px 12px 0 0;flex-shrink:0;">' +
+        '<h3 style="margin:0;font-size:15px;color:' + (isDup ? '#1565c0' : '#2e7d32') + ';">' + (isDup ? '📋 複製して新規追加' : '🏭 新規派遣先登録') + '</h3>' +
         '<button onclick="document.getElementById(\'newHakensakiOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
       '</div>' +
       '<div style="padding:14px 18px;overflow-y:auto;flex:1;">' +
-        '<div style="font-size:11.5px;color:#666;margin-bottom:12px;line-height:1.55;background:#f5f5f5;padding:8px 10px;border-radius:6px;">' +
-          'SharePoint「派遣先情報」リストに新しい行を追加します。<br>' +
-          '<b style="color:#c62828;">★</b> は必須。その他の項目も全てこの画面で入力できます（後から編集も可）。' +
+        '<div style="font-size:11.5px;color:#666;margin-bottom:12px;line-height:1.55;background:' + (isDup ? '#e3f2fd' : '#f5f5f5') + ';padding:8px 10px;border-radius:6px;">' +
+          (isDup
+            ? '元の派遣先「' + escHtml(String(sourceItem[HF.hakensaki_name] || sourceItem[HF.hakensaki_keiyaku] || '')) + '」の内容をコピーしました。<b style="color:#1565c0;">組織単位・番号など</b>を変更して登録すると、<b>元のレコードはそのまま</b>で <b>新しい行が追加</b>されます。<br><b style="color:#c62828;">※ 番号</b>は重複しないよう枝番を自動で+1しています（必要に応じて修正）。'
+            : 'SharePoint「派遣先情報」リストに新しい行を追加します。<br><b style="color:#c62828;">★</b> は必須。その他の項目も全てこの画面で入力できます（後から編集も可）。') +
         '</div>' +
         formHtml +
       '</div>' +
       '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;background:#fff;border-radius:0 0 12px 12px;flex-shrink:0;">' +
         '<button onclick="document.getElementById(\'newHakensakiOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
-        '<button onclick="_saveNewHakensaki()" id="newHkSaveBtn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">💾 派遣先を登録</button>' +
+        '<button onclick="_saveNewHakensaki()" id="newHkSaveBtn" style="background:linear-gradient(135deg,' + (isDup ? '#1976d2,#1565c0' : '#43a047,#2e7d32') + ');color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">' + (isDup ? '📋 複製して登録' : '💾 派遣先を登録') + '</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(ov);
   setTimeout(function() {
+    // 複製時は最初に変更する可能性が高い「番号」へフォーカス (どちらも番号)
     var inp = document.getElementById('newHkF_' + HF.bango);
-    if (inp) inp.focus();
+    if (inp) { inp.focus(); if (inp.select) inp.select(); }
   }, 100);
 }
 
@@ -19266,6 +19294,14 @@ function renderHakensakiDetail() {
     html += '</div>';
     html += '</div>';
   }
+
+  // ===== 複製して新規追加 ボタン =====
+  //   組織単位など一部を変えて「別の行」として追加したい時に使う。
+  //   各項目の編集(まとめて編集/✏️)は この行を上書きするので、用途が違う。
+  html += '<button onclick="openNewHakensakiForm(_hakensakiItems[_hakensakiCurrentItemIdx])" ' +
+    'style="width:100%;background:#fff;color:#1565c0;border:1.5px solid #1976d2;border-radius:10px;' +
+    'padding:11px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">' +
+    '📋 この内容を複製して新規追加（組織単位など変えて別契約に）</button>';
 
   // ===== グループ別フィールド表示 =====
   // まずフィールドをグループごとに分類
