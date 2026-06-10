@@ -38157,7 +38157,39 @@ async function executeShahoSubmit(kanyuubi, huyou, huyouBaai, zairyuCard, myNumb
 
     body['__metadata'] = { type: LIST_ITEM_ENTITY };
     await spPatchEmployee(emp.Id, body);
-    showToast('🏥 社保加入申請を送信しました', 'success');
+
+    // ★ List9 (社保加入申請) にも申請レコードを作成する。
+    //   これが無いと社員データ(健保資格取得日)だけ更新され、総務の「社保加入申請」
+    //   リスト/加入予定/バッジに反映されなかった (今回の不具合の原因)。
+    //   ※扶養追加/喪失は元々 createShahoList9Record で List9 に作成しており正常。
+    let list9Msg = '';
+    try {
+      const l9meta = await fetchShahoDetailFieldsMeta();
+      const l9map = buildShahoList9FieldMap(l9meta);
+      const noEmp = emp[F.syainNo];
+      const nameEmp = emp.Title || '';
+      let empHaken = '';
+      try { empHaken = getHakensaki(emp) || ''; } catch (_) {}
+      const l9 = {};
+      putShahoField(l9, l9map, 'shinseiKubun', '新規加入');
+      putShahoField(l9, l9map, 'kanyuubi', kanyuubi + 'T00:00:00Z');
+      if (noEmp != null && noEmp !== '') putShahoField(l9, l9map, 'bango', isNaN(Number(noEmp)) ? noEmp : Number(noEmp));
+      if (nameEmp) putShahoField(l9, l9map, 'name', nameEmp);
+      if (empHaken) putShahoField(l9, l9map, 'hakensaki', empHaken);
+      if (huyou) putShahoField(l9, l9map, 'huyou', huyou);
+      if (huyouBaai) putShahoField(l9, l9map, 'huyouBaai', huyouBaai);
+      if (riyuuText) putShahoField(l9, l9map, 'kanyuuRiyuu', riyuuText);
+      if (shugyo) putShahoField(l9, l9map, 'shugyo', shugyo);
+      await createShahoList9Record(l9);
+      list9Msg = '（SP「社保加入申請」に登録しました）';
+      _shahoYoteiLoaded = false;       // 総務 社保加入予定を次回再読込
+      _soumuShahoInCount = null;        // 総務バッジを再集計させる
+    } catch (e9) {
+      console.error('List9 社保加入申請レコード作成失敗:', e9);
+      list9Msg = '（※SP「社保加入申請」への登録に失敗しました。総務へご連絡ください）';
+    }
+
+    showToast('🏥 社保加入申請を送信しました' + list9Msg, list9Msg.indexOf('失敗') >= 0 ? 'warn' : 'success');
     closeShahoForm();
 
     const updated = await fetchFullEmployee(emp[F.syainNo]);
