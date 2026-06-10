@@ -32532,15 +32532,42 @@ async function renderAddEmployeeForm() {
   html += '<table class="acc-table">';
   html += '<tr><th>社員氏名 <span style="color:var(--danger);">*</span></th><td><input type="text" class="edit-input" id="addField_Title" placeholder="例: ヤマダ タロウ"></td></tr>';
   // 派遣先（部課）ドロップダウン
+  //   ① 既存社員由来 (#hakenSelect) + ② 派遣先情報リスト由来 を統合。
+  //   ② により「契約は始まったが社員がまだ居ない新規派遣先」も選択肢に出る。
+  //   社員由来を優先し、重複は除外 (SP社員と重複しない)。
   const hakenOpts = document.getElementById('hakenSelect');
-  let bukaHtml = '<select class="edit-select" id="addField_buka" onchange="onAddBukaChange()">';
-  bukaHtml += '<option value="">派遣先(部課)を選択...</option>';
+  const bukaSeen = {};            // value → true (重複判定)
+  const bukaList = [];            // { value, fromEmp }
   if (hakenOpts) {
     Array.from(hakenOpts.options).forEach(o => {
-      if (!o.value) return;
-      bukaHtml += '<option value="' + escHtml(o.value) + '">' + escHtml(o.value) + '</option>';
+      const v = String(o.value || '').trim();
+      if (!v || bukaSeen[v]) return;
+      bukaSeen[v] = true;
+      bukaList.push({ value: v, fromEmp: true });
     });
   }
+  // 派遣先情報リスト (新規契約先・社員未登録も拾う) — 後段の連動マップ用にも保持
+  window._addHakensakiItems = [];
+  try {
+    const hkItems = await spGetAll(LIST_HAKENSAKI_GUID, '$top=500');
+    window._addHakensakiItems = hkItems || [];
+    (hkItems || []).forEach(it => {
+      const v = String(it[HF.hakensaki_keiyaku] || '').trim();
+      if (!v || bukaSeen[v]) return;   // SP社員由来と重複しないように除外
+      bukaSeen[v] = true;
+      bukaList.push({ value: v, fromEmp: false });
+    });
+  } catch (e) { console.warn('派遣先情報リストの buka 取得失敗:', e); }
+  bukaList.sort((a, b) => String(a.value).localeCompare(String(b.value), 'ja'));
+
+  let bukaHtml = '<select class="edit-select" id="addField_buka" onchange="onAddBukaChange()">';
+  bukaHtml += '<option value="">派遣先(部課)を選択...</option>';
+  bukaList.forEach(b => {
+    // 社員がまだ居ない新規派遣先は印で区別 (value はそのまま=保存・連動に影響なし)
+    const isNew = !b.fromEmp && !(window._hakenEmpByBuka && window._hakenEmpByBuka[b.value]);
+    const labelTxt = b.value + (isNew ? '　🆕新規' : '');
+    bukaHtml += '<option value="' + escHtml(b.value) + '">' + escHtml(labelTxt) + '</option>';
+  });
   bukaHtml += '</select>';
   html += '<tr><th>派遣先(部課) <span style="color:var(--danger);">*</span></th><td>' + bukaHtml + '</td></tr>';
   // 組織単位 (派遣先連動)
@@ -32570,6 +32597,16 @@ async function renderAddEmployeeForm() {
         if (j) node[s].add(j);
       }
       if (j) node._allSyokusyu.add(j);
+    });
+    // 社員が居ない新規派遣先は、派遣先情報リストの「組織単位」を連動マップに補完
+    //   → 選択時に その派遣先の組織単位だけが出る (全社の組織単位が出るのを防ぐ)
+    (window._addHakensakiItems || []).forEach(function(it) {
+      const b = String(it[HF.hakensaki_keiyaku] || '').trim();
+      if (!b || window._addCascade[b]) return;   // 社員由来があればそちらを優先
+      const node = { _allSyokusyu: new Set() };
+      const s = String(it[HF.soshiki] || '').trim();
+      if (s) node[s] = new Set();
+      window._addCascade[b] = node;
     });
     // SP Choice 列のフォールバック値も取っておく
     window._addAllSoshiki = getFieldChoices('soshikiTani', keyMap) || [];
