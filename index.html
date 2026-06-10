@@ -32720,11 +32720,15 @@ async function renderAddEmployeeForm() {
     const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=2000');
     const soshikiKey = keyMap['soshikiTani'];
     const syokusyuKey = keyMap['syokusyu'];
+    const allSoshikiSet = new Set();   // 全社員の組織単位(distinct) — フォールバック用
+    const allSyokusyuSet = new Set();  // 全社員の職種(distinct) — フォールバック用
     allEmps.forEach(function(e) {
       const b = getBukaValue(e);
-      if (!b) return;
       const s = soshikiKey ? (e[soshikiKey] || '') : '';
       const j = syokusyuKey ? (e[syokusyuKey] || '') : '';
+      if (s) allSoshikiSet.add(s);
+      if (j) allSyokusyuSet.add(j);
+      if (!b) return;
       if (!window._addCascade[b]) window._addCascade[b] = { _allSyokusyu: new Set() };
       const node = window._addCascade[b];
       if (s) {
@@ -32735,6 +32739,8 @@ async function renderAddEmployeeForm() {
     });
     // 社員が居ない新規派遣先は、派遣先情報リストの「組織単位」を連動マップに補完
     //   → 選択時に その派遣先の組織単位だけが出る (全社の組織単位が出るのを防ぐ)
+    //   ※職種は 派遣先情報の番号体系(例 07409)と社員側(例 575:…)が別系統で
+    //     一致しないため補完せず、下のフォールバック(全社員の職種distinct)を使う
     (window._addHakensakiItems || []).forEach(function(it) {
       const b = String(it[HF.hakensaki_keiyaku] || '').trim();
       if (!b || window._addCascade[b]) return;   // 社員由来があればそちらを優先
@@ -32743,9 +32749,13 @@ async function renderAddEmployeeForm() {
       if (s) node[s] = new Set();
       window._addCascade[b] = node;
     });
-    // SP Choice 列のフォールバック値も取っておく
-    window._addAllSoshiki = getFieldChoices('soshikiTani', keyMap) || [];
-    window._addAllSyokusyu = getFieldChoices('syokusyu', keyMap) || [];
+    // フォールバック値: SP Choice 列 → 空なら 既存社員の実値(distinct)。
+    //   組織単位・職種は Text 型で Choice が空のため、社員未登録の新規派遣先で
+    //   ドロップダウンが空にならないよう全社員の実値を候補にする。
+    const soshikiChoices = getFieldChoices('soshikiTani', keyMap) || [];
+    const syokusyuChoices = getFieldChoices('syokusyu', keyMap) || [];
+    window._addAllSoshiki = soshikiChoices.length ? soshikiChoices : Array.from(allSoshikiSet).sort();
+    window._addAllSyokusyu = syokusyuChoices.length ? syokusyuChoices : Array.from(allSyokusyuSet).sort();
   } catch (e) {
     console.warn('add cascade fetch failed:', e);
   }
