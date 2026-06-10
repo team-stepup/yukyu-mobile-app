@@ -32950,9 +32950,14 @@ async function renderAddEmployeeForm() {
       if (field.key === 'yubin') {
         addInput = addInput.replace('id="addField_yubin"', 'id="addField_yubin" onchange="onAddYubinChange()" placeholder="例: 4350006 → 住所自動取得"');
       }
-      // 住所欄: 郵便番号がわからない時の検索ボタン併記
+      // 住所欄: 入力で郵便番号を自動取得 (住所→郵便番号)。検索ボタンも併記
       if (field.key === 'address') {
-        addInput += '<div style="margin-top:4px;"><button type="button" onclick="openYubinSearchFromAddress()" style="background:#fff;border:1px solid #1976d2;color:#1976d2;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📮 郵便番号を検索 (新タブ)</button></div>';
+        addInput = addInput.replace('id="addField_address"', 'id="addField_address" onchange="onAddAddressChange()"');
+        addInput += '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+          '<button type="button" onclick="onAddAddressChange(true)" style="background:#fff;border:1px solid #2e7d32;color:#2e7d32;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📮 住所から郵便番号を取得</button>' +
+          '<button type="button" onclick="openYubinSearchFromAddress()" style="background:#fff;border:1px solid #1976d2;color:#1976d2;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">🔎 検索 (新タブ)</button>' +
+          '<span id="addField_addrYubinStatus" style="font-size:10.5px;color:#666;flex:1;min-width:0;word-break:break-all;"></span>' +
+          '</div>';
       }
       // 通勤手当欄: 自宅→派遣先 の運転距離から自動計算ボタン併記
       if (field.key === 'tsukinTeate') {
@@ -33303,6 +33308,54 @@ async function onAddYubinChange() {
   } catch (e) {
     console.warn('zipcloud lookup failed:', e);
     showToast('住所取得に失敗しました', 'error');
+  }
+}
+
+// 住所 → 郵便番号 自動取得
+//   国土地理院(GSI)で住所をジオコーディング → HeartRails 逆ジオで郵便番号(町域)を取得。
+//   無料・APIキー不要・CORS対応。郵便番号は既存に合わせ XXX-XXXX 形式で補完。
+//   force=true (ボタン経由) のときは既存の郵便番号があっても確認の上で上書き。
+async function onAddAddressChange(force) {
+  const addrInp = document.getElementById('addField_address');
+  const yubinInp = document.getElementById('addField_yubin');
+  const statusEl = document.getElementById('addField_addrYubinStatus');
+  if (!addrInp || !yubinInp) return;
+  const addr = String(addrInp.value || '').trim();
+  if (addr.length < 4) { if (force && statusEl) statusEl.textContent = '住所を入力してください'; return; }
+  // 既に郵便番号(7桁)があるときは自動では上書きしない。ボタン押下時のみ確認して上書き
+  const curYubin = String(yubinInp.value || '').replace(/[^\d]/g, '');
+  if (curYubin.length === 7 && !force) return;
+  if (statusEl) statusEl.textContent = '📮 郵便番号を取得中…';
+  try {
+    const geo = (typeof _geocodeJp === 'function') ? _geocodeJp
+              : (typeof geocodeAddressJp === 'function' ? geocodeAddressJp : null);
+    if (!geo) { if (statusEl) statusEl.textContent = ''; return; }
+    const pos = await geo(addr);
+    if (!pos) { if (statusEl) statusEl.textContent = '住所から位置を特定できませんでした'; return; }
+    const u = 'https://geoapi.heartrails.com/api/json?method=searchByGeoLocation&x=' + pos.lng + '&y=' + pos.lat;
+    const resp = await fetch(u);
+    if (!resp.ok) { if (statusEl) statusEl.textContent = '郵便番号の取得に失敗しました'; return; }
+    const data = await resp.json();
+    const locs = (data && data.response && data.response.location) || [];
+    if (!locs.length) { if (statusEl) statusEl.textContent = '該当する郵便番号が見つかりません'; return; }
+    const postal = String(locs[0].postal || '').replace(/[^\d]/g, '');
+    if (postal.length !== 7) { if (statusEl) statusEl.textContent = '郵便番号が取得できません'; return; }
+    const formatted = postal.substring(0, 3) + '-' + postal.substring(3);
+    const where = (locs[0].prefecture || '') + (locs[0].city || '') + (locs[0].town || '');
+    // 既存と異なる値をボタンで上書きする場合は確認
+    if (force && curYubin.length === 7 && curYubin !== postal) {
+      if (!confirm('住所から推定した郵便番号:\n' + formatted + '（' + where + '）\n\n現在の「' +
+                   (curYubin.substring(0,3) + '-' + curYubin.substring(3)) + '」を上書きしますか？')) {
+        if (statusEl) statusEl.textContent = '';
+        return;
+      }
+    }
+    yubinInp.value = formatted;
+    if (statusEl) statusEl.textContent = '✓ ' + formatted + '（' + where + '）';
+    if (typeof showToast === 'function') showToast('📮 住所から郵便番号を取得しました: ' + formatted, 'success');
+  } catch (e) {
+    console.warn('address→postal lookup failed:', e);
+    if (statusEl) statusEl.textContent = '郵便番号の取得に失敗しました';
   }
 }
 
