@@ -6990,9 +6990,75 @@ async function spDeleteEmployee(itemId) {
   return true;
 }
 
-// Create new employee record
+// Create new employee record (robust)
+//   spPatchEmployee と同じく InternalName→EntityPropertyName 変換 + 400時に
+//   問題フィールドを外して再試行する。これをしないと、表示名変更後などで
+//   EntityPropertyName≠InternalName のフィールドがあると POST 全体が 400 になる。
 async function spCreateEmployee(body) {
-  return await spPost(LIST_EMPLOYEES_GUID, body);
+  const token = await getToken();
+  if (!token) { showToast('認証エラー', 'error'); throw new Error('No token'); }
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items";
+  const entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+
+  // InternalName → EntityPropertyName へ変換 (書き込みは EntityPropertyName が必要)
+  await fetchEmployeeFields();
+  if (employeeFieldsCache) {
+    Object.keys(body).forEach(k => {
+      if (k === '__metadata' || k === 'Title' || k === 'Id') return;
+      const meta = employeeFieldsCache[k];
+      if (meta && meta.entityPropertyName && meta.entityPropertyName !== k) {
+        body[meta.entityPropertyName] = body[k];
+        delete body[k];
+      }
+    });
+  }
+
+  const dropped = [];
+  async function attempt() {
+    body['__metadata'] = { type: entityType };
+    _badEmployeeFields.forEach(k => { delete body[k]; });
+    return await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose',
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  for (let i = 0; i < 12; i++) {
+    const resp = await attempt();
+    if (resp.ok) {
+      if (dropped.length && typeof showToast === 'function') {
+        showToast('登録しましたが、一部の項目はSPに保存できませんでした: ' + dropped.join(', '), 'warn');
+      }
+      return await resp.json();
+    }
+    const errText = await resp.text();
+    console.error('SP CREATE Employee Error (attempt ' + (i + 1) + '):', errText);
+    let msgValue = errText;
+    try {
+      const errJson = JSON.parse(errText);
+      msgValue = (errJson && errJson.error && errJson.error.message && errJson.error.message.value) || errText;
+    } catch (e) { /* not JSON */ }
+    // 「プロパティ 'X' は型 … に存在しません」= 書き込めない項目 → 外して再試行
+    let m = msgValue.match(/プロパティ\s*'([^']+)'/) || msgValue.match(/property\s*'([^']+)'/i);
+    if (!m) m = msgValue.match(/'(_x[0-9a-fA-F_]+)'/);
+    if (m && m[1] && body[m[1]] !== undefined) {
+      console.warn('Removing unwritable field and retrying (create):', m[1]);
+      _badEmployeeFields.add(m[1]);
+      dropped.push(m[1]);
+      delete body[m[1]];
+      const remaining = Object.keys(body).filter(k => k !== '__metadata');
+      if (remaining.length === 0) throw new Error('書き込み可能なフィールドがありません');
+      continue;
+    }
+    // それ以外(値の変換エラー等)は SP のメッセージを添えて中断
+    throw new Error('登録失敗: ' + resp.status + ' ' + String(msgValue).substring(0, 200));
+  }
+  throw new Error('登録失敗: リトライ上限');
 }
 
 // Convert OData key back to InternalName for writes
@@ -32842,13 +32908,15 @@ async function renderAddEmployeeForm() {
   // Other categories
   const carSections = ['vehicle', 'license', 'carInsurance'];
   const hiddenSections = ['insurance']; // 社会保険・雇用は新規登録では非表示
+  const collapsedSections = ['shahoHuyou']; // 既定で閉じておくセクション (社会保険 扶養)
   PROFILE_CATEGORIES.forEach(cat => {
     // 社会保険・雇用は新規社員登録では表示しない
     if (hiddenSections.indexOf(cat.id) >= 0) return;
     // 車両/免許/保険は通勤方法が車/バイクの場合のみ表示
     const isCarSection = carSections.indexOf(cat.id) >= 0;
     const displayStyle = isCarSection ? 'display:none;' : '';
-    html += '<div class="accordion-section open add-cat-section" data-cat-id="' + cat.id + '" style="' + displayStyle + '">';
+    const openClass = (collapsedSections.indexOf(cat.id) >= 0) ? '' : ' open';
+    html += '<div class="accordion-section' + openClass + ' add-cat-section" data-cat-id="' + cat.id + '" style="' + displayStyle + '">';
     html += '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
     html += '<span class="acc-icon">' + cat.icon + '</span><span>' + cat.label + '</span>';
     html += '<span class="acc-arrow">&#9654;</span></div>';
