@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yukyu-app かんたん操作ガイド | ㈲ステップ・アップ</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<style>
+  :root {
+    --primary:#6264a7; --primary-dark:#4a4c8c;
+    --green:#2e7d32; --blue:#1565c0; --orange:#e65100; --red:#c62828;
+    --pink:#d81b60; --teal:#00897b; --purple:#6a1b9a;
+    --bg:#f0f2f8; --card:#fff; --text:#2d2d3a; --light:#777;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:'Yu Gothic UI','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background:var(--bg); color:var(--text); line-height:1.6; font-size:14px;
+    -webkit-text-size-adjust:100%;
+  }
+  .page { max-width:860px; margin:0 auto; padding:18px 14px 60px; }
+
+  /* ===== ヘッダー ===== */
+  .hero {
+    background:linear-gradient(135deg,#6264a7 0%,#7b7dc4 60%,#9fa0d8 100%);
+    color:#fff; border-radius:18px; padding:26px 24px; margin-bottom:18px;
+    display:flex; gap:18px; align-items:center; flex-wrap:wrap;
+    box-shadow:0 6px 24px rgba(98,100,167,0.35);
+  }
+  .hero-text { flex:1; min-width:240px; }
+  .hero h1 { font-size:24px; font-weight:800; letter-spacing:1px; line-height:1.3; }
+  .hero .sub { font-size:13px; opacity:0.92; margin-top:6px; }
+  .hero .chips { margin-top:12px; display:flex; gap:6px; flex-wrap:wrap; }
+  .hero .chip { background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.35); padding:3px 12px; border-radius:14px; font-size:11.5px; font-weight:700; }
+  .qr-box { background:#fff; border-radius:14px; padding:10px; text-align:center; box-shadow:0 3px 10px rgba(0,0,0,0.2); }
+  .qr-box .cap { font-size:10px; color:#555; font-weight:700; margin-top:4px; }
+  #qr { width:108px; height:108px; }
+
+  /* ===== セクション ===== */
+  .sec { background:var(--card); border-radius:16px; padding:18px 18px 16px; margin-bottom:16px; box-shadow:0 2px 10px rgba(0,0,0,0.06); page-break-inside:avoid; }
+  .sec-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .sec-num {
+    width:34px; height:34px; border-radius:50%; color:#fff; font-weight:800; font-size:16px;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .sec-title { font-size:17px; font-weight:800; }
+  .sec-title small { display:block; font-size:11px; font-weight:600; color:var(--light); }
+
+  /* ===== ステップフロー ===== */
+  .flow { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:8px 0; }
+  .step {
+    flex:1; min-width:138px; background:#f7f8fc; border:1.5px solid #e3e5f2; border-radius:12px;
+    padding:10px 10px 9px; position:relative; text-align:center;
+  }
+  .step .s-ic { font-size:24px; }
+  .step .s-no { position:absolute; top:-9px; left:-6px; width:22px; height:22px; border-radius:50%; background:var(--primary); color:#fff; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 4px rgba(0,0,0,0.2); }
+  .step .s-t { font-size:12.5px; font-weight:800; margin-top:3px; }
+  .step .s-d { font-size:10.5px; color:var(--light); margin-top:2px; line-height:1.45; }
+  .arrow { display:flex; align-items:center; font-size:18px; color:#b9bcd8; font-weight:800; }
+  @media (max-width:620px){ .arrow{ display:none; } .step{min-width:calc(50% - 8px);} }
+
+  /* ===== チップ・バッジ ===== */
+  .tagrow { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+  .tag { padding:4px 11px; border-radius:9px; font-size:11.5px; font-weight:700; }
+  .tip {
+    background:#fff8e1; border:1.5px solid #ffca28; border-radius:10px;
+    padding:9px 12px; font-size:12px; margin-top:10px; color:#7a5c00;
+  }
+  .tip b { color:#e65100; }
+  .warn { background:#ffebee; border-color:#ef9a9a; color:#8c2222; }
+  .warn b { color:#c62828; }
+
+  /* ===== 2カラムカード ===== */
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (max-width:560px){ .grid2{ grid-template-columns:1fr; } }
+  .mini {
+    border-radius:12px; padding:11px 12px; border:1.5px solid #e8e8f0; background:#fafbff;
+  }
+  .mini .m-t { font-weight:800; font-size:13px; margin-bottom:3px; }
+  .mini .m-d { font-size:11.5px; color:#555; line-height:1.55; }
+  .auto-badge { display:inline-block; background:linear-gradient(135deg,#43a047,#2e7d32); color:#fff; font-size:9.5px; font-weight:800; padding:1px 7px; border-radius:7px; vertical-align:middle; margin-left:4px; }
+
+  /* ===== テーブル ===== */
+  table.guide { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+  table.guide th { background:#eef0f8; text-align:left; padding:7px 10px; font-size:11.5px; color:#4a4c8c; }
+  table.guide td { padding:7px 10px; border-bottom:1px solid #f0f0f5; vertical-align:top; }
+  table.guide tr td:first-child { white-space:nowrap; font-weight:700; }
+
+  .footer { text-align:center; font-size:11px; color:#999; margin-top:24px; line-height:1.8; }
+
+  /* ===== 印刷 ===== */
+  @media print {
+    body { background:#fff; }
+    .page { max-width:none; padding:0; }
+    .sec, .hero { box-shadow:none; border:1px solid #ddd; }
+    .hero { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .no-print { display:none; }
+  }
+  @page { size:A4 portrait; margin:10mm; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ヘッダー -->
+  <div class="hero">
+    <div class="hero-text">
+      <h1>📱 ステップ・アップ<br>社員管理アプリ かんたん操作ガイド</h1>
+      <div class="sub">スマホ・PCのブラウザで使えます。インストール不要。</div>
+      <div class="chips">
+        <span class="chip">🔍 社員検索</span>
+        <span class="chip">📝 新規登録</span>
+        <span class="chip">⚡ 各種手続き</span>
+        <span class="chip">🏭 派遣先・契約書</span>
+        <span class="chip">🌸 産休育休</span>
+      </div>
+    </div>
+    <div class="qr-box">
+      <div id="qr"></div>
+      <div class="cap">📷 カメラで読み取って開く</div>
+    </div>
+  </div>
+
+  <!-- 1. はじめに -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-num" style="background:var(--primary);">1</div>
+      <div class="sec-title">はじめての起動とログイン<small>最初の1回だけ。次回からは自動でログインされます</small></div>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="s-no">1</div><div class="s-ic">📷</div><div class="s-t">QRを読む</div><div class="s-d">上のQRコードをスマホのカメラで読み取り → ブラウザで開く</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">2</div><div class="s-ic">🔑</div><div class="s-t">ログイン</div><div class="s-d">「Microsoftでサインイン」→ 会社のアカウントでログイン</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">3</div><div class="s-ic">📌</div><div class="s-t">ホームに追加</div><div class="s-d">共有ボタン→「ホーム画面に追加」でアプリのように使えます</div></div>
+    </div>
+    <div class="tip">💡 画面右上に <b>「更新あり」</b> と赤く出たら、横の 🔄 ボタンを押して最新版にしてください。動きがおかしい時もまず 🔄 が効きます。</div>
+  </div>
+
+  <!-- 2. 社員を探す -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-num" style="background:var(--blue);">2</div>
+      <div class="sec-title">社員を探す・情報を見る<small>ホームの検索ボックスに入力するだけ</small></div>
+    </div>
+    <div class="tagrow">
+      <span class="tag" style="background:#e3f2fd;color:#1565c0;">60124（社員番号）</span>
+      <span class="tag" style="background:#e8f5e9;color:#2e7d32;">850（健康保険証の整理番号）</span>
+      <span class="tag" style="background:#fff3e0;color:#e65100;">田中 / たなか / タナカ</span>
+      <span class="tag" style="background:#f3e5f5;color:#6a1b9a;">1985-04-01（生年月日）</span>
+      <span class="tag" style="background:#e0f7fa;color:#00838f;">TANAKA（ローマ字）</span>
+    </div>
+    <div class="grid2" style="margin-top:8px;">
+      <div class="mini"><div class="m-t">👤 社員情報詳細</div><div class="m-d">検索結果をタップ → 個人情報・雇用・保険・車両など全情報を確認。各行の <b>✏️</b> でその場で編集 → 💾保存。</div></div>
+      <div class="mini"><div class="m-t">📂 社員ファイル</div><div class="m-d">詳細画面から社員ごとの書類フォルダ（SharePoint）を開けます。撮影した書類もここに保存されます。</div></div>
+    </div>
+  </div>
+
+  <!-- 3. 新規社員登録 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-num" style="background:var(--green);">3</div>
+      <div class="sec-title">新規社員登録<small>自動入力がたくさん。入力はどんどんラクに</small></div>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="s-no">1</div><div class="s-ic">🏭</div><div class="s-t">派遣先を選ぶ</div><div class="s-d">社員番号が<b>自動採番</b>。組織単位・職種も絞り込み表示</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">2</div><div class="s-ic">🪪</div><div class="s-t">在留カード撮影</div><div class="s-d">撮ると<b>自動でOCR読み取り</b>→氏名・国籍・在留期限などが自動入力</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">3</div><div class="s-ic">🏠</div><div class="s-t">住所を入力</div><div class="s-d"><b>郵便番号が自動で入る</b>（逆も可：郵便番号→住所）</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">4</div><div class="s-ic">🚗</div><div class="s-t">通勤方法を選ぶ</div><div class="s-d">車/バイクなら<b>通勤手当を距離から自動計算</b>（片道km×往復×12円）</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">5</div><div class="s-ic">➕</div><div class="s-t">登録</div><div class="s-d">書類はSharePointの社員ファイルに自動保存</div></div>
+    </div>
+    <div class="tip">💡 OCRの読み取り結果は<b>確認画面</b>が出ます。間違いがあればその場で直してから「適用」。明るい場所で正面から撮ると精度が上がります。</div>
+  </div>
+
+  <!-- 4. 手続き -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-num" style="background:var(--orange);">4</div>
+      <div class="sec-title">⚡ 各種手続き<small>社員情報詳細の右上 ⚡ ボタンから</small></div>
+    </div>
+    <table class="guide">
+      <tr><th style="width:34%;">手続き</th><th>いつ使う？</th></tr>
+      <tr><td>🚪 退社報告</td><td>退社が決まったら。退社日・理由を入力 → 総務の処理リストに自動で載ります</td></tr>
+      <tr><td>🔄 派遣先 移動</td><td>在職中の社員が別の派遣先へ移る時（退社→入社を1回で処理）</td></tr>
+      <tr><td>🔁 再入社手続き</td><td>一度退社した人を再雇用する時。前回の情報を自動引継ぎ。<b>期限切れ・未入力の項目は色付きで警告</b>が出るのでその場で修正</td></tr>
+      <tr><td>🏥 社保申請</td><td>社会保険の新規加入・扶養追加・扶養喪失。送信するとSP「社保加入申請」リストに登録され、総務のバッジ・加入予定に反映</td></tr>
+      <tr><td>📄 在職証明書 ほか</td><td>書類作成メニューから。PDFで保存・印刷できます</td></tr>
+    </table>
+  </div>
+
+  <!-- 5. 派遣先・契約書 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-num" style="background:var(--purple);">5</div>
+      <div class="sec-title">🏭 派遣先管理と契約書づくり<small>ホーム → 派遣先管理</small></div>
+    </div>
+    <div class="grid2">
+      <div class="mini"><div class="m-t">📋 一覧の見かた</div><div class="m-d">最近作成・更新した契約が上に表示。<b>🆕今日/昨日</b>のバッジ、最終更新日と更新者（by ◯◯）が見えます。</div></div>
+      <div class="mini"><div class="m-t">✏️ まとめて編集</div><div class="m-d">詳細画面でグループごとに「まとめて編集」→ 関連項目を一括修正して1回で保存。</div></div>
+      <div class="mini"><div class="m-t">📋➕ 複製して新規追加</div><div class="m-d">組織単位などを変えて<b>別の契約行を追加</b>したい時。元の行は変わりません（番号は自動で枝番+1）。</div></div>
+      <div class="mini"><div class="m-t">📚 契約書類 一式作成</div><div class="m-d">個別契約書＋管理台帳をまとめてPDF保存。期間と人数を変えて「更新」も「新規」も作れます。</div></div>
+    </div>
+    <div class="tip warn">🖨 <b>契約書を両面印刷するとき</b>：印刷設定の両面は必ず <b>「長辺とじ」</b> を選んでください。「短辺とじ」だと裏面が上下逆になります。</div>
+  </div>
+
+  <!-- 6. 産休育休・その他 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-num" style="background:var(--pink);">6</div>
+      <div class="sec-title">🌸 産休育休 ほか<small>状況の管理もアプリで完結</small></div>
+    </div>
+    <div class="grid2">
+      <div class="mini"><div class="m-t">🌸 産休育休</div><div class="m-d">対象社員の申請カード・日付の自動計算。復職したら詳細画面の <b>「✅ 休業終了に切替」</b> を1タップ。</div></div>
+      <div class="mini"><div class="m-t">📊 総務ダッシュボード</div><div class="m-d">雇用・社保・離職票などの「やること」が件数バッジで表示。<b>数字が付いている＝処理待ちあり</b>のサイン。</div></div>
+      <div class="mini"><div class="m-t">🚗 車両・免許・保険</div><div class="m-d">通勤方法が車/バイクの社員は車検・免許・任意保険の期限も管理。期限切れは赤く警告されます。</div></div>
+      <div class="mini"><div class="m-t">👑 役員専用機能</div><div class="m-d">「役員」バッジ付きのボタン（削除・分析など）は役員アカウントのみ表示・実行できます。</div></div>
+    </div>
+  </div>
+
+  <!-- 7. 困ったとき -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-num" style="background:var(--red);">7</div>
+      <div class="sec-title">🆘 困ったときは<small>まずこの3つを試してください</small></div>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="s-no">1</div><div class="s-ic">🔄</div><div class="s-t">再読み込み</div><div class="s-d">右上の 🔄（更新ボタン）。「更新あり」表示の時は必ず</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">2</div><div class="s-ic">🔑</div><div class="s-t">ログインし直す</div><div class="s-d">右上 logout → もう一度 Microsoft でサインイン</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="s-no">3</div><div class="s-ic">💬</div><div class="s-t">総務へ連絡</div><div class="s-d">赤いエラーメッセージの<b>文言をスクショ</b>して総務（山下）まで</div></div>
+    </div>
+    <div class="tip warn">🔐 <b>個人情報のアプリです。</b>共用PCでは使い終わったら logout。スクリーンショットの社外共有はしないでください。</div>
+  </div>
+
+  <div class="footer">
+    有限会社ステップ・アップ 社員管理アプリ（yukyu-app）操作ガイド<br>
+    このガイドはアプリと同じ場所に保管されています。印刷は ブラウザの印刷（A4縦）でどうぞ。
+  </div>
+</div>
+
+<script>
+  (function(){
+    try {
+      var qr = qrcode(0, 'M');
+      qr.addData('https://team-stepup.github.io/yukyu-mobile-app/');
+      qr.make();
+      document.getElementById('qr').innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
+    } catch(e) {
+      document.getElementById('qr').innerHTML = '<div style="font-size:10px;color:#999;padding:20px 4px;">QR生成不可<br>URLでアクセス</div>';
+    }
+  })();
+</script>
+</body>
+</html>
