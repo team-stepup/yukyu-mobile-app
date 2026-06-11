@@ -32961,25 +32961,27 @@ async function renderAddEmployeeForm() {
       }
       if (j) node._allSyokusyu.add(j);
     });
-    // 社員が居ない新規派遣先は、派遣先情報リストの「組織単位」「職種」を連動マップに補完
-    //   → 選択時に その派遣先の組織単位・職種だけが出る (全社のものが出るのを防ぐ)
-    //   職種は 派遣先情報の「職種番号名称」(例 07409…) と「職種名」(例 電子機械…) を
-    //   両方候補に出し、ユーザーが選べるようにする。
+    // 派遣先情報リストの「組織単位」「職種」を連動マップへマージ補完
+    //   ・社員がまだ居ない新規派遣先 → その派遣先の組織単位・職種が選べるようになる
+    //   ・社員が居る派遣先でも、契約行(複数)の組織単位を追加 (例: アポロ 188-1 北棟製造部
+    //     と 188-2 浜松工場 の両方が出る)。社員由来の選択肢は消さず「追加」のみ。
+    //   ※旧実装は「既に node があればスキップ」だったため、2行目以降の組織単位や
+    //     社員登録後の追加契約行が表示されないバグがあった
     const SYOKUSYU_MEI_KEY = 'OData__x8077__x7a2e__x540d_';  // 派遣先情報「職種名」
     (window._addHakensakiItems || []).forEach(function(it) {
       const b = String(it[HF.hakensaki_keiyaku] || '').trim();
-      if (!b || window._addCascade[b]) return;   // 社員由来があればそちらを優先
-      const node = { _allSyokusyu: new Set() };
+      if (!b) return;
+      if (!window._addCascade[b]) window._addCascade[b] = { _allSyokusyu: new Set() };
+      const node = window._addCascade[b];
       const s = String(it[HF.soshiki] || '').trim();
-      const jCode = String(it[HF.syokushu_meishou] || '').trim();  // 職種番号名称
-      const jName = String(it[SYOKUSYU_MEI_KEY] || '').trim();      // 職種名
+      const jCode = String(it[HF.syokushu_meishou] || '').trim();  // 職種番号名称 (07409…)
+      const jName = String(it[SYOKUSYU_MEI_KEY] || '').trim();      // 職種名 (電子機械…)
       const jList = [jCode, jName].filter(Boolean);
       jList.forEach(function(j) { node._allSyokusyu.add(j); });
       if (s) {
-        node[s] = new Set();
+        if (!node[s]) node[s] = new Set();
         jList.forEach(function(j) { node[s].add(j); });
       }
-      window._addCascade[b] = node;
     });
     // フォールバック値: SP Choice 列 → 空なら 既存社員の実値(distinct)。
     //   組織単位・職種は Text 型で Choice が空のため、社員未登録の新規派遣先で
