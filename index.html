@@ -31901,22 +31901,79 @@ function removeDocCapture(docId) {
   renderDocPreview(docId);
 }
 
+// Tesseract が未ロード(CDN遅延/失敗)なら動的に読み込む
+function _ensureTesseract() {
+  return new Promise(function(resolve, reject) {
+    if (typeof Tesseract !== 'undefined') { resolve(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = function() { resolve(); };
+    s.onerror = function() { reject(new Error('OCRライブラリの読み込みに失敗 (通信環境を確認してください)')); };
+    document.head.appendChild(s);
+  });
+}
+
+// OCR前処理: 長辺を最大1800pxに縮小 + グレースケール + コントラスト強調
+//   スマホの高解像度写真をそのまま渡すより認識率・速度・メモリが大幅に改善する
+function _ocrPreprocess(dataUrl) {
+  return new Promise(function(resolve) {
+    try {
+      var img = new Image();
+      img.onload = function() {
+        try {
+          var MAX = 1800;
+          var scale = Math.min(1, MAX / Math.max(img.width, img.height));
+          var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+          var cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          var ctx = cv.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          var im = ctx.getImageData(0, 0, w, h);
+          var d = im.data;
+          // グレースケール化 + 線形コントラスト強調 (5%〜95%percentile を 0-255 に伸長)
+          var hist = new Array(256).fill(0);
+          for (var i = 0; i < d.length; i += 4) {
+            var g = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114) | 0;
+            d[i] = d[i+1] = d[i+2] = g;
+            hist[g]++;
+          }
+          var total = w * h, acc = 0, lo = 0, hi = 255;
+          for (var v = 0; v < 256; v++) { acc += hist[v]; if (acc >= total * 0.05) { lo = v; break; } }
+          acc = 0;
+          for (var v2 = 255; v2 >= 0; v2--) { acc += hist[v2]; if (acc >= total * 0.05) { hi = v2; break; } }
+          var range = Math.max(1, hi - lo);
+          for (var j = 0; j < d.length; j += 4) {
+            var nv = Math.max(0, Math.min(255, Math.round((d[j] - lo) * 255 / range)));
+            d[j] = d[j+1] = d[j+2] = nv;
+          }
+          ctx.putImageData(im, 0, 0);
+          resolve(cv.toDataURL('image/jpeg', 0.92));
+        } catch (e) { resolve(dataUrl); }   // 前処理失敗時は元画像で続行
+      };
+      img.onerror = function() { resolve(dataUrl); };
+      img.src = dataUrl;
+    } catch (e) { resolve(dataUrl); }
+  });
+}
+
 async function runOcr(docId, idx, autoFill) {
   const imgs = capturedDocs[docId];
   if (!imgs || !imgs[idx]) return;
   const resultDiv = document.getElementById('docOcrResult_' + docId);
-  resultDiv.innerHTML = '<div class="doc-ocr-progress">📷 在留カードを読み取り中… (OCR)</div>';
+  resultDiv.innerHTML = '<div class="doc-ocr-progress" style="background:#fff3e0;border:1.5px solid #fb8c00;color:#e65100;font-weight:700;padding:8px 10px;border-radius:8px;">📷 画像を読み取り中… (OCR準備)</div>';
 
   try {
+    await _ensureTesseract();
+    const procUrl = await _ocrPreprocess(imgs[idx].dataUrl);
     const worker = await Tesseract.createWorker('jpn+eng', 1, {
       logger: m => {
         if (m.status === 'recognizing text') {
           const pct = Math.round((m.progress || 0) * 100);
-          resultDiv.innerHTML = '<div class="doc-ocr-progress">⏳ 認識中... ' + pct + '%</div>';
+          resultDiv.innerHTML = '<div class="doc-ocr-progress" style="background:#fff3e0;border:1.5px solid #fb8c00;color:#e65100;font-weight:700;padding:8px 10px;border-radius:8px;">⏳ 文字を認識中… ' + pct + '%</div>';
         }
       }
     });
-    const { data } = await worker.recognize(imgs[idx].dataUrl);
+    const { data } = await worker.recognize(procUrl);
     await worker.terminate();
 
     if (data.text && data.text.trim()) {
@@ -31948,12 +32005,17 @@ async function runOcr(docId, idx, autoFill) {
 }
 
 // ── 在留カード OCR テキスト → フィールド抽出 ──
+//   在留カードの実ラベル: 氏名 NAME / 生年月日 DATE OF BIRTH / 性別 SEX /
+//   国籍・地域 NATIONALITY/REGION / 在留資格 STATUS / 在留期間(満了日) PERIOD OF STAY
+//   → 英語・日本語の両方のラベルで抽出を試みる (OCRはどちらかしか拾えないことが多い)
 function parseZairyuCardText(text) {
   const result = {};
   const t = text || '';
+  const tFlat = t.replace(/[ \t]+/g, ' ');   // 行内の連続空白を圧縮した版
 
-  // ローマ字氏名 (NAME ラベル直後の大文字英字行 or 連続大文字英字行)
-  let nameMatch = t.match(/NAME[:\s]+([A-Z][A-Z\s,'.\-]+[A-Z])/i);
+  // ローマ字氏名 (NAME ラベル直後の大文字英字 / 同一行内のみ=改行を跨いで次のラベルを巻き込まない)
+  let nameMatch = tFlat.match(/NAME[: ]+([A-Z][A-Z ,'.\-]+[A-Z])/);
+  if (!nameMatch) nameMatch = tFlat.match(/氏\s*名[: ]*([A-Z][A-Z ,'.\-]+[A-Z])/);
   if (!nameMatch) {
     // フォールバック: 連続する大文字英字 (5文字以上、空白許容)
     const lines = t.split(/\r?\n/);
@@ -31964,42 +32026,46 @@ function parseZairyuCardText(text) {
   }
   if (nameMatch) result.tokki1 = nameMatch[1].replace(/\s+/g, ' ').trim();
 
-  // 生年月日 (DATE OF BIRTH: yyyy MM dd or yyyy/MM/dd)
-  let bdMatch = t.match(/DATE\s+OF\s+BIRTH[^\d]{0,30}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/i);
-  if (!bdMatch) bdMatch = t.match(/生年月日[^\d]{0,10}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/);
+  // 生年月日 (DATE OF BIRTH / 生年月日: yyyy年MM月dd日 等)
+  let bdMatch = tFlat.match(/DATE\s+OF\s+BIRTH[^\d]{0,30}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/i);
+  if (!bdMatch) bdMatch = tFlat.match(/生年月日[^\d]{0,15}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/);
   if (bdMatch) {
     result.birthday = bdMatch[1] + '-' + bdMatch[2].padStart(2, '0') + '-' + bdMatch[3].padStart(2, '0');
   }
 
-  // 性別 (SEX MALE/FEMALE)
-  const sexMatch = t.match(/SEX[:\s]+([MF])/i) || t.match(/(MALE|FEMALE)/i) || t.match(/性別[:\s]+([男女])/);
+  // 性別 (SEX MALE/FEMALE / 男・女)
+  const sexMatch = tFlat.match(/SEX[:\s]+([MF])/i) || tFlat.match(/(MALE|FEMALE)/i) || tFlat.match(/性\s*別[^男女]{0,6}([男女])/);
   if (sexMatch) {
-    const s = sexMatch[1].toUpperCase();
+    const s = String(sexMatch[1]).toUpperCase();
     if (s === 'F' || s === 'FEMALE' || s === '女') result.sex = '女';
     else if (s === 'M' || s === 'MALE' || s === '男') result.sex = '男';
   }
 
-  // 国籍 (NATIONALITY/REGION)
-  const natMatch = t.match(/NATIONALITY[\/\s]?REGION[:\s]+([A-Z][A-Z\s\(\)]+?)(?=\n|[a-z]|\d)/i)
-    || t.match(/NATIONALITY[:\s]+([A-Z][A-Z\s\(\)]+?)(?=\n|[a-z]|\d)/i);
-  if (natMatch) result.nationality = natMatch[1].replace(/\s+/g, ' ').trim();
+  // 国籍 (国籍・地域 日本語名を優先 → NATIONALITY/REGION 英語名。行末まで取得して整形)
+  const natMatch = tFlat.match(/国籍[・･\/\s]*地域[: ]*([^\s\n\r]{2,15})/)
+    || tFlat.match(/NATIONALITY[\/ ]?REGION[: ]*([^\n\r]{2,30})/i)
+    || tFlat.match(/NATIONALITY[: ]+([^\n\r]{2,30})/i);
+  if (natMatch) result.nationality = natMatch[1].replace(/\s+/g, ' ').replace(/[^A-Za-zぁ-んァ-ヶ一-龯ー・ ].*$/, '').trim();
 
-  // 在留資格 (STATUS / 在留資格)
-  let statusMatch = t.match(/STATUS[:\s]+([A-Z][A-Z\s\(\)\/]+?)(?=\n|\d|PERIOD|DATE)/i);
-  if (!statusMatch) statusMatch = t.match(/在留資格[:\s]*([^\n\r]{2,40})/);
-  if (statusMatch) result.zairyuShikaku = statusMatch[1].replace(/\s+/g, ' ').trim();
+  // 在留資格 (在留資格 日本語を優先 → STATUS 英語)
+  let statusMatch = tFlat.match(/在留資格[: ]*([^\n\r]{2,40})/);
+  if (!statusMatch) statusMatch = tFlat.match(/STATUS[: ]+([^\n\r]{2,40})/i);
+  if (statusMatch) result.zairyuShikaku = statusMatch[1].replace(/\s+/g, ' ').replace(/\s*(STATUS|在留資格).*$/i, '').trim();
 
-  // 在留期限 (DATE OF EXPIRATION / PERIOD OF STAY)
-  let expMatch = t.match(/(?:DATE\s+OF\s+EXPIRATION|PERIOD\s+OF\s+STAY)[^\d]{0,30}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/i);
-  if (!expMatch) expMatch = t.match(/在留期間[^\d]{0,10}(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/);
+  // 在留期限 (DATE OF EXPIRATION / PERIOD OF STAY / 在留期間(満了日))
+  //   「在留期間 3年 (2027年06月20日)」のように途中に数字(年数)が入る形式に対応するため
+  //   非貪欲の任意文字ギャップで最初の yyyy年MM月dd日 を拾う
+  let expMatch = tFlat.match(/(?:DATE\s+OF\s+EXPIRATION|PERIOD\s+OF\s+STAY)[\s\S]{0,30}?(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/i);
+  if (!expMatch) expMatch = tFlat.match(/満了日[\s\S]{0,25}?(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/);
+  if (!expMatch) expMatch = tFlat.match(/在留期間[\s\S]{0,25}?(\d{4})[\s\/\.\-年]+(\d{1,2})[\s\/\.\-月]+(\d{1,2})/);
   if (expMatch) {
     const date = expMatch[1] + '-' + expMatch[2].padStart(2, '0') + '-' + expMatch[3].padStart(2, '0');
     result.zairyuKigen = date;
     result.zairyuKigenCard = date;  // カード上の在留期限も同じ
   }
 
-  // 在留カード番号 (AB12345678CD パターン)
-  const numMatch = t.match(/\b([A-Z]{2}\d{8}[A-Z]{2})\b/);
+  // 在留カード番号 (AB12345678CD パターン。OCRで空白が混ざる場合に備え空白除去版でも検索)
+  const numMatch = t.match(/\b([A-Z]{2}\d{8}[A-Z]{2})\b/) || t.replace(/\s+/g, '').match(/([A-Z]{2}\d{8}[A-Z]{2})/);
   if (numMatch) {
     result.zairyuBikou = '在留カード番号: ' + numMatch[1];
   }
@@ -32045,8 +32111,17 @@ async function autoFillFromOcr(docId, auto) {
   const parsed = (docId === 'zairyu') ? parseZairyuCardText(text) : parseLicenseText(text);
   const keys = Object.keys(parsed);
   if (keys.length === 0) {
-    // 自動呼び出し時は黙ってOCRテキストだけ残す(手動の🤖ボタンは表示済み)
     showToast(auto ? '自動で項目を読み取れませんでした。写真を撮り直すか手入力してください' : '抽出可能な項目が見つかりませんでした', auto ? 'warn' : 'error');
+    // 画面内にも消えない警告を残す (トーストは見逃されやすい)
+    const rd = document.getElementById('docOcrResult_' + docId);
+    if (rd) {
+      const w = document.createElement('div');
+      w.style.cssText = 'background:#ffebee;border:1.5px solid #ef9a9a;color:#8c2222;border-radius:8px;padding:9px 11px;font-size:11.5px;line-height:1.6;margin-top:6px;font-weight:600;';
+      w.innerHTML = '⚠ 項目を自動で読み取れませんでした。<br>' +
+        '<span style="font-weight:400;">📌 コツ: <b>明るい場所</b>で<b>真上から</b>、カードが画面いっぱいに写るように撮り直すと成功しやすいです。' +
+        '撮り直したら下の「🔍 OCR読み取り→自動入力」を押してください。読めない場合は上の抽出テキストからコピー or 手入力でもOKです。</span>';
+      rd.appendChild(w);
+    }
     return;
   }
   // 適用前に確認ダイアログ表示
