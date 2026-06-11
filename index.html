@@ -31192,6 +31192,26 @@ async function loadEditDropdownOptions(keyMap) {
       Object.keys(map).forEach(function(k) { out[k] = Array.from(map[k]).sort(); });
       _editDropdownLinkMaps[depKey] = out;
     });
+
+    // 派遣先情報リストの契約行 (buka → 組織単位) を連動マップへマージ
+    //   社員が居ない/1人しか居ない派遣先でも、契約行にある全組織単位
+    //   (例: アポロ 北棟製造部・浜松工場) が候補に出るようにする
+    try {
+      var hkItems = await spGetAll(LIST_HAKENSAKI_GUID, '$top=500');
+      var lm = _editDropdownLinkMaps['soshikiTani'] || {};
+      var soshikiAll = _editDropdownCache['soshikiTani'] || [];
+      (hkItems || []).forEach(function(it) {
+        var b = String(it[HF.hakensaki_keiyaku] || '').trim();
+        var s = String(it[HF.soshiki] || '').trim();
+        if (!b || !s) return;
+        if (!lm[b]) lm[b] = [];
+        if (lm[b].indexOf(s) < 0) lm[b].push(s);
+        if (soshikiAll.indexOf(s) < 0) soshikiAll.push(s);
+      });
+      Object.keys(lm).forEach(function(k2) { lm[k2].sort(); });
+      _editDropdownLinkMaps['soshikiTani'] = lm;
+      _editDropdownCache['soshikiTani'] = soshikiAll.sort();
+    } catch (eh) { console.warn('派遣先情報→組織単位 連動マージ失敗:', eh); }
   } catch(e) {
     console.error('loadEditDropdownOptions error:', e);
   }
@@ -31205,14 +31225,26 @@ function refilterLinkedDropdown(dependentKey) {
   var depSel = document.getElementById('editField_' + dependentKey);
   if (!depSel) return;
   // 親フィールドの値取得
+  //   親の編集欄が開いていればその値、開いていなければ社員の保存済みの値で絞り込む
+  //   (例: 組織単位だけを編集 → その社員の派遣先(部課)で絞り込まれた組織単位を出す)
   var srcSel = document.getElementById('editField_' + conf.linkedTo);
-  if (!srcSel) return;
   var srcVal = '';
-  if (srcSel.dataset.dropdownNew === '1' && srcSel.value === '__new__') {
-    var custom = document.getElementById('editField_' + conf.linkedTo + '_custom');
-    srcVal = custom ? custom.value.trim() : '';
+  if (srcSel) {
+    if (srcSel.dataset.dropdownNew === '1' && srcSel.value === '__new__') {
+      var custom = document.getElementById('editField_' + conf.linkedTo + '_custom');
+      srcVal = custom ? custom.value.trim() : '';
+    } else {
+      srcVal = srcSel.value.trim();
+    }
+  } else if (typeof currentEmployee !== 'undefined' && currentEmployee) {
+    if (conf.linkedTo === 'hakensaki') {
+      srcVal = (typeof getBukaValue === 'function') ? String(getBukaValue(currentEmployee) || '').trim() : '';
+    } else if (typeof editKeyMap !== 'undefined' && editKeyMap && editKeyMap[conf.linkedTo]) {
+      srcVal = String(currentEmployee[editKeyMap[conf.linkedTo]] || '').trim();
+    }
+    if (!srcVal) return;   // 親の値が無ければ絞り込まず全件のまま
   } else {
-    srcVal = srcSel.value.trim();
+    return;
   }
   var allOptions = _editDropdownCache[dependentKey] || [];
   var allowed = null;
