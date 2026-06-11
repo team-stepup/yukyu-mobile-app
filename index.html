@@ -31970,7 +31970,9 @@ function _ocrPreprocess(dataUrl) {
       img.onload = function() {
         try {
           var MAX = 1800;
-          var scale = Math.min(1, MAX / Math.max(img.width, img.height));
+          var longEdge = Math.max(img.width, img.height);
+          // 大きすぎる写真は縮小、小さすぎる画像は拡大 (どちらもOCR認識率が上がる)
+          var scale = longEdge > MAX ? MAX / longEdge : (longEdge < 1200 ? Math.min(2.5, 1600 / longEdge) : 1);
           var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
           var cv = document.createElement('canvas');
           cv.width = w; cv.height = h;
@@ -32081,19 +32083,33 @@ function parseZairyuCardText(text) {
     result.birthday = bdMatch[1] + '-' + bdMatch[2].padStart(2, '0') + '-' + bdMatch[3].padStart(2, '0');
   }
 
-  // 性別 (SEX MALE/FEMALE / 男・女)
+  // 性別 (SEX MALE/FEMALE / 男・女) — 社員データの Choice 値 (男性/女性) に正規化して返す
   const sexMatch = tFlat.match(/SEX[:\s]+([MF])/i) || tFlat.match(/(MALE|FEMALE)/i) || tFlat.match(/性\s*別[^男女]{0,6}([男女])/);
   if (sexMatch) {
     const s = String(sexMatch[1]).toUpperCase();
-    if (s === 'F' || s === 'FEMALE' || s === '女') result.sex = '女';
-    else if (s === 'M' || s === 'MALE' || s === '男') result.sex = '男';
+    if (s === 'F' || s === 'FEMALE' || s === '女') result.sex = '女性';
+    else if (s === 'M' || s === 'MALE' || s === '男') result.sex = '男性';
   }
 
-  // 国籍 (国籍・地域 日本語名を優先 → NATIONALITY/REGION 英語名。行末まで取得して整形)
-  const natMatch = tFlat.match(/国籍[・･\/\s]*地域[: ]*([^\s\n\r]{2,15})/)
+  // 国籍 (国籍・地域 日本語名を優先 → NATIONALITY/REGION 英語名)
+  //   OCRは「ブラ ジル」のように文字間に空白を入れたり途中で欠けることがあるため、
+  //   行末まで取得 → 空白・記号を除去 → 既知の国名リストへスナップ (例 「ブラ」→「ブラジル」)
+  const natMatch = tFlat.match(/国籍[・･\/\s]*地域[: ]*([^\n\r]{2,30})/)
     || tFlat.match(/NATIONALITY[\/ ]?REGION[: ]*([^\n\r]{2,30})/i)
     || tFlat.match(/NATIONALITY[: ]+([^\n\r]{2,30})/i);
-  if (natMatch) result.nationality = natMatch[1].replace(/\s+/g, ' ').replace(/[^A-Za-zぁ-んァ-ヶ一-龯ー・ ].*$/, '').trim();
+  if (natMatch) {
+    let nat = String(natMatch[1]).replace(/NATIONALITY.*$/i, '').replace(/REGION.*$/i, '').replace(/[^A-Za-zぁ-んァ-ヶ一-龯ー]/g, '');
+    const COUNTRIES = ['ブラジル', 'フィリピン', 'ペルー', 'ボリビア', 'ベトナム', 'インドネシア', 'ネパール', '中国', '日本',
+      'コロンビア', 'パラグアイ', 'アルゼンチン', 'タイ', 'ミャンマー', 'カンボジア', 'スリランカ', 'バングラデシュ', 'メキシコ',
+      'BRAZIL', 'PHILIPPINES', 'PERU', 'BOLIVIA', 'VIETNAM', 'INDONESIA', 'NEPAL', 'CHINA', 'JAPAN'];
+    if (nat) {
+      const hit = COUNTRIES.find(function(c) { return c === nat; })
+        || COUNTRIES.find(function(c) { return nat.length >= 2 && c.indexOf(nat) === 0; })   // 前方欠け (ブラ→ブラジル)
+        || COUNTRIES.find(function(c) { return nat.indexOf(c) >= 0; });                       // ノイズ混入 (xブラジルy→ブラジル)
+      if (hit) nat = hit;
+    }
+    if (nat && nat.length >= 2) result.nationality = nat;
+  }
 
   // 在留資格 (在留資格 日本語を優先 → STATUS 英語)
   let statusMatch = tFlat.match(/在留資格[: ]*([^\n\r]{2,40})/);
@@ -33148,6 +33164,12 @@ function _showEmpOcrApplyPreview(parsed, fileName) {
     '</tr>';
   });
   window._empOcrParsed = parsed;
+  // 読み取れなかった項目の案内 (手入力の必要が一目で分かるように)
+  var ALL_KEYS = ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuBikou'];
+  var missing = ALL_KEYS.filter(function(k) { return !(k in parsed); }).map(function(k) { return labelMap[k] || k; });
+  var missingHtml = missing.length
+    ? '<div style="font-size:11px;color:#666;background:#f5f5f5;border-radius:6px;padding:7px 10px;margin-top:8px;">📝 読み取れなかった項目（手入力してください）: <b>' + escHtml(missing.join('、')) + '</b><br><span style="font-size:10px;color:#999;">裏面しか無い・画像が不鮮明な場合に起こります。鮮明な表面の画像で再実行すると改善することがあります。</span></div>'
+    : '';
   var old = document.getElementById('empOcrApplyOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
   ov.id = 'empOcrApplyOverlay'; ov.className = 'no-print';
@@ -33164,6 +33186,7 @@ function _showEmpOcrApplyPreview(parsed, fileName) {
           rows +
         '</table>' +
         '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:6px;padding:7px 10px;margin-top:10px;">⚠ 「適用して保存」を押すと上記の値で社員データを上書きします。読み取りミスがあれば「キャンセル」して、各項目の ✏️ で個別に修正してください。</div>' +
+        missingHtml +
       '</div>' +
       '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
         '<button onclick="document.getElementById(\'empOcrApplyOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
