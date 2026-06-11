@@ -11425,7 +11425,16 @@ async function _maicarBuildRouteForEmployee(emp) {
     }
     return null;
   }
-  var workAddr = lookupHakenAddress(hakenMap, bukaVal);
+  // 組織単位の契約行の「就業場所（所在地）」を最優先 (通勤手当の距離計算と同じ基準)
+  var workAddr = '';
+  if (typeof resolveCommuteWorkAddress === 'function') {
+    var empSoshiki = '';
+    for (var sk in emp) {
+      if (sk.indexOf('x7d44') >= 0 && sk.indexOf('x7e54') >= 0) { empSoshiki = String(emp[sk] || '').trim(); break; }
+    }
+    workAddr = resolveCommuteWorkAddress(bukaVal, empSoshiki);
+  }
+  if (!workAddr) workAddr = lookupHakenAddress(hakenMap, bukaVal);
 
   // 派遣先マップに住所がなければ、Lists から個別に再取得を試みる (kinmu_jusho/haken_jusho 以外のフィールドも探す)
   if (!workAddr) {
@@ -33171,7 +33180,8 @@ function onAddTsukinChange() {
 // ============================================================
 var _geocodeCache = {};   // address → {lat, lng}
 var _routeCache = {};     // "lat,lng→lat,lng" → meters
-var _hakensakiByBuka = null; // 派遣先名 → 住所 のキャッシュ
+var _hakensakiByBuka = null; // 派遣先名 → 住所 のキャッシュ (就業場所優先・代表1件)
+var _hakensakiRowsByBuka = {}; // 派遣先名 → [{soshiki, kinmu, haken}] 全契約行 (組織単位で選択用)
 
 // Nominatim で日本国内住所を geocode
 async function geocodeAddressJp(address) {
@@ -33229,6 +33239,7 @@ async function loadHakensakiByBukaMap() {
     var data = await resp.json();
     var items = (data.d && data.d.results) || [];
     _hakensakiByBuka = {};
+    _hakensakiRowsByBuka = {};
     items.forEach(function(it) {
       // 派遣先情報リストの実際の構造:
       //   - Title = 派遣元責任者の人名 (例: "森 ゆうじ")  ← 部課ではない！
@@ -33239,11 +33250,19 @@ async function loadHakensakiByBukaMap() {
       var primaryKey = String(it[HF.hakensaki_keiyaku] || '').trim();   // 例: "077:ASTI㈱掛川"
       var companyName = String(it[HF.hakensaki_name] || '').trim();     // 例: "ASTI株式会社 掛川工場"
       var titleKey   = String(it.Title || '').trim();                   // 例: "森 ゆうじ"
-      // 派遣先住所 を優先 (就業場所が違うサテライト施設なら kinmu_jusho が別だが、
-      // マイカー通勤届の経路としては派遣先の正式住所が望ましい)
-      var addr = it[HF.haken_jusho] || it[HF.kinmu_jusho] || '';
+      // 通勤距離の基準は「就業場所（所在地）」= 実際に通う場所 (会社規定)。
+      // 就業場所が未入力の行のみ 派遣先住所 にフォールバック。
+      var addr = it[HF.kinmu_jusho] || it[HF.haken_jusho] || '';
       addr = String(addr).trim();
       if (!addr) return;
+      // 組織単位ごとの行も保持 (同じ派遣先で就業場所が違う契約に対応)
+      var soshiki = String(it[HF.soshiki] || '').trim();
+      var row = { soshiki: soshiki, kinmu: String(it[HF.kinmu_jusho] || '').trim(), haken: String(it[HF.haken_jusho] || '').trim() };
+      [primaryKey, companyName, titleKey].forEach(function(k) {
+        if (!k) return;
+        if (!_hakensakiRowsByBuka[k]) _hakensakiRowsByBuka[k] = [];
+        _hakensakiRowsByBuka[k].push(row);
+      });
       // 3 種類すべてをキーとして登録 (順序: 既存値は上書きしない)
       if (primaryKey  && !_hakensakiByBuka[primaryKey])  _hakensakiByBuka[primaryKey]  = addr;
       if (companyName && !_hakensakiByBuka[companyName]) _hakensakiByBuka[companyName] = addr;
@@ -33254,6 +33273,45 @@ async function loadHakensakiByBukaMap() {
     console.warn('loadHakensakiByBukaMap error:', e);
     return null;
   }
+}
+
+// 通勤距離用の就業先住所を解決 (会社規定: 就業場所（所在地）の住所で距離を計算)
+//   bukaVal: 派遣先(部課) 例 "188-アポロ電気株式会社"
+//   soshikiVal: 社員の組織単位 例 "浜松工場" — 同じ派遣先で就業場所が違う契約行を区別
+//   優先順位: ①組織単位一致行の就業場所 → ②同・派遣先住所 → ③いずれかの行の就業場所
+//             → ④代表マップ(就業場所優先) → ⑤番号前方一致フォールバック
+function resolveCommuteWorkAddress(bukaVal, soshikiVal) {
+  var b = String(bukaVal || '').trim();
+  if (!b) return '';
+  var rows = _hakensakiRowsByBuka[b];
+  if (!rows || !rows.length) {
+    // 番号前方一致 (例 "188" → "188-アポロ電気株式会社")
+    var num = (b.match(/^(\d+)/) || [])[1];
+    if (num) {
+      var k = Object.keys(_hakensakiRowsByBuka).find(function(x) { return x.indexOf(num) === 0; });
+      if (k) rows = _hakensakiRowsByBuka[k];
+    }
+  }
+  var s = String(soshikiVal || '').trim();
+  if (rows && rows.length) {
+    if (s) {
+      var hit = rows.find(function(r) { return r.soshiki && (r.soshiki === s || r.soshiki.indexOf(s) >= 0 || s.indexOf(r.soshiki) >= 0); });
+      if (hit && (hit.kinmu || hit.haken)) return hit.kinmu || hit.haken;
+    }
+    var withKinmu = rows.find(function(r) { return r.kinmu; });
+    if (withKinmu) return withKinmu.kinmu;
+    var withHaken = rows.find(function(r) { return r.haken; });
+    if (withHaken) return withHaken.haken;
+  }
+  // 代表マップへフォールバック
+  var map = _hakensakiByBuka || {};
+  if (map[b]) return map[b];
+  var num2 = (b.match(/^(\d+)/) || [])[1];
+  if (num2) {
+    var k2 = Object.keys(map).find(function(x) { return x.indexOf(num2) === 0; });
+    if (k2) return map[k2];
+  }
+  return '';
 }
 
 // 計算結果: { km, teate, error, homeFound, workFound }
@@ -33318,26 +33376,18 @@ async function autoCalcCommuteForAddForm() {
   if (!homeAddr.trim()) { st('warn', '⚠ 自宅住所を入力してください'); return; }
   if (!bukaVal) { st('warn', '⚠ 派遣先を選択してください'); return; }
 
-  // 派遣先住所を取得
+  // 就業先住所を取得 (組織単位の契約行の「就業場所（所在地）」を優先)
   var map = await loadHakensakiByBukaMap();
   if (!map) { st('err', '⚠ 派遣先リスト取得失敗'); return; }
-  // バリエーション吸収: そのまま / startsWith / 番号一致
-  var workAddr = map[bukaVal];
-  if (!workAddr) {
-    // 番号で部分一致
-    var num = (bukaVal.match(/^(\d+)/) || [])[1];
-    if (num) {
-      var fallbackKey = Object.keys(map).find(function(k){ return k.indexOf(num) === 0; });
-      if (fallbackKey) workAddr = map[fallbackKey];
-    }
-  }
-  if (!workAddr) { st('err', '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません'); return; }
+  var soshikiVal = (document.getElementById('addField_soshikiTani') || {}).value || '';
+  var workAddr = resolveCommuteWorkAddress(bukaVal, soshikiVal);
+  if (!workAddr) { st('err', '⚠ 派遣先「' + bukaVal + '」の就業場所住所が見つかりません (派遣先情報リストに登録してください)'); return; }
 
   var r = await computeCommuteAllowance(homeAddr, workAddr);
   if (r.error) { st('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
-  st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">派遣先: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>'));
+  st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">就業場所: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>'));
 }
 
 // 社員情報詳細のインライン編集 (通勤手当) から再計算
@@ -33368,24 +33418,27 @@ async function autoCalcCommuteForDetailEdit() {
   var bukaVal = (typeof getBukaValue === 'function') ? getBukaValue(emp) : '';
   if (!bukaVal) { st('warn', '⚠ 派遣先(部課)が未設定です'); return; }
 
-  st('calc', '距離を計算しています… (自宅 → 派遣先)');
+  st('calc', '距離を計算しています… (自宅 → 就業場所)');
   var map = await loadHakensakiByBukaMap();
   if (!map) { st('err', '⚠ 派遣先リスト取得失敗'); return; }
-  var workAddr = map[bukaVal];
-  if (!workAddr) {
-    var num = (bukaVal.match(/^(\d+)/) || [])[1];
-    if (num) {
-      var fb = Object.keys(map).find(function(k2){ return k2.indexOf(num) === 0; });
-      if (fb) workAddr = map[fb];
+  // 社員の組織単位 (編集中の欄があれば優先 → 保存済みの値) で契約行を選ぶ
+  var soshikiVal = '';
+  var sosInp = document.getElementById('editField_soshikiTani');
+  if (sosInp && sosInp.value && sosInp.value !== '__new__') soshikiVal = sosInp.value;
+  if (!soshikiVal && typeof editKeyMap !== 'undefined' && editKeyMap && editKeyMap['soshikiTani']) soshikiVal = String(emp[editKeyMap['soshikiTani']] || '').trim();
+  if (!soshikiVal) {
+    for (var k3 in emp) {
+      if (k3.indexOf('x7d44') >= 0 && k3.indexOf('x7e54') >= 0) { soshikiVal = String(emp[k3] || '').trim(); break; }
     }
   }
-  if (!workAddr) { st('err', '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません (派遣先情報リストに住所を登録してください)'); return; }
+  var workAddr = resolveCommuteWorkAddress(bukaVal, soshikiVal);
+  if (!workAddr) { st('err', '⚠ 派遣先「' + bukaVal + '」の就業場所住所が見つかりません (派遣先情報リストに登録してください)'); return; }
 
   var r = await computeCommuteAllowance(homeAddr, workAddr);
   if (r.error) { st('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
-  st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">派遣先: ' + escHtml(workAddr) + '　→ 💾保存で確定</span>'));
+  st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">就業場所: ' + escHtml(workAddr) + (soshikiVal ? '（' + escHtml(soshikiVal) + '）' : '') + '　→ 💾保存で確定</span>'));
 }
 
 // 移動入社フォームから自動計算
@@ -33418,21 +33471,16 @@ async function autoCalcCommuteForIdouForm() {
 
   var map = await loadHakensakiByBukaMap();
   if (!map) { if (statusEl) statusEl.textContent = '⚠ 派遣先リスト取得失敗'; return; }
-  var workAddr = map[bukaVal];
-  if (!workAddr) {
-    var num = (bukaVal.match(/^(\d+)/) || [])[1];
-    if (num) {
-      var fallbackKey = Object.keys(map).find(function(k){ return k.indexOf(num) === 0; });
-      if (fallbackKey) workAddr = map[fallbackKey];
-    }
-  }
-  if (!workAddr) { if (statusEl) statusEl.textContent = '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません'; return; }
+  // 移動先の組織単位で契約行を選び、就業場所（所在地）を距離の基準にする
+  var soshikiVal = (document.getElementById('idou_soshikiTani') || {}).value || '';
+  var workAddr = resolveCommuteWorkAddress(bukaVal, soshikiVal);
+  if (!workAddr) { if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('err', '⚠ 派遣先「' + bukaVal + '」の就業場所住所が見つかりません'); return; }
 
   var r = await computeCommuteAllowance(homeAddr, workAddr);
   if (r.error) { if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
-  if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">派遣先: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>');
+  if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">就業場所: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>');
 }
 
 // 派遣先変更 → 組織単位/職種を絞り込み + 社員番号自動採番
