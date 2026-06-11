@@ -31326,6 +31326,49 @@ function getEditDropdownNewValue(fieldKey) {
   return sel.value;
 }
 
+// ── 柔軟な日付入力 (貼り付け対応 + カレンダー選択) ──
+// "2027/06/20" "2027-6-20" "2027.6.20" "2027年6月20日" "２０２７／６／２０" "20270620" → "YYYY-MM-DD"
+function parseFlexibleDateStr(s) {
+  if (!s) return '';
+  s = String(s).trim().replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+    .replace(/[／－．]/g, function(c) { return { '／': '/', '－': '-', '．': '.' }[c]; });
+  var m = s.match(/(\d{4})\s*[\/\-\.年]\s*(\d{1,2})\s*[\/\-\.月]\s*(\d{1,2})/);
+  if (!m) {
+    var digits = s.replace(/[^\d]/g, '');
+    if (/^\d{8}$/.test(digits)) m = [null, digits.substring(0, 4), digits.substring(4, 6), digits.substring(6, 8)];
+  }
+  if (!m) return '';
+  var y = +m[1], mo = +m[2], d = +m[3];
+  if (y < 1900 || y > 2200 || mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+  return y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+// テキスト日付欄の change で正規化 (貼り付け・手入力をどの形式でも受け付ける)
+function normalizeDateText(inp) {
+  var v = String(inp.value || '').trim();
+  if (!v) { inp.style.borderColor = ''; return; }
+  var norm = parseFlexibleDateStr(v);
+  if (norm) { inp.value = norm; inp.style.borderColor = ''; }
+  else {
+    inp.style.borderColor = '#e53935';
+    showToast('日付の形式を認識できません: ' + v + '（例: 2027/06/20）', 'warn');
+  }
+}
+// 📅ボタン → 隠しdate入力のカレンダーを開く
+function openDatePickerFor(id) {
+  var p = document.getElementById(id + '_picker');
+  var t = document.getElementById(id);
+  if (!p) return;
+  if (t && /^\d{4}-\d{2}-\d{2}$/.test(String(t.value || ''))) p.value = t.value;
+  if (typeof p.showPicker === 'function') { try { p.showPicker(); return; } catch (e) {} }
+  // showPicker 非対応ブラウザ: フォーカス+クリックで開く
+  p.focus(); p.click();
+}
+function syncDateFromPicker(id) {
+  var p = document.getElementById(id + '_picker');
+  var t = document.getElementById(id);
+  if (p && t && p.value) { t.value = p.value; t.style.borderColor = ''; }
+}
+
 function getEditInputHtml(field, currentVal, fieldType, choices) {
   const id = 'editField_' + field.key;
   const val = (currentVal === null || currentVal === undefined) ? '' : currentVal;
@@ -31388,10 +31431,13 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
       const d = new Date(val);
       if (!isNaN(d)) dateVal = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
-    // 日付クリアボタン付き (退社取消等の用途・空欄保存で SharePoint も null に更新)
-    return '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">' +
-      '<input type="date" class="edit-input" id="' + id + '" value="' + dateVal + '" data-field="' + field.key + '" data-format="date" style="flex:1;min-width:130px;">' +
-      '<button type="button" onclick="document.getElementById(\'' + id + '\').value=\'\';" title="日付をクリア (空欄で保存すると未設定に戻る)" style="background:#fff;color:#c62828;border:1.5px solid #ef9a9a;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">✕ クリア</button>' +
+    // ハイブリッド日付入力: テキスト欄(貼り付け・手入力をどの形式でも受付→自動正規化)
+    //                    + 📅ボタン(カレンダーから選択) + ✕クリア
+    return '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;position:relative;">' +
+      '<input type="text" class="edit-input" id="' + id + '" value="' + dateVal + '" data-field="' + field.key + '" data-format="date" placeholder="2027/06/20 など (貼り付け可)" onchange="normalizeDateText(this)" style="flex:1;min-width:120px;">' +
+      '<button type="button" onclick="openDatePickerFor(\'' + id + '\')" title="カレンダーから選択" style="background:#eef2ff;color:#3949ab;border:1.5px solid #c5cae9;border-radius:6px;padding:4px 9px;font-size:14px;cursor:pointer;line-height:1.3;">📅</button>' +
+      '<input type="date" id="' + id + '_picker" onchange="syncDateFromPicker(\'' + id + '\')" tabindex="-1" style="position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0.01;border:none;padding:0;">' +
+      '<button type="button" onclick="var _i=document.getElementById(\'' + id + '\');_i.value=\'\';_i.style.borderColor=\'\';var _p=document.getElementById(\'' + id + '_picker\');if(_p)_p.value=\'\';" title="日付をクリア (空欄で保存すると未設定に戻る)" style="background:#fff;color:#c62828;border:1.5px solid #ef9a9a;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">✕ クリア</button>' +
     '</div>';
   }
   if (field.format === 'currency') {
@@ -31576,6 +31622,7 @@ async function saveEditField(catId, fieldKey) {
     newVal = inputEl.value.trim();
   }
   if (inputEl.dataset.format === 'date' && newVal) {
+    newVal = parseFlexibleDateStr(newVal) || newVal;   // 貼り付け形式 (2027/06/20等) を正規化
     newVal = newVal + 'T00:00:00Z';
   } else if (inputEl.dataset.format === 'date' && !newVal) {
     newVal = null;
@@ -31743,6 +31790,7 @@ async function saveEditSection(catId) {
 
       // Convert based on format
       if (inputEl.dataset.format === 'date' && newVal) {
+        newVal = parseFlexibleDateStr(newVal) || newVal;   // 貼り付け形式を正規化
         newVal = newVal + 'T00:00:00Z';
       } else if (inputEl.dataset.format === 'date' && !newVal) {
         newVal = null;
@@ -34102,6 +34150,7 @@ async function saveNewEmployee() {
         if (!internalName || internalName === 'Title') return;
 
         if (inputEl.dataset.format === 'date') {
+          val = parseFlexibleDateStr(val) || val;   // 貼り付け形式 (2027/06/20等) を正規化
           val = val + 'T00:00:00Z';
         } else if (inputEl.dataset.format === 'number' || inputEl.dataset.format === 'currency') {
           val = parseFloat(val);
