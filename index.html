@@ -31697,7 +31697,7 @@ async function startEditField(catId, fieldKey) {
     extraHtml =
       '<div style="width:100%;margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
         '<button type="button" onclick="autoCalcCommuteForDetailEdit()" style="background:#fff;border:1.5px solid #2e7d32;color:#2e7d32;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;">📍 距離から再計算</button>' +
-        '<span id="detailTsukinCalcStatus" style="font-size:10.5px;color:#666;flex:1;min-width:0;word-break:break-all;">登録住所 → 派遣先の片道距離 × 往復 × 12円。結果を確認して💾保存</span>' +
+        '<span id="detailTsukinCalcStatus" style="display:block;flex-basis:100%;width:100%;font-size:11px;color:#666;line-height:1.6;word-break:break-word;margin-top:2px;">登録住所 → 就業場所の片道距離 × 往復 × 12円（切上げ）。結果を確認して💾保存</span>' +
       '</div>';
   }
   wrap.innerHTML =
@@ -33707,7 +33707,7 @@ async function renderAddEmployeeForm() {
       if (field.key === 'tsukinTeate') {
         addInput += '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
           '<button type="button" onclick="autoCalcCommuteForAddForm()" style="background:#fff;border:1px solid #2e7d32;color:#2e7d32;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📍 距離から自動計算</button>' +
-          '<span id="addField_tsukinCalcStatus" style="font-size:10.5px;color:#666;flex:1;min-width:0;word-break:break-all;">車/バイクの場合、住所と派遣先から距離を計測 (2km以上で 1km×12円)</span>' +
+          '<span id="addField_tsukinCalcStatus" style="display:block;flex-basis:100%;width:100%;font-size:11px;color:#666;line-height:1.6;word-break:break-word;margin-top:2px;">通勤方法が車/バイクのとき、住所→就業場所の片道距離から自動計算します（片道km×往復×12円・切上げ）</span>' +
           '</div>';
       }
       html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
@@ -33940,15 +33940,16 @@ async function computeCommuteAllowance(homeAddress, workAddress) {
 
 // 計算ステータスの共通表示 (state: calc / ok / warn / err)
 function _tsukinCalcStatusHtml(state, msg) {
+  // スマホ対応: バッジは全幅ブロックで折り返し表示 (横の細い隙間に縦書きで潰れない)
   if (state === 'calc') {
-    return '<span style="display:inline-flex;align-items:center;gap:6px;background:#fff3e0;border:1.5px solid #fb8c00;color:#e65100;font-weight:700;font-size:12px;padding:5px 10px;border-radius:8px;">' +
-      '<span class="tsukin-spin" style="display:inline-block;animation:spin 1s linear infinite;">⏳</span> ' + escHtml(msg) + '</span>';
+    return '<span style="display:flex;align-items:flex-start;gap:6px;width:100%;box-sizing:border-box;background:#fff3e0;border:1.5px solid #fb8c00;color:#e65100;font-weight:700;font-size:12px;padding:7px 10px;border-radius:8px;line-height:1.5;word-break:break-word;">' +
+      '<span class="tsukin-spin" style="display:inline-block;animation:spin 1s linear infinite;flex-shrink:0;">⏳</span><span style="flex:1;min-width:0;">' + escHtml(msg) + '</span></span>';
   }
   if (state === 'ok') {
-    return '<span style="display:inline-block;background:#e8f5e9;border:1.5px solid #43a047;color:#1b5e20;font-weight:700;font-size:12px;padding:5px 10px;border-radius:8px;line-height:1.5;">' + msg + '</span>';
+    return '<span style="display:block;width:100%;box-sizing:border-box;background:#e8f5e9;border:1.5px solid #43a047;color:#1b5e20;font-weight:700;font-size:12px;padding:7px 10px;border-radius:8px;line-height:1.6;word-break:break-word;">' + msg + '</span>';
   }
   var c = (state === 'err') ? ['#ffebee', '#e53935', '#b71c1c'] : ['#fffde7', '#fbc02d', '#8a6d00'];
-  return '<span style="display:inline-block;background:' + c[0] + ';border:1.5px solid ' + c[1] + ';color:' + c[2] + ';font-weight:600;font-size:11.5px;padding:4px 9px;border-radius:8px;line-height:1.5;">' + escHtml(msg) + '</span>';
+  return '<span style="display:block;width:100%;box-sizing:border-box;background:' + c[0] + ';border:1.5px solid ' + c[1] + ';color:' + c[2] + ';font-weight:600;font-size:11.5px;padding:6px 10px;border-radius:8px;line-height:1.6;word-break:break-word;">' + escHtml(msg) + '</span>';
 }
 
 // 新規入社フォームから自動計算
@@ -39736,7 +39737,7 @@ async function openIdouForm(opts) {
         '<input type="number" id="idou_tsukinTeate" placeholder="例: 5000">' +
         '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
           '<button type="button" onclick="autoCalcCommuteForIdouForm()" style="background:#fff;border:1px solid #2e7d32;color:#2e7d32;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">📍 距離から自動計算</button>' +
-          '<span id="idou_tsukinCalcStatus" style="font-size:10.5px;color:#666;flex:1;min-width:0;word-break:break-all;">既存住所と新派遣先から距離を計測 (2km以上で 1km×12円)</span>' +
+          '<span id="idou_tsukinCalcStatus" style="display:block;flex-basis:100%;width:100%;font-size:11px;color:#666;line-height:1.6;word-break:break-word;margin-top:2px;">登録住所→新派遣先の就業場所の片道距離から自動計算します（片道km×往復×12円・切上げ）</span>' +
         '</div>' +
       '</div>' +
 
