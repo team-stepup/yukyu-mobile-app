@@ -31561,13 +31561,14 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
     // (showPicker() はブラウザ制限で開かないことがあるため補助的に呼ぶだけ)
     return '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">' +
       '<input type="text" class="edit-input" id="' + id + '" value="' + dateVal + '" data-field="' + field.key + '" data-format="date" placeholder="2027/06/20 など (貼り付け可)" onchange="normalizeDateText(this)" style="flex:1;min-width:120px;">' +
+      // 前払一覧・有給一覧で実績のある date-hidden-input パターンをそのまま使用。
+      // date入力自身に onclick/showPicker は付けない (ネイティブの開く動作と衝突して
+      // 開かなくなるブラウザがあるため)。タップ→透明のdate入力→ネイティブUIが開く。
       '<span style="position:relative;display:inline-flex;flex-shrink:0;">' +
         '<button type="button" tabindex="-1" style="background:#eef2ff;color:#3949ab;border:1.5px solid #c5cae9;border-radius:6px;padding:4px 9px;font-size:14px;line-height:1.3;pointer-events:none;">📅</button>' +
-        '<input type="date" id="' + id + '_picker" title="カレンダーから選択" ' +
-          'onclick="syncPickerFromText(\'' + id + '\');try{if(this.showPicker)this.showPicker();}catch(e){}" ' +
+        '<input type="date" id="' + id + '_picker" class="date-hidden-input" title="カレンダーから選択" ' +
           'onfocus="syncPickerFromText(\'' + id + '\')" ' +
-          'onchange="syncDateFromPicker(\'' + id + '\')" ' +
-          'style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer;border:none;padding:0;margin:0;">' +
+          'onchange="syncDateFromPicker(\'' + id + '\')">' +
       '</span>' +
       '<button type="button" onclick="var _i=document.getElementById(\'' + id + '\');_i.value=\'\';_i.style.borderColor=\'\';var _p=document.getElementById(\'' + id + '_picker\');if(_p)_p.value=\'\';" title="日付をクリア (空欄で保存すると未設定に戻る)" style="background:#fff;color:#c62828;border:1.5px solid #ef9a9a;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">✕ クリア</button>' +
     '</div>';
