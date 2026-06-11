@@ -32856,7 +32856,107 @@ async function submitUpload() {
   }
 }
 
-async function uploadCapturedDocs(bukaVal, syainNo, name) {
+// 社員ファイル(URL型)フィールドにフォルダリンクを保存
+//   folderPath: サーバー相対パス (例 /sites/TeamStepup/Shared Documents/社員ファイル/188-アポロ電気株式会社/50764 イワノ ケレン)
+//   保存形式: AllItems.aspx?id=… (既存社員と同じ・ライブラリビューで開ける)
+async function saveSyainFileLinkToEmp(empId, folderPath, label) {
+  if (!empId || !folderPath) return false;
+  // フィールド解決 (Title='社員ファイル') — 失敗時は既知の EPN にフォールバック
+  var epn = 'OData__x793e__x54e1__x30d5__x30a1__x30';
+  try {
+    var meta = await fetchEmployeeFields();
+    if (meta) {
+      for (var iname in meta) {
+        if (meta[iname] && meta[iname].title === '社員ファイル') {
+          epn = meta[iname].entityPropertyName || iname;
+          if (epn.charAt(0) === '_') epn = 'OData_' + epn;
+          break;
+        }
+      }
+    }
+  } catch (_) {}
+  var url = SP_DOC_SITE_URL + '/Shared%20Documents/Forms/AllItems.aspx?id=' + encodeURIComponent(folderPath);
+  var body = {};
+  body[epn] = { '__metadata': { type: 'SP.FieldUrlValue' }, 'Url': url, 'Description': String(label || '社員ファイル').substring(0, 250) };
+  try {
+    await spPatchEmployee(empId, body);
+    console.log('[社員ファイル] リンクを社員データへ保存:', folderPath);
+    return true;
+  } catch (e) {
+    console.warn('[社員ファイル] リンク保存失敗:', e);
+    return false;
+  }
+}
+
+// フォルダ存在チェック (ensureSpFolder の確認部分のみ)
+async function spFolderExists(folderPath) {
+  try {
+    var token = await getToken();
+    if (!token) return false;
+    var encodedPath = encodeURIComponent(folderPath).replace(/%2F/g, '/');
+    var resp = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')?$select=Exists", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) return false;
+    var data = await resp.json();
+    return !!(data.d && data.d.Exists === true);
+  } catch (e) { return false; }
+}
+
+// 社員ファイルを開く (スマート版)
+//   ①社員データのリンク → ②慣例パス(部課/番号 氏名)のフォルダが存在すれば開き、
+//     リンクを社員データへ自動保存(自己修復) → ③無ければ作成を提案して作成+保存+開く
+async function openSyainFileSmart(emp) {
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  // ① 保存済みリンク
+  var url = '';
+  for (var k in emp) {
+    var v = emp[k];
+    if (v && typeof v === 'object' && v.Url) { url = v.Url; break; }
+  }
+  if (url) { window.open(url, '_blank', 'noopener'); return; }
+  // ② 慣例パスで自己修復
+  showToast('📂 社員ファイルを確認中…', 'info');
+  var path = await getEmpFolderPath(emp);
+  if (!path) { showToast('社員ファイルを特定できません (部課・社員番号・氏名を確認してください)', 'error'); return; }
+  var no = emp[F.syainNo] || '';
+  var name = emp.Title || '';
+  var exists = await spFolderExists(path);
+  if (!exists) {
+    // ③ フォルダ未作成 → 作成を提案
+    if (!confirm('社員ファイルのフォルダがまだ作成されていません。\n\n' + path.replace(SP_DOC_LIB_PATH + '/', '') + '\n\nフォルダを作成しますか？')) return;
+    try {
+      var parent = path.substring(0, path.lastIndexOf('/'));
+      await ensureSpFolder(parent);
+      await ensureSpFolder(path);
+    } catch (e) {
+      showToast('フォルダ作成失敗: ' + (e.message || e), 'error');
+      return;
+    }
+  }
+  // リンクを社員データへ保存 (今後はワンタップで開ける)
+  if (emp.Id) {
+    var saved = await saveSyainFileLinkToEmp(emp.Id, path, no + ' ' + name);
+    if (saved && typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.Id === emp.Id) {
+      // ローカルにも反映 (次回クリックは①で即開く)
+      try {
+        var meta2 = await fetchEmployeeFields();
+        for (var iname2 in meta2) {
+          if (meta2[iname2] && meta2[iname2].title === '社員ファイル') {
+            var key2 = (meta2[iname2].entityPropertyName || iname2);
+            if (key2.charAt(0) === '_') key2 = 'OData_' + key2;
+            currentEmployee[key2] = { Url: SP_DOC_SITE_URL + '/Shared%20Documents/Forms/AllItems.aspx?id=' + encodeURIComponent(path), Description: no + ' ' + name };
+            break;
+          }
+        }
+      } catch (_) {}
+      showToast('✓ 社員ファイルのリンクを社員データに保存しました', 'success');
+    }
+  }
+  window.open(SP_DOC_SITE_URL + '/Shared%20Documents/Forms/AllItems.aspx?id=' + encodeURIComponent(path), '_blank', 'noopener');
+}
+
+async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
   const docIds = Object.keys(capturedDocs);
   if (docIds.length === 0) return;
 
@@ -32867,6 +32967,11 @@ async function uploadCapturedDocs(bukaVal, syainNo, name) {
 
     await ensureSpFolder(bukaFolder);
     await ensureSpFolder(empFolder);
+
+    // フォルダ作成と同時に 社員ファイルリンクを社員データへ保存 (リンク切れ防止)
+    if (empId) {
+      try { await saveSyainFileLinkToEmp(empId, empFolder, syainNo + ' ' + name); } catch (_) {}
+    }
 
     // Upload each document (array of pages per doc type)
     let totalFiles = 0;
@@ -33742,12 +33847,14 @@ async function saveNewEmployee() {
     body['__metadata'] = { type: LIST_ITEM_ENTITY };
 
     console.log('Creating employee:', JSON.stringify(body));
-    await spCreateEmployee(body);
+    const created = await spCreateEmployee(body);
+    const createdId = created && created.d ? created.d.Id : (created ? created.Id : null);
 
     // Upload captured documents to SharePoint
+    //   (フォルダ作成時に 社員ファイルリンクも社員データへ自動保存される)
     if (Object.keys(capturedDocs).length > 0) {
       btn.textContent = '書類アップロード中...';
-      await uploadCapturedDocs(bukaSelVal, noVal, nameVal);
+      await uploadCapturedDocs(bukaSelVal, noVal, nameVal, createdId);
     }
 
     showToast(nameVal + ' を登録しました', 'success');
@@ -37555,14 +37662,9 @@ function quickAction(type) {
   const empNo = (typeof F !== 'undefined' && F.syainNo) ? (emp[F.syainNo] || '') : '';
   const empName = emp.Title || '';
   if (type === 'syainFile') {
-    // emp 内の spUrl型フィールドからURLを取得
-    let url = '';
-    for (var k in emp) {
-      var v = emp[k];
-      if (v && typeof v === 'object' && v.Url) { url = v.Url; break; }
-    }
-    if (url) window.open(url, '_blank', 'noopener');
-    else showToast('社員ファイルURL未設定', 'error');
+    // スマート版: リンク未設定でも慣例パスで開き、リンクを社員データへ自動保存(自己修復)。
+    // フォルダ未作成なら作成を提案する。
+    openSyainFileSmart(emp);
   } else if (type === 'gensen' && typeof openGensenForEmp === 'function') {
     openGensenForEmp(empNo, empName);
   } else if (type === 'kyuryou' && typeof openKyuryouForEmp === 'function') {
