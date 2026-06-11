@@ -7273,6 +7273,24 @@ function toHiragana(s) {
     return String.fromCharCode(ch.charCodeAt(0) - 0x60);
   });
 }
+// \u5168\u89D2\u30AB\u30BF\u30AB\u30CA \u2192 \u534A\u89D2\u30AB\u30BF\u30AB\u30CA (\u53E3\u5EA7\u540D\u7FA9\u30D5\u30EA\u30AC\u30CA\u691C\u7D22\u7528\u3002\u6FC1\u70B9\u30FB\u534A\u6FC1\u70B9\u306F\u5206\u96E2\u5F62\u306B)
+function toHankakuKana(s) {
+  var v = String(s || '');
+  var vFw = '\u30AC\u30AE\u30B0\u30B2\u30B4\u30B6\u30B8\u30BA\u30BC\u30BE\u30C0\u30C2\u30C5\u30C7\u30C9\u30D0\u30D3\u30D6\u30D9\u30DC\u30F4', vHw = '\uFF76\uFF77\uFF78\uFF79\uFF7A\uFF7B\uFF7C\uFF7D\uFF7E\uFF7F\uFF80\uFF81\uFF82\uFF83\uFF84\uFF8A\uFF8B\uFF8C\uFF8D\uFF8E\uFF73';
+  var pFw = '\u30D1\u30D4\u30D7\u30DA\u30DD', pHw = '\uFF8A\uFF8B\uFF8C\uFF8D\uFF8E';
+  v = v.replace(/[\u30AC-\u30DC\u30F4]/g, function(c) {
+    var i = vFw.indexOf(c); if (i >= 0) return vHw.charAt(i) + '\uFF9E';
+    var j = pFw.indexOf(c); if (j >= 0) return pHw.charAt(j) + '\uFF9F';
+    return c;
+  });
+  var fw = '\u30A2\u30A4\u30A6\u30A8\u30AA\u30AB\u30AD\u30AF\u30B1\u30B3\u30B5\u30B7\u30B9\u30BB\u30BD\u30BF\u30C1\u30C4\u30C6\u30C8\u30CA\u30CB\u30CC\u30CD\u30CE\u30CF\u30D2\u30D5\u30D8\u30DB\u30DE\u30DF\u30E0\u30E1\u30E2\u30E4\u30E6\u30E8\u30E9\u30EA\u30EB\u30EC\u30ED\u30EF\u30F2\u30F3\u30A1\u30A3\u30A5\u30A7\u30A9\u30C3\u30E3\u30E5\u30E7\u30FC\u30FB';
+  var hw = '\uFF71\uFF72\uFF73\uFF74\uFF75\uFF76\uFF77\uFF78\uFF79\uFF7A\uFF7B\uFF7C\uFF7D\uFF7E\uFF7F\uFF80\uFF81\uFF82\uFF83\uFF84\uFF85\uFF86\uFF87\uFF88\uFF89\uFF8A\uFF8B\uFF8C\uFF8D\uFF8E\uFF8F\uFF90\uFF91\uFF92\uFF93\uFF94\uFF95\uFF96\uFF97\uFF98\uFF99\uFF9A\uFF9B\uFF9C\uFF66\uFF9D\uFF67\uFF68\uFF69\uFF6A\uFF6B\uFF6F\uFF6C\uFF6D\uFF6E\uFF70\uFF65';
+  return v.replace(/[\u30A2-\u30F6\u30FC\u30FB\u3000]/g, function(c) {
+    if (c === '\u3000') return ' ';
+    var i = fw.indexOf(c);
+    return i >= 0 ? hw.charAt(i) : c;
+  });
+}
 
 async function searchEmployee() {
   const query = document.getElementById('searchInput').value.trim();
@@ -7287,6 +7305,7 @@ async function searchEmployee() {
   let isRomajiSearch = false;
   let romajiODataKey = null;
   let seiriMatchNum = null;  // 数字検索時、整理番号一致を表示するための値
+  let kanaSearchInfo = null; // カナ検索時、フリガナ一致チップ表示用
   try {
     let filter;
     let dateResults = null;   // 生年月日検索はクライアント側で確定 (UTC保存ズレ対応)
@@ -7360,8 +7379,35 @@ async function searchEmployee() {
       var seen = {};
       var variants = [];
       [qOrig, qKata, qHira].forEach(function(v) { if (v && !seen[v]) { seen[v] = 1; variants.push(v); } });
-      var orClauses = variants.map(function(v) { return "substringof('" + v + "',Title)"; }).join(' or ');
-      filter = "$filter=(" + orClauses + ")&$top=30";
+      var clauses = variants.map(function(v) { return "substringof('" + v + "',Title)"; });
+
+      // カナ検索 → 漢字氏名にもヒットさせる (例: タナカ → 田中)
+      var isKanaQuery = /^[ぁ-んァ-ヶー\s　]+$/.test(query);
+      if (isKanaQuery) {
+        // ① 苗字辞書の逆引き: カナ→ローマ字→SURNAME_ROMAJI から漢字姓候補
+        if (typeof kanaToRomaji === 'function' && typeof SURNAME_ROMAJI !== 'undefined') {
+          var kanjiCands = {};
+          var tokens = toKatakana(query).split(/[\s　]+/).filter(Boolean);
+          tokens.forEach(function(tok) {
+            var roma = String(kanaToRomaji(tok) || '').toLowerCase().replace(/[^a-z]/g, '');
+            if (!roma) return;
+            for (var kj in SURNAME_ROMAJI) {
+              if (String(SURNAME_ROMAJI[kj]).toLowerCase() === roma) kanjiCands[kj] = 1;
+            }
+          });
+          Object.keys(kanjiCands).slice(0, 8).forEach(function(kj) {
+            clauses.push("substringof('" + kj.replace(/'/g, "''") + "',Title)");
+          });
+        }
+        // ② 口座名義フリガナ (半角カナ) でも照合 — 辞書に無い姓・名前側もカバー
+        if (typeof F !== 'undefined' && F.meigi) {
+          var qHan = toHankakuKana(toKatakana(query)).replace(/'/g, "''");
+          if (qHan) clauses.push("substringof('" + qHan + "'," + F.meigi + ")");
+          clauses.push("substringof('" + qKata + "'," + F.meigi + ")");
+          kanaSearchInfo = { qOrig: qOrig, qKata: qKata, qHira: qHira, qHan: qHan };
+        }
+      }
+      filter = "$filter=(" + clauses.join(' or ') + ")&$top=30";
     }
     const results = (dateResults !== null) ? dateResults : await spGet(LIST_EMPLOYEES_GUID, filter);
 
@@ -7411,6 +7457,17 @@ async function searchEmployee() {
       if (seiriMatchNum != null && emp[F.seiriNo] != null && String(emp[F.seiriNo]) === String(seiriMatchNum)) {
         seiriChipHtml = '<div style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:1px solid #a5d6a7;border-radius:8px;padding:2px 9px;font-size:11px;font-weight:700;color:#2e7d32;margin-bottom:6px;letter-spacing:0.3px;">🏥 整理番号 ' + escHtml(String(emp[F.seiriNo])) + '</div>';
       }
+      // カナ検索で氏名(漢字)に直接ヒットしなかった場合、何で一致したか分かるよう
+      // 口座名義フリガナのチップを表示
+      let furiganaChipHtml = '';
+      if (kanaSearchInfo && F.meigi) {
+        const _t = String(emp.Title || '');
+        const _titleHit = [kanaSearchInfo.qOrig, kanaSearchInfo.qKata, kanaSearchInfo.qHira].some(function(v) { return v && _t.indexOf(v) >= 0; });
+        const _mg = String(emp[F.meigi] || '');
+        if (!_titleHit && _mg && ((kanaSearchInfo.qHan && _mg.indexOf(kanaSearchInfo.qHan) >= 0) || _mg.indexOf(kanaSearchInfo.qKata) >= 0)) {
+          furiganaChipHtml = '<div style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#e1f5fe,#b3e5fc);border:1px solid #81d4fa;border-radius:8px;padding:2px 9px;font-size:11px;font-weight:700;color:#0277bd;margin-bottom:6px;letter-spacing:0.3px;">🔤 ' + escHtml(_mg) + '</div>';
+        }
+      }
       return `
         <div class="card card-clickable" style="position:relative;padding-right:28px;${resignedStyle}" onclick='selectEmployee(${empJson})'>
           <span style="position:absolute;top:14px;right:12px;color:var(--primary);font-size:22px;line-height:1;">&#8250;</span>
@@ -7421,6 +7478,7 @@ async function searchEmployee() {
           </div>
           ${romajiChipHtml}
           ${seiriChipHtml}
+          ${furiganaChipHtml}
           ${hakensaki ? '<div style="display:inline-flex;align-items:center;gap:4px;background:rgba(98,100,167,0.1);border:1px solid rgba(98,100,167,0.2);border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600;color:var(--primary);margin-bottom:6px;">🏭 ' + escHtml(hakensaki) + '</div>' : ''}
           <div style="display:flex;gap:4px 14px;font-size:12px;color:var(--text-light);flex-wrap:wrap;align-items:center;line-height:1.5;">
             <span>📅 入社 ${formatDate(nyushaRaw)}${tenureHtml}</span>
