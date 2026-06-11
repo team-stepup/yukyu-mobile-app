@@ -14777,7 +14777,10 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
               '<td class="hd-inner-l" style="white-space:normal;">法定休日</td>' +
               '<td class="hd-inner-v" style="text-align:right;font-weight:600;">' + yen(ryoHoutei) + ' ／時間</td>' +
               '<td class="hd-inner-l" style="white-space:normal;">計算単位</td>' +
-              '<td class="hd-inner-v" style="text-align:right;font-weight:600;">' + (tani ? escHtml(tani) + ' 分' : '－') + '</td>' +
+              // 「分」の自動判定: SPの値が数字のみ(例 "15")なら「分」を付加、
+              // 既に文字を含む(例 "時間内1分・時間外15分")ならそのまま表示 (分の重複防止)
+              '<td class="hd-inner-v" style="text-align:right;font-weight:600;">' +
+                (tani ? (/^[0-9０-９\s]+$/.test(String(tani).trim()) ? escHtml(tani) + ' 分' : escHtml(tani)) : '－') + '</td>' +
             '</tr>' +
           '</table></td></tr>' +
         '<tr><th>15　支払い方法</th><td>毎月 ' + escHtml(shimebi || '末日') + ' 締め、' +
