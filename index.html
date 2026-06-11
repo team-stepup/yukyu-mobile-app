@@ -28357,6 +28357,10 @@ async function loadEmployeeProfile() {
     html += '<span class="acc-arrow">&#9654;</span>';
     html += '</div>';
     html += '<div class="accordion-body">';
+    // 在留・国籍: 社員ファイルに保存済みの在留カード画像からOCRで自動入力
+    if (cat.id === 'residence') {
+      html += '<button onclick="ocrZairyuFromEmpFolder()" style="width:calc(100% - 16px);margin:8px;background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,105,92,0.3);">🪪 社員ファイルの在留カードから自動入力（OCR）</button>';
+    }
     // View mode table
     html += '<div id="view_' + cat.id + '"><table class="acc-table">';
     // 1行を描画 (✏️編集ボタン付き)
@@ -33000,6 +33004,209 @@ async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
   } catch (e) {
     console.error('Doc upload error:', e);
     showToast('書類アップロードエラー: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// 社員ファイル内の在留カード画像 → OCR → 社員データへ保存
+//   登録時にOCRが失敗した社員 (例: イワノ ケレン) を、アップロード済みの
+//   画像から後追いでデータ化する。在留・国籍セクションのボタンから起動。
+// ============================================================
+async function ocrZairyuFromEmpFolder() {
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  showToast('📂 社員ファイルから在留カードを探しています…', 'info');
+  try {
+    // プレビューの「現在の値」表示用に keyMap を準備 (キャッシュ済みなら即時)
+    try { var _m = await fetchEmployeeFields(); if (_m) editKeyMap = buildFieldKeyMap(_m); } catch (_) {}
+    var path = await getEmpFolderPath(emp);
+    if (!path) { showToast('社員ファイルを特定できません (部課・番号・氏名を確認)', 'error'); return; }
+    var token = await getToken();
+    var encodedPath = encodeURIComponent(path).replace(/%2F/g, '/');
+    var resp = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')/Files?$select=Name,ServerRelativeUrl", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) { showToast('社員ファイルのフォルダが見つかりません (HTTP ' + resp.status + ')', 'error'); return; }
+    var data = await resp.json();
+    var files = (data.d && data.d.results) || [];
+    var imgs = files.filter(function(f) { return /\.(jpe?g|png|webp|heic)$/i.test(f.Name || ''); });
+    if (!imgs.length) { showToast('フォルダに画像がありません。先に在留カードを撮影・アップロードしてください', 'error'); return; }
+    var zairyu = imgs.filter(function(f) { return String(f.Name).indexOf('在留') >= 0; });
+    var cands = zairyu.length ? zairyu : imgs;
+    if (cands.length === 1) { _ocrEmpFolderFile(cands[0]); return; }
+    // 複数候補 → 選択オーバーレイ (表面を選んでもらう)
+    window._empOcrCands = cands;
+    var old = document.getElementById('empOcrPickOverlay'); if (old) old.remove();
+    var ov = document.createElement('div');
+    ov.id = 'empOcrPickOverlay'; ov.className = 'no-print';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    var rows = cands.map(function(f, i) {
+      return '<button onclick="_ocrEmpFolderFileAt(' + i + ')" style="display:block;width:100%;text-align:left;background:#f7f8fc;border:1.5px solid #d8dcf0;border-radius:9px;padding:10px 12px;margin-bottom:6px;cursor:pointer;font-size:13px;font-weight:600;">🖼 ' + escHtml(f.Name) + '</button>';
+    }).join('');
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+        '<div style="padding:13px 16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">' +
+          '<h3 style="margin:0;font-size:14.5px;color:#00695c;">🪪 読み取る画像を選択（表面）</h3>' +
+          '<button onclick="document.getElementById(\'empOcrPickOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999;">×</button>' +
+        '</div>' +
+        '<div style="padding:14px 16px;">' +
+          (zairyu.length ? '' : '<div style="font-size:11px;color:#e65100;background:#fff3e0;border-radius:6px;padding:6px 9px;margin-bottom:8px;">「在留」の名前が付いた画像が無いため全画像を表示しています。在留カード（表面）を選んでください</div>') +
+          rows +
+        '</div>' +
+      '</div>';
+    ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
+  } catch (e) {
+    console.error('ocrZairyuFromEmpFolder error:', e);
+    showToast('読み取り準備に失敗: ' + (e.message || e), 'error');
+  }
+}
+
+function _ocrEmpFolderFileAt(i) {
+  var ov = document.getElementById('empOcrPickOverlay'); if (ov) ov.remove();
+  var f = (window._empOcrCands || [])[i];
+  if (f) _ocrEmpFolderFile(f);
+}
+
+function _empOcrProg(msg) {
+  var ov = document.getElementById('empOcrProgOverlay');
+  if (!msg) { if (ov) ov.remove(); return; }
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'empOcrProgOverlay'; ov.className = 'no-print';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px 26px;box-shadow:0 10px 40px rgba(0,0,0,0.3);text-align:center;">' +
+      '<div style="font-size:26px;margin-bottom:8px;">🪪</div>' +
+      '<div id="empOcrProgTxt" style="font-size:13.5px;font-weight:700;color:#00695c;"></div></div>';
+    document.body.appendChild(ov);
+  }
+  var t = document.getElementById('empOcrProgTxt');
+  if (t) t.textContent = msg;
+}
+
+async function _ocrEmpFolderFile(f) {
+  try {
+    _empOcrProg('画像を取得中…');
+    var token = await getToken();
+    var encUrl = encodeURIComponent(f.ServerRelativeUrl).replace(/%2F/g, '/');
+    var binResp = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + encUrl + "')/$value", {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!binResp.ok) throw new Error('画像の取得に失敗 (HTTP ' + binResp.status + ')');
+    var blob = await binResp.blob();
+    var dataUrl = await new Promise(function(res, rej) {
+      var r = new FileReader();
+      r.onload = function() { res(r.result); };
+      r.onerror = function() { rej(new Error('画像の読み込みに失敗')); };
+      r.readAsDataURL(blob);
+    });
+    _empOcrProg('OCRエンジンを準備中…');
+    await _ensureTesseract();
+    var procUrl = await _ocrPreprocess(dataUrl);
+    var worker = await Tesseract.createWorker('jpn+eng', 1, {
+      logger: function(m) {
+        if (m.status === 'recognizing text') _empOcrProg('文字を認識中… ' + Math.round((m.progress || 0) * 100) + '%');
+      }
+    });
+    var rec = await worker.recognize(procUrl);
+    await worker.terminate();
+    _empOcrProg(null);
+    var text = (rec && rec.data && rec.data.text) || '';
+    if (!text.trim()) { showToast('文字を検出できませんでした。鮮明な画像で撮り直してください', 'error'); return; }
+    var parsed = parseZairyuCardText(text);
+    if (!Object.keys(parsed).length) { showToast('項目を抽出できませんでした。在留カードの表面の画像を選んでください', 'error'); return; }
+    _showEmpOcrApplyPreview(parsed, f.Name);
+  } catch (e) {
+    _empOcrProg(null);
+    console.error('_ocrEmpFolderFile error:', e);
+    showToast('読み取り失敗: ' + (e.message || e), 'error');
+  }
+}
+
+// 読み取り結果のプレビュー (現在値 → 新値) → 適用で SP社員データへ保存
+function _showEmpOcrApplyPreview(parsed, fileName) {
+  var emp = currentEmployee;
+  if (!emp) return;
+  var km = editKeyMap || {};
+  var labelMap = {
+    tokki1: 'ローマ字氏名', birthday: '生年月日', sex: '性別', nationality: '本(国)籍',
+    zairyuShikaku: '在留資格', zairyuKigen: '在留期限', zairyuKigenCard: '在留期限(カード)', zairyuBikou: '在留カード番号 (備考)'
+  };
+  function curVal(k) {
+    var od = km[k];
+    var v = od ? emp[od] : '';
+    if (v && /^\d{4}-\d{2}-\d{2}T/.test(String(v))) return String(v).substring(0, 10);
+    return (v === null || v === undefined) ? '' : String(v);
+  }
+  var rows = '';
+  Object.keys(parsed).forEach(function(k) {
+    var cv = curVal(k);
+    rows += '<tr>' +
+      '<th style="text-align:left;padding:5px 8px;color:#555;border-bottom:1px solid #eee;white-space:nowrap;">' + escHtml(labelMap[k] || k) + '</th>' +
+      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #eee;font-size:11px;">' + (cv ? escHtml(cv) : '<span style="color:#ccc;">（空欄）</span>') + '</td>' +
+      '<td style="padding:5px 8px;font-weight:700;color:#00695c;border-bottom:1px solid #eee;">→ ' + escHtml(String(parsed[k])) + '</td>' +
+    '</tr>';
+  });
+  window._empOcrParsed = parsed;
+  var old = document.getElementById('empOcrApplyOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'empOcrApplyOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:13px 16px;border-bottom:1px solid #eee;background:#e0f2f1;border-radius:12px 12px 0 0;">' +
+        '<h3 style="margin:0;font-size:14.5px;color:#00695c;">🪪 読み取り結果の確認</h3>' +
+        '<div style="font-size:10.5px;color:#777;margin-top:2px;">画像: ' + escHtml(fileName || '') + '</div>' +
+      '</div>' +
+      '<div style="padding:14px 16px;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+          '<tr><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">項目</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">現在の値</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">読み取り値</th></tr>' +
+          rows +
+        '</table>' +
+        '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:6px;padding:7px 10px;margin-top:10px;">⚠ 「適用して保存」を押すと上記の値で社員データを上書きします。読み取りミスがあれば「キャンセル」して、各項目の ✏️ で個別に修正してください。</div>' +
+      '</div>' +
+      '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button onclick="document.getElementById(\'empOcrApplyOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+        '<button onclick="_applyEmpOcrToSp()" id="empOcrApplyBtn" style="background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">✓ 適用して保存</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+async function _applyEmpOcrToSp() {
+  var emp = currentEmployee;
+  var parsed = window._empOcrParsed || {};
+  if (!emp || !emp.Id || !Object.keys(parsed).length) return;
+  var btn = document.getElementById('empOcrApplyBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
+  try {
+    var meta = await fetchEmployeeFields();
+    var km = buildFieldKeyMap(meta);
+    var body = {};
+    var dateKeys = { birthday: 1, zairyuKigen: 1, zairyuKigenCard: 1 };
+    Object.keys(parsed).forEach(function(k) {
+      var od = km[k];
+      if (!od) { console.warn('[在留OCR保存] フィールド未解決:', k); return; }
+      var v = parsed[k];
+      if (k === 'sex') v = (v === '女') ? '女性' : (v === '男') ? '男性' : v;   // Choice 値に合わせる
+      if (dateKeys[k]) v = v + 'T00:00:00Z';
+      body[od.replace(/^OData_/, '')] = v;   // spPatchEmployee が EntityPropertyName へ変換
+    });
+    if (!Object.keys(body).length) { showToast('保存できる項目がありません', 'error'); return; }
+    await spPatchEmployee(emp.Id, body);
+    var ov = document.getElementById('empOcrApplyOverlay'); if (ov) ov.remove();
+    showToast('✓ 在留カードの情報を社員データに保存しました', 'success');
+    // 最新データで画面を再描画
+    var updated = await fetchFullEmployee(emp[F.syainNo]);
+    if (updated) {
+      currentEmployee = updated;
+      if (typeof loadLeaveDetails === 'function') loadLeaveDetails();
+    }
+  } catch (e) {
+    console.error('_applyEmpOcrToSp error:', e);
+    showToast('保存失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '✓ 適用して保存'; }
   }
 }
 
