@@ -31464,11 +31464,21 @@ async function startEditField(catId, fieldKey) {
   if (!wrap) return;
   // 元のHTMLを保存しておいてキャンセル時に戻せるようにする
   if (!wrap.dataset.originalHtml) wrap.dataset.originalHtml = wrap.innerHTML;
+  // 通勤手当の編集時は再計算ボタンを併設 (住所変更時などに距離から再計算→保存)
+  var extraHtml = '';
+  if (fieldKey === 'tsukinTeate') {
+    extraHtml =
+      '<div style="width:100%;margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+        '<button type="button" onclick="autoCalcCommuteForDetailEdit()" style="background:#fff;border:1.5px solid #2e7d32;color:#2e7d32;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;">📍 距離から再計算</button>' +
+        '<span id="detailTsukinCalcStatus" style="font-size:10.5px;color:#666;flex:1;min-width:0;word-break:break-all;">登録住所 → 派遣先の片道距離 × 往復 × 12円。結果を確認して💾保存</span>' +
+      '</div>';
+  }
   wrap.innerHTML =
     '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;">' +
       '<div style="flex:1;min-width:120px;">' + inputHtml + '</div>' +
       '<button onclick="saveEditField(\'' + catId + '\',\'' + fieldKey + '\')" style="background:#ef6c00;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">💾 保存</button>' +
       '<button onclick="cancelEditField(\'' + fieldKey + '\')" style="background:#9e9e9e;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;">×</button>' +
+      extraHtml +
     '</div>';
   // 連動ドロップダウン用フィルタ
   Object.keys(DROPDOWN_NEW_FIELDS).forEach(function(depKey) {
@@ -33216,6 +33226,54 @@ async function autoCalcCommuteForAddForm() {
 
   teateEl.value = r.teate;
   st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">派遣先: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>'));
+}
+
+// 社員情報詳細のインライン編集 (通勤手当) から再計算
+//   登録住所→派遣先(部課)で片道距離を測り、editField_tsukinTeate に往復手当をセット。
+//   保存は既存の💾ボタンで行う (確認してから反映)。
+async function autoCalcCommuteForDetailEdit() {
+  var statusEl = document.getElementById('detailTsukinCalcStatus');
+  var teateEl = document.getElementById('editField_tsukinTeate');
+  function st(state, msg, html) { if (statusEl) statusEl.innerHTML = html || _tsukinCalcStatusHtml(state, msg); }
+  if (!teateEl) { st('err', '通勤手当の入力欄が見つかりません'); return; }
+
+  var emp = (typeof currentEmployee !== 'undefined') ? currentEmployee : null;
+  if (!emp) { st('err', '社員データが見つかりません'); return; }
+
+  // 登録住所 (編集中の住所欄が開いていればそちらを優先 → 普段は保存済みの住所)
+  var homeAddr = '';
+  var addrInp = document.getElementById('editField_address');
+  if (addrInp && addrInp.value) homeAddr = addrInp.value;
+  if (!homeAddr && editKeyMap && editKeyMap['address']) homeAddr = emp[editKeyMap['address']] || '';
+  if (!homeAddr) {
+    for (var k in emp) {
+      if (k.indexOf('x4f4f') >= 0 && k.indexOf('x6240') >= 0) { homeAddr = emp[k] || ''; break; }
+    }
+  }
+  homeAddr = String(homeAddr || '').trim();
+  if (!homeAddr) { st('warn', '⚠ 社員の住所が未登録です。先に住所を入力してください'); return; }
+
+  var bukaVal = (typeof getBukaValue === 'function') ? getBukaValue(emp) : '';
+  if (!bukaVal) { st('warn', '⚠ 派遣先(部課)が未設定です'); return; }
+
+  st('calc', '距離を計算しています… (自宅 → 派遣先)');
+  var map = await loadHakensakiByBukaMap();
+  if (!map) { st('err', '⚠ 派遣先リスト取得失敗'); return; }
+  var workAddr = map[bukaVal];
+  if (!workAddr) {
+    var num = (bukaVal.match(/^(\d+)/) || [])[1];
+    if (num) {
+      var fb = Object.keys(map).find(function(k2){ return k2.indexOf(num) === 0; });
+      if (fb) workAddr = map[fb];
+    }
+  }
+  if (!workAddr) { st('err', '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません (派遣先情報リストに住所を登録してください)'); return; }
+
+  var r = await computeCommuteAllowance(homeAddr, workAddr);
+  if (r.error) { st('err', '❌ ' + r.error); return; }
+
+  teateEl.value = r.teate;
+  st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">派遣先: ' + escHtml(workAddr) + '　→ 💾保存で確定</span>'));
 }
 
 // 移動入社フォームから自動計算
