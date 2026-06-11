@@ -31238,21 +31238,23 @@ async function loadEditDropdownOptions(keyMap) {
 function refilterLinkedDropdown(dependentKey) {
   var conf = DROPDOWN_NEW_FIELDS[dependentKey];
   if (!conf || !conf.linkedTo) return;
-  var depSel = document.getElementById('editField_' + dependentKey);
+  // 編集画面 (editField_) と 新規社員登録 (addField_) の両方に対応
+  var depSel = document.getElementById('editField_' + dependentKey) || document.getElementById('addField_' + dependentKey);
   if (!depSel) return;
   // 親フィールドの値取得
   //   親の編集欄が開いていればその値、開いていなければ社員の保存済みの値で絞り込む
   //   (例: 組織単位だけを編集 → その社員の派遣先(部課)で絞り込まれた組織単位を出す)
-  var srcSel = document.getElementById('editField_' + conf.linkedTo);
+  var srcSel = document.getElementById('editField_' + conf.linkedTo) || document.getElementById('addField_' + conf.linkedTo);
   var srcVal = '';
   if (srcSel) {
     if (srcSel.dataset.dropdownNew === '1' && srcSel.value === '__new__') {
-      var custom = document.getElementById('editField_' + conf.linkedTo + '_custom');
+      var custom = document.getElementById(srcSel.id + '_custom');
       srcVal = custom ? custom.value.trim() : '';
     } else {
       srcVal = srcSel.value.trim();
     }
-  } else if (typeof currentEmployee !== 'undefined' && currentEmployee) {
+  } else if (depSel.id.indexOf('editField_') === 0 && typeof currentEmployee !== 'undefined' && currentEmployee) {
+    // 社員保存値フォールバックは編集画面のみ (新規登録では無関係な社員の値で絞らない)
     if (conf.linkedTo === 'hakensaki') {
       srcVal = (typeof getBukaValue === 'function') ? String(getBukaValue(currentEmployee) || '').trim() : '';
     } else if (typeof editKeyMap !== 'undefined' && editKeyMap && editKeyMap[conf.linkedTo]) {
@@ -31279,7 +31281,7 @@ function refilterLinkedDropdown(dependentKey) {
   // 現在値が候補に無ければクリア
   if (currentVal && currentVal !== '__new__' && filtered.indexOf(currentVal) < 0) {
     depSel.value = '';
-    var customEl = document.getElementById('editField_' + dependentKey + '_custom');
+    var customEl = document.getElementById(depSel.id + '_custom');
     if (customEl) customEl.style.display = 'none';
   }
 }
@@ -33342,6 +33344,11 @@ async function renderAddEmployeeForm() {
   const keyMap = buildFieldKeyMap(meta);
   editKeyMap = keyMap;
 
+  // 銀行/支店/本(国)籍/在留資格 等の dropdown_new 候補 (SP社員データの distinct 値) を読み込む
+  //   ※これが無いと、編集画面を一度も開いていないセッション (スマホ直行など) で
+  //     ドロップダウンが「（未選択）+新規入力」だけになる
+  try { await loadEditDropdownOptions(keyMap); } catch (e) { console.warn('dropdown options load failed:', e); }
+
   let html = '';
   // Essential fields first
   html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
@@ -33509,8 +33516,10 @@ async function renderAddEmployeeForm() {
       const choices = getFieldChoices(field.key, keyMap);
       const inputHtml = getEditInputHtml(field, '', fieldType, choices);
       if (!inputHtml) return;
-      // Change id to addField_ prefix
-      let addInput = inputHtml.replace('id="editField_', 'id="addField_');
+      // editField_ → addField_ へ全置換 (id だけでなく onclick/onchange 内の参照・
+      // _custom/_picker/_sel 等の付随IDも揃える。最初の1か所だけの置換だと
+      // 📅カレンダー・✕クリア・「＋新規入力」切替などの内部参照が壊れる)
+      let addInput = inputHtml.replace(/editField_/g, 'addField_');
       // 通勤方法にonchangeイベント追加
       if (field.key === 'tsukinHouhou') {
         addInput = addInput.replace('id="addField_tsukinHouhou"', 'id="addField_tsukinHouhou" onchange="onAddTsukinChange()"');
@@ -33554,7 +33563,7 @@ async function renderAddEmployeeForm() {
         const choices = getFieldChoices(extKey, keyMap);
         const inputHtml = getEditInputHtml(extField, '', ftype, choices);
         if (!inputHtml) return;
-        const addInput = inputHtml.replace('id="editField_', 'id="addField_');
+        const addInput = inputHtml.replace(/editField_/g, 'addField_');
         html += '<tr><th>' + escHtml(extField.label) + '</th><td>' + addInput + '</td></tr>';
       });
     }
@@ -34136,6 +34145,11 @@ async function saveNewEmployee() {
         const inputEl = document.getElementById('addField_' + field.key);
         if (!inputEl) return;
         let val = inputEl.value.trim();
+        // dropdown_new の「＋新規入力」選択時は付随テキスト欄の値を使う
+        if (val === '__new__') {
+          const cust = document.getElementById('addField_' + field.key + '_custom');
+          val = cust ? cust.value.trim() : '';
+        }
         if (!val) return;
 
         // 派遣先 → 部課フィールドに書き込み
