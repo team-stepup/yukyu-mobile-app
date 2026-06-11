@@ -33053,9 +33053,10 @@ function onAddTsukinChange() {
 // 通勤距離 → 通勤手当 自動計算
 // 仕様: 自宅住所 → 派遣先住所 の片道運転距離 (km) を計測し、
 //   2km 未満: 0円 (支給なし)
-//   2km 以上: round(片道km) × 2(往復) × 12円 = 片道km × 24円/日
-//   ※労働契約書の表記「片道◯km(1Km12円計算)」= 手当÷12÷2 と整合 (往復ベース)。
-//   ※マイカー通勤届の経路図も同じ OSRM 片道距離 → 片道km表記が一致する。
+//   2km 以上: 片道km(小数1位) × 2(往復) × 12円 → 1円未満切り上げ
+//   例: 片道9.7km × 2 × 12円 = 232.8円 → 233円/日
+//   ※労働契約書の表記「片道◯km(1Km12円計算・1円未満切上げ)」と一致 (往復ベース)。
+//   ※マイカー通勤届の経路図も同じ OSRM 片道距離 (小数1位表示) → 片道kmが一致する。
 // 距離取得: GSI/Nominatim で geocode → OSRM public で運転距離 (片道)
 // すべて無料、APIキー不要。
 // ============================================================
@@ -33167,11 +33168,13 @@ async function computeCommuteAllowance(homeAddress, workAddress) {
     teate = 0;
     note = '片道2km未満のため通勤手当なし';
   } else {
-    // 会社規定: 片道km(四捨五入) × 往復(×2) × 12円/km = 1日あたり手当
-    // 例: 片道9.7km → 10km × 2 × 12円 = 240円/日
-    var kmRounded = Math.round(km);
-    teate = kmRounded * 2 * 12;
-    note = '片道 約' + km.toFixed(1) + 'km → ' + kmRounded + 'km × 往復 × 12円 = ' + teate.toLocaleString() + '円/日';
+    // 会社規定: 片道km(小数1位・通勤届と同表記) × 往復(×2) × 12円/km、
+    //           1円未満は切り上げ (契約書の「1Km12円計算・1円未満切上げ」と一致)
+    // 例: 片道9.7km × 2 × 12円 = 232.8円 → 切上げ 233円/日
+    var km1 = Math.round(km * 10) / 10;   // 小数1位 (通勤届の表示と同じ)
+    var raw = km1 * 2 * 12;
+    teate = Math.ceil(raw);
+    note = '片道 ' + km1.toFixed(1) + 'km × 往復 × 12円 = ' + (Math.round(raw * 10) / 10).toLocaleString() + '円 → 切上げ ' + teate.toLocaleString() + '円/日';
   }
   return { km: km, teate: teate, note: note, home: home, work: work, workAddress: workAddress };
 }
