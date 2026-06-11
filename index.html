@@ -33251,13 +33251,20 @@ async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
       const docType = DOC_TYPES.find(d => d.id === docId);
       const label = docType ? docType.label : docId;
 
+      // 表裏のある書類: 1枚目=表 / 2枚目=裏 (3枚目以降は連番)
+      const OMOTE_URA_DOCS = { mynumber: 1, zairyu: 1, license: 1, koyou: 1, jibaiseki: 1 };
       for (let i = 0; i < pages.length; i++) {
         const page = pages[i];
         const ext = page.file.name.split('.').pop() || 'jpg';
-        // Single page: マイナンバー.jpg, Multiple pages: マイナンバー_1.jpg, マイナンバー_2.jpg
-        const fileName = pages.length === 1
-          ? label + '.' + ext
-          : label + '_' + (i + 1) + '.' + ext;
+        // ファイル名: 「{社員番号} {書類名}_表.jpg」/「{社員番号} {書類名}_裏.jpg」
+        //   表裏でない書類(通帳/任意保険/車検証 等)は 「{社員番号} {書類名}.jpg」(複数は _1, _2)
+        let suffix;
+        if (OMOTE_URA_DOCS[docId]) {
+          suffix = (i === 0) ? '_表' : (i === 1) ? '_裏' : '_' + (i + 1);
+        } else {
+          suffix = (pages.length === 1) ? '' : '_' + (i + 1);
+        }
+        const fileName = syainNo + ' ' + label + suffix + '.' + ext;
         await uploadFileToSp(empFolder, fileName, page.file);
         totalFiles++;
       }
