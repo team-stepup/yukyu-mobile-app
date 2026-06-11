@@ -5345,12 +5345,12 @@ select.sankyu-edit-input {
         <div class="home-section-icon search">🔍</div>
         <div class="home-section-titles">
           <div class="home-section-title">社員検索</div>
-          <div class="home-section-sub">番号・名前・生年月日・ローマ字・整理番号で検索</div>
+          <div class="home-section-sub">番号・名前・生年月日（月日だけも可）・ローマ字・整理番号で検索</div>
         </div>
       </div>
       <div class="home-search-wrap">
         <div style="position:relative;flex:1;">
-          <input id="searchInput" type="text" placeholder="例: 60124 / 850(整理番号) / 田中 / 1985-04-01 / TANAKA" style="width:100%;padding-right:30px;">
+          <input id="searchInput" type="text" placeholder="例: 60124 / 850(整理番号) / 田中 / 2003/3/28 / 3/28 / TANAKA" style="width:100%;padding-right:30px;">
           <button id="searchClearBtn" onclick="resetSearch()"
             style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#bbb;cursor:pointer;padding:0;line-height:1;">&times;</button>
         </div>
@@ -7251,6 +7251,14 @@ function parseDateQuery(query) {
   if (m && parseInt(m[1]) >= 1900 && parseInt(m[1]) <= 2100) {
     return { year: parseInt(m[1]), month: m[2] ? parseInt(m[2]) : null, day: m[3] ? parseInt(m[3]) : null };
   }
+  // 月日のみ: 3/28, 03-28, 3.28, 3月28日 (区切り必須 — 純数字は社員番号/整理番号検索と衝突するため)
+  const md = query.match(/^(\d{1,2})[\.\/\-](\d{1,2})$/) || query.match(/^(\d{1,2})月(\d{1,2})日?$/);
+  if (md) {
+    const mo = parseInt(md[1]), dy = parseInt(md[2]);
+    if (mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
+      return { year: null, month: mo, day: dy };
+    }
+  }
   return null;
 }
 
@@ -7281,21 +7289,45 @@ async function searchEmployee() {
   let seiriMatchNum = null;  // 数字検索時、整理番号一致を表示するための値
   try {
     let filter;
+    let dateResults = null;   // 生年月日検索はクライアント側で確定 (UTC保存ズレ対応)
     const dateQ = parseDateQuery(query);
     if (dateQ) {
       // Birthday search
+      //   SPの生年月日は2形式が混在: 旧データ=JST 0時→前日15:00Z / アプリ保存=当日00:00Z。
+      //   そのためサーバーには広めの範囲で問い合わせ、クライアントで「ローカル(JST)日付の
+      //   一致」に絞り込む。これで同一人物の退社/在職レコード両方が漏れなくヒットする。
       const bdField = 'OData__x751f__x5e74__x6708__x65e5_';
-      if (dateQ.month && dateQ.day) {
-        const ds = dateQ.year + '-' + String(dateQ.month).padStart(2,'0') + '-' + String(dateQ.day).padStart(2,'0');
-        filter = "$filter=" + bdField + " ge datetime'" + ds + "T00:00:00Z' and " + bdField + " lt datetime'" + ds + "T23:59:59Z'&$top=50";
-      } else if (dateQ.month) {
-        const s = dateQ.year + '-' + String(dateQ.month).padStart(2,'0') + '-01';
-        const eM = dateQ.month === 12 ? 1 : dateQ.month + 1;
-        const eY = dateQ.month === 12 ? dateQ.year + 1 : dateQ.year;
-        const e = eY + '-' + String(eM).padStart(2,'0') + '-01';
-        filter = "$filter=" + bdField + " ge datetime'" + s + "T00:00:00Z' and " + bdField + " lt datetime'" + e + "T00:00:00Z'&$top=50";
+      function _bdLocalMatch(emp) {
+        const v = emp[bdField];
+        if (!v) return false;
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return false;
+        if (dateQ.year && d.getFullYear() !== dateQ.year) return false;
+        if (dateQ.month && (d.getMonth() + 1) !== dateQ.month) return false;
+        if (dateQ.day && d.getDate() !== dateQ.day) return false;
+        return true;
+      }
+      if (!dateQ.year) {
+        // 月日のみ (例 3/28): 年をまたぐため全件取得してローカル月日で絞り込み
+        const all = await spGetAll(LIST_EMPLOYEES_GUID, '$top=2000');
+        dateResults = (all || []).filter(_bdLocalMatch);
       } else {
-        filter = "$filter=" + bdField + " ge datetime'" + dateQ.year + "-01-01T00:00:00Z' and " + bdField + " lt datetime'" + (dateQ.year + 1) + "-01-01T00:00:00Z'&$top=50";
+        // 年あり: 前後1日(年月のみは前後)を含む範囲で取得 → ローカル日付で確定
+        let s, e;
+        if (dateQ.month && dateQ.day) {
+          s = new Date(Date.UTC(dateQ.year, dateQ.month - 1, dateQ.day - 1));
+          e = new Date(Date.UTC(dateQ.year, dateQ.month - 1, dateQ.day + 2));
+        } else if (dateQ.month) {
+          s = new Date(Date.UTC(dateQ.year, dateQ.month - 1, 0));
+          e = new Date(Date.UTC(dateQ.year, dateQ.month, 2));
+        } else {
+          s = new Date(Date.UTC(dateQ.year - 1, 11, 31));
+          e = new Date(Date.UTC(dateQ.year + 1, 0, 2));
+        }
+        const iso = function(d) { return d.toISOString().substring(0, 19) + 'Z'; };
+        const wideFilter = "$filter=" + bdField + " ge datetime'" + iso(s) + "' and " + bdField + " lt datetime'" + iso(e) + "'&$top=500";
+        const fetched = await spGet(LIST_EMPLOYEES_GUID, wideFilter);
+        dateResults = (fetched || []).filter(_bdLocalMatch);
       }
     } else if (/^\d+$/.test(query)) {
       // Number only → 社員番号 または 健康保険証の整理番号 で検索 (どちらも数値型)
@@ -7331,7 +7363,7 @@ async function searchEmployee() {
       var orClauses = variants.map(function(v) { return "substringof('" + v + "',Title)"; }).join(' or ');
       filter = "$filter=(" + orClauses + ")&$top=30";
     }
-    const results = await spGet(LIST_EMPLOYEES_GUID, filter);
+    const results = (dateResults !== null) ? dateResults : await spGet(LIST_EMPLOYEES_GUID, filter);
 
     if (!results || results.length === 0) {
       container.innerHTML = '<div class="empty-state"><p>該当する社員が見つかりません</p></div>';
