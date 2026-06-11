@@ -33041,11 +33041,13 @@ function onAddTsukinChange() {
 
 // ============================================================
 // 通勤距離 → 通勤手当 自動計算
-// 仕様: 自宅住所 → 派遣先住所 の運転距離 (km)
+// 仕様: 自宅住所 → 派遣先住所 の片道運転距離 (km) を計測し、
 //   2km 未満: 0円 (支給なし)
-//   2km 以上: round(km) × 12円  ※ユーザー設定 (1kmあたり12円)
-// 距離取得: Nominatim (OSM) で geocode → OSRM public で運転距離
-// すべて無料、APIキー不要。地理院/Google Maps へ差し替え可能。
+//   2km 以上: round(片道km) × 2(往復) × 12円 = 片道km × 24円/日
+//   ※労働契約書の表記「片道◯km(1Km12円計算)」= 手当÷12÷2 と整合 (往復ベース)。
+//   ※マイカー通勤届の経路図も同じ OSRM 片道距離 → 片道km表記が一致する。
+// 距離取得: GSI/Nominatim で geocode → OSRM public で運転距離 (片道)
+// すべて無料、APIキー不要。
 // ============================================================
 var _geocodeCache = {};   // address → {lat, lng}
 var _routeCache = {};     // "lat,lng→lat,lng" → meters
@@ -33153,33 +33155,50 @@ async function computeCommuteAllowance(homeAddress, workAddress) {
   var note;
   if (km < 2) {
     teate = 0;
-    note = '2km未満のため通勤手当なし';
+    note = '片道2km未満のため通勤手当なし';
   } else {
-    teate = Math.round(km) * 12;
-    note = '約 ' + km.toFixed(1) + ' km × 12円 = ' + teate.toLocaleString() + '円';
+    // 会社規定: 片道km(四捨五入) × 往復(×2) × 12円/km = 1日あたり手当
+    // 例: 片道9.7km → 10km × 2 × 12円 = 240円/日
+    var kmRounded = Math.round(km);
+    teate = kmRounded * 2 * 12;
+    note = '片道 約' + km.toFixed(1) + 'km → ' + kmRounded + 'km × 往復 × 12円 = ' + teate.toLocaleString() + '円/日';
   }
   return { km: km, teate: teate, note: note, home: home, work: work, workAddress: workAddress };
+}
+
+// 計算ステータスの共通表示 (state: calc / ok / warn / err)
+function _tsukinCalcStatusHtml(state, msg) {
+  if (state === 'calc') {
+    return '<span style="display:inline-flex;align-items:center;gap:6px;background:#fff3e0;border:1.5px solid #fb8c00;color:#e65100;font-weight:700;font-size:12px;padding:5px 10px;border-radius:8px;">' +
+      '<span class="tsukin-spin" style="display:inline-block;animation:spin 1s linear infinite;">⏳</span> ' + escHtml(msg) + '</span>';
+  }
+  if (state === 'ok') {
+    return '<span style="display:inline-block;background:#e8f5e9;border:1.5px solid #43a047;color:#1b5e20;font-weight:700;font-size:12px;padding:5px 10px;border-radius:8px;line-height:1.5;">' + msg + '</span>';
+  }
+  var c = (state === 'err') ? ['#ffebee', '#e53935', '#b71c1c'] : ['#fffde7', '#fbc02d', '#8a6d00'];
+  return '<span style="display:inline-block;background:' + c[0] + ';border:1.5px solid ' + c[1] + ';color:' + c[2] + ';font-weight:600;font-size:11.5px;padding:4px 9px;border-radius:8px;line-height:1.5;">' + escHtml(msg) + '</span>';
 }
 
 // 新規入社フォームから自動計算
 async function autoCalcCommuteForAddForm() {
   var statusEl = document.getElementById('addField_tsukinCalcStatus');
   var teateEl = document.getElementById('addField_tsukinTeate');
-  if (!teateEl) { if (statusEl) statusEl.textContent = '通勤手当 入力欄が見つかりません'; return; }
-  if (statusEl) statusEl.textContent = '📍 距離計算中…';
+  function st(state, msg, html) { if (statusEl) statusEl.innerHTML = html || _tsukinCalcStatusHtml(state, msg); }
+  if (!teateEl) { st('err', '通勤手当 入力欄が見つかりません'); return; }
+  st('calc', '距離を計算しています… (自宅 → 派遣先)');
 
   var homeAddr = (document.getElementById('addField_address') || {}).value || '';
   var bukaVal = (document.getElementById('addField_buka') || {}).value || '';
   var method = (document.getElementById('addField_tsukinHouhou') || {}).value || '';
   var isCar = method.indexOf('車') >= 0 || method.indexOf('バイク') >= 0 || method.indexOf('原付') >= 0;
 
-  if (!isCar) { if (statusEl) statusEl.textContent = '通勤方法が車/バイクの場合のみ計算します'; return; }
-  if (!homeAddr.trim()) { if (statusEl) statusEl.textContent = '⚠ 自宅住所を入力してください'; return; }
-  if (!bukaVal) { if (statusEl) statusEl.textContent = '⚠ 派遣先を選択してください'; return; }
+  if (!isCar) { st('warn', '通勤方法が車/バイクの場合のみ計算します'); return; }
+  if (!homeAddr.trim()) { st('warn', '⚠ 自宅住所を入力してください'); return; }
+  if (!bukaVal) { st('warn', '⚠ 派遣先を選択してください'); return; }
 
   // 派遣先住所を取得
   var map = await loadHakensakiByBukaMap();
-  if (!map) { if (statusEl) statusEl.textContent = '⚠ 派遣先リスト取得失敗'; return; }
+  if (!map) { st('err', '⚠ 派遣先リスト取得失敗'); return; }
   // バリエーション吸収: そのまま / startsWith / 番号一致
   var workAddr = map[bukaVal];
   if (!workAddr) {
@@ -33190,13 +33209,13 @@ async function autoCalcCommuteForAddForm() {
       if (fallbackKey) workAddr = map[fallbackKey];
     }
   }
-  if (!workAddr) { if (statusEl) statusEl.textContent = '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません'; return; }
+  if (!workAddr) { st('err', '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません'); return; }
 
   var r = await computeCommuteAllowance(homeAddr, workAddr);
-  if (r.error) { if (statusEl) statusEl.textContent = '❌ ' + r.error; return; }
+  if (r.error) { st('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
-  if (statusEl) statusEl.innerHTML = '✓ ' + escHtml(r.note) + ' <span style="color:#999;">(派遣先: ' + escHtml(workAddr) + ')</span>';
+  st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">派遣先: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>'));
 }
 
 // 移動入社フォームから自動計算
@@ -33204,7 +33223,7 @@ async function autoCalcCommuteForIdouForm() {
   var statusEl = document.getElementById('idou_tsukinCalcStatus');
   var teateEl = document.getElementById('idou_tsukinTeate');
   if (!teateEl) { if (statusEl) statusEl.textContent = '通勤手当 入力欄が見つかりません'; return; }
-  if (statusEl) statusEl.textContent = '📍 距離計算中…';
+  if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('calc', '距離を計算しています… (自宅 → 派遣先)');
 
   // 既存社員の住所を取得 (currentEmployee から)
   var emp = (typeof currentEmployee !== 'undefined') ? currentEmployee : null;
@@ -33240,10 +33259,10 @@ async function autoCalcCommuteForIdouForm() {
   if (!workAddr) { if (statusEl) statusEl.textContent = '⚠ 派遣先「' + bukaVal + '」の住所が見つかりません'; return; }
 
   var r = await computeCommuteAllowance(homeAddr, workAddr);
-  if (r.error) { if (statusEl) statusEl.textContent = '❌ ' + r.error; return; }
+  if (r.error) { if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
-  if (statusEl) statusEl.innerHTML = '✓ ' + escHtml(r.note) + ' <span style="color:#999;">(派遣先: ' + escHtml(workAddr) + ')</span>';
+  if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">派遣先: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>');
 }
 
 // 派遣先変更 → 組織単位/職種を絞り込み + 社員番号自動採番
