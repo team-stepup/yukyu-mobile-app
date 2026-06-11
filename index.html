@@ -31153,6 +31153,26 @@ var DROPDOWN_NEW_FIELDS = {
   zairyuShikaku: { label: '在留資格' }
 };
 
+// dropdown_new 候補の非表示ルール (選択肢から隠すだけ。既存社員のデータは変更しない)
+//   表記ゆれ・誤入力由来の値を新規入力時に選べないようにする
+var DROPDOWN_HIDE_RULES = {
+  bankName: function(v) {
+    if (!/^\d/.test(v)) return true;                 // 先頭に銀行番号が無いものは非表示
+    if (/^9900/.test(v)) return v !== '9900:ゆうちよ'; // 9900系は主流表記「9900:ゆうちよ」のみ表示
+    return false;
+  },
+  nationality: function(v) {
+    return v === '日本人' || v === 'ﾌﾞﾗｼﾞﾙ';          // 「日本」「ブラジル」(全角)へ統一
+  },
+  zairyuShikaku: function(v) {
+    // 空白除去・全角数字→半角・ヵ→ヶ で正規化してから比較 (定住者　３年 等の表記ゆれ対応)
+    var n = String(v).replace(/[\s　]/g, '')
+      .replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+      .replace(/ヵ/g, 'ヶ');
+    return ['定住者', '定住者1', '定住者3年', '日本人の配偶者', '留学（1年3ヶ月）'].indexOf(n) >= 0;
+  }
+};
+
 // 職業安定統計R8 の職種コード+名称一覧 (このリストにない場合は「その他」で手入力)
 // 値の保存形式: "コード名称" (例: "03401一般事務員") — Excel の A列に揃える
 var JOB_CODE_LIST = [
@@ -31259,7 +31279,12 @@ async function loadEditDropdownOptions(keyMap) {
         var v = emp[odataKey];
         if (v && String(v).trim()) set.add(String(v).trim());
       });
-      _editDropdownCache[k] = Array.from(set).sort();
+      var arr = Array.from(set).sort();
+      // 非表示ルール適用 (表記ゆれ・誤入力値を選択肢から除外)
+      if (typeof DROPDOWN_HIDE_RULES !== 'undefined' && DROPDOWN_HIDE_RULES[k]) {
+        arr = arr.filter(function(v) { return !DROPDOWN_HIDE_RULES[k](v); });
+      }
+      _editDropdownCache[k] = arr;
     });
     // 組織単位: 派遣先（部課）の値も追加
     var bukaSet = new Set();
@@ -31460,6 +31485,12 @@ function syncDateFromPicker(id) {
   var t = document.getElementById(id);
   if (p && t && p.value) { t.value = p.value; t.style.borderColor = ''; }
 }
+// カレンダーを開く前にテキスト欄の値をピッカーへ反映 (選択開始位置を現在値に)
+function syncPickerFromText(id) {
+  var p = document.getElementById(id + '_picker');
+  var t = document.getElementById(id);
+  if (p && t && /^\d{4}-\d{2}-\d{2}$/.test(String(t.value || ''))) p.value = t.value;
+}
 
 function getEditInputHtml(field, currentVal, fieldType, choices) {
   const id = 'editField_' + field.key;
@@ -31524,11 +31555,20 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
       if (!isNaN(d)) dateVal = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
     // ハイブリッド日付入力: テキスト欄(貼り付け・手入力をどの形式でも受付→自動正規化)
-    //                    + 📅ボタン(カレンダーから選択) + ✕クリア
-    return '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;position:relative;">' +
+    //                    + 📅(カレンダーから選択) + ✕クリア
+    // 📅は「透明の date input をボタンの上に重ねる」方式 — タップがネイティブの
+    // 日付入力に直接当たるため、iOS/Android/PC すべてで確実にカレンダーが開く
+    // (showPicker() はブラウザ制限で開かないことがあるため補助的に呼ぶだけ)
+    return '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">' +
       '<input type="text" class="edit-input" id="' + id + '" value="' + dateVal + '" data-field="' + field.key + '" data-format="date" placeholder="2027/06/20 など (貼り付け可)" onchange="normalizeDateText(this)" style="flex:1;min-width:120px;">' +
-      '<button type="button" onclick="openDatePickerFor(\'' + id + '\')" title="カレンダーから選択" style="background:#eef2ff;color:#3949ab;border:1.5px solid #c5cae9;border-radius:6px;padding:4px 9px;font-size:14px;cursor:pointer;line-height:1.3;">📅</button>' +
-      '<input type="date" id="' + id + '_picker" onchange="syncDateFromPicker(\'' + id + '\')" tabindex="-1" style="position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0.01;border:none;padding:0;">' +
+      '<span style="position:relative;display:inline-flex;flex-shrink:0;">' +
+        '<button type="button" tabindex="-1" style="background:#eef2ff;color:#3949ab;border:1.5px solid #c5cae9;border-radius:6px;padding:4px 9px;font-size:14px;line-height:1.3;pointer-events:none;">📅</button>' +
+        '<input type="date" id="' + id + '_picker" title="カレンダーから選択" ' +
+          'onclick="syncPickerFromText(\'' + id + '\');try{if(this.showPicker)this.showPicker();}catch(e){}" ' +
+          'onfocus="syncPickerFromText(\'' + id + '\')" ' +
+          'onchange="syncDateFromPicker(\'' + id + '\')" ' +
+          'style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer;border:none;padding:0;margin:0;">' +
+      '</span>' +
       '<button type="button" onclick="var _i=document.getElementById(\'' + id + '\');_i.value=\'\';_i.style.borderColor=\'\';var _p=document.getElementById(\'' + id + '_picker\');if(_p)_p.value=\'\';" title="日付をクリア (空欄で保存すると未設定に戻る)" style="background:#fff;color:#c62828;border:1.5px solid #ef9a9a;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">✕ クリア</button>' +
     '</div>';
   }
