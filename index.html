@@ -28447,9 +28447,9 @@ async function loadEmployeeProfile() {
     html += '<span class="acc-arrow">&#9654;</span>';
     html += '</div>';
     html += '<div class="accordion-body">';
-    // 在留・国籍: 社員ファイルに保存済みの在留カード画像からOCRで自動入力
+    // 在留・国籍: 社員ファイルの書類画像からAIで一括読み取り→自動入力
     if (cat.id === 'residence') {
-      html += '<button onclick="ocrZairyuFromEmpFolder()" style="width:calc(100% - 16px);margin:8px;background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,105,92,0.3);">🪪 社員ファイルの在留カードから自動入力（OCR）</button>';
+      html += '<button onclick="ocrAllFromEmpFolder()" style="width:calc(100% - 16px);margin:8px;background:linear-gradient(135deg,#1976d2,#0d47a1);color:#fff;border:none;border-radius:10px;padding:12px 10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(13,71,161,0.3);line-height:1.5;">🤖 社員ファイルをAIで読み取り → 自動入力<br><span style="font-size:10px;font-weight:600;opacity:0.9;">在留カード・免許証・雇用保険証・車検証・保険・通帳</span></button>';
     }
     // View mode table
     html += '<div id="view_' + cat.id + '"><table class="acc-table">';
@@ -32130,6 +32130,102 @@ function removeDocCapture(docId) {
   renderDocPreview(docId);
 }
 
+// ============================================================
+// ☁️ クラウドAI-OCR (Azure OpenAI GPT-4o-mini / employee-portal Functions 中継)
+//   認証: ログイン中ユーザーの SharePoint トークンを中継先で検証 (許可リスト制)
+// ============================================================
+const FUNC_OCR_BASE = 'https://func-employee-portal-7833.azurewebsites.net/api';
+
+// 書類画像をクラウドで構造化抽出。images=[dataURL/base64] か paths=[社員ファイル配下のサーバー相対パス]
+async function cloudDocOcr(docType, opts) {
+  const token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  const body = { docType: docType };
+  if (opts && opts.images && opts.images.length) body.images = opts.images.slice(0, 4);
+  if (opts && opts.paths && opts.paths.length) body.paths = opts.paths.slice(0, 4);
+  const resp = await fetch(FUNC_OCR_BASE + '/yukyu/file-ocr', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    let detail = '';
+    try { detail = JSON.stringify(await resp.json()).substring(0, 200); } catch (_) {}
+    throw new Error('クラウドOCR失敗 HTTP ' + resp.status + ' ' + detail);
+  }
+  const data = await resp.json();
+  return data.ocr || {};
+}
+
+// クラウド送信用に画像をリサイズ (カラー維持・長辺2000px・JPEG)
+function _resizeForCloud(dataUrl) {
+  return new Promise(function(resolve) {
+    try {
+      var img = new Image();
+      img.onload = function() {
+        try {
+          var MAX = 2000;
+          var scale = Math.min(1, MAX / Math.max(img.width, img.height));
+          var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+          var cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(cv.toDataURL('image/jpeg', 0.85));
+        } catch (e) { resolve(dataUrl); }
+      };
+      img.onerror = function() { resolve(dataUrl); };
+      img.src = dataUrl;
+    } catch (e) { resolve(dataUrl); }
+  });
+}
+
+// クラウドOCR結果 → アプリのフィールドキーへ変換
+function mapCloudOcrToFields(docType, ocr) {
+  const out = {};
+  function put(k, v) {
+    if (v === null || v === undefined) return;
+    v = String(v).trim();
+    if (v && v !== 'null') out[k] = v;
+  }
+  if (docType === 'zairyu') {
+    put('tokki1', ocr.name);
+    put('birthday', ocr.birthday);
+    if (ocr.sex === 'M') out.sex = '男性';
+    else if (ocr.sex === 'F') out.sex = '女性';
+    put('nationality', ocr.nationality);
+    put('zairyuShikaku', ocr.zairyuShikaku);
+    put('zairyuKigen', ocr.zairyuKigen);
+    put('zairyuKigenCard', ocr.zairyuKigen);
+    if (ocr.cardNumber) out.zairyuBikou = '在留カード番号: ' + String(ocr.cardNumber).trim();
+    put('address', ocr.address);
+  } else {
+    // license/koyou/shaken/jibaiseki/nini/bank/mynumber はキーがアプリと一致する設計
+    Object.keys(ocr).forEach(function(k) {
+      if (k === 'engine' || k === '_usage' || k === 'name') return;
+      put(k, ocr[k]);
+    });
+  }
+  return out;
+}
+
+// OCR項目の表示ラベル (プレビュー共通)
+var OCR_FIELD_LABELS = {
+  tokki1: 'ローマ字氏名', birthday: '生年月日', sex: '性別', nationality: '本(国)籍',
+  zairyuShikaku: '在留資格', zairyuKigen: '在留期限', zairyuKigenCard: '在留期限(カード)',
+  zairyuBikou: '在留カード番号 (備考)', address: '住所', yubin: '郵便番号',
+  licenseNo: '免許証番号', licenseType: '免許 種類', licenseGetDate: '免許 取得年月日', licenseExpiry: '免許 有効期限',
+  koyouNo: '雇用：被保険者番号', koyouName: '雇用保険名前', koyouShutoku: '雇用：資格取得日',
+  carNumber: '登録番号', carMaker: 'メーカー', carName: '車名', carDisplacement: '排気量',
+  carFirstReg: '初年度登録', shakenExpiry: '車検満了日',
+  jibaisekiCompany: '自賠責保険会社', jibaisekiNo: '自賠責証券番号', jibaisekiExpiry: '自賠責満了日',
+  niniCompany: '任意保険会社', niniNo: '任意保険証券番号', niniStartDate: '任意保険開始日', niniExpiry: '任意保険満了日',
+  taijin: '対人', taibutsu: '対物',
+  bankName: '銀行', bankBranch: '支店', bankAccount: '口座番号', bankMeigi: '氏名フリガナ'
+};
+// 日付として保存するキー
+var OCR_DATE_KEYS = { birthday: 1, zairyuKigen: 1, zairyuKigenCard: 1, licenseGetDate: 1, licenseExpiry: 1,
+  koyouShutoku: 1, shakenExpiry: 1, jibaisekiExpiry: 1, niniStartDate: 1, niniExpiry: 1 };
+
 // Tesseract が未ロード(CDN遅延/失敗)なら動的に読み込む
 function _ensureTesseract() {
   return new Promise(function(resolve, reject) {
@@ -32187,10 +32283,43 @@ function _ocrPreprocess(dataUrl) {
   });
 }
 
+// クラウド読み取り結果のポップアップを再表示 (誤って閉じた時用)
+function _reopenCloudOcrPopup(docId) {
+  var p = (window._lastCloudOcr || {})[docId];
+  if (p) _openOcrEditPopup(docId, p);
+}
+
 async function runOcr(docId, idx, autoFill) {
   const imgs = capturedDocs[docId];
   if (!imgs || !imgs[idx]) return;
   const resultDiv = document.getElementById('docOcrResult_' + docId);
+
+  // ☁️ クラウドAI優先 (在留カード/免許証): 撮影済みの表裏をまとめて高精度読み取り。
+  //    失敗時は従来のブラウザ内OCR (Tesseract) へ自動フォールバック
+  if (docId === 'zairyu' || docId === 'license') {
+    try {
+      resultDiv.innerHTML = '<div class="doc-ocr-progress" style="background:#e3f2fd;border:1.5px solid #1976d2;color:#0d47a1;font-weight:700;padding:8px 10px;border-radius:8px;">☁️ AIで読み取り中… (高精度クラウドOCR)</div>';
+      const sendImgs = [];
+      for (let k = 0; k < Math.min(imgs.length, 2); k++) {
+        sendImgs.push(await _resizeForCloud(imgs[k].dataUrl));
+      }
+      const ocr = await cloudDocOcr(docId, { images: sendImgs });
+      const parsed = mapCloudOcrToFields(docId, ocr);
+      if (Object.keys(parsed).length > 0) {
+        window._lastCloudOcr = window._lastCloudOcr || {};
+        window._lastCloudOcr[docId] = parsed;
+        resultDiv.innerHTML =
+          '<div class="doc-ocr-progress" style="background:#e8f5e9;border:1.5px solid #43a047;color:#1b5e20;font-weight:700;padding:8px 10px;border-radius:8px;">✓ ☁️AI読み取り完了 (' + Object.keys(parsed).length + '項目)</div>' +
+          '<div style="margin-top:6px;"><button class="doc-ocr-btn" style="background:#2e7d32;color:#fff;" onclick="_reopenCloudOcrPopup(\'' + docId + '\')">🤖 読み取り結果を確認・入力</button></div>';
+        _openOcrEditPopup(docId, parsed);
+        return;
+      }
+      console.warn('[cloud OCR] 0項目 → Tesseractへフォールバック');
+    } catch (e) {
+      console.warn('[cloud OCR] 失敗 → Tesseractへフォールバック:', e);
+    }
+  }
+
   resultDiv.innerHTML = '<div class="doc-ocr-progress" style="background:#fff3e0;border:1.5px solid #fb8c00;color:#e65100;font-weight:700;padding:8px 10px;border-radius:8px;">📷 画像を読み取り中… (OCR準備)</div>';
 
   try {
@@ -32369,23 +32498,19 @@ async function autoFillFromOcr(docId, auto) {
     }
     return;
   }
-  // 確認 + その場修正できる編集ポップアップ
-  //   読み取れた項目は ✓緑 で初期値入り、読み取れなかった項目も空欄で表示され
-  //   その場で手入力できる。「適用する」でフォームに反映。
-  const labelMap = {
-    tokki1: 'ローマ字氏名',
-    birthday: '生年月日',
-    sex: '性別',
-    nationality: '本(国)籍',
-    zairyuShikaku: '在留資格',
-    zairyuKigen: '在留期限',
-    zairyuKigenCard: '在留期限(カード)',
-    zairyuBikou: '在留カード番号 (備考)'
-  };
+  _openOcrEditPopup(docId, parsed);
+}
+
+// 確認 + その場修正できる編集ポップアップ (Tesseract / クラウドAI 共通)
+//   読み取れた項目は ✓緑 で初期値入り、読み取れなかった項目も空欄で表示され
+//   その場で手入力できる。「適用する」でフォームに反映。
+function _openOcrEditPopup(docId, parsed) {
+  const labelMap = OCR_FIELD_LABELS;
   const FIELD_ORDER = (docId === 'zairyu')
-    ? ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuKigenCard', 'zairyuBikou']
-    : ['birthday'];
-  const DATE_KEYS = { birthday: 1, zairyuKigen: 1, zairyuKigenCard: 1 };
+    ? ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuKigenCard', 'zairyuBikou', 'address']
+    : ['birthday', 'licenseNo', 'licenseType', 'licenseGetDate', 'licenseExpiry'];
+  const DATE_KEYS = OCR_DATE_KEYS;
+  const keys = Object.keys(parsed);
   const okCount = keys.length;
 
   let formHtml = '';
@@ -33278,6 +33403,94 @@ async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
 }
 
 // ============================================================
+// 🤖 社員ファイル一括AI読み取り → 社員データへ自動入力
+//   フォルダ内の書類画像をファイル名で分類し、書類ごとにクラウドAI
+//   (GPT-4o-mini) で構造化抽出 → まとめてプレビュー → SP社員データへ保存。
+//   ScanSnap等で後からスキャンを追加した場合も同じボタンで再読み取り可能。
+// ============================================================
+var OCR_DOC_CLASSIFY = [
+  { docType: 'zairyu',    re: /在留/,                    label: '在留カード' },
+  { docType: 'license',   re: /免許/,                    label: '免許証' },
+  { docType: 'koyou',     re: /雇用保険/,                label: '雇用保険被保険者証' },
+  { docType: 'mynumber',  re: /マイナンバー/,            label: 'マイナンバー' },
+  { docType: 'shaken',    re: /車検/,                    label: '車検証' },
+  { docType: 'jibaiseki', re: /自賠責/,                  label: '自賠責保険証' },
+  { docType: 'nini',      re: /任意保険/,                label: '任意保険証' },
+  { docType: 'bank',      re: /通帳|キャッシュ|銀行|口座/, label: '銀行口座' }
+];
+
+async function ocrAllFromEmpFolder() {
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  try {
+    try { var _m = await fetchEmployeeFields(); if (_m) editKeyMap = buildFieldKeyMap(_m); } catch (_) {}
+    _empOcrProg('📂 社員ファイルを確認中…');
+    var path = await getEmpFolderPath(emp);
+    if (!path) { _empOcrProg(null); showToast('社員ファイルを特定できません', 'error'); return; }
+    var token = await getToken();
+    var encodedPath = encodeURIComponent(path).replace(/%2F/g, '/');
+    var resp = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')/Files?$select=Name,ServerRelativeUrl", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) { _empOcrProg(null); showToast('社員ファイルのフォルダが見つかりません (HTTP ' + resp.status + ')', 'error'); return; }
+    var files = ((await resp.json()).d || {}).results || [];
+    var imgs = files.filter(function(f) { return /\.(jpe?g|png|webp|heic|pdf)$/i.test(f.Name || ''); });
+    if (!imgs.length) { _empOcrProg(null); showToast('フォルダに読み取れるファイルがありません', 'error'); return; }
+
+    // ファイル名で書類タイプに分類 (表→裏の順に整列)
+    var groups = {};   // docType → { label, paths: [] }
+    imgs.forEach(function(f) {
+      for (var i = 0; i < OCR_DOC_CLASSIFY.length; i++) {
+        var c = OCR_DOC_CLASSIFY[i];
+        if (c.re.test(f.Name)) {
+          if (!groups[c.docType]) groups[c.docType] = { label: c.label, files: [] };
+          groups[c.docType].files.push(f);
+          break;
+        }
+      }
+    });
+    var docTypes = ['zairyu', 'license', 'koyou', 'mynumber', 'shaken', 'jibaiseki', 'nini', 'bank'].filter(function(t) { return groups[t]; });
+    if (!docTypes.length) { _empOcrProg(null); showToast('分類できる書類がありません (在留カード/免許/保険など名前を含むファイルが対象)', 'error'); return; }
+
+    // 書類ごとに順次クラウドAIで抽出 → 先勝ちでマージ
+    var allParsed = {};
+    var okDocs = [], ngDocs = [];
+    for (var d = 0; d < docTypes.length; d++) {
+      var dt = docTypes[d];
+      var g = groups[dt];
+      g.files.sort(function(a, b) {
+        var au = a.Name.indexOf('裏') >= 0 ? 1 : 0, bu = b.Name.indexOf('裏') >= 0 ? 1 : 0;
+        return (au - bu) || a.Name.localeCompare(b.Name, 'ja');
+      });
+      _empOcrProg('☁️ ' + g.label + ' をAIで読み取り中… (' + (d + 1) + '/' + docTypes.length + ')');
+      try {
+        var ocr = await cloudDocOcr(dt, { paths: g.files.map(function(f) { return f.ServerRelativeUrl; }) });
+        var mapped = mapCloudOcrToFields(dt, ocr);
+        var added = 0;
+        Object.keys(mapped).forEach(function(k) {
+          if (!(k in allParsed)) { allParsed[k] = mapped[k]; added++; }
+        });
+        okDocs.push(g.label + ' (' + added + '項目)');
+      } catch (e) {
+        console.warn('[一括OCR] ' + dt + ' 失敗:', e);
+        ngDocs.push(g.label);
+      }
+    }
+    _empOcrProg(null);
+    if (!Object.keys(allParsed).length) {
+      showToast('読み取れた項目がありません' + (ngDocs.length ? ' (失敗: ' + ngDocs.join('、') + ')' : ''), 'error');
+      return;
+    }
+    var srcNote = okDocs.join('、') + (ngDocs.length ? '　⚠失敗: ' + ngDocs.join('、') : '');
+    _showEmpOcrApplyPreview(allParsed, srcNote, { skipMissing: true });
+  } catch (e) {
+    _empOcrProg(null);
+    console.error('ocrAllFromEmpFolder error:', e);
+    showToast('一括読み取りに失敗: ' + (e.message || e), 'error');
+  }
+}
+
+// ============================================================
 // 社員ファイル内の在留カード画像 → OCR → 社員データへ保存
 //   登録時にOCRが失敗した社員 (例: イワノ ケレン) を、アップロード済みの
 //   画像から後追いでデータ化する。在留・国籍セクションのボタンから起動。
@@ -33394,14 +33607,13 @@ async function _ocrEmpFolderFile(f) {
 }
 
 // 読み取り結果のプレビュー (現在値 → 新値) → 適用で SP社員データへ保存
-function _showEmpOcrApplyPreview(parsed, fileName) {
+//   opts.skipMissing: true で「読み取れなかった項目」案内を省略 (一括読み取り用)
+function _showEmpOcrApplyPreview(parsed, fileName, opts) {
   var emp = currentEmployee;
   if (!emp) return;
+  opts = opts || {};
   var km = editKeyMap || {};
-  var labelMap = {
-    tokki1: 'ローマ字氏名', birthday: '生年月日', sex: '性別', nationality: '本(国)籍',
-    zairyuShikaku: '在留資格', zairyuKigen: '在留期限', zairyuKigenCard: '在留期限(カード)', zairyuBikou: '在留カード番号 (備考)'
-  };
+  var labelMap = OCR_FIELD_LABELS;
   function curVal(k) {
     var od = km[k];
     var v = od ? emp[od] : '';
@@ -33420,7 +33632,7 @@ function _showEmpOcrApplyPreview(parsed, fileName) {
   window._empOcrParsed = parsed;
   // 読み取れなかった項目の案内 (手入力の必要が一目で分かるように)
   var ALL_KEYS = ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuBikou'];
-  var missing = ALL_KEYS.filter(function(k) { return !(k in parsed); }).map(function(k) { return labelMap[k] || k; });
+  var missing = opts.skipMissing ? [] : ALL_KEYS.filter(function(k) { return !(k in parsed); }).map(function(k) { return labelMap[k] || k; });
   var missingHtml = missing.length
     ? '<div style="font-size:11px;color:#666;background:#f5f5f5;border-radius:6px;padding:7px 10px;margin-top:8px;">📝 読み取れなかった項目（手入力してください）: <b>' + escHtml(missing.join('、')) + '</b><br><span style="font-size:10px;color:#999;">裏面しか無い・画像が不鮮明な場合に起こります。鮮明な表面の画像で再実行すると改善することがあります。</span></div>'
     : '';
@@ -33461,13 +33673,16 @@ async function _applyEmpOcrToSp() {
     var meta = await fetchEmployeeFields();
     var km = buildFieldKeyMap(meta);
     var body = {};
-    var dateKeys = { birthday: 1, zairyuKigen: 1, zairyuKigenCard: 1 };
+    var dateKeys = OCR_DATE_KEYS;
     Object.keys(parsed).forEach(function(k) {
       var od = km[k];
-      if (!od) { console.warn('[在留OCR保存] フィールド未解決:', k); return; }
+      if (!od) { console.warn('[OCR保存] フィールド未解決:', k); return; }
       var v = parsed[k];
       if (k === 'sex') v = (v === '女') ? '女性' : (v === '男') ? '男性' : v;   // Choice 値に合わせる
-      if (dateKeys[k]) v = v + 'T00:00:00Z';
+      if (dateKeys[k]) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v))) { console.warn('[OCR保存] 日付形式外のためスキップ:', k, v); return; }
+        v = v + 'T00:00:00Z';
+      }
       body[od.replace(/^OData_/, '')] = v;   // spPatchEmployee が EntityPropertyName へ変換
     });
     if (!Object.keys(body).length) { showToast('保存できる項目がありません', 'error'); return; }
