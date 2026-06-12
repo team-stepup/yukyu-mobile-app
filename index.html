@@ -30715,13 +30715,15 @@ async function submitLeaveApplication() {
   else if (leaveType === '半日（午後）') leaveTypeDetail = '午後';
 
   const leaveEntityType = await getListItemEntityType(LIST_LEAVE_GUID);
+  // Title は一覧画面の「派遣先」列に表示されるため、氏名ではなく部課（例 "114:ASTI㈱浜松"）を入れる
+  const bukaForTitle = (typeof getBukaValue === 'function' ? getBukaValue(emp) : '') || getHakensakiCode(emp) || '';
   for (const dateStr of selectedDates) {
     try {
       const amount = Math.round(hourlyRate * hoursPerDate);
       const body = {
         __metadata: { type: leaveEntityType },
         [F.syainNo]: emp[F.syainNo],
-        Title: emp.Title || '',
+        Title: bukaForTitle,
         [F.shimei]: emp.Title || '',
         [F.leaveDate]: dateStr + 'T00:00:00Z',
         [F.leaveType]: leaveType,
