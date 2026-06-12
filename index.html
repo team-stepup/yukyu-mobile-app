@@ -10382,10 +10382,76 @@ function _printIsshikiRest() {
   var groups = window._isshikiGroups || [];
   var html = ''; groups.forEach(function(g) { html += g.rest; });
   if (!html) { showToast('通知書・台帳が見つかりません', 'error'); return; }
+  // 同時に 派遣元管理台帳 を各社員の社員ファイルへ個別PDF保存 (非同期・印刷を妨げない)
+  if (!window._motoKanriboSaved) {
+    window._motoKanriboSaved = true;   // 再印刷での重複実行防止 (同名上書きなので実害はないが無駄を省く)
+    _saveMotoKanriboToEmpFolders().catch(function(e) {
+      console.error('派遣元台帳 個別保存エラー:', e);
+      window._motoKanriboSaved = false;
+      showToast('派遣元管理台帳の社員ファイル保存に失敗: ' + (e.message || e), 'error');
+    });
+  }
   if (_isIOSDevice && window.PDFLib && window.html2canvas) {
     _openHaisenPdfForIOS(html, '通知書・台帳'); return;
   }
   _openHaisenPrintTab(html, '💡 <b>通知書・台帳は【片面印刷】</b>で印刷してください。<br>　・ヘッダーとフッター: OFF　・背景のグラフィック: ON');
+}
+
+// 派遣元管理台帳 を社員ごとに1ファイルのPDFにして、各社員の社員ファイルへ保存
+//   ファイル名: 「{社員番号}派遣元管理台帳.{派遣期間終了日(YYYY.M.D)}.pdf」(同名は上書き)
+async function _saveMotoKanriboToEmpFolders() {
+  var groups = window._isshikiGroups || [];
+  var jobs = [];
+  groups.forEach(function(g) {
+    (g.motoByEmp || []).forEach(function(m) { jobs.push({ hg: g.hg, emp: m.emp, html: m.html }); });
+  });
+  if (!jobs.length) return;
+  await loadEsignLibsIfNeeded();
+  var body = document.getElementById('haisenDocBody');
+  var savedNames = [], failed = [];
+  for (var i = 0; i < jobs.length; i++) {
+    var jb = jobs[i];
+    var sn = jb.emp[F.syainNo] || '';
+    var nm = jb.emp.Title || '';
+    showToast('💾 派遣元管理台帳を社員ファイルへ保存中… (' + (i + 1) + '/' + jobs.length + ') ' + nm, 'info');
+    try {
+      // 終了日 (YYYY.M.D)
+      var pe = jb.hg[HF.haken_period_end];
+      var peStr = '';
+      if (pe) { var d = new Date(pe); if (!isNaN(d)) peStr = d.getFullYear() + '.' + (d.getMonth() + 1) + '.' + d.getDate(); }
+      var fileName = String(sn) + '派遣元管理台帳' + (peStr ? '.' + peStr : '') + '.pdf';
+      // PDF生成 (このページだけを描画してキャプチャ)
+      body.innerHTML = '<div class="haisen-doc-wrapper">' + jb.html + '</div>';
+      await new Promise(function(r) { setTimeout(r, 350); });
+      var z = _captureAndResetZoom();
+      var pdfBlob = await generateHaisenDocAsPdf();
+      _restoreZoom(z);
+      // 保存先 = 社員ファイル/{部課}/{番号 氏名}/
+      var folder = await getEmpFolderPath(jb.emp);
+      if (!folder) throw new Error('社員フォルダを特定できません');
+      var parent = folder.substring(0, folder.lastIndexOf('/'));
+      try { await ensureSpFolder(parent); } catch (_) {}
+      try { await ensureSpFolder(folder); } catch (_) {}
+      var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+      await uploadFileToSp(folder, fileName, file);
+      savedNames.push(fileName);
+    } catch (e) {
+      console.error('派遣元台帳 保存失敗 (' + sn + ' ' + nm + '):', e);
+      failed.push(sn + ' ' + nm);
+    }
+  }
+  // 元の全ページ表示に戻す
+  var allHtml = '';
+  groups.forEach(function(g) { allHtml += g.kobetsu + g.rest; });
+  body.innerHTML = '<div class="haisen-doc-wrapper">' + allHtml + '</div>';
+  if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+  if (savedNames.length) {
+    showToast('✓ 派遣元管理台帳を社員ファイルへ保存しました: ' + savedNames.join('、'), 'success');
+  }
+  if (failed.length) {
+    window._motoKanriboSaved = false;
+    showToast('⚠ 保存失敗: ' + failed.join('、'), 'error');
+  }
 }
 
 // ============================================================
@@ -16152,16 +16218,20 @@ async function _submitHakenIsshiki() {
       });
       // ② 通知書 + 各人(派遣先台帳・派遣元台帳)
       var restPages = renderHakenTsuuchisho(hg, gEmps, { shahoMap: gShaho, sakuseiDate: sakuseiDate, returnHtml: true });
+      var motoByEmp = [];   // 社員ごとの派遣元管理台帳 (社員ファイルへの個別PDF保存用)
       gEmps.forEach(function(emp, j) {
+        var motoHtml = renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
         restPages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
-        restPages += renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
+        restPages += motoHtml;
+        motoByEmp.push({ emp: emp, html: motoHtml });
       });
-      isshikiGroups.push({ hg: hg, kobetsu: kobetsuPages, rest: restPages });
+      isshikiGroups.push({ hg: hg, kobetsu: kobetsuPages, rest: restPages, motoByEmp: motoByEmp });
       allPagesHtml += kobetsuPages + restPages;
     }
     // ここでは SharePoint 保存しない（「印刷 / PDF保存」押下時に保存）
     window._isshikiGroups = isshikiGroups;
     window._isshikiSaved = false;
+    window._motoKanriboSaved = false;
     switchScreen('haisenDocScreen');
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allPagesHtml + '</div>';
     var actions = document.getElementById('haisenDocActions');
