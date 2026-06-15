@@ -5456,7 +5456,7 @@ select.sankyu-edit-input {
       <span style="font-size:9px;font-weight:800;color:#fff;background:linear-gradient(135deg,#f0b000,#d99000);padding:2px 7px;border-radius:8px;">👑 役員</span>
     </div>
     <div style="background:#fffaf0;border:1px solid #f0d9a0;border-radius:10px;padding:10px 12px;font-size:11.5px;color:#7a5b10;line-height:1.6;margin-bottom:12px;">
-      レシート・領収書・請求書を撮影すると、AIが<b>取引日・金額・取引先</b>を読み取ります。確認・修正して保存すると、<b>検索しやすいファイル名のPDF</b>がSharePointの証憑フォルダに溜まります。あとはPCでTKC証憑保存ツールにまとめて取り込んでください。
+      レシート・領収書・請求書を撮影すると、AIが<b>取引日・金額・取引先</b>を読み取ります。確認・修正して保存すると、<b>検索しやすいファイル名のPDF</b>が役員の<b>📒証憑待ちファイル</b>に溜まります。あとはPCでTKC証憑保存ツールにまとめて取り込んでください。
     </div>
 
     <label class="doc-capture-btn" style="display:block;text-align:center;padding:14px;border:2px dashed var(--primary);border-radius:12px;background:#f7f7fc;color:var(--primary);font-weight:700;cursor:pointer;font-size:14px;">
@@ -33012,8 +33012,30 @@ async function uploadFileToSp(folderPath, fileName, file) {
 //     ファイル名(YYYYMMDD_取引先_金額.pdf)とPDFプロパティに付与 → TKC証憑保存ツールへ取込しやすくする
 // ============================================================
 var _shohyoImages = [];   // [{file, dataUrl}]
-// 保存先: 社員ファイル/★証憑保存 shohyo/{YYYY-MM}/ (このPCにOneDrive同期 → TKCへファイル読込)
-var SHOHYO_LIB_BASE = SP_DOC_LIB_PATH + '/★証憑保存 shohyo';
+// 保存先: 役員サイト(TeamStepup-58) の 役員/📒証憑待ちファイル (このPCにOneDrive同期 → TKCへファイル読込)
+var SHOHYO_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup-58';
+var SHOHYO_FOLDER = '/sites/TeamStepup-58/Shared Documents/役員/📒証憑待ちファイル';
+
+// 役員サイトの証憑待ちフォルダへPDFをアップロード (フォルダは既存。SPトークンは全サイト共通)
+async function _uploadShohyoFile(fileName, blob) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var arrayBuffer = await blob.arrayBuffer();
+  var encodedFolder = encodeURIComponent(SHOHYO_FOLDER).replace(/%2F/g, '/');
+  var encodedName = encodeURIComponent(fileName);
+  var url = SHOHYO_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedFolder + "')/files/add(url='" + encodedName + "',overwrite=true)";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' },
+    body: arrayBuffer
+  });
+  if (!resp.ok) {
+    var t = ''; try { t = await resp.text(); } catch (_) {}
+    console.error('shohyo upload error:', resp.status, t);
+    throw new Error('アップロード失敗: ' + resp.status);
+  }
+  return await resp.json();
+}
 
 function openShohyoScan() {
   if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('役員のみアクセス可能です', 'error'); return; }
@@ -33181,14 +33203,10 @@ async function saveShohyoToSp() {
   try {
     var blob = await _shohyoBuildPdf({ date: date, vendor: vendor, amount: amount, invoiceNo: invoiceNo, docKind: docKind });
     var ymd = date.replace(/-/g, '');
-    var ym = date.substring(0, 7); // YYYY-MM
     var safeVendor = vendor.replace(/[\\\/:*?"<>|]/g, '').replace(/\s+/g, '').substring(0, 30);
     var fname = ymd + '_' + safeVendor + '_' + amount + '.pdf';
-    await ensureSpFolder(SHOHYO_LIB_BASE);
-    await ensureSpFolder(SHOHYO_LIB_BASE + '/' + ym);
-    var file = new File([blob], fname, { type: 'application/pdf' });
-    await uploadFileToSp(SHOHYO_LIB_BASE + '/' + ym, fname, file);
-    if (st) st.innerHTML = '<div style="background:#e8f5e9;border:1.5px solid #43a047;color:#1b5e20;font-weight:700;padding:10px;border-radius:8px;font-size:13px;">✓ 証憑を保存しました<br><span style="font-weight:500;font-size:12px;">★証憑保存 shohyo / ' + escHtml(ym) + ' / ' + escHtml(fname) + '</span></div>';
+    await _uploadShohyoFile(fname, blob);
+    if (st) st.innerHTML = '<div style="background:#e8f5e9;border:1.5px solid #43a047;color:#1b5e20;font-weight:700;padding:10px;border-radius:8px;font-size:13px;">✓ 役員「📒証憑待ちファイル」へ保存しました<br><span style="font-weight:500;font-size:12px;">' + escHtml(fname) + '</span></div>';
     showToast('証憑を保存しました', 'success');
     // 次の1枚に備えてリセット
     _shohyoImages = [];
