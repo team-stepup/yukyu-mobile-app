@@ -5439,8 +5439,56 @@ select.sankyu-edit-input {
           <span style="flex:1;font-weight:600;">有給データ バックアップ (CSV)</span>
           <span style="color:#bbb;font-size:14px;">↓</span>
         </button>
+        <button type="button" onclick="openShohyoScan()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:linear-gradient(135deg,#fff,#fffaf0);cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">🧾</span>
+          <span style="flex:1;font-weight:600;">証憑スキャン <span style="font-size:10px;color:#999;font-weight:500;">(AI読取り→証憑保存)</span></span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
       </div>
     </div>
+  </div>
+
+  <!-- Screen: 証憑スキャン（役員専用 / AI-OCR→電帳法準拠PDF→証憑フォルダ保存） -->
+  <div class="screen" id="shohyoScanScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;flex:1;">🧾 証憑スキャン</h2>
+      <span style="font-size:9px;font-weight:800;color:#fff;background:linear-gradient(135deg,#f0b000,#d99000);padding:2px 7px;border-radius:8px;">👑 役員</span>
+    </div>
+    <div style="background:#fffaf0;border:1px solid #f0d9a0;border-radius:10px;padding:10px 12px;font-size:11.5px;color:#7a5b10;line-height:1.6;margin-bottom:12px;">
+      レシート・領収書・請求書を撮影すると、AIが<b>取引日・金額・取引先</b>を読み取ります。確認・修正して保存すると、<b>検索しやすいファイル名のPDF</b>がSharePointの証憑フォルダに溜まります。あとはPCでTKC証憑保存ツールにまとめて取り込んでください。
+    </div>
+
+    <label class="doc-capture-btn" style="display:block;text-align:center;padding:14px;border:2px dashed var(--primary);border-radius:12px;background:#f7f7fc;color:var(--primary);font-weight:700;cursor:pointer;font-size:14px;">
+      <input type="file" accept="image/*" capture="environment" multiple style="display:none;" onchange="onShohyoCapture(this)">
+      📷 証憑を撮影 / 画像を選ぶ（複数可）
+    </label>
+    <div id="shohyoThumbs" style="margin-top:10px;"></div>
+    <div id="shohyoOcrResult" style="margin-top:10px;"></div>
+
+    <button type="button" id="shohyoOcrBtn" onclick="runShohyoOcr()" style="width:100%;margin-top:10px;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(21,101,192,0.3);">🤖 AIで読み取る</button>
+
+    <div style="margin-top:16px;background:#fff;border:1px solid #e6e6ef;border-radius:12px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+      <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:8px;">取引内容（確認・修正）</div>
+      <div style="margin-bottom:8px;"><label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">取引年月日</label>
+        <input type="date" id="shohyoDate" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:14px;"></div>
+      <div style="margin-bottom:8px;"><label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">取引先</label>
+        <input type="text" id="shohyoVendor" placeholder="例: ㈱○○商事" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:14px;"></div>
+      <div style="margin-bottom:8px;"><label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">金額（税込・円）</label>
+        <input type="number" id="shohyoAmount" inputmode="numeric" placeholder="例: 11000" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:14px;"></div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">書類種別</label>
+          <select id="shohyoDocKind" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff;">
+            <option value="">—</option><option value="レシート">レシート</option><option value="領収書">領収書</option><option value="請求書">請求書</option><option value="納品書">納品書</option>
+          </select></div>
+        <div style="flex:1.4;"><label style="font-size:11px;color:#666;display:block;margin-bottom:3px;">登録番号（任意）</label>
+          <input type="text" id="shohyoInvoiceNo" placeholder="T1234567890123" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:14px;"></div>
+      </div>
+    </div>
+
+    <button type="button" id="shohyoSaveBtn" onclick="saveShohyoToSp()" style="width:100%;margin-top:12px;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(27,94,32,0.3);">💾 証憑フォルダへ保存</button>
+    <div id="shohyoStatus" style="margin-top:10px;"></div>
+    <div style="height:60px;"></div>
   </div>
 
   <!-- Screen: 経営分析（月次入退社推移） -->
@@ -32956,6 +33004,205 @@ async function uploadFileToSp(folderPath, fileName, file) {
     throw new Error('アップロード失敗: ' + resp.status);
   }
   return await resp.json();
+}
+
+// ============================================================
+// 🧾 証憑スキャン (役員専用) — 撮影 → Azure AI-OCR(shohyo) → 電帳法準拠PDF → 証憑フォルダ保存
+//   ・撮影画像は無改変のままPDF化(≥200dpi・カラー)。OCRで読んだ取引日/金額/取引先は
+//     ファイル名(YYYYMMDD_取引先_金額.pdf)とPDFプロパティに付与 → TKC証憑保存ツールへ取込しやすくする
+// ============================================================
+var _shohyoImages = [];   // [{file, dataUrl}]
+// 保存先: 社員ファイル/★証憑保存 shohyo/{YYYY-MM}/ (このPCにOneDrive同期 → TKCへファイル読込)
+var SHOHYO_LIB_BASE = SP_DOC_LIB_PATH + '/★証憑保存 shohyo';
+
+function openShohyoScan() {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('役員のみアクセス可能です', 'error'); return; }
+  _shohyoImages = [];
+  renderShohyoThumbs();
+  ['shohyoDate', 'shohyoVendor', 'shohyoAmount', 'shohyoInvoiceNo'].forEach(function(id) { var e = document.getElementById(id); if (e) e.value = ''; });
+  var k = document.getElementById('shohyoDocKind'); if (k) k.value = '';
+  var st = document.getElementById('shohyoStatus'); if (st) st.innerHTML = '';
+  var oc = document.getElementById('shohyoOcrResult'); if (oc) oc.innerHTML = '';
+  switchScreen('shohyoScanScreen');
+}
+
+function onShohyoCapture(input) {
+  var files = Array.from(input.files || []);
+  if (!files.length) return;
+  files.forEach(function(file) {
+    var r = new FileReader();
+    r.onload = function(e) { _shohyoImages.push({ file: file, dataUrl: e.target.result }); renderShohyoThumbs(); };
+    r.readAsDataURL(file);
+  });
+  input.value = '';
+}
+
+function renderShohyoThumbs() {
+  var el = document.getElementById('shohyoThumbs');
+  if (!el) return;
+  if (!_shohyoImages.length) { el.innerHTML = ''; return; }
+  var html = '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+  _shohyoImages.forEach(function(img, i) {
+    html += '<div style="position:relative;width:calc(33.33% - 4px);">'
+      + '<img src="' + img.dataUrl + '" style="width:100%;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.12);">'
+      + '<div style="position:absolute;top:4px;left:4px;background:var(--primary);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;">' + (i + 1) + '</div>'
+      + '<button onclick="removeShohyoPage(' + i + ')" style="position:absolute;top:2px;right:2px;background:var(--danger);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:13px;cursor:pointer;line-height:1;">&times;</button>'
+      + '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function removeShohyoPage(i) {
+  _shohyoImages.splice(i, 1);
+  renderShohyoThumbs();
+}
+
+function _shohyoSetResult(html, kind) {
+  var el = document.getElementById('shohyoOcrResult');
+  if (!el) return;
+  var bg = kind === 'ok' ? '#e8f5e9' : kind === 'err' ? '#ffebee' : '#e3f2fd';
+  var bd = kind === 'ok' ? '#43a047' : kind === 'err' ? '#e53935' : '#1976d2';
+  var fg = kind === 'ok' ? '#1b5e20' : kind === 'err' ? '#b71c1c' : '#0d47a1';
+  el.innerHTML = '<div style="background:' + bg + ';border:1.5px solid ' + bd + ';color:' + fg + ';font-weight:700;padding:8px 10px;border-radius:8px;font-size:13px;">' + html + '</div>';
+}
+
+async function runShohyoOcr() {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('役員のみ', 'error'); return; }
+  if (!_shohyoImages.length) { showToast('先に証憑を撮影/選択してください', 'error'); return; }
+  var btn = document.getElementById('shohyoOcrBtn');
+  if (btn) { btn.disabled = true; }
+  _shohyoSetResult('☁️ AIで読み取り中… (高精度クラウドOCR)', 'info');
+  try {
+    var sendImgs = [];
+    for (var k = 0; k < Math.min(_shohyoImages.length, 4); k++) {
+      sendImgs.push(await _resizeForCloud(_shohyoImages[k].dataUrl));
+    }
+    var ocr = await cloudDocOcr('shohyo', { images: sendImgs });
+    var setIf = function(id, v) { if (v !== null && v !== undefined && String(v).trim() !== '' && String(v).trim() !== 'null') { var e = document.getElementById(id); if (e) e.value = String(v).trim(); } };
+    if (ocr.torihikiDate) { var d = _shohyoNormDate(ocr.torihikiDate); if (d) document.getElementById('shohyoDate').value = d; }
+    setIf('shohyoVendor', ocr.torihikisaki);
+    if (ocr.amount !== null && ocr.amount !== undefined) { var amt = String(ocr.amount).replace(/[^\d]/g, ''); if (amt) document.getElementById('shohyoAmount').value = amt; }
+    setIf('shohyoInvoiceNo', ocr.invoiceNo);
+    if (ocr.docKind) { var sel = document.getElementById('shohyoDocKind'); if (sel) { var opt = Array.from(sel.options).find(function(o) { return o.value === String(ocr.docKind).trim(); }); if (opt) sel.value = opt.value; } }
+    var got = ['torihikiDate', 'torihikisaki', 'amount'].filter(function(key) { return ocr[key] !== null && ocr[key] !== undefined && String(ocr[key]).trim() !== ''; }).length;
+    if (got > 0) _shohyoSetResult('✓ 読み取り完了（' + got + '/3項目）。内容を確認・修正して保存してください。', 'ok');
+    else _shohyoSetResult('読み取れた項目がありませんでした。手入力で保存できます。', 'err');
+  } catch (e) {
+    console.warn('[shohyo OCR]', e);
+    _shohyoSetResult('読み取りに失敗しました（' + escHtml(e.message || String(e)) + '）。手入力で保存できます。', 'err');
+  } finally {
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+// OCR返却の取引日を YYYY-MM-DD に正規化 (date入力用)
+function _shohyoNormDate(s) {
+  s = String(s || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (typeof parseFlexibleDateStr === 'function') {
+    try { var p = parseFlexibleDateStr(s); if (p && /^\d{4}-\d{2}-\d{2}$/.test(p)) return p; } catch (_) {}
+  }
+  var m = s.match(/(\d{4})[\/.\-年](\d{1,2})[\/.\-月](\d{1,2})/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  return '';
+}
+
+// 画像を フルサイズのベースラインJPEG に再エンコード (pdf-lib の embedJpg が確実に通る形へ)
+function _shohyoToBaselineJpeg(dataUrl) {
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    img.onload = function() {
+      try {
+        var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+        var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        var ctx = cv.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve({ dataUrl: cv.toDataURL('image/jpeg', 0.92), w: w, h: h });
+      } catch (e) { reject(e); }
+    };
+    img.onerror = function() { reject(new Error('画像の読込に失敗')); };
+    img.src = dataUrl;
+  });
+}
+
+function _dataUrlToBytes(dataUrl) {
+  var b64 = dataUrl.split(',')[1] || '';
+  var bin = atob(b64);
+  var arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+// 撮影画像(無改変)を 1ファイルのPDFに。各画像1ページ・≥200dpi(電帳法スキャナ保存要件)
+async function _shohyoBuildPdf(meta) {
+  if (!window.PDFLib) throw new Error('PDF生成ライブラリが未ロードです');
+  var doc = await window.PDFLib.PDFDocument.create();
+  for (var i = 0; i < _shohyoImages.length; i++) {
+    var jpg = await _shohyoToBaselineJpeg(_shohyoImages[i].dataUrl);
+    var img = await doc.embedJpg(_dataUrlToBytes(jpg.dataUrl));
+    var wPt = jpg.w / 200 * 72, hPt = jpg.h / 200 * 72;   // 200dpi基準でページ寸法を決定
+    var page = doc.addPage([wPt, hPt]);
+    page.drawImage(img, { x: 0, y: 0, width: wPt, height: hPt });
+  }
+  try {
+    doc.setTitle((meta.date || '') + ' ' + (meta.vendor || '') + ' ' + (meta.amount || '') + '円');
+    doc.setSubject('証憑' + (meta.docKind ? '（' + meta.docKind + '）' : ''));
+    var kw = [];
+    if (meta.date) kw.push('取引年月日:' + meta.date);
+    if (meta.vendor) kw.push('取引先:' + meta.vendor);
+    if (meta.amount) kw.push('取引金額:' + meta.amount);
+    if (meta.invoiceNo) kw.push('登録番号:' + meta.invoiceNo);
+    doc.setKeywords(kw);
+    doc.setCreator('yukyu-app 証憑スキャン');
+    doc.setProducer('yukyu-app 証憑スキャン');
+  } catch (_) {}
+  var bytes = await doc.save();
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+
+async function saveShohyoToSp() {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('役員のみ', 'error'); return; }
+  if (!_shohyoImages.length) { showToast('証憑画像がありません', 'error'); return; }
+  var date = (document.getElementById('shohyoDate').value || '').trim();
+  var vendor = (document.getElementById('shohyoVendor').value || '').trim();
+  var amount = (document.getElementById('shohyoAmount').value || '').trim().replace(/[^\d]/g, '');
+  var invoiceNo = (document.getElementById('shohyoInvoiceNo').value || '').trim();
+  var docKind = (document.getElementById('shohyoDocKind').value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showToast('取引年月日を入力してください', 'error'); return; }
+  if (!amount) { showToast('金額を入力してください', 'error'); return; }
+  if (!vendor) { showToast('取引先を入力してください', 'error'); return; }
+
+  var btn = document.getElementById('shohyoSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+  var st = document.getElementById('shohyoStatus');
+  if (st) st.innerHTML = '<div style="background:#e3f2fd;border:1.5px solid #1976d2;color:#0d47a1;font-weight:700;padding:8px 10px;border-radius:8px;font-size:13px;">PDFを作成してアップロード中…</div>';
+  try {
+    var blob = await _shohyoBuildPdf({ date: date, vendor: vendor, amount: amount, invoiceNo: invoiceNo, docKind: docKind });
+    var ymd = date.replace(/-/g, '');
+    var ym = date.substring(0, 7); // YYYY-MM
+    var safeVendor = vendor.replace(/[\\\/:*?"<>|]/g, '').replace(/\s+/g, '').substring(0, 30);
+    var fname = ymd + '_' + safeVendor + '_' + amount + '.pdf';
+    await ensureSpFolder(SHOHYO_LIB_BASE);
+    await ensureSpFolder(SHOHYO_LIB_BASE + '/' + ym);
+    var file = new File([blob], fname, { type: 'application/pdf' });
+    await uploadFileToSp(SHOHYO_LIB_BASE + '/' + ym, fname, file);
+    if (st) st.innerHTML = '<div style="background:#e8f5e9;border:1.5px solid #43a047;color:#1b5e20;font-weight:700;padding:10px;border-radius:8px;font-size:13px;">✓ 証憑を保存しました<br><span style="font-weight:500;font-size:12px;">★証憑保存 shohyo / ' + escHtml(ym) + ' / ' + escHtml(fname) + '</span></div>';
+    showToast('証憑を保存しました', 'success');
+    // 次の1枚に備えてリセット
+    _shohyoImages = [];
+    renderShohyoThumbs();
+    var oc = document.getElementById('shohyoOcrResult'); if (oc) oc.innerHTML = '';
+    ['shohyoDate', 'shohyoVendor', 'shohyoAmount', 'shohyoInvoiceNo'].forEach(function(id) { var e = document.getElementById(id); if (e) e.value = ''; });
+    var kd = document.getElementById('shohyoDocKind'); if (kd) kd.value = '';
+  } catch (e) {
+    console.error('[shohyo save]', e);
+    if (st) st.innerHTML = '<div style="background:#ffebee;border:1.5px solid #e53935;color:#b71c1c;font-weight:700;padding:10px;border-radius:8px;font-size:13px;">保存に失敗しました: ' + escHtml(e.message || String(e)) + '</div>';
+    showToast('保存に失敗しました', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 証憑フォルダへ保存'; }
+  }
 }
 
 // ============================================================
