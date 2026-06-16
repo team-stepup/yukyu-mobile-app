@@ -5873,17 +5873,11 @@ select.sankyu-edit-input {
     <div id="nyutaiBody"></div>
   </div>
 
-  <!-- Screen: 送迎連絡 (派遣先別に当日の帰り便/終業時間を従業員アプリへ) -->
+  <!-- Screen: 送迎連絡 (派遣先→名簿→車両割当→確認→人単位配信) -->
   <div class="screen" id="sougeiScreen">
-    <div style="padding:8px 4px 4px;color:var(--text-light);font-size:12px;line-height:1.5;">
-      送迎を利用する従業員へ、<b>本日の帰りの終業時間と車両</b>を派遣先ごとに送ります。<br>
-      前回の値が初期表示されます。基本はそのまま「送信」でOK（変更がある日だけ直してください）。
-    </div>
-    <div style="display:flex;justify-content:center;padding:4px;">
-      <button class="nyutai-asti-btn" onclick="sendAllSougei()">📣 表示中をまとめて送信</button>
-    </div>
-    <div id="sougeiBody"></div>
-    <datalist id="sougeiVehicleList"></datalist>
+    <div id="sougeiHakenList"></div>
+    <div id="sougeiRoster" style="display:none;"></div>
+    <div id="sougeiConfirm" style="display:none;"></div>
   </div>
 
   <!-- Screen: 前払い一覧 -->
@@ -40845,15 +40839,29 @@ async function fetchTenkenFields() {
   return _tenkenFields;
 }
 
-// ====== 送迎連絡 (派遣先別に当日の帰り便/終業時間を従業員アプリへ配信) ======
+// ====== 送迎連絡 v2 (派遣先→名簿→人ごとに車両割当→車両別まとめ→人単位配信) ======
 const SOUGEI_LIST_GUID = '60569629-38e0-4dcb-9a73-c5f2904e3036';
-const SG_F_BUKA = 'OData__x90e8__x8ab2_';                         // 部課 (派遣先)
+const SG_F_SHAINNO = 'OData__x793e__x54e1__x756a__x53f7_';        // 社員番号
+const SG_F_NAME = 'Title';                                       // 氏名
+const SG_F_BUKA = 'OData__x90e8__x8ab2_';                        // 部課 (派遣先)
 const SG_F_TSUKIN_OLD = 'OData__x901a__x52e4__x65b9__x6cd5_tsuk'; // 通勤方法
 const SG_F_TSUKIN_NEW = 'OData__x65b0__x901a__x52e4__x65b9__x6c'; // 新通勤方法
 const SG_F_TAISHA = 'OData__x6d3e__x9063__x5148__x9000__x79';     // 退社日
-window._sougeiGroups = [];
+const SOUGEI_BUCKETS = [
+  { key: 'ASTI㈱浜松', label: 'ASTI浜松', kw: '浜松' },
+  { key: 'ユーシン', label: 'ユーシン', kw: 'ユーシン' },
+  { key: 'ASTI都田', label: 'ASTI都田', kw: '都田' },
+  { key: 'ASTI掛川', label: 'ASTI掛川', kw: '掛川' }
+];
 function _sgEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _sgAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+window._sgData = { byBucket: {}, vehicles: [], lastBySn: {}, bucketTime: {} };
+
+function _sgBucketOf(buka){
+  var s = stripBukaPrefix(buka || '');
+  for (var i = 0; i < SOUGEI_BUCKETS.length; i++){ if (s.indexOf(SOUGEI_BUCKETS[i].kw) >= 0) return SOUGEI_BUCKETS[i].key; }
+  return null;
+}
 
 async function loadSougeiVehicleOptions() {
   try {
@@ -40864,102 +40872,183 @@ async function loadSougeiVehicleOptions() {
     var items = ((await resp.json()).d.results) || [];
     var fields = await fetchVehicleFields();
     var fp = function(sub){ var h = fields.find(function(f){ return f.Title && f.Title.indexOf(sub) >= 0; }); return h ? h.EntityPropertyName : null; };
-    var fNo1 = fp('NO1') || fp('No1'); var fUsage = fp('Usage') || fp('使用'); var fHaken = fp('送迎') || fp('Pick') || fp('派遣');
+    var fNo1 = fp('NO1') || fp('No1');
+    var fUsage = fp('Usage') || fp('使用');
+    var fHaken = fp('送迎') || fp('Pick') || fp('派遣');
+    var fColor = (function(){ var e = fields.find(function(f){ return f.Title === 'Color' || f.Title === '色'; }); return e ? e.EntityPropertyName : (fp('カラー') || null); })();
+    var fType = fp('車種') || fp('車名');
     var opts = [];
     items.forEach(function(it){
       if (fUsage && (it[fUsage] || '') !== '使用') return;
-      var no1 = fNo1 ? (it[fNo1] || '') : '';
-      var hk = fHaken ? (it[fHaken] || '') : '';
-      if (no1) opts.push({ value: String(no1).trim(), haken: stripBukaPrefix(hk || '') });
+      var no1 = fNo1 ? String(it[fNo1] || '').trim() : '';
+      if (!no1) return;
+      var color = fColor ? String(it[fColor] || '').trim() : '';
+      var type = fType ? String(it[fType] || '').trim() : '';
+      var parts = [no1]; if (color) parts.push(color); if (type) parts.push(type);
+      opts.push({ value: parts.join(' / '), haken: stripBukaPrefix(fHaken ? (it[fHaken] || '') : '') });
     });
     return opts;
   } catch (e) { console.warn('送迎車両候補の取得失敗', e); return []; }
 }
 
 async function loadSougeiScreen() {
-  var body = document.getElementById('sougeiBody');
-  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+  document.getElementById('sougeiRoster').style.display = 'none';
+  document.getElementById('sougeiConfirm').style.display = 'none';
+  var list = document.getElementById('sougeiHakenList');
+  list.style.display = '';
+  list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
   try {
-    var sel = '$select=Id,Title,' + [SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
+    var sel = '$select=Id,' + [SG_F_NAME, SG_F_SHAINNO, SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
     var arr = await Promise.all([
       spGetAll(LIST_EMPLOYEES_GUID, sel),
-      spGetAll(SOUGEI_LIST_GUID, '$select=Id,Hakensaki,EndTime,Vehicle&$orderby=Id desc&$top=300').catch(function(){ return []; }),
+      spGetAll(SOUGEI_LIST_GUID, '$select=Id,ShainNo,EndTime,Vehicle&$orderby=Id desc&$top=600').catch(function(){ return []; }),
       loadSougeiVehicleOptions()
     ]);
     var emps = arr[0], recs = arr[1], vehOpts = arr[2];
-    var dl = document.getElementById('sougeiVehicleList');
-    if (dl) dl.innerHTML = vehOpts.map(function(o){ return '<option value="' + _sgAttr(o.value) + '">'; }).join('');
-    var last = {};
-    recs.forEach(function(r){ var h = stripBukaPrefix(r.Hakensaki || ''); if (h && !last[h]) last[h] = r; });
+    var lastBySn = {};
+    recs.forEach(function(r){ var sn = String(r.ShainNo || '').trim(); if (sn && !lastBySn[sn]) lastBySn[sn] = { endTime: r.EndTime || '', vehicle: r.Vehicle || '' }; });
     var today = new Date(); today.setHours(0, 0, 0, 0);
-    var groups = {};
+    var byBucket = {}; SOUGEI_BUCKETS.forEach(function(b){ byBucket[b.key] = []; });
     emps.forEach(function(e){
       var ts = e[SG_F_TAISHA];
       if (ts) { var d = new Date(ts); if (!isNaN(d.getTime()) && d < today) return; }
       var comb = String(e[SG_F_TSUKIN_OLD] || '') + ' ' + String(e[SG_F_TSUKIN_NEW] || '');
       if (comb.indexOf('送迎') < 0) return;
-      var key = stripBukaPrefix(e[SG_F_BUKA] || '') || '(派遣先未設定)';
-      groups[key] = (groups[key] || 0) + 1;
+      var bk = _sgBucketOf(e[SG_F_BUKA]);
+      if (!bk) return;
+      byBucket[bk].push({ sn: String(e[SG_F_SHAINNO] || '').trim(), name: e[SG_F_NAME] || '', buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
     });
-    var keys = Object.keys(groups).sort(function(a, b){ return groups[b] - groups[a]; });
-    if (!keys.length) { body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">送迎を利用する在職社員が見つかりません。</div>'; return; }
-    window._sougeiGroups = [];
-    var html = '';
-    keys.forEach(function(k, i){
-      var lr = last[k];
-      var pvTime = (lr && lr.EndTime) ? lr.EndTime : '17:00';
-      var pvVeh = (lr && lr.Vehicle) ? lr.Vehicle : '';
-      if (!pvVeh) { var m = vehOpts.find(function(o){ return o.haken && o.haken === k; }); if (m) pvVeh = m.value; }
-      window._sougeiGroups.push({ haken: k, idx: i });
-      html += '<div class="card" style="padding:12px;margin:0 4px 10px;">'
-        + '<div style="font-weight:800;color:var(--primary);font-size:15px;margin-bottom:8px;">' + _sgEsc(k) + ' <span style="font-weight:600;color:var(--text-light);font-size:12px;">(' + groups[k] + '名)</span></div>'
-        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
-        + '<label style="font-size:12px;color:var(--text-light);">終業 <input type="time" id="sg-time-' + i + '" value="' + _sgAttr(pvTime) + '" style="font-size:15px;padding:4px;"></label>'
-        + '<label style="font-size:12px;color:var(--text-light);flex:1;min-width:130px;">車両 <input list="sougeiVehicleList" id="sg-veh-' + i + '" value="' + _sgAttr(pvVeh) + '" placeholder="例 1号車 / ナンバー" style="font-size:15px;padding:4px;width:100%;box-sizing:border-box;"></label>'
-        + '</div>'
-        + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">'
-        + '<button class="nyutai-asti-btn" style="background:var(--primary);" onclick="sendSougei(' + i + ')">送信</button>'
-        + '<span id="sg-status-' + i + '" style="font-size:12px;color:var(--text-light);"></span>'
-        + '</div></div>';
+    var bucketTime = {};
+    SOUGEI_BUCKETS.forEach(function(b){
+      var times = {}; byBucket[b.key].forEach(function(p){ var lr = lastBySn[p.sn]; if (lr && lr.endTime) times[lr.endTime] = (times[lr.endTime] || 0) + 1; });
+      var best = '17:00', bn = -1; Object.keys(times).forEach(function(t){ if (times[t] > bn){ bn = times[t]; best = t; } });
+      bucketTime[b.key] = best;
     });
-    body.innerHTML = html;
+    window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, bucketTime: bucketTime };
+    var html = '<div style="padding:8px 4px;color:var(--text-light);font-size:12px;">送迎を利用する従業員へ、本日の帰りの<b>終業時間と車両</b>を送ります。派遣先を選んでください。</div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px;">';
+    SOUGEI_BUCKETS.forEach(function(b){
+      var n = byBucket[b.key].length;
+      html += '<button class="quick-link-btn" style="min-height:84px;" onclick="openSougeiRoster(\'' + _sgAttr(b.key) + '\')">'
+        + '<span class="ql-icon">🚐</span><span class="ql-text">' + _sgEsc(b.label) + '</span>'
+        + '<span style="font-size:12px;color:var(--text-light);">' + n + '名</span></button>';
+    });
+    html += '</div>';
+    list.innerHTML = html;
   } catch (e) {
     console.error(e);
-    body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _sgEsc(String(e && e.message || e)) + '</div>';
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _sgEsc(String(e && e.message || e)) + '</div>';
   }
 }
 
-async function sendSougei(idx) {
-  var g = (window._sougeiGroups || [])[idx];
-  if (!g) return;
-  var time = (document.getElementById('sg-time-' + idx) || {}).value || '';
-  var veh = (document.getElementById('sg-veh-' + idx) || {}).value || '';
-  var st = document.getElementById('sg-status-' + idx);
-  if (!time && !veh) { showToast('終業時間か車両を入力してください', 'error'); return; }
-  if (st) { st.textContent = '送信中...'; st.style.color = 'var(--text-light)'; }
+function _sgVehicleSelect(sn, preselect){
+  var opts = window._sgData.vehicles || [];
+  var html = '<select id="sg-v-' + _sgAttr(sn) + '" style="font-size:14px;padding:4px;max-width:170px;">';
+  html += '<option value="">（車両を選択）</option>';
+  var found = false;
+  opts.forEach(function(o){
+    var seld = (preselect && o.value === preselect) ? ' selected' : '';
+    if (seld) found = true;
+    html += '<option value="' + _sgAttr(o.value) + '"' + seld + '>' + _sgEsc(o.value) + '</option>';
+  });
+  if (preselect && !found) html += '<option value="' + _sgAttr(preselect) + '" selected>' + _sgEsc(preselect) + '</option>';
+  html += '</select>';
+  return html;
+}
+
+function openSougeiRoster(bucketKey){
+  var emps = (window._sgData.byBucket || {})[bucketKey] || [];
+  window._sgBucket = bucketKey;
+  document.getElementById('sougeiHakenList').style.display = 'none';
+  document.getElementById('sougeiConfirm').style.display = 'none';
+  var box = document.getElementById('sougeiRoster');
+  box.style.display = '';
+  var bk = SOUGEI_BUCKETS.find(function(b){ return b.key === bucketKey; });
+  var defTime = (window._sgData.bucketTime || {})[bucketKey] || '17:00';
+  var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;">'
+    + '<button class="nyutai-range-btn" onclick="loadSougeiScreen()">← 派遣先</button>'
+    + '<span style="font-weight:800;color:var(--primary);">' + _sgEsc(bk ? bk.label : bucketKey) + '（' + emps.length + '名）</span></div>';
+  html += '<div class="card" style="padding:10px;margin:0 4px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+    + '<span style="font-size:12px;color:var(--text-light);">定時</span>'
+    + '<input type="time" id="sg-teiji" value="' + _sgAttr(defTime) + '" style="font-size:15px;padding:4px;">'
+    + '<button class="nyutai-range-btn" onclick="applySougeiTeiji()">全員に適用</button></div>';
+  if (!emps.length) {
+    html += '<div style="text-align:center;padding:16px;color:var(--text-light);">送迎利用者がいません。</div>';
+  } else {
+    html += '<div class="card" style="padding:6px;margin:0 4px;">';
+    emps.forEach(function(p){
+      var lr = (window._sgData.lastBySn || {})[p.sn] || {};
+      var t = lr.endTime || defTime;
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 2px;border-bottom:1px solid #eee;flex-wrap:wrap;">'
+        + '<span style="min-width:84px;font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</span>'
+        + '<input type="time" id="sg-t-' + _sgAttr(p.sn) + '" value="' + _sgAttr(t) + '" style="font-size:14px;padding:3px;">'
+        + _sgVehicleSelect(p.sn, lr.vehicle || '')
+        + '</div>';
+    });
+    html += '</div>';
+    html += '<div style="display:flex;justify-content:center;padding:12px;">'
+      + '<button class="nyutai-asti-btn" style="background:var(--primary);" onclick="confirmSougeiRoster()">確定 → 確認</button></div>';
+  }
+  box.innerHTML = html;
+}
+
+function applySougeiTeiji(){
+  var t = (document.getElementById('sg-teiji') || {}).value || '';
+  if (!t) return;
+  var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
+  emps.forEach(function(p){ var el = document.getElementById('sg-t-' + p.sn); if (el) el.value = t; });
+}
+
+function confirmSougeiRoster(){
+  var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
+  var assignments = [];
+  emps.forEach(function(p){
+    var t = (document.getElementById('sg-t-' + p.sn) || {}).value || '';
+    var v = (document.getElementById('sg-v-' + p.sn) || {}).value || '';
+    assignments.push({ shainNo: p.sn, hakensaki: window._sgBucket, endTime: t, vehicle: v, name: p.name });
+  });
+  window._sgAssignments = assignments;
+  var groups = {};
+  assignments.forEach(function(a){ var key = a.vehicle || '（車両未選択）'; (groups[key] = groups[key] || []).push(a); });
+  document.getElementById('sougeiRoster').style.display = 'none';
+  var box = document.getElementById('sougeiConfirm');
+  box.style.display = '';
+  var bk = SOUGEI_BUCKETS.find(function(b){ return b.key === window._sgBucket; });
+  var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;">'
+    + '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket)">← 名簿</button>'
+    + '<span style="font-weight:800;color:var(--primary);">' + _sgEsc(bk ? bk.label : window._sgBucket) + ' 確認</span></div>';
+  Object.keys(groups).forEach(function(veh){
+    html += '<div class="card" style="padding:10px;margin:0 4px 8px;">'
+      + '<div style="font-weight:800;color:var(--primary);font-size:14px;margin-bottom:6px;">🚐 ' + _sgEsc(veh) + ' <span style="font-weight:600;color:var(--text-light);font-size:12px;">(' + groups[veh].length + '名)</span></div>';
+    groups[veh].forEach(function(a){
+      html += '<div style="display:flex;justify-content:space-between;padding:3px 2px;border-bottom:1px solid #f0f0f0;font-size:13px;"><span>' + _sgEsc(a.name) + '</span><span style="color:var(--text-light);">終業 ' + _sgEsc(a.endTime || '-') + '</span></div>';
+    });
+    html += '</div>';
+  });
+  html += '<div style="display:flex;justify-content:center;gap:10px;padding:12px;">'
+    + '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket)">戻る</button>'
+    + '<button class="nyutai-asti-btn" style="background:#2e7d32;" onclick="sendSougeiBatch()">📣 この内容で送信</button></div>';
+  box.innerHTML = html;
+}
+
+async function sendSougeiBatch(){
+  var a = window._sgAssignments || [];
+  var valid = a.filter(function(x){ return x.shainNo && (x.endTime || x.vehicle); });
+  if (!valid.length) { showToast('送信対象がありません', 'error'); return; }
+  if (!confirm(valid.length + '名に送信します。よろしいですか？')) return;
   try {
     var token = await getToken();
-    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/sougei-send', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hakensaki: g.haken, endTime: time, vehicle: veh })
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/sougei-send-batch', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments: valid.map(function(x){ return { shainNo: x.shainNo, hakensaki: x.hakensaki, endTime: x.endTime, vehicle: x.vehicle }; }) })
     });
     var data = await resp.json().catch(function(){ return {}; });
     if (!resp.ok || !data.ok) throw new Error((data && (data.error || JSON.stringify(data))) || ('HTTP ' + resp.status));
-    if (st) { st.textContent = '✅ 送信済 (' + data.targets + '名 / 通知' + data.pushed + ')'; st.style.color = '#2e7d32'; }
-    showToast(g.haken + ' に送信しました (' + data.targets + '名)', 'success');
+    showToast('送信完了: ' + data.saved + '名 / 通知' + data.pushed + '件', 'success');
+    loadSougeiScreen();
   } catch (e) {
-    if (st) { st.textContent = '❌ ' + (e.message || '失敗'); st.style.color = '#c62828'; }
     showToast('送信失敗: ' + (e.message || e), 'error');
   }
-}
-
-async function sendAllSougei() {
-  var gs = window._sougeiGroups || [];
-  if (!gs.length) return;
-  if (!confirm('表示中の ' + gs.length + ' 派遣先すべてに送信します。よろしいですか？')) return;
-  for (var i = 0; i < gs.length; i++) { await sendSougei(gs[i].idx); }
-  showToast('まとめて送信が完了しました', 'success');
 }
 
 async function loadVehicleList() {
