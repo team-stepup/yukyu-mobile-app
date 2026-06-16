@@ -40957,7 +40957,7 @@ function openSougeiRoster(bucketKey, preserve){
   var times = (bk && bk.times && bk.times.length) ? bk.times : ['17:00'];
   if (!preserve || window._sgBucket !== bucketKey || !window._sgAssign) {
     var assign = {};
-    emps.forEach(function(p){ assign[p.sn] = { name: p.name, time: times[0], driver: '', kesseki: false, checked: false }; });
+    emps.forEach(function(p){ var lr = (window._sgData.lastBySn || {})[p.sn] || {}; assign[p.sn] = { name: p.name, time: times[0], driver: '', kesseki: false, checked: false, prev: lr.vehicle || '' }; });
     window._sgAssign = assign;
   }
   window._sgBucket = bucketKey;
@@ -41012,6 +41012,11 @@ function _sgRenderRoster(){
   if (doneN + kesN > 0) {
     html += '<div style="padding:0 8px 6px;"><label style="font-size:12px;"><input type="checkbox" ' + (window._sgShowAll ? 'checked' : '') + ' onchange="_sgToggleShowAll(this.checked)"> 割当済・欠早退も表示（' + (doneN + kesN) + '名）</label></div>';
   }
+  var prevCount = 0;
+  emps.forEach(function(p){ var a = A[p.sn]; if (a && !_sgDone(a) && a.prev) prevCount++; });
+  if (prevCount > 0 && !mode) {
+    html += '<div style="padding:0 8px 8px;"><button class="nyutai-range-btn" style="background:#0f7b6c;color:#fff;font-weight:700;font-size:13px;" onclick="_sgCarryPrev()">🔁 前回の運転手を引き継ぐ（' + prevCount + '名）</button></div>';
+  }
   html += '<div class="card" style="padding:4px;margin:0 4px;">';
   var shown = 0;
   emps.forEach(function(p){
@@ -41026,7 +41031,8 @@ function _sgRenderRoster(){
     var timeBadge = a.kesseki ? '' : '<span style="font-size:12px;background:#eef2ff;color:#1a44aa;border-radius:6px;padding:1px 7px;font-weight:700;">' + _sgEsc(a.time) + '</span>';
     html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 3px;border-bottom:1px solid #eee;' + (done ? 'opacity:0.55;' : '') + '">'
       + (mode ? '<input type="checkbox" ' + (a.checked ? 'checked' : '') + ' onchange="_sgCheck(\'' + _sgAttr(p.sn) + '\',this.checked)" style="width:18px;height:18px;flex-shrink:0;">' : '')
-      + '<span style="flex:1;min-width:80px;font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</span>'
+      + '<div style="flex:1;min-width:80px;"><div style="font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</div>'
+      + ((a.prev && !a.driver && !a.kesseki) ? '<div style="font-size:10px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">前回 ' + _sgEsc(a.prev) + '</div>' : '') + '</div>'
       + timeBadge + statusHtml + '</div>';
   });
   if (!shown) html += '<div style="text-align:center;padding:14px;color:#2e7d32;font-weight:700;">全員の割当が完了しました 🎉</div>';
@@ -41035,6 +41041,15 @@ function _sgRenderRoster(){
     + '<button class="nyutai-asti-btn" style="background:var(--primary);" onclick="confirmSougeiRoster()">確定 → 確認</button></div>';
   document.getElementById('sougeiRoster').innerHTML = html;
   _sgUpdateSel();
+}
+
+function _sgCarryPrev(){
+  var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
+  var n = 0;
+  emps.forEach(function(p){ var a = window._sgAssign[p.sn]; if (a && !_sgDone(a) && a.prev) { a.driver = a.prev; a.kesseki = false; n++; } });
+  if (!n) { showToast('前回の運転手の記録がありません', 'error'); return; }
+  _sgRenderRoster();
+  showToast(n + '名に前回の運転手を引き継ぎました', 'success');
 }
 
 function _sgClearChecks(){
