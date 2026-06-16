@@ -20065,6 +20065,48 @@ async function saveHakensakiDetail() {
   }
 }
 
+// 社員ファイル直下の派遣先フォルダ一覧をキャッシュ取得
+var _shainFolderListCache = null;
+async function _getShainFolders() {
+  if (_shainFolderListCache) return _shainFolderListCache;
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var enc = encodeURIComponent(SP_DOC_LIB_PATH).replace(/%2F/g, '/');
+  var url = SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + enc + "')/folders?$select=Name,ServerRelativeUrl&$top=400";
+  var r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!r.ok) throw new Error('フォルダ一覧取得失敗 ' + r.status);
+  var d = await r.json();
+  _shainFolderListCache = ((d.d && d.d.results) || []).filter(function(f) { return f.Name.indexOf('Forms') !== 0; });
+  return _shainFolderListCache;
+}
+
+// 派遣先グループの「派遣先ファイル」フォルダ(社員ファイル/{番号}{会社名})を新タブで開く
+//   マッピング: 派遣先情報の番号 先頭数字 (188-1 → 188) = フォルダ名 先頭数字
+async function openHakensakiFolder(gIdx) {
+  var meta = (window._hkGroupMeta || {})[gIdx];
+  if (!meta) { showToast('情報が取得できません', 'error'); return; }
+  var num = parseInt(String(meta.bukaNum || '').replace(/[^\d]/g, ''), 10);
+  showToast('📁 派遣先ファイルを開いています…', 'info');
+  try {
+    var folders = await _getShainFolders();
+    var hit = null;
+    if (!isNaN(num)) {
+      hit = folders.find(function(f) { var m = f.Name.match(/^\s*(\d+)/); return m && parseInt(m[1], 10) === num; });
+    }
+    // 番号で見つからなければ会社名の先頭で部分一致
+    if (!hit && meta.name) {
+      var key = String(meta.name).replace(/(株式会社|有限会社|㈱|㈲)/g, '').replace(/[・\s　].*$/, '').slice(0, 4);
+      if (key) hit = folders.find(function(f) { return f.Name.indexOf(key) >= 0; });
+    }
+    var path = hit ? hit.ServerRelativeUrl : SP_DOC_LIB_PATH;
+    if (!hit) showToast('該当フォルダが見つからないため「社員ファイル」を開きます', 'warn');
+    window.open(SP_DOC_SITE_URL + '/Shared%20Documents/Forms/AllItems.aspx?id=' + encodeURIComponent(path), '_blank', 'noopener');
+  } catch (e) {
+    console.error('openHakensakiFolder', e);
+    showToast('フォルダを開けませんでした: ' + (e.message || e), 'error');
+  }
+}
+
 function drawHakensakiCards(filterKey) {
   var body = document.getElementById('hakensakiBody');
   if (!body) return;
@@ -20158,6 +20200,7 @@ function drawHakensakiCards(filterKey) {
     return;
   }
 
+  window._hkGroupMeta = {};
   groupOrder.forEach(function(gName, gIdx) {
     var gItems = groups[gName];
     var totalNinzu = 0;
@@ -20194,12 +20237,17 @@ function drawHakensakiCards(filterKey) {
     }
 
     var sectionId = 'hkAcc_' + gIdx;
+    var _bukaNum = '';
+    for (var _bi = 0; _bi < gItems.length; _bi++) { var _bm = String(gItems[_bi][HF.bango] || '').match(/(\d+)/); if (_bm) { _bukaNum = _bm[1]; break; } }
+    window._hkGroupMeta[gIdx] = { bukaNum: _bukaNum, name: gName };
     html += '<div id="' + sectionId + '" style="background:#fff;border-radius:12px;margin-bottom:8px;border:' + cardBorder + ';overflow:hidden;' + cardStyle + '">';
 
     // ヘッダー (クリックで展開)
     html += '<div onclick="toggleHakenAcc(\'' + sectionId + '\')" style="background:' + headerBg + ';color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">';
     html += '<span class="hk-acc-arrow" style="font-size:10px;transition:transform 0.2s;flex-shrink:0;">▶</span>';
-    html += '<div style="flex:1;font-weight:700;font-size:14px;">' + escHtml(gName) + '</div>';
+    html += '<div style="flex:1;min-width:0;font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(gName) + '</div>';
+    // 派遣先ファイルを開くボタン (アコーディオン開閉とは独立)
+    html += '<button onclick="event.stopPropagation();openHakensakiFolder(' + gIdx + ')" title="派遣先ファイルを開く" style="flex-shrink:0;background:rgba(255,255,255,0.22);border:none;border-radius:7px;color:#fff;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:3px;-webkit-tap-highlight-color:transparent;">📁 ファイル</button>';
     // サマリー: 件数 + 合計人数
     html += '<div style="font-size:11px;opacity:0.8;">' + gItems.length + '件</div>';
     if (F.ninzu) {
