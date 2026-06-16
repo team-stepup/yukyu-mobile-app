@@ -40944,10 +40944,11 @@ async function loadSougeiScreen() {
 
 function _sgDriverOptions(sel){
   var opts = window._sgData.vehicles || [];
-  var html = '<option value="">（運転手・車両を選ぶ）</option>';
+  var html = '<option value=""' + (!sel ? ' selected' : '') + '>（運転手・車両を選ぶ）</option>';
   var found = false;
-  opts.forEach(function(o){ var s = (sel && o.label === sel) ? ' selected' : ''; if (s) found = true; html += '<option value="' + _sgAttr(o.label) + '"' + s + '>' + _sgEsc(o.label) + '</option>'; });
-  if (sel && !found) html += '<option value="' + _sgAttr(sel) + '" selected>' + _sgEsc(sel) + '</option>';
+  opts.forEach(function(o){ var s = (o.label === sel) ? ' selected' : ''; if (s) found = true; html += '<option value="' + _sgAttr(o.label) + '"' + s + '>' + _sgEsc(o.label) + '</option>'; });
+  html += '<option value="__other__"' + (sel === '__other__' ? ' selected' : '') + '>✏️ その他（手入力／代車など）</option>';
+  if (sel && sel !== '__other__' && !found) html += '<option value="' + _sgAttr(sel) + '" selected>' + _sgEsc(sel) + '</option>';
   return html;
 }
 
@@ -40964,6 +40965,7 @@ function openSougeiRoster(bucketKey, preserve){
   window._sgTimes = times;
   window._sgMode = null;
   window._sgDriverSel = '';
+  window._sgDriverOther = '';
   window._sgShowAll = preserve ? true : false;
   document.getElementById('sougeiHakenList').style.display = 'none';
   document.getElementById('sougeiConfirm').style.display = 'none';
@@ -40998,6 +41000,9 @@ function _sgRenderRoster(){
   html += '</div>';
   html += '<div style="font-size:12px;color:var(--text-light);margin-bottom:5px;">② <b>運転手（車両）</b>（選ぶ → チェック → 割当）</div>';
   html += '<select id="sg-driver" style="font-size:13px;padding:5px;max-width:240px;" onchange="_sgDriverChange(this.value)">' + _sgDriverOptions(window._sgDriverSel) + '</select>';
+  if (window._sgDriverSel === '__other__') {
+    html += '<div style="margin-top:6px;"><input id="sg-driver-other" type="text" value="' + _sgAttr(window._sgDriverOther || '') + '" oninput="window._sgDriverOther=this.value" placeholder="例: 森 ゆうじ（代車 軽トラ）" style="font-size:13px;padding:6px;width:100%;max-width:280px;box-sizing:border-box;"></div>';
+  }
   html += '</div>';
   if (mode) {
     var applyLabel = (mode === 'D') ? '割当' : (mode === 'K' ? '欠・早退に確定' : 'この時間で確定');
@@ -41057,9 +41062,9 @@ function _sgClearChecks(){
   emps.forEach(function(p){ if (window._sgAssign[p.sn]) window._sgAssign[p.sn].checked = false; });
 }
 
-function _sgSetMode(m){ window._sgMode = (window._sgMode === m) ? null : m; window._sgDriverSel = ''; _sgClearChecks(); _sgRenderRoster(); }
+function _sgSetMode(m){ window._sgMode = (window._sgMode === m) ? null : m; window._sgDriverSel = ''; window._sgDriverOther = ''; _sgClearChecks(); _sgRenderRoster(); }
 function _sgDriverChange(val){ window._sgDriverSel = val || ''; window._sgMode = val ? 'D' : null; _sgClearChecks(); _sgRenderRoster(); }
-function _sgCancelMode(){ window._sgMode = null; window._sgDriverSel = ''; _sgClearChecks(); _sgRenderRoster(); }
+function _sgCancelMode(){ window._sgMode = null; window._sgDriverSel = ''; window._sgDriverOther = ''; _sgClearChecks(); _sgRenderRoster(); }
 function _sgToggleShowAll(c){ window._sgShowAll = c; _sgRenderRoster(); }
 function _sgCheck(sn, checked){ if (window._sgAssign[sn]) window._sgAssign[sn].checked = checked; _sgUpdateSel(); }
 
@@ -41076,7 +41081,7 @@ function _sgApply(){
   if (!sel.length) { showToast('社員をチェックしてください', 'error'); return; }
   var msg;
   if (mode === 'K') { sel.forEach(function(p){ var a = window._sgAssign[p.sn]; a.kesseki = true; a.driver = ''; a.checked = false; }); msg = sel.length + '名を欠・早退に'; }
-  else if (mode === 'D') { var d = window._sgDriverSel; if (!d) { showToast('運転手を選んでください', 'error'); return; } sel.forEach(function(p){ var a = window._sgAssign[p.sn]; a.driver = d; a.kesseki = false; a.checked = false; }); msg = sel.length + '名に運転手を割当'; window._sgDriverSel = ''; }
+  else if (mode === 'D') { var d = window._sgDriverSel; if (d === '__other__') d = (window._sgDriverOther || '').trim(); if (!d) { showToast('運転手・車両を選ぶか入力してください', 'error'); return; } sel.forEach(function(p){ var a = window._sgAssign[p.sn]; a.driver = d; a.kesseki = false; a.checked = false; }); msg = sel.length + '名に運転手を割当'; window._sgDriverSel = ''; window._sgDriverOther = ''; }
   else if (mode.indexOf('T:') === 0) { var t = mode.slice(2); sel.forEach(function(p){ var a = window._sgAssign[p.sn]; a.time = t; a.kesseki = false; a.checked = false; }); msg = sel.length + '名の終業を ' + t + ' に'; }
   window._sgMode = null;
   _sgRenderRoster();
