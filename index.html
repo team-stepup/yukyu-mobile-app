@@ -5316,7 +5316,7 @@ select.sankyu-edit-input {
         <span class="ql-text">期限注意</span>
         <span id="expiryBadgeCount" class="ql-badge" style="background:#d32f2f;display:none;"></span>
       </button>
-      <button class="quick-link-btn" onclick="switchScreen('sougeiScreen')" style="position:relative;">
+      <button class="quick-link-btn admin-only" onclick="switchScreen('sougeiScreen')" style="position:relative;display:none;">
         <span class="ql-icon">🚐</span>
         <span class="ql-text">送迎連絡</span>
       </button>
@@ -40848,10 +40848,10 @@ const SG_F_TSUKIN_OLD = 'OData__x901a__x52e4__x65b9__x6cd5_tsuk'; // 通勤方�
 const SG_F_TSUKIN_NEW = 'OData__x65b0__x901a__x52e4__x65b9__x6c'; // 新通勤方法
 const SG_F_TAISHA = 'OData__x6d3e__x9063__x5148__x9000__x79';     // 退社日
 const SOUGEI_BUCKETS = [
-  { key: 'ASTI㈱浜松', label: 'ASTI浜松', kw: '浜松' },
-  { key: 'ユーシン', label: 'ユーシン', kw: 'ユーシン' },
-  { key: 'ASTI都田', label: 'ASTI都田', kw: '都田' },
-  { key: 'ASTI掛川', label: 'ASTI掛川', kw: '掛川' }
+  { key: 'ASTI㈱浜松', label: 'ASTI浜松', kw: '浜松', teiji: '' },
+  { key: 'ユーシン', label: 'ユーシン', kw: 'ユーシン', teiji: '17:40' },
+  { key: 'ASTI都田', label: 'ASTI都田', kw: '都田', teiji: '' },
+  { key: 'ASTI掛川', label: 'ASTI掛川', kw: '掛川', teiji: '' }
 ];
 function _sgEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _sgAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
@@ -40892,6 +40892,7 @@ async function loadSougeiVehicleOptions() {
 }
 
 async function loadSougeiScreen() {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('この機能は役員のみ利用できます', 'error'); switchScreen('searchScreen'); return; }
   document.getElementById('sougeiRoster').style.display = 'none';
   document.getElementById('sougeiConfirm').style.display = 'none';
   var list = document.getElementById('sougeiHakenList');
@@ -40920,6 +40921,7 @@ async function loadSougeiScreen() {
     });
     var bucketTime = {};
     SOUGEI_BUCKETS.forEach(function(b){
+      if (b.teiji) { bucketTime[b.key] = b.teiji; return; }  // 派遣先の定時を最優先
       var times = {}; byBucket[b.key].forEach(function(p){ var lr = lastBySn[p.sn]; if (lr && lr.endTime) times[lr.endTime] = (times[lr.endTime] || 0) + 1; });
       var best = '17:00', bn = -1; Object.keys(times).forEach(function(t){ if (times[t] > bn){ bn = times[t]; best = t; } });
       bucketTime[b.key] = best;
@@ -40978,7 +40980,7 @@ function openSougeiRoster(bucketKey){
     html += '<div class="card" style="padding:6px;margin:0 4px;">';
     emps.forEach(function(p){
       var lr = (window._sgData.lastBySn || {})[p.sn] || {};
-      var t = lr.endTime || defTime;
+      var t = defTime;  // 基本は派遣先の定時
       html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 2px;border-bottom:1px solid #eee;flex-wrap:wrap;">'
         + '<span style="min-width:84px;font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</span>'
         + '<input type="time" id="sg-t-' + _sgAttr(p.sn) + '" value="' + _sgAttr(t) + '" style="font-size:14px;padding:3px;">'
