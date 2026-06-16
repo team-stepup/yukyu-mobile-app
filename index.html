@@ -40848,10 +40848,10 @@ const SG_F_TSUKIN_OLD = 'OData__x901a__x52e4__x65b9__x6cd5_tsuk'; // 通勤方�
 const SG_F_TSUKIN_NEW = 'OData__x65b0__x901a__x52e4__x65b9__x6c'; // 新通勤方法
 const SG_F_TAISHA = 'OData__x6d3e__x9063__x5148__x9000__x79';     // 退社日
 const SOUGEI_BUCKETS = [
-  { key: 'ASTI㈱浜松', label: 'ASTI浜松', kw: '浜松', teiji: '' },
-  { key: 'ユーシン', label: 'ユーシン', kw: 'ユーシン', teiji: '17:40' },
-  { key: 'ASTI都田', label: 'ASTI都田', kw: '都田', teiji: '' },
-  { key: 'ASTI掛川', label: 'ASTI掛川', kw: '掛川', teiji: '' }
+  { key: 'ASTI㈱浜松', label: 'ASTI浜松', kw: '浜松', times: ['17:00'] },
+  { key: 'ユーシン', label: 'ユーシン', kw: 'ユーシン', times: ['17:40', '19:45'] },
+  { key: 'ASTI都田', label: 'ASTI都田', kw: '都田', times: ['17:00'] },
+  { key: 'ASTI掛川', label: 'ASTI掛川', kw: '掛川', times: ['17:00'] }
 ];
 function _sgEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _sgAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
@@ -40875,6 +40875,7 @@ async function loadSougeiVehicleOptions() {
     var fNo1 = fp('NO1') || fp('No1');
     var fUsage = fp('Usage') || fp('使用');
     var fHaken = fp('送迎') || fp('Pick') || fp('派遣');
+    var fDriver = fp('ドライバー') || fp('運転');
     var fColor = (function(){ var e = fields.find(function(f){ return f.Title === 'Color' || f.Title === '色'; }); return e ? e.EntityPropertyName : (fp('カラー') || null); })();
     var fType = fp('車種') || fp('車名');
     var opts = [];
@@ -40884,8 +40885,11 @@ async function loadSougeiVehicleOptions() {
       if (!no1) return;
       var color = fColor ? String(it[fColor] || '').trim() : '';
       var type = fType ? String(it[fType] || '').trim() : '';
+      var driver = fDriver ? String(it[fDriver] || '').trim() : '';
       var parts = [no1]; if (color) parts.push(color); if (type) parts.push(type);
-      opts.push({ value: parts.join(' / '), haken: stripBukaPrefix(fHaken ? (it[fHaken] || '') : '') });
+      var vehicle = parts.join(' / ');
+      var label = driver ? (driver + '（' + vehicle + '）') : vehicle;
+      opts.push({ driver: driver, vehicle: vehicle, value: vehicle, label: label, haken: stripBukaPrefix(fHaken ? (it[fHaken] || '') : '') });
     });
     return opts;
   } catch (e) { console.warn('送迎車両候補の取得失敗', e); return []; }
@@ -40920,12 +40924,7 @@ async function loadSougeiScreen() {
       byBucket[bk].push({ sn: String(e[SG_F_SHAINNO] || '').trim(), name: e[SG_F_NAME] || '', buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
     });
     var bucketTime = {};
-    SOUGEI_BUCKETS.forEach(function(b){
-      if (b.teiji) { bucketTime[b.key] = b.teiji; return; }  // 派遣先の定時を最優先
-      var times = {}; byBucket[b.key].forEach(function(p){ var lr = lastBySn[p.sn]; if (lr && lr.endTime) times[lr.endTime] = (times[lr.endTime] || 0) + 1; });
-      var best = '17:00', bn = -1; Object.keys(times).forEach(function(t){ if (times[t] > bn){ bn = times[t]; best = t; } });
-      bucketTime[b.key] = best;
-    });
+    SOUGEI_BUCKETS.forEach(function(b){ bucketTime[b.key] = (b.times && b.times[0]) || '17:00'; });
     window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, bucketTime: bucketTime };
     var html = '<div style="padding:8px 4px;color:var(--text-light);font-size:12px;">送迎を利用する従業員へ、本日の帰りの<b>終業時間と車両</b>を送ります。派遣先を選んでください。</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px;">';
@@ -40943,92 +40942,135 @@ async function loadSougeiScreen() {
   }
 }
 
-function _sgVehicleSelect(sn, preselect){
+function _sgDriverOptions(){
   var opts = window._sgData.vehicles || [];
-  var html = '<select id="sg-v-' + _sgAttr(sn) + '" style="font-size:14px;padding:4px;max-width:170px;">';
-  html += '<option value="">（車両を選択）</option>';
-  var found = false;
-  opts.forEach(function(o){
-    var seld = (preselect && o.value === preselect) ? ' selected' : '';
-    if (seld) found = true;
-    html += '<option value="' + _sgAttr(o.value) + '"' + seld + '>' + _sgEsc(o.value) + '</option>';
-  });
-  if (preselect && !found) html += '<option value="' + _sgAttr(preselect) + '" selected>' + _sgEsc(preselect) + '</option>';
-  html += '</select>';
+  var html = '<option value="">（運転手・車両を選択）</option>';
+  opts.forEach(function(o){ html += '<option value="' + _sgAttr(o.label) + '">' + _sgEsc(o.label) + '</option>'; });
   return html;
 }
 
-function openSougeiRoster(bucketKey){
+function openSougeiRoster(bucketKey, preserve){
   var emps = (window._sgData.byBucket || {})[bucketKey] || [];
+  var bk = SOUGEI_BUCKETS.find(function(b){ return b.key === bucketKey; });
+  var times = (bk && bk.times && bk.times.length) ? bk.times : ['17:00'];
+  if (!preserve || window._sgBucket !== bucketKey || !window._sgAssign) {
+    var assign = {};
+    emps.forEach(function(p){
+      var lr = (window._sgData.lastBySn || {})[p.sn] || {};
+      assign[p.sn] = { name: p.name, time: times[0], driver: lr.vehicle || '', checked: false };
+    });
+    window._sgAssign = assign;
+  }
   window._sgBucket = bucketKey;
+  window._sgTimes = times;
   document.getElementById('sougeiHakenList').style.display = 'none';
   document.getElementById('sougeiConfirm').style.display = 'none';
-  var box = document.getElementById('sougeiRoster');
-  box.style.display = '';
-  var bk = SOUGEI_BUCKETS.find(function(b){ return b.key === bucketKey; });
-  var defTime = (window._sgData.bucketTime || {})[bucketKey] || '17:00';
+  var box = document.getElementById('sougeiRoster'); box.style.display = '';
   var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;">'
     + '<button class="nyutai-range-btn" onclick="loadSougeiScreen()">← 派遣先</button>'
     + '<span style="font-weight:800;color:var(--primary);">' + _sgEsc(bk ? bk.label : bucketKey) + '（' + emps.length + '名）</span></div>';
-  html += '<div class="card" style="padding:10px;margin:0 4px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-    + '<span style="font-size:12px;color:var(--text-light);">定時</span>'
-    + '<input type="time" id="sg-teiji" value="' + _sgAttr(defTime) + '" style="font-size:15px;padding:4px;">'
-    + '<button class="nyutai-range-btn" onclick="applySougeiTeiji()">全員に適用</button></div>';
-  if (!emps.length) {
-    html += '<div style="text-align:center;padding:16px;color:var(--text-light);">送迎利用者がいません。</div>';
-  } else {
-    html += '<div class="card" style="padding:6px;margin:0 4px;">';
-    emps.forEach(function(p){
-      var lr = (window._sgData.lastBySn || {})[p.sn] || {};
-      var t = defTime;  // 基本は派遣先の定時
-      html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 2px;border-bottom:1px solid #eee;flex-wrap:wrap;">'
-        + '<span style="min-width:84px;font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</span>'
-        + '<input type="time" id="sg-t-' + _sgAttr(p.sn) + '" value="' + _sgAttr(t) + '" style="font-size:14px;padding:3px;">'
-        + _sgVehicleSelect(p.sn, lr.vehicle || '')
-        + '</div>';
-    });
-    html += '</div>';
-    html += '<div style="display:flex;justify-content:center;padding:12px;">'
-      + '<button class="nyutai-asti-btn" style="background:var(--primary);" onclick="confirmSougeiRoster()">確定 → 確認</button></div>';
-  }
+  html += '<div class="card" style="padding:10px;margin:0 4px 8px;">';
+  html += '<div style="font-size:12px;color:var(--text-light);margin-bottom:5px;">① チェックした人の<b>終業時間</b>を一括設定（既定 ' + _sgEsc(times[0]) + '）</div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
+  times.forEach(function(t){ html += '<button class="nyutai-range-btn" style="font-size:14px;" onclick="_sgAssignTime(\'' + _sgAttr(t) + '\')">' + _sgEsc(t) + '</button>'; });
+  html += '</div>';
+  html += '<div style="font-size:12px;color:var(--text-light);margin-bottom:5px;">② チェックした人に<b>運転手（車両）</b>を一括割当</div>';
+  html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
+  html += '<select id="sg-driver" style="font-size:13px;padding:5px;max-width:210px;">' + _sgDriverOptions() + '</select>';
+  html += '<button class="nyutai-range-btn" onclick="_sgAssignDriver()">割当</button>';
+  html += '</div></div>';
+  html += '<div style="display:flex;gap:12px;align-items:center;padding:0 8px 6px;">'
+    + '<label style="font-size:12px;font-weight:600;"><input type="checkbox" id="sg-all" onchange="_sgToggleAll(this.checked)"> 全選択</label>'
+    + '<span id="sg-selcount" style="font-size:12px;color:var(--primary);font-weight:700;"></span></div>';
+  html += '<div class="card" id="sg-rows" style="padding:4px;margin:0 4px;"></div>';
+  html += '<div style="display:flex;justify-content:center;padding:12px;">'
+    + '<button class="nyutai-asti-btn" style="background:var(--primary);" onclick="confirmSougeiRoster()">確定 → 確認</button></div>';
   box.innerHTML = html;
+  _sgRenderRoster();
 }
 
-function applySougeiTeiji(){
-  var t = (document.getElementById('sg-teiji') || {}).value || '';
-  if (!t) return;
+function _sgRenderRoster(){
   var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
-  emps.forEach(function(p){ var el = document.getElementById('sg-t-' + p.sn); if (el) el.value = t; });
+  var assign = window._sgAssign || {};
+  var rows = '';
+  emps.forEach(function(p){
+    var a = assign[p.sn] || {};
+    rows += '<div style="display:flex;align-items:center;gap:6px;padding:6px 3px;border-bottom:1px solid #eee;">'
+      + '<input type="checkbox" ' + (a.checked ? 'checked' : '') + ' onchange="_sgCheck(\'' + _sgAttr(p.sn) + '\',this.checked)" style="width:18px;height:18px;">'
+      + '<span style="flex:1;min-width:80px;font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</span>'
+      + '<span style="font-size:12px;background:#eef2ff;color:#1a44aa;border-radius:6px;padding:1px 7px;font-weight:700;">' + _sgEsc(a.time || '-') + '</span>'
+      + '<span style="font-size:11px;color:' + (a.driver ? '#04604a' : '#c62828') + ';max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _sgEsc(a.driver || '未割当') + '</span>'
+      + '</div>';
+  });
+  var rb = document.getElementById('sg-rows'); if (rb) rb.innerHTML = rows;
+  _sgUpdateSel();
+}
+
+function _sgCheck(sn, checked){ if (window._sgAssign[sn]) window._sgAssign[sn].checked = checked; _sgUpdateSel(); }
+
+function _sgUpdateSel(){
+  var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
+  var n = 0; emps.forEach(function(p){ if (window._sgAssign[p.sn] && window._sgAssign[p.sn].checked) n++; });
+  var sc = document.getElementById('sg-selcount'); if (sc) sc.textContent = n ? ('選択中 ' + n + '名') : '';
+  var allBox = document.getElementById('sg-all'); if (allBox) allBox.checked = (n === emps.length && emps.length > 0);
+}
+
+function _sgToggleAll(checked){
+  var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
+  emps.forEach(function(p){ if (window._sgAssign[p.sn]) window._sgAssign[p.sn].checked = checked; });
+  _sgRenderRoster();
+}
+
+function _sgCheckedList(){
+  var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
+  return emps.filter(function(p){ return window._sgAssign[p.sn] && window._sgAssign[p.sn].checked; });
+}
+
+function _sgAssignTime(t){
+  var sel = _sgCheckedList();
+  if (!sel.length) { showToast('社員をチェックしてください', 'error'); return; }
+  sel.forEach(function(p){ window._sgAssign[p.sn].time = t; });
+  _sgRenderRoster();
+  showToast(sel.length + '名の終業を ' + t + ' に設定', 'success');
+}
+
+function _sgAssignDriver(){
+  var d = (document.getElementById('sg-driver') || {}).value || '';
+  if (!d) { showToast('運転手・車両を選択してください', 'error'); return; }
+  var sel = _sgCheckedList();
+  if (!sel.length) { showToast('社員をチェックしてください', 'error'); return; }
+  sel.forEach(function(p){ window._sgAssign[p.sn].driver = d; });
+  _sgRenderRoster();
+  showToast(sel.length + '名に「' + d + '」を割当', 'success');
 }
 
 function confirmSougeiRoster(){
   var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
   var assignments = [];
   emps.forEach(function(p){
-    var t = (document.getElementById('sg-t-' + p.sn) || {}).value || '';
-    var v = (document.getElementById('sg-v-' + p.sn) || {}).value || '';
-    assignments.push({ shainNo: p.sn, hakensaki: window._sgBucket, endTime: t, vehicle: v, name: p.name });
+    var a = window._sgAssign[p.sn] || {};
+    assignments.push({ shainNo: p.sn, hakensaki: window._sgBucket, endTime: a.time || '', vehicle: a.driver || '', name: p.name });
   });
   window._sgAssignments = assignments;
   var groups = {};
-  assignments.forEach(function(a){ var key = a.vehicle || '（車両未選択）'; (groups[key] = groups[key] || []).push(a); });
+  assignments.forEach(function(a){ var key = a.vehicle || '（運転手未割当）'; (groups[key] = groups[key] || []).push(a); });
   document.getElementById('sougeiRoster').style.display = 'none';
-  var box = document.getElementById('sougeiConfirm');
-  box.style.display = '';
+  var box = document.getElementById('sougeiConfirm'); box.style.display = '';
   var bk = SOUGEI_BUCKETS.find(function(b){ return b.key === window._sgBucket; });
   var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;">'
-    + '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket)">← 名簿</button>'
+    + '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket, true)">← 名簿</button>'
     + '<span style="font-weight:800;color:var(--primary);">' + _sgEsc(bk ? bk.label : window._sgBucket) + ' 確認</span></div>';
-  Object.keys(groups).forEach(function(veh){
-    html += '<div class="card" style="padding:10px;margin:0 4px 8px;">'
-      + '<div style="font-weight:800;color:var(--primary);font-size:14px;margin-bottom:6px;">🚐 ' + _sgEsc(veh) + ' <span style="font-weight:600;color:var(--text-light);font-size:12px;">(' + groups[veh].length + '名)</span></div>';
-    groups[veh].forEach(function(a){
+  Object.keys(groups).forEach(function(drv){
+    var unassigned = (drv === '（運転手未割当）');
+    html += '<div class="card" style="padding:10px;margin:0 4px 8px;' + (unassigned ? 'border:1.5px solid #f5b3ad;' : '') + '">'
+      + '<div style="font-weight:800;color:' + (unassigned ? '#c62828' : 'var(--primary)') + ';font-size:14px;margin-bottom:6px;">🚐 ' + _sgEsc(drv) + ' <span style="font-weight:600;color:var(--text-light);font-size:12px;">(' + groups[drv].length + '名)</span></div>';
+    groups[drv].forEach(function(a){
       html += '<div style="display:flex;justify-content:space-between;padding:3px 2px;border-bottom:1px solid #f0f0f0;font-size:13px;"><span>' + _sgEsc(a.name) + '</span><span style="color:var(--text-light);">終業 ' + _sgEsc(a.endTime || '-') + '</span></div>';
     });
     html += '</div>';
   });
   html += '<div style="display:flex;justify-content:center;gap:10px;padding:12px;">'
-    + '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket)">戻る</button>'
+    + '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket, true)">戻る</button>'
     + '<button class="nyutai-asti-btn" style="background:#2e7d32;" onclick="sendSougeiBatch()">📣 この内容で送信</button></div>';
   box.innerHTML = html;
 }
