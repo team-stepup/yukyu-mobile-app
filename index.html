@@ -5316,6 +5316,10 @@ select.sankyu-edit-input {
         <span class="ql-text">期限注意</span>
         <span id="expiryBadgeCount" class="ql-badge" style="background:#d32f2f;display:none;"></span>
       </button>
+      <button class="quick-link-btn" onclick="switchScreen('sougeiScreen')" style="position:relative;">
+        <span class="ql-icon">🚐</span>
+        <span class="ql-text">送迎連絡</span>
+      </button>
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
         <span class="ql-text">車両管理</span>
@@ -5867,6 +5871,19 @@ select.sankyu-edit-input {
       </div>
     </div>
     <div id="nyutaiBody"></div>
+  </div>
+
+  <!-- Screen: 送迎連絡 (派遣先別に当日の帰り便/終業時間を従業員アプリへ) -->
+  <div class="screen" id="sougeiScreen">
+    <div style="padding:8px 4px 4px;color:var(--text-light);font-size:12px;line-height:1.5;">
+      送迎を利用する従業員へ、<b>本日の帰りの終業時間と車両</b>を派遣先ごとに送ります。<br>
+      前回の値が初期表示されます。基本はそのまま「送信」でOK（変更がある日だけ直してください）。
+    </div>
+    <div style="display:flex;justify-content:center;padding:4px;">
+      <button class="nyutai-asti-btn" onclick="sendAllSougei()">📣 表示中をまとめて送信</button>
+    </div>
+    <div id="sougeiBody"></div>
+    <datalist id="sougeiVehicleList"></datalist>
   </div>
 
   <!-- Screen: 前払い一覧 -->
@@ -7182,7 +7199,7 @@ function switchScreen(screenId, skipHistory) {
   }
   var _mainContent = document.querySelector('.main-content');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -7217,6 +7234,7 @@ function switchScreen(screenId, skipHistory) {
   if (screenId === 'maebariListScreen') initMaebariListDate();
   if (screenId === 'yukyuListScreen') initYukyuListDate();
   if (screenId === 'nyutaiScreen') loadNyutaiScreen();
+  if (screenId === 'sougeiScreen') loadSougeiScreen();
   if (screenId === 'vehicleListScreen') loadVehicleList();
 }
 
@@ -40825,6 +40843,123 @@ async function fetchTenkenFields() {
   _tenkenFields = data.d.results || [];
   console.log('Tenken fields:', _tenkenFields.map(function(f){ return f.Title + '→' + f.EntityPropertyName + '(' + f.TypeAsString + ')'; }));
   return _tenkenFields;
+}
+
+// ====== 送迎連絡 (派遣先別に当日の帰り便/終業時間を従業員アプリへ配信) ======
+const SOUGEI_LIST_GUID = '60569629-38e0-4dcb-9a73-c5f2904e3036';
+const SG_F_BUKA = 'OData__x90e8__x8ab2_';                         // 部課 (派遣先)
+const SG_F_TSUKIN_OLD = 'OData__x901a__x52e4__x65b9__x6cd5_tsuk'; // 通勤方法
+const SG_F_TSUKIN_NEW = 'OData__x65b0__x901a__x52e4__x65b9__x6c'; // 新通勤方法
+const SG_F_TAISHA = 'OData__x6d3e__x9063__x5148__x9000__x79';     // 退社日
+window._sougeiGroups = [];
+function _sgEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _sgAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+async function loadSougeiVehicleOptions() {
+  try {
+    var token = await getToken();
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')";
+    var resp = await fetch(listApi + "/items?$top=500", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) return [];
+    var items = ((await resp.json()).d.results) || [];
+    var fields = await fetchVehicleFields();
+    var fp = function(sub){ var h = fields.find(function(f){ return f.Title && f.Title.indexOf(sub) >= 0; }); return h ? h.EntityPropertyName : null; };
+    var fNo1 = fp('NO1') || fp('No1'); var fUsage = fp('Usage') || fp('使用'); var fHaken = fp('送迎') || fp('Pick') || fp('派遣');
+    var opts = [];
+    items.forEach(function(it){
+      if (fUsage && (it[fUsage] || '') !== '使用') return;
+      var no1 = fNo1 ? (it[fNo1] || '') : '';
+      var hk = fHaken ? (it[fHaken] || '') : '';
+      if (no1) opts.push({ value: String(no1).trim(), haken: stripBukaPrefix(hk || '') });
+    });
+    return opts;
+  } catch (e) { console.warn('送迎車両候補の取得失敗', e); return []; }
+}
+
+async function loadSougeiScreen() {
+  var body = document.getElementById('sougeiBody');
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+  try {
+    var sel = '$select=Id,Title,' + [SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
+    var arr = await Promise.all([
+      spGetAll(LIST_EMPLOYEES_GUID, sel),
+      spGetAll(SOUGEI_LIST_GUID, '$select=Id,Hakensaki,EndTime,Vehicle&$orderby=Id desc&$top=300').catch(function(){ return []; }),
+      loadSougeiVehicleOptions()
+    ]);
+    var emps = arr[0], recs = arr[1], vehOpts = arr[2];
+    var dl = document.getElementById('sougeiVehicleList');
+    if (dl) dl.innerHTML = vehOpts.map(function(o){ return '<option value="' + _sgAttr(o.value) + '">'; }).join('');
+    var last = {};
+    recs.forEach(function(r){ var h = stripBukaPrefix(r.Hakensaki || ''); if (h && !last[h]) last[h] = r; });
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var groups = {};
+    emps.forEach(function(e){
+      var ts = e[SG_F_TAISHA];
+      if (ts) { var d = new Date(ts); if (!isNaN(d.getTime()) && d < today) return; }
+      var comb = String(e[SG_F_TSUKIN_OLD] || '') + ' ' + String(e[SG_F_TSUKIN_NEW] || '');
+      if (comb.indexOf('送迎') < 0) return;
+      var key = stripBukaPrefix(e[SG_F_BUKA] || '') || '(派遣先未設定)';
+      groups[key] = (groups[key] || 0) + 1;
+    });
+    var keys = Object.keys(groups).sort(function(a, b){ return groups[b] - groups[a]; });
+    if (!keys.length) { body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">送迎を利用する在職社員が見つかりません。</div>'; return; }
+    window._sougeiGroups = [];
+    var html = '';
+    keys.forEach(function(k, i){
+      var lr = last[k];
+      var pvTime = (lr && lr.EndTime) ? lr.EndTime : '17:00';
+      var pvVeh = (lr && lr.Vehicle) ? lr.Vehicle : '';
+      if (!pvVeh) { var m = vehOpts.find(function(o){ return o.haken && o.haken === k; }); if (m) pvVeh = m.value; }
+      window._sougeiGroups.push({ haken: k, idx: i });
+      html += '<div class="card" style="padding:12px;margin:0 4px 10px;">'
+        + '<div style="font-weight:800;color:var(--primary);font-size:15px;margin-bottom:8px;">' + _sgEsc(k) + ' <span style="font-weight:600;color:var(--text-light);font-size:12px;">(' + groups[k] + '名)</span></div>'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+        + '<label style="font-size:12px;color:var(--text-light);">終業 <input type="time" id="sg-time-' + i + '" value="' + _sgAttr(pvTime) + '" style="font-size:15px;padding:4px;"></label>'
+        + '<label style="font-size:12px;color:var(--text-light);flex:1;min-width:130px;">車両 <input list="sougeiVehicleList" id="sg-veh-' + i + '" value="' + _sgAttr(pvVeh) + '" placeholder="例 1号車 / ナンバー" style="font-size:15px;padding:4px;width:100%;box-sizing:border-box;"></label>'
+        + '</div>'
+        + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">'
+        + '<button class="nyutai-asti-btn" style="background:var(--primary);" onclick="sendSougei(' + i + ')">送信</button>'
+        + '<span id="sg-status-' + i + '" style="font-size:12px;color:var(--text-light);"></span>'
+        + '</div></div>';
+    });
+    body.innerHTML = html;
+  } catch (e) {
+    console.error(e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _sgEsc(String(e && e.message || e)) + '</div>';
+  }
+}
+
+async function sendSougei(idx) {
+  var g = (window._sougeiGroups || [])[idx];
+  if (!g) return;
+  var time = (document.getElementById('sg-time-' + idx) || {}).value || '';
+  var veh = (document.getElementById('sg-veh-' + idx) || {}).value || '';
+  var st = document.getElementById('sg-status-' + idx);
+  if (!time && !veh) { showToast('終業時間か車両を入力してください', 'error'); return; }
+  if (st) { st.textContent = '送信中...'; st.style.color = 'var(--text-light)'; }
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/sougei-send', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hakensaki: g.haken, endTime: time, vehicle: veh })
+    });
+    var data = await resp.json().catch(function(){ return {}; });
+    if (!resp.ok || !data.ok) throw new Error((data && (data.error || JSON.stringify(data))) || ('HTTP ' + resp.status));
+    if (st) { st.textContent = '✅ 送信済 (' + data.targets + '名 / 通知' + data.pushed + ')'; st.style.color = '#2e7d32'; }
+    showToast(g.haken + ' に送信しました (' + data.targets + '名)', 'success');
+  } catch (e) {
+    if (st) { st.textContent = '❌ ' + (e.message || '失敗'); st.style.color = '#c62828'; }
+    showToast('送信失敗: ' + (e.message || e), 'error');
+  }
+}
+
+async function sendAllSougei() {
+  var gs = window._sougeiGroups || [];
+  if (!gs.length) return;
+  if (!confirm('表示中の ' + gs.length + ' 派遣先すべてに送信します。よろしいですか？')) return;
+  for (var i = 0; i < gs.length; i++) { await sendSougei(gs[i].idx); }
+  showToast('まとめて送信が完了しました', 'success');
 }
 
 async function loadVehicleList() {
