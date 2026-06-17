@@ -41035,6 +41035,7 @@ async function loadSougeiVehicleOptions() {
     var fUsage = fp('Usage') || fp('使用');
     var fHaken = fp('送迎') || fp('Pick') || fp('派遣');
     var fDriver = fp('ドライバー') || fp('運転');
+    var fShainNo = fp('DriverShainNo');                // 運転手の社員番号(アプリ通知先)
     var fColor = (function(){ var e = fields.find(function(f){ return f.Title === 'Color' || f.Title === '色'; }); return e ? e.EntityPropertyName : (fp('カラー') || null); })();
     var fType = fp('車種') || fp('車名');
     var opts = [];
@@ -41047,10 +41048,11 @@ async function loadSougeiVehicleOptions() {
       var color = fColor ? String(it[fColor] || '').trim() : '';
       var type = fType ? String(it[fType] || '').trim() : '';
       var driver = fDriver ? String(it[fDriver] || '').trim() : '';
+      var dShain = fShainNo ? String(it[fShainNo] || '').trim().replace(/\.0$/, '') : '';
       var parts = [plate]; if (color) parts.push(color); if (type) parts.push(type);
       var vehicle = parts.join(' / ');
       var label = driver ? (driver + '（' + vehicle + '）') : vehicle;
-      opts.push({ driver: driver, vehicle: vehicle, value: vehicle, label: label, haken: stripBukaPrefix(fHaken ? (it[fHaken] || '') : '') });
+      opts.push({ driver: driver, driverShainNo: dShain, vehicle: vehicle, value: vehicle, label: label, haken: stripBukaPrefix(fHaken ? (it[fHaken] || '') : '') });
     });
     return opts;
   } catch (e) { console.warn('送迎車両候補の取得失敗', e); return []; }
@@ -41474,17 +41476,25 @@ async function sendSougeiBatch(){
   var a = window._sgAssignments || [];
   var valid = a.filter(function(x){ return x.shainNo && (x.endTime || x.vehicle); });
   if (!valid.length) { showToast('送信対象がありません', 'error'); return; }
-  if (!confirm('送信します（前回から変更があった人だけに届きます／初回は全員）。よろしいですか？')) return;
+  if (!confirm('送信します（前回から変更があった従業員・運転手だけに届きます／初回は全員）。よろしいですか？')) return;
   try {
     var token = await getToken();
+    // 運転手label → 社員番号(車両管理 DriverShainNo)
+    var driverByVehicle = {};
+    ((window._sgData && window._sgData.vehicles) || []).forEach(function(o){ if (o.label) driverByVehicle[o.label] = o.driverShainNo || ''; });
     var resp = await fetch(FUNC_OCR_BASE + '/yukyu/sougei-send-batch', {
       method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assignments: valid.map(function(x){ return { shainNo: x.shainNo, hakensaki: x.hakensaki, endTime: x.endTime, vehicle: x.vehicle }; }) })
+      body: JSON.stringify({
+        assignments: valid.map(function(x){ return { shainNo: x.shainNo, hakensaki: x.hakensaki, endTime: x.endTime, vehicle: x.vehicle, name: x.name || '', driverShainNo: driverByVehicle[x.vehicle] || '' }; }),
+        driverByVehicle: driverByVehicle
+      })
     });
     var data = await resp.json().catch(function(){ return {}; });
     if (!resp.ok || !data.ok) throw new Error((data && (data.error || JSON.stringify(data))) || ('HTTP ' + resp.status));
     var unch = data.unchanged || 0;
-    showToast('送信完了: 変更' + data.saved + '名に配信（通知' + data.pushed + '件）' + (unch ? ' / 変更なし' + unch + '名はそのまま' : ''), 'success');
+    var dnt = (data.driverTargets != null) ? data.driverTargets : 0;
+    var dpush = (data.driverPushed != null) ? data.driverPushed : 0;
+    showToast('送信完了: 従業員 変更' + data.saved + '名に配信（通知' + data.pushed + '件）' + (dnt ? ' ／ 運転手' + dnt + '名に便を通知（届' + dpush + '件）' : '') + (unch ? ' ／ 変更なし' + unch + '名' : ''), 'success');
     loadSougeiScreen();
   } catch (e) {
     showToast('送信失敗: ' + (e.message || e), 'error');
