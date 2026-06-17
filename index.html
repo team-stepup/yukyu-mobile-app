@@ -41055,7 +41055,7 @@ function openSougeiRoster(bucketKey, preserve){
   var times = (bk && bk.times && bk.times.length) ? bk.times : ['17:00'];
   if (!preserve || window._sgBucket !== bucketKey || !window._sgAssign) {
     var assign = {};
-    emps.forEach(function(p){ var lr = (window._sgData.lastBySn || {})[p.sn] || {}; assign[p.sn] = { name: p.name, time: times[0], driver: '', kesseki: false, checked: false, prev: lr.vehicle || '' }; });
+    emps.forEach(function(p){ var lr = (window._sgData.lastBySn || {})[p.sn] || {}; assign[p.sn] = { name: p.name, time: times[0], driver: '', kesseki: false, checked: false, prev: lr.vehicle || '', order: '' }; });
     window._sgAssign = assign;
   }
   window._sgBucket = bucketKey;
@@ -41193,7 +41193,7 @@ function confirmSougeiRoster(){
   var riders = [], kesList = [];
   emps.forEach(function(p){ var a = A[p.sn] || {};
     if (a.kesseki) { kesList.push({ name: p.name, sn: p.sn }); return; }
-    riders.push({ shainNo: p.sn, hakensaki: window._sgBucket, endTime: a.time || '', vehicle: a.driver || '', name: p.name });
+    riders.push({ shainNo: p.sn, hakensaki: window._sgBucket, endTime: a.time || '', vehicle: a.driver || '', name: p.name, order: a.order || '' });
   });
   window._sgAssignments = riders;
   var groups = {};
@@ -41204,7 +41204,8 @@ function confirmSougeiRoster(){
   var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;flex-wrap:wrap;">'
     + '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket, true)">← 名簿で修正</button>'
     + '<span style="font-weight:800;color:var(--primary);">' + _sgEsc(bk ? bk.label : '') + ' 確認</span></div>';
-  html += '<div style="font-size:11px;color:var(--text-light);padding:0 8px 6px;">🟦 定時 ' + _sgEsc(teiji) + '　🟧 残業　／　<b style="color:#1565c0;">✎ 氏名をタップで修正</b></div>';
+  html += '<div style="font-size:11px;color:var(--text-light);padding:0 8px 4px;">🟦 定時 ' + _sgEsc(teiji) + '　🟧 残業　／　<b style="color:#1565c0;">✎ 氏名をタップで修正</b></div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;padding:0 8px 8px;"><button class="nyutai-range-btn" style="font-size:13px;" onclick="confirmSougeiRoster()">🔢 入力した順番で並べ替え</button><span style="font-size:11px;color:var(--text-light);">左の□に乗車順を入力</span></div>';
   var keys = Object.keys(groups).sort(function(a, b){ if (a === '（運転手未割当）') return 1; if (b === '（運転手未割当）') return -1; return 0; });
   keys.forEach(function(drv){
     var unassigned = (drv === '（運転手未割当）');
@@ -41224,7 +41225,10 @@ function confirmSougeiRoster(){
       html += '<div style="margin-top:6px;border-radius:7px;overflow:hidden;">'
         + '<div style="background:' + headBg + ';color:' + headColor + ';font-weight:800;font-size:12px;padding:4px 9px;">' + (isTeiji ? '🟦 定時 ' : '🟧 残業 ') + _sgEsc(t) + '　<span style="font-weight:600;">(' + byTime[t].length + '名)</span></div>'
         + '<div style="background:' + bodyBg + ';">';
-      byTime[t].forEach(function(a){ html += '<div onclick="_sgEditPerson(\'' + _sgAttr(a.shainNo) + '\')" style="padding:6px 11px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);cursor:pointer;display:flex;justify-content:space-between;align-items:center;"><span>' + _sgEsc(a.name) + '</span><span style="color:#aaa;font-size:11px;">✎</span></div>'; });
+      byTime[t].sort(function(x, y){ var ox = x.order === '' ? Infinity : Number(x.order); var oy = y.order === '' ? Infinity : Number(y.order); return ox - oy; });
+      byTime[t].forEach(function(a){ html += '<div onclick="_sgEditPerson(\'' + _sgAttr(a.shainNo) + '\')" style="padding:5px 8px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);cursor:pointer;display:flex;align-items:center;gap:8px;">'
+        + '<input type="number" min="1" value="' + _sgAttr(a.order || '') + '" placeholder="順" onclick="event.stopPropagation()" oninput="_sgSetOrder(\'' + _sgAttr(a.shainNo) + '\',this.value)" style="width:42px;font-size:13px;padding:3px;text-align:center;border:1px solid #ccd;border-radius:5px;">'
+        + '<span style="flex:1;">' + _sgEsc(a.name) + '</span><span style="color:#aaa;font-size:11px;">✎</span></div>'; });
       html += '</div></div>';
     });
     html += '</div>';
@@ -41263,6 +41267,7 @@ function _sgEditTime(t){ var sn = window._sgEditSn; if (!sn) return; window._sgA
 function _sgEditKesseki(){ var sn = window._sgEditSn; if (!sn) return; var a = window._sgAssign[sn]; a.kesseki = true; a.driver = ''; confirmSougeiRoster(); }
 function _sgEditDriver(val){ var sn = window._sgEditSn; if (!sn) return; if (val === '__other__') { window._sgEditOther = true; confirmSougeiRoster(); return; } window._sgEditOther = false; window._sgAssign[sn].driver = val; window._sgAssign[sn].kesseki = false; confirmSougeiRoster(); }
 function _sgEditOtherInput(v){ var sn = window._sgEditSn; if (!sn) return; window._sgAssign[sn].driver = v; window._sgAssign[sn].kesseki = false; }
+function _sgSetOrder(sn, v){ if (window._sgAssign[sn]) window._sgAssign[sn].order = (v == null ? '' : String(v).trim()); }
 
 async function sendSougeiBatch(){
   var a = window._sgAssignments || [];
