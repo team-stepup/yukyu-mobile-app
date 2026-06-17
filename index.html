@@ -41025,7 +41025,9 @@ async function loadSougeiScreen() {
     });
     var bucketTime = {};
     SOUGEI_BUCKETS.forEach(function(b){ bucketTime[b.key] = (b.times && b.times[0]) || '17:00'; });
-    window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, bucketTime: bucketTime };
+    var nameBySn = {};
+    emps.forEach(function(e){ var sn = String(e[SG_F_SHAINNO] || '').trim(); if (sn) nameBySn[sn] = e[SG_F_NAME] || ''; });
+    window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, bucketTime: bucketTime, nameBySn: nameBySn };
     var html = '<div style="padding:8px 4px;color:var(--text-light);font-size:12px;">送迎を利用する従業員へ、本日の帰りの<b>終業時間と車両</b>を送ります。派遣先を選んでください。</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px;">';
     SOUGEI_BUCKETS.forEach(function(b){
@@ -41035,10 +41037,65 @@ async function loadSougeiScreen() {
         + '<span style="font-size:12px;color:var(--text-light);">' + n + '名</span></button>';
     });
     html += '</div>';
+    var todayIso = today.getFullYear() + '-' + ('0' + (today.getMonth() + 1)).slice(-2) + '-' + ('0' + today.getDate()).slice(-2);
+    html += '<div style="margin:10px 4px 0;padding:10px;border-top:1px solid #eee;">'
+      + '<div style="font-size:12px;color:var(--text-light);margin-bottom:6px;">📅 過去の送迎連絡を見直す</div>'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+      + '<input type="date" id="sg-hist-date" value="' + todayIso + '" max="' + todayIso + '" style="font-size:14px;padding:5px;">'
+      + '<button class="nyutai-range-btn" onclick="loadSougeiHistory()">表示</button></div></div>';
     list.innerHTML = html;
   } catch (e) {
     console.error(e);
     list.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _sgEsc(String(e && e.message || e)) + '</div>';
+  }
+}
+
+// 過去の送迎連絡を日付指定で表示 (読み取り専用)
+async function loadSougeiHistory(){
+  var dateStr = (document.getElementById('sg-hist-date') || {}).value || '';
+  if (!dateStr) { showToast('日付を選んでください', 'error'); return; }
+  document.getElementById('sougeiHakenList').style.display = 'none';
+  document.getElementById('sougeiConfirm').style.display = 'none';
+  var box = document.getElementById('sougeiRoster'); box.style.display = '';
+  box.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+  try {
+    var startUtc = new Date(dateStr + 'T00:00:00+09:00').toISOString().slice(0, 19);
+    var endUtc = new Date(new Date(dateStr + 'T00:00:00+09:00').getTime() + 86400000).toISOString().slice(0, 19);
+    var flt = "TargetDate ge datetime'" + startUtc + "' and TargetDate lt datetime'" + endUtc + "'";
+    var query = '$select=Id,TargetDate,ShainNo,Hakensaki,EndTime,Vehicle,SentBy&$filter=' + encodeURIComponent(flt) + '&$orderby=Id desc&$top=2000';
+    var recs = await spGetAll(SOUGEI_LIST_GUID, query);
+    var nameBySn = (window._sgData || {}).nameBySn || {};
+    var seen = {}, rows = [];
+    recs.forEach(function(r){
+      var sn = String(r.ShainNo || '').trim();
+      if (!sn || seen[sn]) return;          // 同日複数は最新(Id desc)のみ
+      seen[sn] = true;
+      rows.push({ name: nameBySn[sn] || ('社員' + sn), hakensaki: stripBukaPrefix(r.Hakensaki || ''), endTime: r.EndTime || '', vehicle: r.Vehicle || '', sentBy: r.SentBy || '' });
+    });
+    var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;flex-wrap:wrap;">'
+      + '<button class="nyutai-range-btn" onclick="loadSougeiScreen()">← 戻る</button>'
+      + '<span style="font-weight:800;color:var(--primary);">📅 ' + _sgEsc(dateStr) + ' の送迎連絡</span></div>';
+    if (!rows.length) { html += '<div style="text-align:center;padding:20px;color:var(--text-light);">この日の送迎連絡はありません。</div>'; box.innerHTML = html; return; }
+    var byHaken = {};
+    rows.forEach(function(r){ var k = r.hakensaki || '(派遣先不明)'; (byHaken[k] = byHaken[k] || []).push(r); });
+    Object.keys(byHaken).forEach(function(hk){
+      html += '<div style="font-weight:800;color:var(--primary);font-size:14px;padding:8px 8px 2px;">' + _sgEsc(hk) + '（' + byHaken[hk].length + '名）</div>';
+      var byVeh = {};
+      byHaken[hk].forEach(function(r){ var k = r.vehicle || '(運転手未割当)'; (byVeh[k] = byVeh[k] || []).push(r); });
+      Object.keys(byVeh).forEach(function(veh){
+        html += '<div class="card" style="padding:10px;margin:0 4px 8px;">'
+          + '<div style="font-weight:700;color:var(--primary);font-size:13px;margin-bottom:6px;">🚐 ' + _sgEsc(veh) + ' (' + byVeh[veh].length + '名)</div>';
+        byVeh[veh].sort(function(a, b){ return String(a.endTime).localeCompare(String(b.endTime)); });
+        byVeh[veh].forEach(function(r){
+          html += '<div style="display:flex;justify-content:space-between;padding:3px 2px;border-bottom:1px solid #f0f0f0;font-size:13px;"><span>' + _sgEsc(r.name) + '</span><span style="color:var(--text-light);">終業 ' + _sgEsc(r.endTime || '-') + '</span></div>';
+        });
+        html += '</div>';
+      });
+    });
+    box.innerHTML = html;
+  } catch (e) {
+    console.error(e);
+    box.innerHTML = '<div style="padding:14px;"><button class="nyutai-range-btn" onclick="loadSougeiScreen()">← 戻る</button><div style="text-align:center;padding:16px;color:#c62828;">読み込み失敗: ' + _sgEsc(String(e && e.message || e)) + '</div></div>';
   }
 }
 
