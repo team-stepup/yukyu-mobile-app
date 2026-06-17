@@ -40942,6 +40942,7 @@ const SANKYU_IKUKYU_GUID = '43a0fead-9b92-4ad8-9325-5ffcb9891dfb';  // 産休育
 const SG_F_SHAINNO = 'OData__x793e__x54e1__x756a__x53f7_';        // 社員番号
 const SG_F_NAME = 'Title';                                       // 氏名(カタカナ)
 const SG_F_ZAIRYU = 'OData__x7279__x8a18__x4e8b__x9805__xff';    // 特記事項1 = 在留カード氏名(ローマ字フル)
+const SG_F_SOSHIKI = 'OData__x7d44__x7e54__x5358__x4f4d__xff';   // 組織単位 (末尾()に作業内容)
 const SG_F_BUKA = 'OData__x90e8__x8ab2_';                        // 部課 (派遣先)
 const SG_F_TSUKIN_OLD = 'OData__x901a__x52e4__x65b9__x6cd5_tsuk'; // 通勤方法
 const SG_F_TSUKIN_NEW = 'OData__x65b0__x901a__x52e4__x65b9__x6c'; // 新通勤方法
@@ -41002,6 +41003,15 @@ function _sgRomajiOf(kata, zairyu){
   if (giv && giv !== sur) out.push(giv);
   return out.join(' ');
 }
+// 組織単位の末尾()の中身を取り出す (例「…組立二グループ（エアＳＷ組立）」→「エアＳＷ組立」)。無ければ ''
+function _sgSoshikiGroup(s){
+  s = String(s || '').trim();
+  if (!s) return '';
+  var m = s.match(/[（(]\s*([^（()）]+?)\s*[）)]\s*$/);
+  if (m) return m[1].trim();                                  // 末尾()の作業内容を優先
+  if (s.length <= 12 && s.indexOf(' ') < 0 && s.indexOf('　') < 0) return s;  // ()無しでも短い作業名(例 電子組立)はそのまま
+  return '';                                                  // 長い組織パス(()無し)は未記入扱い
+}
 
 async function loadSougeiVehicleOptions() {
   try {
@@ -41046,7 +41056,7 @@ async function loadSougeiScreen() {
   list.style.display = '';
   list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
   try {
-    var sel = '$select=Id,' + [SG_F_NAME, SG_F_ZAIRYU, SG_F_SHAINNO, SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
+    var sel = '$select=Id,' + [SG_F_NAME, SG_F_ZAIRYU, SG_F_SOSHIKI, SG_F_SHAINNO, SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
     var arr = await Promise.all([
       spGetAll(LIST_EMPLOYEES_GUID, sel),
       spGetAll(SOUGEI_LIST_GUID, '$select=Id,ShainNo,EndTime,Vehicle&$orderby=Id desc&$top=600').catch(function(){ return []; }),
@@ -41074,13 +41084,13 @@ async function loadSougeiScreen() {
       if (leaveSet[sn]) return;   // 産休育休中は非表示
       var bk = _sgBucketOf(e[SG_F_BUKA]);
       if (!bk) return;
-      byBucket[bk].push({ sn: sn, name: e[SG_F_NAME] || '', romaji: _sgRomajiOf(e[SG_F_NAME] || '', e[SG_F_ZAIRYU] || ''), buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
+      byBucket[bk].push({ sn: sn, name: e[SG_F_NAME] || '', romaji: _sgRomajiOf(e[SG_F_NAME] || '', e[SG_F_ZAIRYU] || ''), soshiki: _sgSoshikiGroup(e[SG_F_SOSHIKI] || ''), buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
     });
     var bucketTime = {};
     SOUGEI_BUCKETS.forEach(function(b){ bucketTime[b.key] = (b.times && b.times[0]) || '17:00'; });
-    var nameBySn = {};
-    emps.forEach(function(e){ var sn = String(e[SG_F_SHAINNO] || '').trim(); if (sn) nameBySn[sn] = e[SG_F_NAME] || ''; });
-    window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, bucketTime: bucketTime, nameBySn: nameBySn };
+    var nameBySn = {}, romajiBySn = {};
+    emps.forEach(function(e){ var sn = String(e[SG_F_SHAINNO] || '').trim(); if (sn) { nameBySn[sn] = e[SG_F_NAME] || ''; romajiBySn[sn] = _sgRomajiOf(e[SG_F_NAME] || '', e[SG_F_ZAIRYU] || ''); } });
+    window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, bucketTime: bucketTime, nameBySn: nameBySn, romajiBySn: romajiBySn };
     var html = '<div style="padding:8px 4px;color:var(--text-light);font-size:12px;">送迎を利用する従業員へ、本日の帰りの<b>終業時間と車両</b>を送ります。派遣先を選んでください。</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px;">';
     SOUGEI_BUCKETS.forEach(function(b){
@@ -41095,7 +41105,7 @@ async function loadSougeiScreen() {
       + '<div style="font-size:12px;color:var(--text-light);margin-bottom:6px;">📅 過去の送迎連絡を見直す</div>'
       + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
       + '<input type="date" id="sg-hist-date" value="' + todayIso + '" max="' + todayIso + '" style="font-size:14px;padding:5px;">'
-      + '<button class="nyutai-range-btn" onclick="loadSougeiHistory()">表示</button></div></div>';
+      + '<button class="nyutai-range-btn" onclick="openSougeiHistory(null, document.getElementById(\'sg-hist-date\').value)">表示</button></div></div>';
     list.innerHTML = html;
   } catch (e) {
     console.error(e);
@@ -41103,14 +41113,34 @@ async function loadSougeiScreen() {
   }
 }
 
-// 過去の送迎連絡を日付指定で表示 (読み取り専用)
-async function loadSougeiHistory(){
-  var dateStr = (document.getElementById('sg-hist-date') || {}).value || '';
+// 過去の送迎連絡を表示 (読取専用・時間色分け/修正は赤字/ローマ字)。bucketKey指定で派遣先を絞り込み(名簿画面から)
+function openSougeiHistory(bucketKey, dateStr){
+  window._sgHistBucket = bucketKey || null;
+  var d = dateStr;
+  if (!d) { var t = new Date(); d = t.getFullYear() + '-' + ('0' + (t.getMonth() + 1)).slice(-2) + '-' + ('0' + t.getDate()).slice(-2); }
+  loadSougeiHistory(d);
+}
+
+async function loadSougeiHistory(dateStr){
+  if (!dateStr) dateStr = (document.getElementById('sg-hist-date') || {}).value || '';
   if (!dateStr) { showToast('日付を選んでください', 'error'); return; }
   document.getElementById('sougeiHakenList').style.display = 'none';
   document.getElementById('sougeiConfirm').style.display = 'none';
   var box = document.getElementById('sougeiRoster'); box.style.display = '';
-  box.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
+  var bucketKey = window._sgHistBucket || null;
+  var bk = bucketKey ? SOUGEI_BUCKETS.find(function(b){ return b.key === bucketKey; }) : null;
+  var teiji = (bk && bk.times && bk.times.length) ? bk.times[0] : '';
+  var todayIso2 = (function(){ var t = new Date(); return t.getFullYear() + '-' + ('0' + (t.getMonth() + 1)).slice(-2) + '-' + ('0' + t.getDate()).slice(-2); })();
+  var backBtn = bucketKey
+    ? '<button class="nyutai-range-btn" onclick="openSougeiRoster(window._sgBucket, true)">← 名簿へ戻る</button>'
+    : '<button class="nyutai-range-btn" onclick="loadSougeiScreen()">← 戻る</button>';
+  var headHtml = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;flex-wrap:wrap;">'
+    + backBtn
+    + '<span style="font-weight:800;color:var(--primary);">📅 過去の送迎連絡' + (bk ? '（' + _sgEsc(bk.label) + '）' : '') + '</span></div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:0 4px 8px;">'
+    + '<input type="date" value="' + _sgAttr(dateStr) + '" max="' + todayIso2 + '" onchange="loadSougeiHistory(this.value)" style="font-size:14px;padding:5px;">'
+    + '<span style="font-size:11px;color:var(--text-light);">🟦 定時　🟧 残業　／　<b style="color:#c62828;">赤字＝送信後に修正</b></span></div>';
+  box.innerHTML = headHtml + '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
   try {
     var startUtc = new Date(dateStr + 'T00:00:00+09:00').toISOString().slice(0, 19);
     var endUtc = new Date(new Date(dateStr + 'T00:00:00+09:00').getTime() + 86400000).toISOString().slice(0, 19);
@@ -41118,16 +41148,18 @@ async function loadSougeiHistory(){
     var query = '$select=Id,TargetDate,ShainNo,Hakensaki,EndTime,Vehicle,SentBy&$filter=' + encodeURIComponent(flt) + '&$orderby=Id desc&$top=2000';
     var recs = await spGetAll(SOUGEI_LIST_GUID, query);
     var nameBySn = (window._sgData || {}).nameBySn || {};
+    var romajiBySn = (window._sgData || {}).romajiBySn || {};
+    var cntBySn = {};
+    recs.forEach(function(r){ var sn = String(r.ShainNo || '').trim(); if (sn) cntBySn[sn] = (cntBySn[sn] || 0) + 1; });
     var seen = {}, rows = [];
     recs.forEach(function(r){
       var sn = String(r.ShainNo || '').trim();
       if (!sn || seen[sn]) return;          // 同日複数は最新(Id desc)のみ
       seen[sn] = true;
-      rows.push({ name: nameBySn[sn] || ('社員' + sn), hakensaki: stripBukaPrefix(r.Hakensaki || ''), endTime: r.EndTime || '', vehicle: r.Vehicle || '', sentBy: r.SentBy || '' });
+      if (bucketKey && _sgBucketOf(r.Hakensaki || '') !== bucketKey) return;   // 派遣先で絞り込み
+      rows.push({ sn: sn, name: nameBySn[sn] || ('社員' + sn), romaji: romajiBySn[sn] || '', hakensaki: stripBukaPrefix(r.Hakensaki || ''), endTime: r.EndTime || '', vehicle: r.Vehicle || '', modified: (cntBySn[sn] || 0) > 1 });
     });
-    var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;flex-wrap:wrap;">'
-      + '<button class="nyutai-range-btn" onclick="loadSougeiScreen()">← 戻る</button>'
-      + '<span style="font-weight:800;color:var(--primary);">📅 ' + _sgEsc(dateStr) + ' の送迎連絡</span></div>';
+    var html = headHtml;
     if (!rows.length) { html += '<div style="text-align:center;padding:20px;color:var(--text-light);">この日の送迎連絡はありません。</div>'; box.innerHTML = html; return; }
     var byHaken = {};
     rows.forEach(function(r){ var k = r.hakensaki || '(派遣先不明)'; (byHaken[k] = byHaken[k] || []).push(r); });
@@ -41140,7 +41172,16 @@ async function loadSougeiHistory(){
           + '<div style="font-weight:700;color:var(--primary);font-size:13px;margin-bottom:6px;">🚐 ' + _sgEsc(veh) + ' (' + byVeh[veh].length + '名)</div>';
         byVeh[veh].sort(function(a, b){ return String(a.endTime).localeCompare(String(b.endTime)); });
         byVeh[veh].forEach(function(r){
-          html += '<div style="display:flex;justify-content:space-between;padding:3px 2px;border-bottom:1px solid #f0f0f0;font-size:13px;"><span>' + _sgEsc(r.name) + '</span><span style="color:var(--text-light);">終業 ' + _sgEsc(r.endTime || '-') + '</span></div>';
+          var isTeiji = teiji ? (r.endTime === teiji) : false;
+          var tcolor, tbg;
+          if (teiji) { tcolor = isTeiji ? '#1a44aa' : '#b35400'; tbg = isTeiji ? '#eef4ff' : '#fff4e5'; }
+          else { tcolor = '#666'; tbg = 'transparent'; }
+          var nameColor = r.modified ? '#c62828' : 'inherit';
+          var nameWeight = r.modified ? '700' : '600';
+          html += '<div style="padding:4px 6px;border-bottom:1px solid #f0f0f0;font-size:13px;background:' + tbg + ';border-radius:5px;margin-bottom:2px;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+            + '<span style="color:' + nameColor + ';font-weight:' + nameWeight + ';">' + (r.romaji ? '<span style="display:block;font-size:10px;color:#9a9a9a;font-weight:400;letter-spacing:0.3px;">' + _sgEsc(r.romaji) + '</span>' : '') + _sgEsc(r.name) + (r.modified ? ' <span style="font-size:10px;color:#c62828;">✎修正後</span>' : '') + '</span>'
+            + '<span style="color:' + tcolor + ';font-weight:700;white-space:nowrap;">終業 ' + _sgEsc(r.endTime || '-') + '</span></div></div>';
         });
         html += '</div>';
       });
@@ -41148,7 +41189,7 @@ async function loadSougeiHistory(){
     box.innerHTML = html;
   } catch (e) {
     console.error(e);
-    box.innerHTML = '<div style="padding:14px;"><button class="nyutai-range-btn" onclick="loadSougeiScreen()">← 戻る</button><div style="text-align:center;padding:16px;color:#c62828;">読み込み失敗: ' + _sgEsc(String(e && e.message || e)) + '</div></div>';
+    box.innerHTML = headHtml + '<div style="text-align:center;padding:16px;color:#c62828;">読み込み失敗: ' + _sgEsc(String(e && e.message || e)) + '</div>';
   }
 }
 
@@ -41168,7 +41209,7 @@ function openSougeiRoster(bucketKey, preserve){
   var times = (bk && bk.times && bk.times.length) ? bk.times : ['17:00'];
   if (!preserve || window._sgBucket !== bucketKey || !window._sgAssign) {
     var assign = {};
-    emps.forEach(function(p){ var lr = (window._sgData.lastBySn || {})[p.sn] || {}; assign[p.sn] = { name: p.name, time: times[0], driver: '', kesseki: false, checked: false, prev: lr.vehicle || '', order: '' }; });
+    emps.forEach(function(p){ var lr = (window._sgData.lastBySn || {})[p.sn] || {}; var pv = lr.vehicle || ''; assign[p.sn] = { name: p.name, time: times[0], driver: pv, kesseki: false, checked: false, prev: pv, order: '' }; });
     window._sgAssign = assign;
   }
   window._sgBucket = bucketKey;
@@ -41183,7 +41224,7 @@ function openSougeiRoster(bucketKey, preserve){
   _sgRenderRoster();
 }
 
-function _sgDone(a){ return !!(a && (a.kesseki || a.driver)); }
+function _sgDone(a){ return !!(a && a.kesseki); }   // 欠・早退のみ非表示(運転手は前回割当を表示・修正)
 
 function _sgRenderRoster(){
   var emps = (window._sgData.byBucket || {})[window._sgBucket] || [];
@@ -41228,31 +41269,43 @@ function _sgRenderRoster(){
     html += '<div style="padding:0 8px 6px;"><label style="font-size:12px;"><input type="checkbox" ' + (window._sgShowAll ? 'checked' : '') + ' onchange="_sgToggleShowAll(this.checked)"> 割当済・欠早退も表示（' + (doneN + kesN) + '名）</label></div>';
   }
   var prevCount = 0;
-  emps.forEach(function(p){ var a = A[p.sn]; if (a && !_sgDone(a) && a.prev) prevCount++; });
+  emps.forEach(function(p){ var a = A[p.sn]; if (a && !_sgDone(a) && !a.driver && a.prev) prevCount++; });
   if (prevCount > 0 && !mode) {
     html += '<div style="padding:0 8px 8px;"><button class="nyutai-range-btn" style="background:#0f7b6c;color:#fff;font-weight:700;font-size:13px;" onclick="_sgCarryPrev()">🔁 前回の運転手を引き継ぐ（' + prevCount + '名）</button></div>';
   }
   html += '<div class="card" style="padding:4px;margin:0 4px;">';
   var shown = 0;
+  // 組織単位(末尾())でグループ化、未記入は最後
+  var groups = {}, gorder = [];
   emps.forEach(function(p){
     var a = A[p.sn] || {};
-    var done = _sgDone(a);
-    if (done && !window._sgShowAll) return;
-    shown++;
-    var statusHtml;
-    if (a.kesseki) statusHtml = '<span style="font-size:11px;background:#eee;color:#666;border-radius:6px;padding:1px 7px;">欠・早退</span>';
-    else if (a.driver) statusHtml = '<span style="font-size:11px;color:#04604a;max-width:116px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _sgEsc(a.driver) + '</span>';
-    else statusHtml = '<span style="font-size:11px;color:#c62828;">未割当</span>';
-    var timeBadge = a.kesseki ? '' : '<span style="font-size:12px;background:#eef2ff;color:#1a44aa;border-radius:6px;padding:1px 7px;font-weight:700;">' + _sgEsc(a.time) + '</span>';
-    html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 3px;border-bottom:1px solid #eee;' + (done ? 'opacity:0.55;' : '') + '">'
-      + (mode ? '<input type="checkbox" ' + (a.checked ? 'checked' : '') + ' onchange="_sgCheck(\'' + _sgAttr(p.sn) + '\',this.checked)" style="width:18px;height:18px;flex-shrink:0;">' : '')
-      + '<div style="flex:1;min-width:80px;">' + (p.romaji ? '<div style="font-size:10px;color:#888;letter-spacing:0.3px;">' + _sgEsc(p.romaji) + '</div>' : '') + '<div style="font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</div>'
-      + ((a.prev && !a.driver && !a.kesseki) ? '<div style="font-size:10px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">前回 ' + _sgEsc(a.prev) + '</div>' : '') + '</div>'
-      + timeBadge + statusHtml + '</div>';
+    if (_sgDone(a) && !window._sgShowAll) return;
+    var g = p.soshiki || '未記入';
+    if (!groups[g]) { groups[g] = []; gorder.push(g); }
+    groups[g].push(p);
   });
-  if (!shown) html += '<div style="text-align:center;padding:14px;color:#2e7d32;font-weight:700;">全員の割当が完了しました 🎉</div>';
+  gorder.sort(function(x, y){ if (x === '未記入') return 1; if (y === '未記入') return -1; return 0; });
+  gorder.forEach(function(g){
+    html += '<div style="font-size:11px;font-weight:800;color:#3a4a6b;background:#eef1f8;padding:4px 9px;border-radius:6px;margin:6px 2px 2px;">🏷️ ' + _sgEsc(g) + '（' + groups[g].length + '名）</div>';
+    groups[g].forEach(function(p){
+      var a = A[p.sn] || {};
+      shown++;
+      var done = _sgDone(a);
+      var statusHtml;
+      if (a.kesseki) statusHtml = '<span style="font-size:11px;background:#eee;color:#666;border-radius:6px;padding:1px 7px;">欠・早退</span>';
+      else if (a.driver) statusHtml = '<span style="font-size:11px;color:#04604a;max-width:116px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _sgEsc(a.driver) + '</span>';
+      else statusHtml = '<span style="font-size:11px;color:#c62828;">未割当</span>';
+      var timeBadge = a.kesseki ? '' : '<span style="font-size:12px;background:#eef2ff;color:#1a44aa;border-radius:6px;padding:1px 7px;font-weight:700;">' + _sgEsc(a.time) + '</span>';
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 3px;border-bottom:1px solid #eee;' + (done ? 'opacity:0.55;' : '') + '">'
+        + (mode ? '<input type="checkbox" ' + (a.checked ? 'checked' : '') + ' onchange="_sgCheck(\'' + _sgAttr(p.sn) + '\',this.checked)" style="width:18px;height:18px;flex-shrink:0;">' : '')
+        + '<div style="flex:1;min-width:80px;">' + (p.romaji ? '<div style="font-size:10px;color:#888;letter-spacing:0.3px;">' + _sgEsc(p.romaji) + '</div>' : '') + '<div style="font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</div></div>'
+        + timeBadge + statusHtml + '</div>';
+    });
+  });
+  if (!shown) html += '<div style="text-align:center;padding:14px;color:#2e7d32;font-weight:700;">全員割当済み 🎉</div>';
   html += '</div>';
-  html += '<div style="display:flex;justify-content:center;padding:12px;">'
+  html += '<div style="display:flex;justify-content:center;gap:10px;padding:12px;flex-wrap:wrap;">'
+    + '<button class="nyutai-range-btn" onclick="openSougeiHistory(window._sgBucket)">📅 過去分を見る</button>'
     + '<button class="nyutai-asti-btn" style="background:var(--primary);" onclick="confirmSougeiRoster()">確定 → 確認</button></div>';
   document.getElementById('sougeiRoster').innerHTML = html;
   _sgUpdateSel();
@@ -41339,9 +41392,10 @@ function confirmSougeiRoster(){
         + '<div style="background:' + headBg + ';color:' + headColor + ';font-weight:800;font-size:12px;padding:4px 9px;">' + (isTeiji ? '🟦 定時 ' : '🟧 残業 ') + _sgEsc(t) + '　<span style="font-weight:600;">(' + byTime[t].length + '名)</span></div>'
         + '<div style="background:' + bodyBg + ';">';
       byTime[t].sort(function(x, y){ var ox = x.order === '' ? Infinity : Number(x.order); var oy = y.order === '' ? Infinity : Number(y.order); return ox - oy; });
-      byTime[t].forEach(function(a){ html += '<div onclick="_sgEditPerson(\'' + _sgAttr(a.shainNo) + '\')" style="padding:5px 8px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);cursor:pointer;display:flex;align-items:center;gap:8px;">'
+      byTime[t].forEach(function(a){ var rm = (window._sgData.romajiBySn || {})[a.shainNo] || '';
+        html += '<div onclick="_sgEditPerson(\'' + _sgAttr(a.shainNo) + '\')" style="padding:5px 8px;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.05);cursor:pointer;display:flex;align-items:center;gap:8px;">'
         + '<input type="number" min="1" value="' + _sgAttr(a.order || '') + '" placeholder="順" onclick="event.stopPropagation()" oninput="_sgSetOrder(\'' + _sgAttr(a.shainNo) + '\',this.value)" style="width:42px;font-size:13px;padding:3px;text-align:center;border:1px solid #ccd;border-radius:5px;">'
-        + '<span style="flex:1;">' + _sgEsc(a.name) + '</span><span style="color:#aaa;font-size:11px;">✎</span></div>'; });
+        + '<span style="flex:1;">' + (rm ? '<span style="display:block;font-size:10px;color:#9a9a9a;letter-spacing:0.3px;">' + _sgEsc(rm) + '</span>' : '') + _sgEsc(a.name) + '</span><span style="color:#aaa;font-size:11px;">✎</span></div>'; });
       html += '</div></div>';
     });
     html += '</div>';
@@ -41349,7 +41403,7 @@ function confirmSougeiRoster(){
   if (kesList.length) {
     html += '<div class="card" style="padding:10px;margin:0 4px 8px;background:#f7f7f7;">'
       + '<div style="font-weight:800;color:#666;font-size:14px;margin-bottom:6px;">🚷 欠・早退 <span style="font-weight:600;font-size:12px;">(' + kesList.length + '名・送迎なし)</span></div>';
-    kesList.forEach(function(k){ html += '<div onclick="_sgEditPerson(\'' + _sgAttr(k.sn) + '\')" style="padding:5px 4px;border-bottom:1px solid #eee;font-size:13px;color:#888;cursor:pointer;display:flex;justify-content:space-between;align-items:center;"><span>' + _sgEsc(k.name) + '</span><span style="color:#aaa;font-size:11px;">✎</span></div>'; });
+    kesList.forEach(function(k){ var rm = (window._sgData.romajiBySn || {})[k.sn] || ''; html += '<div onclick="_sgEditPerson(\'' + _sgAttr(k.sn) + '\')" style="padding:5px 4px;border-bottom:1px solid #eee;font-size:13px;color:#888;cursor:pointer;display:flex;justify-content:space-between;align-items:center;"><span>' + (rm ? '<span style="display:block;font-size:10px;color:#bbb;letter-spacing:0.3px;">' + _sgEsc(rm) + '</span>' : '') + _sgEsc(k.name) + '</span><span style="color:#aaa;font-size:11px;">✎</span></div>'; });
     html += '</div>';
   }
   html += '<div style="display:flex;justify-content:center;gap:10px;padding:12px;">'
