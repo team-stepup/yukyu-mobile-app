@@ -40969,7 +40969,8 @@ async function loadSougeiVehicleOptions() {
     var items = ((await resp.json()).d.results) || [];
     var fields = await fetchVehicleFields();
     var fp = function(sub){ var h = fields.find(function(f){ return f.Title && f.Title.indexOf(sub) >= 0; }); return h ? h.EntityPropertyName : null; };
-    var fNo1 = fp('NO1') || fp('No1');
+    var fNo1 = fp('NO1') || fp('No1');               // 地域+分類+かな (Title) 例「浜松301 や」
+    var fNum = fp('ナンバー') || fp('Number');         // 4桁の一連番号 (OData__x004e_O2) 例「2862」
     var fUsage = fp('Usage') || fp('使用');
     var fHaken = fp('送迎') || fp('Pick') || fp('派遣');
     var fDriver = fp('ドライバー') || fp('運転');
@@ -40979,11 +40980,13 @@ async function loadSougeiVehicleOptions() {
     items.forEach(function(it){
       if (fUsage && (it[fUsage] || '') !== '使用') return;
       var no1 = fNo1 ? String(it[fNo1] || '').trim() : '';
-      if (!no1) return;
+      var num = fNum ? String(it[fNum] || '').trim() : '';
+      var plate = (no1 + ' ' + num).replace(/\s+/g, ' ').trim();   // フルナンバー「浜松301 や 2862」
+      if (!plate) return;
       var color = fColor ? String(it[fColor] || '').trim() : '';
       var type = fType ? String(it[fType] || '').trim() : '';
       var driver = fDriver ? String(it[fDriver] || '').trim() : '';
-      var parts = [no1]; if (color) parts.push(color); if (type) parts.push(type);
+      var parts = [plate]; if (color) parts.push(color); if (type) parts.push(type);
       var vehicle = parts.join(' / ');
       var label = driver ? (driver + '（' + vehicle + '）') : vehicle;
       opts.push({ driver: driver, vehicle: vehicle, value: vehicle, label: label, haken: stripBukaPrefix(fHaken ? (it[fHaken] || '') : '') });
