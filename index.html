@@ -29259,6 +29259,12 @@ function onMaebariCustomInput(input) {
   updateMaebariConfirm();
 }
 
+// 金額入力欄を「半角数字のみ→カンマ区切り」に整形（ピリオド桁区切り誤入力 30.000 → 30,000 を防ぐ）
+function formatYenInput(el) {
+  var raw = String(el.value).replace(/[^\d]/g, '');
+  el.value = raw ? parseInt(raw, 10).toLocaleString() : '';
+}
+
 function getEmployeeBankInfo(emp) {
   const bank = emp[F.bank] || '';
   const branch = emp[F.branch] || '';
@@ -29691,7 +29697,7 @@ function openMaebariEdit(itemId) {
         <option value="__custom__"${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? ' selected' : ''}>その他</option>
       </select>
       <div id="editCustomAmountWrap" style="margin-top:6px;display:${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? 'block' : 'none'};">
-        <input type="text" id="editMaebariAmountCustom" placeholder="金額を入力（例: 15,000）" value="${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? escHtml(amount) : ''}" ${isLocked ? 'disabled' : ''}>
+        <input type="text" id="editMaebariAmountCustom" inputmode="numeric" oninput="formatYenInput(this)" placeholder="金額を入力（例: 15,000）" value="${![5000,10000,20000,30000,40000,50000,60000,70000,80000,90000,100000].includes(parseInt(String(amount).replace(/,/g,''))) && amount ? escHtml(amount) : ''}" ${isLocked ? 'disabled' : ''}>
       </div>
     </div>
 
@@ -29900,10 +29906,13 @@ async function saveMaebariEdit() {
   try {
     const selAmount = document.getElementById('editMaebariAmount').value;
     const customAmount = document.getElementById('editMaebariAmountCustom').value.trim();
-    const amount = selAmount === '__custom__' ? customAmount : selAmount;
+    let amount = selAmount === '__custom__' ? customAmount : selAmount;
     const fee = document.getElementById('editMaebariFee').value;
 
-    if (!amount) { showToast('金額を入力してください', 'error'); btn.disabled = false; btn.textContent = '修正完了'; return; }
+    // 金額は半角数字のみに正規化（「30.000」のようなピリオド桁区切りの誤入力を 30000 に直す）
+    const amountNum = parseInt(String(amount).replace(/[^\d]/g, ''), 10);
+    if (!amountNum) { showToast('金額を入力してください', 'error'); btn.disabled = false; btn.textContent = '修正完了'; return; }
+    amount = amountNum.toLocaleString();
 
     const token = await getToken();
     if (!token) { showToast('認証エラー', 'error'); return; }
