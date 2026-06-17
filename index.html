@@ -40940,7 +40940,8 @@ async function fetchTenkenFields() {
 const SOUGEI_LIST_GUID = '60569629-38e0-4dcb-9a73-c5f2904e3036';
 const SANKYU_IKUKYU_GUID = '43a0fead-9b92-4ad8-9325-5ffcb9891dfb';  // 産休育休 List52 (field_0=社員番号, field_47=仕事復帰予定)
 const SG_F_SHAINNO = 'OData__x793e__x54e1__x756a__x53f7_';        // 社員番号
-const SG_F_NAME = 'Title';                                       // 氏名
+const SG_F_NAME = 'Title';                                       // 氏名(カタカナ)
+const SG_F_ZAIRYU = 'OData__x7279__x8a18__x4e8b__x9805__xff';    // 特記事項1 = 在留カード氏名(ローマ字フル)
 const SG_F_BUKA = 'OData__x90e8__x8ab2_';                        // 部課 (派遣先)
 const SG_F_TSUKIN_OLD = 'OData__x901a__x52e4__x65b9__x6cd5_tsuk'; // 通勤方法
 const SG_F_TSUKIN_NEW = 'OData__x65b0__x901a__x52e4__x65b9__x6c'; // 新通勤方法
@@ -40959,6 +40960,47 @@ function _sgBucketOf(buka){
   var s = stripBukaPrefix(buka || '');
   for (var i = 0; i < SOUGEI_BUCKETS.length; i++){ if (s.indexOf(SOUGEI_BUCKETS[i].kw) >= 0) return SOUGEI_BUCKETS[i].key; }
   return null;
+}
+
+// カタカナ氏名 → 在留カード氏名(フルローマ字)から「姓+名」相当を抽出 (ベストエフォート)
+var _SG_KMAP = {'ア':'A','イ':'I','ウ':'U','エ':'E','オ':'O','カ':'KA','キ':'KI','ク':'KU','ケ':'KE','コ':'KO','ガ':'GA','ギ':'GI','グ':'GU','ゲ':'GE','ゴ':'GO','サ':'SA','シ':'SHI','ス':'SU','セ':'SE','ソ':'SO','ザ':'ZA','ジ':'JI','ズ':'ZU','ゼ':'ZE','ゾ':'ZO','タ':'TA','チ':'CHI','ツ':'TSU','テ':'TE','ト':'TO','ダ':'DA','ヂ':'JI','ヅ':'ZU','デ':'DE','ド':'DO','ナ':'NA','ニ':'NI','ヌ':'NU','ネ':'NE','ノ':'NO','ハ':'HA','ヒ':'HI','フ':'FU','ヘ':'HE','ホ':'HO','バ':'BA','ビ':'BI','ブ':'BU','ベ':'BE','ボ':'BO','パ':'PA','ピ':'PI','プ':'PU','ペ':'PE','ポ':'PO','マ':'MA','ミ':'MI','ム':'MU','メ':'ME','モ':'MO','ヤ':'YA','ユ':'YU','ヨ':'YO','ラ':'RA','リ':'RI','ル':'RU','レ':'RE','ロ':'RO','ワ':'WA','ヲ':'O','ン':'N','ヴ':'V'};
+var _SG_KSMALL = {'ャ':'YA','ュ':'YU','ョ':'YO','ァ':'A','ィ':'I','ゥ':'U','ェ':'E','ォ':'O'};
+function _sgKataRomaji(s){
+  var arr = Array.from(String(s || '')), out = '';
+  for (var i = 0; i < arr.length; i++){
+    var c = arr[i];
+    if (c === 'ー' || c === 'ッ') continue;
+    if (_SG_KSMALL[c]) { out = out.replace(/[AIUEO]$/, ''); out += _SG_KSMALL[c]; continue; }
+    if (_SG_KMAP[c] !== undefined) out += _SG_KMAP[c];
+  }
+  return out;
+}
+function _sgFold(s){ return String(s || '').toUpperCase().replace(/[^A-Z]/g, '').replace(/L/g, 'R'); }
+function _sgDice(a, b){
+  a = _sgFold(a); b = _sgFold(b);
+  if (a.length < 2 || b.length < 2) return (a && a === b) ? 1 : 0;
+  var bg = {}, m = 0;
+  for (var i = 0; i < a.length - 1; i++){ var g = a.substr(i, 2); bg[g] = (bg[g] || 0) + 1; }
+  for (var j = 0; j < b.length - 1; j++){ var g2 = b.substr(j, 2); if (bg[g2] > 0){ bg[g2]--; m++; } }
+  return 2 * m / ((a.length - 1) + (b.length - 1));
+}
+function _sgRomajiOf(kata, zairyu){
+  if (!zairyu) return '';
+  var words = String(zairyu).toUpperCase().replace(/[^A-Z ]/g, ' ').split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  var segs = String(kata || '').replace(/[　\s]+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!segs.length) return '';
+  function best(seg){
+    var rk = _sgKataRomaji(seg), bw = '', bs = 0.18;   // しきい値
+    words.forEach(function(w){ var sc = _sgDice(rk, w); if (sc > bs){ bs = sc; bw = w; } });
+    return bw;
+  }
+  var sur = best(segs[0]);
+  var giv = segs.length > 1 ? best(segs[segs.length - 1]) : '';
+  var out = [];
+  if (sur) out.push(sur);
+  if (giv && giv !== sur) out.push(giv);
+  return out.join(' ');
 }
 
 async function loadSougeiVehicleOptions() {
@@ -41004,7 +41046,7 @@ async function loadSougeiScreen() {
   list.style.display = '';
   list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light);">読み込み中...</div>';
   try {
-    var sel = '$select=Id,' + [SG_F_NAME, SG_F_SHAINNO, SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
+    var sel = '$select=Id,' + [SG_F_NAME, SG_F_ZAIRYU, SG_F_SHAINNO, SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
     var arr = await Promise.all([
       spGetAll(LIST_EMPLOYEES_GUID, sel),
       spGetAll(SOUGEI_LIST_GUID, '$select=Id,ShainNo,EndTime,Vehicle&$orderby=Id desc&$top=600').catch(function(){ return []; }),
@@ -41032,7 +41074,7 @@ async function loadSougeiScreen() {
       if (leaveSet[sn]) return;   // 産休育休中は非表示
       var bk = _sgBucketOf(e[SG_F_BUKA]);
       if (!bk) return;
-      byBucket[bk].push({ sn: sn, name: e[SG_F_NAME] || '', buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
+      byBucket[bk].push({ sn: sn, name: e[SG_F_NAME] || '', romaji: _sgRomajiOf(e[SG_F_NAME] || '', e[SG_F_ZAIRYU] || ''), buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
     });
     var bucketTime = {};
     SOUGEI_BUCKETS.forEach(function(b){ bucketTime[b.key] = (b.times && b.times[0]) || '17:00'; });
@@ -41204,7 +41246,7 @@ function _sgRenderRoster(){
     var timeBadge = a.kesseki ? '' : '<span style="font-size:12px;background:#eef2ff;color:#1a44aa;border-radius:6px;padding:1px 7px;font-weight:700;">' + _sgEsc(a.time) + '</span>';
     html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 3px;border-bottom:1px solid #eee;' + (done ? 'opacity:0.55;' : '') + '">'
       + (mode ? '<input type="checkbox" ' + (a.checked ? 'checked' : '') + ' onchange="_sgCheck(\'' + _sgAttr(p.sn) + '\',this.checked)" style="width:18px;height:18px;flex-shrink:0;">' : '')
-      + '<div style="flex:1;min-width:80px;"><div style="font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</div>'
+      + '<div style="flex:1;min-width:80px;">' + (p.romaji ? '<div style="font-size:10px;color:#888;letter-spacing:0.3px;">' + _sgEsc(p.romaji) + '</div>' : '') + '<div style="font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</div>'
       + ((a.prev && !a.driver && !a.kesseki) ? '<div style="font-size:10px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">前回 ' + _sgEsc(a.prev) + '</div>' : '') + '</div>'
       + timeBadge + statusHtml + '</div>';
   });
