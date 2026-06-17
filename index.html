@@ -41276,7 +41276,7 @@ async function sendSougeiBatch(){
   var a = window._sgAssignments || [];
   var valid = a.filter(function(x){ return x.shainNo && (x.endTime || x.vehicle); });
   if (!valid.length) { showToast('送信対象がありません', 'error'); return; }
-  if (!confirm(valid.length + '名に送信します。よろしいですか？')) return;
+  if (!confirm('送信します（前回から変更があった人だけに届きます／初回は全員）。よろしいですか？')) return;
   try {
     var token = await getToken();
     var resp = await fetch(FUNC_OCR_BASE + '/yukyu/sougei-send-batch', {
@@ -41285,7 +41285,8 @@ async function sendSougeiBatch(){
     });
     var data = await resp.json().catch(function(){ return {}; });
     if (!resp.ok || !data.ok) throw new Error((data && (data.error || JSON.stringify(data))) || ('HTTP ' + resp.status));
-    showToast('送信完了: ' + data.saved + '名 / 通知' + data.pushed + '件', 'success');
+    var unch = data.unchanged || 0;
+    showToast('送信完了: 変更' + data.saved + '名に配信（通知' + data.pushed + '件）' + (unch ? ' / 変更なし' + unch + '名はそのまま' : ''), 'success');
     loadSougeiScreen();
   } catch (e) {
     showToast('送信失敗: ' + (e.message || e), 'error');
