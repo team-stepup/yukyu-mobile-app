@@ -3211,24 +3211,58 @@ select.sankyu-edit-input {
   background: var(--primary-dark);
   color: #fff;
   display: flex;
-  justify-content: space-around;
-  padding: 12px 16px;
-  font-weight: 700;
-  font-size: 14px;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 14px calc(9px + env(safe-area-inset-bottom));
   box-shadow: 0 -2px 8px rgba(0,0,0,0.15);
   z-index: 50;
 }
-.list-footer .footer-item {
+/* 上段: 件数3つ (申請/完了/未処理) を均等配置 */
+.list-footer .footer-stats {
   display: flex;
-  align-items: center;
+  justify-content: space-around;
+  align-items: flex-end;
   gap: 6px;
 }
-.list-footer .footer-label {
-  font-size: 12px;
-  background: rgba(255,255,255,0.2);
-  padding: 2px 8px;
-  border-radius: 4px;
+.list-footer .footer-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
+.list-footer .footer-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  opacity: 0.82;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+.list-footer .footer-value {
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+.list-footer .footer-value .unit {
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 1px;
+  opacity: 0.85;
+}
+/* 下段: 合計金額を大きく */
+.list-footer .footer-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  border-top: 1px solid rgba(255,255,255,0.22);
+  padding-top: 6px;
+}
+.list-footer .footer-total .footer-label { font-size: 12px; opacity: 0.9; }
+.list-footer .footer-total .total-amt { font-size: 23px; font-weight: 800; line-height: 1; }
+.list-footer .footer-total .total-amt .unit { font-size: 14px; font-weight: 700; margin-left: 2px; }
 
 /* 前払い */
 .maebari-period-label {
@@ -29552,10 +29586,14 @@ async function loadMaebariList() {
     footer.style.display = 'flex';
     var doneCount = records.length - unprocessed.length;
     var doneColor = doneCount === records.length ? '#7CFC9A' : '#FFD27D';
-    footer.innerHTML = '<div class="footer-item"><span class="footer-label">申請件数</span> ' + records.length + '件</div>'
-      + '<div class="footer-item"><span class="footer-label">完了済</span> <span style="color:' + doneColor + ';font-weight:700;">' + doneCount + '件</span></div>'
-      + (unprocessed.length > 0 ? '<div class="footer-item"><span class="footer-label">未処理</span> ' + unprocessed.length + '件</div>' : '')
-      + '<div class="footer-item"><span class="footer-label">合計金額</span> ' + totalAmount.toLocaleString('ja-JP') + '円</div>';
+    var unprocColor = unprocessed.length > 0 ? '#FFD27D' : '#7CFC9A';
+    footer.innerHTML =
+      '<div class="footer-stats">'
+      +   '<div class="footer-item"><span class="footer-label">申請件数</span><span class="footer-value">' + records.length + '<span class="unit">件</span></span></div>'
+      +   '<div class="footer-item"><span class="footer-label">完了済</span><span class="footer-value" style="color:' + doneColor + ';">' + doneCount + '<span class="unit">件</span></span></div>'
+      +   '<div class="footer-item"><span class="footer-label">未処理</span><span class="footer-value" style="color:' + unprocColor + ';">' + unprocessed.length + '<span class="unit">件</span></span></div>'
+      + '</div>'
+      + '<div class="footer-total"><span class="footer-label">合計金額</span><span class="total-amt">' + totalAmount.toLocaleString('ja-JP') + '<span class="unit">円</span></span></div>';
   } catch (e) {
     console.error('Maebari list error:', e);
     body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
