@@ -41013,6 +41013,14 @@ function _sgSoshikiGroup(s){
   return '';                                                  // 長い組織パス(()無し)は未記入扱い
 }
 
+// UTC ISO(Created) → JST HH:MM
+function _sgHhmmJst(iso){
+  if (!iso) return '';
+  var d = new Date(iso); if (isNaN(d.getTime())) return '';
+  d = new Date(d.getTime() + 9 * 3600000);
+  return ('0' + d.getUTCHours()).slice(-2) + ':' + ('0' + d.getUTCMinutes()).slice(-2);
+}
+
 async function loadSougeiVehicleOptions() {
   try {
     var token = await getToken();
@@ -41059,14 +41067,22 @@ async function loadSougeiScreen() {
     var sel = '$select=Id,' + [SG_F_NAME, SG_F_ZAIRYU, SG_F_SOSHIKI, SG_F_SHAINNO, SG_F_BUKA, SG_F_TSUKIN_OLD, SG_F_TSUKIN_NEW, SG_F_TAISHA].join(',') + '&$top=5000';
     var arr = await Promise.all([
       spGetAll(LIST_EMPLOYEES_GUID, sel),
-      spGetAll(SOUGEI_LIST_GUID, '$select=Id,ShainNo,EndTime,Vehicle&$orderby=Id desc&$top=600').catch(function(){ return []; }),
+      spGetAll(SOUGEI_LIST_GUID, '$select=Id,ShainNo,EndTime,Vehicle,TargetDate,Created&$orderby=Id desc&$top=1000').catch(function(){ return []; }),
       loadSougeiVehicleOptions(),
       spGetAll(SANKYU_IKUKYU_GUID, '$select=field_0,field_47&$top=500').catch(function(){ return []; })
     ]);
     var emps = arr[0], recs = arr[1], vehOpts = arr[2], leaveRecs = arr[3];
-    var lastBySn = {};
-    recs.forEach(function(r){ var sn = String(r.ShainNo || '').trim(); if (sn && !lastBySn[sn]) lastBySn[sn] = { endTime: r.EndTime || '', vehicle: r.Vehicle || '' }; });
     var today = new Date(); today.setHours(0, 0, 0, 0);
+    var todayStr = today.getFullYear() + '-' + ('0' + (today.getMonth() + 1)).slice(-2) + '-' + ('0' + today.getDate()).slice(-2);
+    var lastBySn = {}, todayBySn = {};
+    recs.forEach(function(r){
+      var sn = String(r.ShainNo || '').trim(); if (!sn) return;
+      if (!lastBySn[sn]) lastBySn[sn] = { endTime: r.EndTime || '', vehicle: r.Vehicle || '' };   // 全日通算の最新(運転手の引き継ぎ用)
+      if (r.TargetDate && String(r.TargetDate).slice(0, 10) === todayStr) {                          // 本日分のみ(送信状態/時間復元用)
+        if (!todayBySn[sn]) todayBySn[sn] = { endTime: r.EndTime || '', vehicle: r.Vehicle || '', count: 0, hhmm: _sgHhmmJst(r.Created) };
+        todayBySn[sn].count++;
+      }
+    });
     // 産休育休中(仕事復帰予定が未来)の社員番号 → 名簿から除外
     var leaveSet = {};
     (leaveRecs || []).forEach(function(r){
@@ -41090,7 +41106,7 @@ async function loadSougeiScreen() {
     SOUGEI_BUCKETS.forEach(function(b){ bucketTime[b.key] = (b.times && b.times[0]) || '17:00'; });
     var nameBySn = {}, romajiBySn = {};
     emps.forEach(function(e){ var sn = String(e[SG_F_SHAINNO] || '').trim(); if (sn) { nameBySn[sn] = e[SG_F_NAME] || ''; romajiBySn[sn] = _sgRomajiOf(e[SG_F_NAME] || '', e[SG_F_ZAIRYU] || ''); } });
-    window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, bucketTime: bucketTime, nameBySn: nameBySn, romajiBySn: romajiBySn };
+    window._sgData = { byBucket: byBucket, vehicles: vehOpts, lastBySn: lastBySn, todayBySn: todayBySn, bucketTime: bucketTime, nameBySn: nameBySn, romajiBySn: romajiBySn };
     var html = '<div style="padding:8px 4px;color:var(--text-light);font-size:12px;">送迎を利用する従業員へ、本日の帰りの<b>終業時間と車両</b>を送ります。派遣先を選んでください。</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px;">';
     SOUGEI_BUCKETS.forEach(function(b){
@@ -41209,7 +41225,7 @@ function openSougeiRoster(bucketKey, preserve){
   var times = (bk && bk.times && bk.times.length) ? bk.times : ['17:00'];
   if (!preserve || window._sgBucket !== bucketKey || !window._sgAssign) {
     var assign = {};
-    emps.forEach(function(p){ var lr = (window._sgData.lastBySn || {})[p.sn] || {}; var pv = lr.vehicle || ''; assign[p.sn] = { name: p.name, time: times[0], driver: pv, kesseki: false, checked: false, prev: pv, order: '' }; });
+    emps.forEach(function(p){ var lr = (window._sgData.lastBySn || {})[p.sn] || {}; var tr = (window._sgData.todayBySn || {})[p.sn]; var pv = lr.vehicle || ''; var tm = (tr && tr.endTime) ? tr.endTime : times[0]; assign[p.sn] = { name: p.name, time: tm, driver: pv, kesseki: false, checked: false, prev: pv, order: '' }; });
     window._sgAssign = assign;
   }
   window._sgBucket = bucketKey;
@@ -41234,6 +41250,16 @@ function _sgRenderRoster(){
   var times = window._sgTimes || ['17:00'];
   var remaining = 0, doneN = 0, kesN = 0;
   emps.forEach(function(p){ var a = A[p.sn] || {}; if (a.kesseki) kesN++; else if (a.driver) doneN++; else remaining++; });
+  // 本日の送信状態 (todayBySn と現在の割当を比較)
+  var TB = (window._sgData.todayBySn || {});
+  function sgSentState(p, a){
+    var ts = TB[p.sn];
+    var sent = !ts ? 'none' : (ts.count > 1 ? 'resent' : 'sent');
+    var pending = (!a.kesseki && ts) ? ((a.time !== ts.endTime) || (a.driver !== ts.vehicle)) : false;  // 送信後に内容が変わった=未送信の変更
+    return { sent: sent, hhmm: ts ? ts.hhmm : '', pending: pending };
+  }
+  var sentN = 0, unsentN = 0, pendingN = 0;
+  emps.forEach(function(p){ var a = A[p.sn] || {}; if (a.kesseki) return; var s = sgSentState(p, a); if (s.sent === 'none') unsentN++; else sentN++; if (s.pending) pendingN++; });
   function modeBtn(label, m, color){
     var on = (mode === m);
     var st = on ? ('background:' + color + ';color:#fff;font-weight:800;') : '';
@@ -41244,6 +41270,8 @@ function _sgRenderRoster(){
     + '<span style="font-weight:800;color:var(--primary);">' + _sgEsc(bk ? bk.label : '') + '</span>'
     + '<span style="font-size:12px;color:var(--text-light);">未割当' + remaining + '・割当済' + doneN + '・欠早退' + kesN + '</span>'
     + '<button class="nyutai-range-btn" style="margin-left:auto;font-size:13px;background:#eef1f8;color:#3a4a6b;font-weight:700;" onclick="openSougeiHistory(window._sgBucket)">📅 過去の送迎連絡</button></div>';
+  html += '<div style="font-size:12px;padding:0 8px 6px;color:var(--text-light);">本日 <span style="color:#1565c0;font-weight:700;">🔵送信済 ' + sentN + '</span>・<span style="color:#999;">⚪未送信 ' + unsentN + '</span>'
+    + (pendingN > 0 ? '・<span style="color:#c62828;font-weight:800;">🔴変更未送信 ' + pendingN + '</span>' : '') + '</div>';
   html += '<div class="card" style="padding:10px;margin:0 4px 8px;">';
   html += '<div style="font-size:12px;color:var(--text-light);margin-bottom:5px;">① <b>終業時間 / 欠・早退</b>（押す → チェック → 下の確定）</div>';
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
@@ -41292,6 +41320,12 @@ function _sgRenderRoster(){
       var a = A[p.sn] || {};
       shown++;
       var done = _sgDone(a);
+      var st = sgSentState(p, a);
+      var sentLine;
+      if (st.sent === 'none') sentLine = '<span style="color:#aaa;">⚪未送信</span>';
+      else if (st.sent === 'resent') sentLine = '<span style="color:#b35400;">🟠再送 ' + _sgEsc(st.hhmm) + '</span>';
+      else sentLine = '<span style="color:#1565c0;">🔵送信済 ' + _sgEsc(st.hhmm) + '</span>';
+      if (st.pending) sentLine += ' <span style="color:#c62828;font-weight:700;">●変更未送信</span>';
       var statusHtml;
       if (a.kesseki) statusHtml = '<span style="font-size:11px;background:#eee;color:#666;border-radius:6px;padding:1px 7px;">欠・早退</span>';
       else if (a.driver) statusHtml = '<span style="font-size:11px;color:#04604a;max-width:116px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _sgEsc(a.driver) + '</span>';
@@ -41299,7 +41333,7 @@ function _sgRenderRoster(){
       var timeBadge = a.kesseki ? '' : '<span style="font-size:12px;background:#eef2ff;color:#1a44aa;border-radius:6px;padding:1px 7px;font-weight:700;">' + _sgEsc(a.time) + '</span>';
       html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 3px;border-bottom:1px solid #eee;' + (done ? 'opacity:0.55;' : '') + '">'
         + (mode ? '<input type="checkbox" ' + (a.checked ? 'checked' : '') + ' onchange="_sgCheck(\'' + _sgAttr(p.sn) + '\',this.checked)" style="width:18px;height:18px;flex-shrink:0;">' : '')
-        + '<div style="flex:1;min-width:80px;">' + (p.romaji ? '<div style="font-size:10px;color:#888;letter-spacing:0.3px;">' + _sgEsc(p.romaji) + '</div>' : '') + '<div style="font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</div></div>'
+        + '<div style="flex:1;min-width:80px;">' + (p.romaji ? '<div style="font-size:10px;color:#888;letter-spacing:0.3px;">' + _sgEsc(p.romaji) + '</div>' : '') + '<div style="font-weight:600;font-size:13px;">' + _sgEsc(p.name) + '</div><div style="font-size:10px;margin-top:1px;">' + sentLine + '</div></div>'
         + timeBadge + statusHtml + '</div>';
     });
   });
