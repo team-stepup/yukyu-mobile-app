@@ -40938,6 +40938,7 @@ async function fetchTenkenFields() {
 
 // ====== 送迎連絡 v2 (派遣先→名簿→人ごとに車両割当→車両別まとめ→人単位配信) ======
 const SOUGEI_LIST_GUID = '60569629-38e0-4dcb-9a73-c5f2904e3036';
+const SANKYU_IKUKYU_GUID = '43a0fead-9b92-4ad8-9325-5ffcb9891dfb';  // 産休育休 List52 (field_0=社員番号, field_47=仕事復帰予定)
 const SG_F_SHAINNO = 'OData__x793e__x54e1__x756a__x53f7_';        // 社員番号
 const SG_F_NAME = 'Title';                                       // 氏名
 const SG_F_BUKA = 'OData__x90e8__x8ab2_';                        // 部課 (派遣先)
@@ -40946,7 +40947,7 @@ const SG_F_TSUKIN_NEW = 'OData__x65b0__x901a__x52e4__x65b9__x6c'; // 新通勤�
 const SG_F_TAISHA = 'OData__x6d3e__x9063__x5148__x9000__x79';     // 退社日
 const SOUGEI_BUCKETS = [
   { key: 'ASTI㈱浜松', label: 'ASTI浜松', kw: '浜松', times: ['17:00'] },
-  { key: 'ユーシン', label: 'ユーシン', kw: 'ユーシン', times: ['17:40', '19:45'] },
+  { key: 'ユーシン', label: 'ユーシン', kw: 'ユーシン', times: ['17:40', '19:45', '21:00'] },
   { key: 'ASTI都田', label: 'ASTI都田', kw: '都田', times: ['17:00'] },
   { key: 'ASTI掛川', label: 'ASTI掛川', kw: '掛川', times: ['17:00'] }
 ];
@@ -41007,21 +41008,31 @@ async function loadSougeiScreen() {
     var arr = await Promise.all([
       spGetAll(LIST_EMPLOYEES_GUID, sel),
       spGetAll(SOUGEI_LIST_GUID, '$select=Id,ShainNo,EndTime,Vehicle&$orderby=Id desc&$top=600').catch(function(){ return []; }),
-      loadSougeiVehicleOptions()
+      loadSougeiVehicleOptions(),
+      spGetAll(SANKYU_IKUKYU_GUID, '$select=field_0,field_47&$top=500').catch(function(){ return []; })
     ]);
-    var emps = arr[0], recs = arr[1], vehOpts = arr[2];
+    var emps = arr[0], recs = arr[1], vehOpts = arr[2], leaveRecs = arr[3];
     var lastBySn = {};
     recs.forEach(function(r){ var sn = String(r.ShainNo || '').trim(); if (sn && !lastBySn[sn]) lastBySn[sn] = { endTime: r.EndTime || '', vehicle: r.Vehicle || '' }; });
     var today = new Date(); today.setHours(0, 0, 0, 0);
+    // 産休育休中(仕事復帰予定が未来)の社員番号 → 名簿から除外
+    var leaveSet = {};
+    (leaveRecs || []).forEach(function(r){
+      var sn = String(r.field_0 || '').trim(); if (!sn) return;
+      var fukki = r.field_47 ? new Date(r.field_47) : null;
+      if (fukki && !isNaN(fukki.getTime()) && fukki > today) leaveSet[sn] = true;
+    });
     var byBucket = {}; SOUGEI_BUCKETS.forEach(function(b){ byBucket[b.key] = []; });
     emps.forEach(function(e){
       var ts = e[SG_F_TAISHA];
       if (ts) { var d = new Date(ts); if (!isNaN(d.getTime()) && d < today) return; }
       var comb = String(e[SG_F_TSUKIN_OLD] || '') + ' ' + String(e[SG_F_TSUKIN_NEW] || '');
       if (comb.indexOf('送迎') < 0) return;
+      var sn = String(e[SG_F_SHAINNO] || '').trim();
+      if (leaveSet[sn]) return;   // 産休育休中は非表示
       var bk = _sgBucketOf(e[SG_F_BUKA]);
       if (!bk) return;
-      byBucket[bk].push({ sn: String(e[SG_F_SHAINNO] || '').trim(), name: e[SG_F_NAME] || '', buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
+      byBucket[bk].push({ sn: sn, name: e[SG_F_NAME] || '', buka: stripBukaPrefix(e[SG_F_BUKA] || '') });
     });
     var bucketTime = {};
     SOUGEI_BUCKETS.forEach(function(b){ bucketTime[b.key] = (b.times && b.times[0]) || '17:00'; });
