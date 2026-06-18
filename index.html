@@ -33975,16 +33975,19 @@ async function _normalizeBankOcr(parsed) {
 
   if (isYucho) {
     // ② ゆうちょ: 記号-番号 → 店番(支店)・口座番号
-    var combo = (String(parsed.bankAccount || '') + '-' + String(parsed.bankBranch || '')).replace(/[^\d\-]/g, '');
-    var mm = combo.match(/(\d{5})\D*(\d{2,8})/);
+    //    妥当性チェック: 記号は「1始まりの5桁」(総合口座)、番号は7〜8桁。
+    //    これに合致する時だけ変換する(誤読で短い数字になった時に変な口座番号を作らない)。
+    var d = (String(parsed.bankAccount || '') + ' ' + String(parsed.bankBranch || '')).replace(/[^\d]/g, '');
+    var mm = d.match(/(1\d{4})(\d{7,8})/);
     if (mm) {
       var kigo = mm[1], num = mm[2];
-      var tenban = kigo.substring(1, 3) + '8';            // 2・3桁目 + 8
-      var tenmei = tenban.split('').map(function(d) { return '〇一二三四五六七八九'.charAt(+d); }).join('');
-      var kouza = num.replace(/1$/, '').replace(/\D/g, ''); // 末尾の1を除く
+      var tenban = kigo.substring(1, 3) + '8';            // 記号の2・3桁目 + 8
+      var tenmei = tenban.split('').map(function(c) { return '〇一二三四五六七八九'.charAt(+c); }).join('');
+      var kouza = num.replace(/1$/, '');                  // 番号末尾の1を除く → 7桁
       parsed.bankBranch = tenban + ':' + tenmei;
       parsed.bankAccount = kouza;
     }
+    // 妥当な記号番号(1+4桁 と 7〜8桁)が読めない場合は変換せず原文のまま → 確認画面で人が気づける
   } else {
     // ③ 通常銀行: 支店名 → ドロップダウン一致 (銀行に連動した支店候補を優先)
     var rawBr = String(parsed.bankBranch || '').trim();
