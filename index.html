@@ -32488,10 +32488,53 @@ function mapCloudOcrToFields(docType, ocr) {
     // license/koyou/shaken/jibaiseki/nini/bank/mynumber はキーがアプリと一致する設計
     Object.keys(ocr).forEach(function(k) {
       if (k === 'engine' || k === '_usage' || k === 'name') return;
-      put(k, ocr[k]);
+      var kk = k;
+      // 車名(通称名)は「任意保険の車名・仕様」を最優先にしたいので一旦別キーに退避し、
+      // _resolveCarName() で 任意保険 > 車検証 > 型式逆引き の順に解決する
+      if (docType === 'nini' && k === 'carName') kk = '_niniCarName';
+      // 型式は保存フィールドが無い → 逆引き用に退避(車名欄に型式を入れない)
+      if (docType === 'shaken' && k === 'carModel') kk = '_carModel';
+      put(kk, ocr[k]);
     });
   }
   return out;
+}
+
+// 型式 → 通称名 の静的逆引き表 (AIが通称名を返せなかった時の最終フォールバック。軽・小型中心)
+var CAR_MODEL_TO_NAME = {
+  'JH1':'N-WGN','JH2':'N-WGN','JH3':'N-WGN','JH4':'N-WGN',
+  'JF1':'N-BOX','JF2':'N-BOX','JF3':'N-BOX','JF4':'N-BOX','JF5':'N-BOX','JF6':'N-BOX',
+  'JG1':'N-ONE','JG2':'N-ONE','JG3':'N-ONE','JG4':'N-ONE','JW5':'S660',
+  'MH23S':'ワゴンR','MH34S':'ワゴンR','MH44S':'ワゴンR','MH35S':'ワゴンR','MH55S':'ワゴンR','MH85S':'ワゴンR','MH95S':'ワゴンR',
+  'HA36S':'アルト','HA25S':'アルト','HA37S':'アルト','MK53S':'スペーシア','MK42S':'スペーシア','MK32S':'スペーシア',
+  'DA17V':'エブリイ','DA64V':'エブリイ','DA17W':'エブリイワゴン',
+  'LA600S':'タント','LA610S':'タント','LA650S':'タント','LA660S':'タント','L375S':'タント','L385S':'タント',
+  'LA800S':'ムーヴキャンバス','LA810S':'ムーヴキャンバス','LA150S':'ムーヴ','LA160S':'ムーヴ','L175S':'ムーヴ','L185S':'ムーヴ',
+  'LA300S':'ミライース','LA310S':'ミライース','LA350S':'ミライース','LA360S':'ミライース',
+  'B21W':'デイズ','B40W':'デイズ','B43W':'デイズ','B44W':'デイズ','B45W':'デイズ','B46W':'デイズ','B47W':'デイズ','B48W':'デイズ',
+  'NCP131':'ヴィッツ','KSP130':'ヴィッツ','NSP130':'ヴィッツ','MXPK11':'アクア','NHP10':'アクア'
+};
+function _modelKey(s) {
+  // "DBA-JH1" → "JH1"、"5BA-MN71S" → "MN71S"、"JH1" → "JH1"
+  return String(s || '').toUpperCase().replace(/^[0-9A-Z]+-/, '').replace(/[^0-9A-Z]/g, '');
+}
+// 車名(通称名)を 任意保険 > 車検証 > 型式逆引き の優先で確定し、型式が車名に紛れ込むのを防ぐ
+function _resolveCarName(p) {
+  var nini   = (p._niniCarName || '').trim();   // 任意保険「車名・仕様」(最優先)
+  var shaken = (p.carName || '').trim();          // 車検証由来(通称名 or AI逆引き推測)
+  var model  = (p._carModel || '').trim();        // 型式 (逆引き用)
+  var name = nini || shaken;
+  // 解決した「車名」が実は型式(例 DBA-JH1 / S07A)だった場合は逆引きで通称名へ
+  var looksModel = name && (name === model
+    || /^(DBA|CBA|LA|5BA|6BA|3BA|4BA|2BA|UA|ABA|TA|CBF|LDF|TRG|KK|GF|GH|CBE)-/i.test(name)
+    || !!CAR_MODEL_TO_NAME[_modelKey(name)]);
+  if (looksModel) {
+    name = CAR_MODEL_TO_NAME[_modelKey(name)] || CAR_MODEL_TO_NAME[_modelKey(model)] || name;
+  }
+  // 通称名が無く型式だけある → 静的逆引き
+  if (!name && model) { var h = CAR_MODEL_TO_NAME[_modelKey(model)]; if (h) name = h; }
+  if (name) p.carName = name; else delete p.carName;   // 型式しか分からない時は車名を入れない(誤転記防止)
+  delete p._niniCarName; delete p._carModel;
 }
 
 // OCR項目の表示ラベル (プレビュー共通)
@@ -34080,6 +34123,10 @@ async function ocrAllFromEmpFolder() {
       return;
     }
     var srcNote = okDocs.join('、') + (ngDocs.length ? '　⚠失敗: ' + ngDocs.join('、') : '');
+    // 車名(通称名)を 任意保険 > 車検証 > 型式逆引き の優先で確定 (型式が車名欄に入るのを防ぐ)
+    if (allParsed.carName || allParsed._niniCarName || allParsed._carModel) {
+      try { _resolveCarName(allParsed); } catch (ce) { console.warn('[一括OCR] 車名解決失敗:', ce); }
+    }
     // 銀行・支店をドロップダウン値に正規化 ＋ ゆうちょは振込用(店番・口座番号)へ変換
     if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch) {
       try { await _normalizeBankOcr(allParsed); } catch (be) { console.warn('[一括OCR] 銀行正規化失敗:', be); }
