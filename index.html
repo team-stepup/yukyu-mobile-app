@@ -33948,6 +33948,57 @@ async function _fetchPdfAsImages(serverRelativeUrl, maxPages) {
   return out;
 }
 
+// OCRの銀行・支店をアプリのドロップダウン値(コード:名)に一致させる ＋ ゆうちょは給与振込用に変換
+//   ゆうちょ変換: 店番=記号の2・3桁目+"8" / 口座番号=番号の末尾"1"を除く7桁 / 種目=普通
+async function _normalizeBankOcr(parsed) {
+  if (!parsed) return parsed;
+  try { if (typeof loadEditDropdownOptions === 'function' && typeof editKeyMap !== 'undefined' && editKeyMap) await loadEditDropdownOptions(editKeyMap); } catch (_) {}
+  var bankOpts = (_editDropdownCache && _editDropdownCache['bankName']) || [];
+  var branchOpts = (_editDropdownCache && _editDropdownCache['bankBranch']) || [];
+  function nameOf(o) { var i = String(o).indexOf(':'); return i >= 0 ? String(o).substring(i + 1) : String(o); }
+
+  var rawBank = String(parsed.bankName || '').trim();
+  var isYucho = /ゆうち[ょよ]|郵便貯金|ゆうちょ/.test(rawBank) || /^9900/.test(rawBank);
+
+  // ① 銀行名 → ドロップダウン一致
+  if (rawBank) {
+    if (isYucho) {
+      var y = bankOpts.find(function(o) { return /^9900/.test(o); });
+      parsed.bankName = y || '9900:ゆうちよ';
+    } else {
+      var bm = bankOpts.find(function(o) { var n = nameOf(o).replace(/銀行$/, ''); return n && rawBank.indexOf(n) >= 0; })
+            || bankOpts.find(function(o) { return rawBank.indexOf(nameOf(o)) >= 0 || nameOf(o).indexOf(rawBank.replace(/銀行$/, '')) >= 0; });
+      if (bm) parsed.bankName = bm;
+    }
+  }
+
+  if (isYucho) {
+    // ② ゆうちょ: 記号-番号 → 店番(支店)・口座番号
+    var combo = (String(parsed.bankAccount || '') + '-' + String(parsed.bankBranch || '')).replace(/[^\d\-]/g, '');
+    var mm = combo.match(/(\d{5})\D*(\d{2,8})/);
+    if (mm) {
+      var kigo = mm[1], num = mm[2];
+      var tenban = kigo.substring(1, 3) + '8';            // 2・3桁目 + 8
+      var tenmei = tenban.split('').map(function(d) { return '〇一二三四五六七八九'.charAt(+d); }).join('');
+      var kouza = num.replace(/1$/, '').replace(/\D/g, ''); // 末尾の1を除く
+      parsed.bankBranch = tenban + ':' + tenmei;
+      parsed.bankAccount = kouza;
+    }
+  } else {
+    // ③ 通常銀行: 支店名 → ドロップダウン一致 (銀行に連動した支店候補を優先)
+    var rawBr = String(parsed.bankBranch || '').trim();
+    if (rawBr) {
+      var linked = (_editDropdownLinkMaps && _editDropdownLinkMaps['bankBranch'] && parsed.bankName)
+        ? (_editDropdownLinkMaps['bankBranch'][parsed.bankName] || []) : [];
+      var pool = linked.length ? linked : branchOpts;
+      var brm = pool.find(function(o) { var n = nameOf(o).replace(/支店$/, ''); return n && rawBr.indexOf(n) >= 0; })
+             || pool.find(function(o) { return rawBr.indexOf(nameOf(o)) >= 0; });
+      if (brm) parsed.bankBranch = brm;
+    }
+  }
+  return parsed;
+}
+
 async function ocrAllFromEmpFolder() {
   var emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
@@ -34025,6 +34076,10 @@ async function ocrAllFromEmpFolder() {
       return;
     }
     var srcNote = okDocs.join('、') + (ngDocs.length ? '　⚠失敗: ' + ngDocs.join('、') : '');
+    // 銀行・支店をドロップダウン値に正規化 ＋ ゆうちょは振込用(店番・口座番号)へ変換
+    if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch) {
+      try { await _normalizeBankOcr(allParsed); } catch (be) { console.warn('[一括OCR] 銀行正規化失敗:', be); }
+    }
     _showEmpOcrApplyPreview(allParsed, srcNote, { skipMissing: true });
   } catch (e) {
     _empOcrProg(null);
