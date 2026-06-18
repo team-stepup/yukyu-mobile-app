@@ -34232,10 +34232,19 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
       '<td style="padding:5px 8px;font-weight:700;color:' + (isEmpty ? '#00695c' : '#c62828') + ';border-bottom:1px solid #eee;">→ ' + escHtml(String(parsed[k])) + '</td>' +
     '</tr>';
   }
-  var newRows = '', conflictRows = '', newCount = 0, confCount = 0, sameCount = 0;
+  function _ocrSameRow(k) {
+    var cv = curVal(k);
+    return '<tr style="opacity:0.65;">' +
+      '<td style="padding:5px 6px;border-bottom:1px solid #f0f0f0;text-align:center;color:#bbb;">―</td>' +
+      '<th style="text-align:left;padding:5px 8px;color:#888;border-bottom:1px solid #f0f0f0;white-space:nowrap;font-weight:500;">' + escHtml(labelMap[k] || k) + '</th>' +
+      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #f0f0f0;font-size:11px;">' + escHtml(cv) + '</td>' +
+      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #f0f0f0;">＝ 同じ</td>' +
+    '</tr>';
+  }
+  var newRows = '', conflictRows = '', sameRows = '', newCount = 0, confCount = 0, sameCount = 0;
   Object.keys(parsed).forEach(function(k) {
     var cv = curVal(k);
-    if (normCmp(k, cv) === normCmp(k, parsed[k])) { sameCount++; return; }   // 変更なし→表示しない
+    if (normCmp(k, cv) === normCmp(k, parsed[k])) { sameRows += _ocrSameRow(k); sameCount++; return; }
     if (!String(cv).trim()) { newRows += _ocrRow(k, true); newCount++; }
     else { conflictRows += _ocrRow(k, false); confCount++; }
   });
@@ -34243,7 +34252,8 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
   var rows = '';
   if (newCount) rows += '<tr><td colspan="4" style="padding:7px 8px 3px;font-size:11px;font-weight:800;color:#00695c;">🆕 空欄を補完（' + newCount + '件・チェック済みを保存）</td></tr>' + _hdr + newRows;
   if (confCount) rows += '<tr><td colspan="4" style="padding:11px 8px 3px;font-size:11px;font-weight:800;color:#c62828;">⚠ 現在値と異なる（' + confCount + '件・上書き注意。必要なものだけチェック）</td></tr>' + _hdr + conflictRows;
-  if (!newCount && !confCount) rows = '<tr><td colspan="4" style="padding:14px;text-align:center;color:#888;font-size:12px;">変更が必要な項目はありません（読み取り値は現在値と同じ' + (sameCount ? ' ' + sameCount + '件' : '') + '）</td></tr>';
+  if (sameCount) rows += '<tr><td colspan="4" style="padding:11px 8px 3px;font-size:11px;font-weight:800;color:#2e7d32;">✓ 現在値と同じ（' + sameCount + '件・変更不要）</td></tr>' + _hdr + sameRows;
+  if (!newCount && !confCount && !sameCount) rows = '<tr><td colspan="4" style="padding:14px;text-align:center;color:#888;font-size:12px;">読み取れた項目がありません</td></tr>';
   window._empOcrParsed = parsed;
   // 読み取れなかった項目の案内 (手入力の必要が一目で分かるように)
   var ALL_KEYS = ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuBikou'];
