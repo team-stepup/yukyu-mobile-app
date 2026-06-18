@@ -34163,15 +34163,32 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
     if (v && /^\d{4}-\d{2}-\d{2}T/.test(String(v))) return String(v).substring(0, 10);
     return (v === null || v === undefined) ? '' : String(v);
   }
-  var rows = '';
+  function normCmp(k, v) {
+    var s = String(v == null ? '' : v).trim();
+    if (k === 'sex') s = (s === '女') ? '女性' : (s === '男') ? '男性' : s;
+    return s;
+  }
+  function _ocrRow(k, isEmpty) {
+    var cv = curVal(k);
+    return '<tr>' +
+      '<td style="padding:5px 6px;border-bottom:1px solid #eee;text-align:center;"><input type="checkbox" class="emp-ocr-chk" data-ocr-key="' + escHtml(k) + '"' + (isEmpty ? ' checked' : '') + ' style="width:17px;height:17px;"></td>' +
+      '<th style="text-align:left;padding:5px 8px;color:#555;border-bottom:1px solid #eee;white-space:nowrap;font-weight:600;">' + escHtml(labelMap[k] || k) + '</th>' +
+      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #eee;font-size:11px;">' + (cv ? escHtml(cv) : '<span style="color:#ccc;">（空欄）</span>') + '</td>' +
+      '<td style="padding:5px 8px;font-weight:700;color:' + (isEmpty ? '#00695c' : '#c62828') + ';border-bottom:1px solid #eee;">→ ' + escHtml(String(parsed[k])) + '</td>' +
+    '</tr>';
+  }
+  var newRows = '', conflictRows = '', newCount = 0, confCount = 0, sameCount = 0;
   Object.keys(parsed).forEach(function(k) {
     var cv = curVal(k);
-    rows += '<tr>' +
-      '<th style="text-align:left;padding:5px 8px;color:#555;border-bottom:1px solid #eee;white-space:nowrap;">' + escHtml(labelMap[k] || k) + '</th>' +
-      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #eee;font-size:11px;">' + (cv ? escHtml(cv) : '<span style="color:#ccc;">（空欄）</span>') + '</td>' +
-      '<td style="padding:5px 8px;font-weight:700;color:#00695c;border-bottom:1px solid #eee;">→ ' + escHtml(String(parsed[k])) + '</td>' +
-    '</tr>';
+    if (normCmp(k, cv) === normCmp(k, parsed[k])) { sameCount++; return; }   // 変更なし→表示しない
+    if (!String(cv).trim()) { newRows += _ocrRow(k, true); newCount++; }
+    else { conflictRows += _ocrRow(k, false); confCount++; }
   });
+  var _hdr = '<tr style="background:#f0f7f6;"><th style="padding:4px 6px;color:#888;font-size:10px;"></th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">項目</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">現在</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">読み取り値</th></tr>';
+  var rows = '';
+  if (newCount) rows += '<tr><td colspan="4" style="padding:7px 8px 3px;font-size:11px;font-weight:800;color:#00695c;">🆕 空欄を補完（' + newCount + '件・チェック済みを保存）</td></tr>' + _hdr + newRows;
+  if (confCount) rows += '<tr><td colspan="4" style="padding:11px 8px 3px;font-size:11px;font-weight:800;color:#c62828;">⚠ 現在値と異なる（' + confCount + '件・上書き注意。必要なものだけチェック）</td></tr>' + _hdr + conflictRows;
+  if (!newCount && !confCount) rows = '<tr><td colspan="4" style="padding:14px;text-align:center;color:#888;font-size:12px;">変更が必要な項目はありません（読み取り値は現在値と同じ' + (sameCount ? ' ' + sameCount + '件' : '') + '）</td></tr>';
   window._empOcrParsed = parsed;
   // 読み取れなかった項目の案内 (手入力の必要が一目で分かるように)
   var ALL_KEYS = ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuBikou'];
@@ -34191,15 +34208,14 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
       '</div>' +
       '<div style="padding:14px 16px;">' +
         '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
-          '<tr><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">項目</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">現在の値</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">読み取り値</th></tr>' +
           rows +
         '</table>' +
-        '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:6px;padding:7px 10px;margin-top:10px;">⚠ 「適用して保存」を押すと上記の値で社員データを上書きします。読み取りミスがあれば「キャンセル」して、各項目の ✏️ で個別に修正してください。</div>' +
+        '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:6px;padding:7px 10px;margin-top:10px;">✅ <b>チェックした項目だけ</b>を保存します。空欄は自動でチェック済み。<b>現在値と異なる項目は誤読の恐れがあるので既定オフ</b>です（必要なものだけチェック）。</div>' +
         missingHtml +
       '</div>' +
       '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
         '<button onclick="document.getElementById(\'empOcrApplyOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
-        '<button onclick="_applyEmpOcrToSp()" id="empOcrApplyBtn" style="background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">✓ 適用して保存</button>' +
+        '<button onclick="_applyEmpOcrToSp()" id="empOcrApplyBtn" style="background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">✓ チェックした項目を保存</button>' +
       '</div>' +
     '</div>';
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
@@ -34210,6 +34226,10 @@ async function _applyEmpOcrToSp() {
   var emp = currentEmployee;
   var parsed = window._empOcrParsed || {};
   if (!emp || !emp.Id || !Object.keys(parsed).length) return;
+  // チェックされた項目だけを対象にする (空欄=既定ON / 既存値と異なる=既定OFF)
+  var checkedKeys = {};
+  document.querySelectorAll('.emp-ocr-chk').forEach(function(c) { if (c.checked) checkedKeys[c.getAttribute('data-ocr-key')] = true; });
+  if (!Object.keys(checkedKeys).length) { showToast('保存する項目が選択されていません', 'error'); return; }
   var btn = document.getElementById('empOcrApplyBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
   try {
@@ -34218,6 +34238,7 @@ async function _applyEmpOcrToSp() {
     var body = {};
     var dateKeys = OCR_DATE_KEYS;
     Object.keys(parsed).forEach(function(k) {
+      if (!checkedKeys[k]) return;   // 未チェックは保存しない
       var od = km[k];
       if (!od) { console.warn('[OCR保存] フィールド未解決:', k); return; }
       var v = parsed[k];
