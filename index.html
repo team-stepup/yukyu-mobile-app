@@ -32867,15 +32867,20 @@ function _openOcrEditPopup(docId, parsed) {
       '</div>' + inputHtml + '</div>';
   });
 
+  // 在留カードは確認画面の最上部に偽造チェック（失効照会＋券面クロス照合）を表示
+  var forgeryBanner = (docId === 'zairyu') ? _buildAntiForgeryBanner(parsed) : '';
   const overlay = document.createElement('div');
   overlay.className = 'confirm-overlay';
   overlay.style.zIndex = '99999';
   overlay.innerHTML = '<div class="confirm-box" style="max-width:440px;max-height:88vh;display:flex;flex-direction:column;">' +
     '<div class="confirm-title">🤖 読み取り結果の確認・修正</div>' +
-    '<div class="confirm-msg" style="text-align:left;font-size:11.5px;color:#666;">' +
-      '✓緑 = 読み取れた項目（' + okCount + '件）。<b>間違いはこの場で直せます</b>。空欄の項目も入力できます。' +
+    '<div style="overflow-y:auto;flex:1;text-align:left;">' +
+      forgeryBanner +
+      '<div class="confirm-msg" style="text-align:left;font-size:11.5px;color:#666;margin:0 0 8px;">' +
+        '✓緑 = 読み取れた項目（' + okCount + '件）。<b>間違いはこの場で直せます</b>。空欄の項目も入力できます。' +
+      '</div>' +
+      formHtml +
     '</div>' +
-    '<div style="margin:8px 0;overflow-y:auto;flex:1;text-align:left;">' + formHtml + '</div>' +
     '<div class="confirm-btns">' +
       '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">キャンセル</button>' +
       '<button class="btn-ok" id="autoFillOkBtn">✓ 適用する</button>' +
@@ -32912,8 +32917,18 @@ function _openOcrEditPopup(docId, parsed) {
       }
       applied++;
     });
+    // 失効照会の結果(OK/NG)を在留備考フォームへ追記（登録時に保存される）
+    if (docId === 'zairyu' && window._lapseStatus) {
+      var bk = document.getElementById('addField_zairyuBikou');
+      if (bk) {
+        var dd = new Date();
+        var ds = dd.getFullYear() + '-' + ('0' + (dd.getMonth() + 1)).slice(-2) + '-' + ('0' + dd.getDate()).slice(-2);
+        var cur = String(bk.value || '').trim();
+        bk.value = (cur ? cur + ' ／ ' : '') + '失効照会:' + window._lapseStatus + '(' + ds + ')';
+      }
+    }
     overlay.remove();
-    showToast('🤖 ' + applied + '項目をフォームに反映しました', 'success');
+    showToast('🤖 ' + applied + '項目をフォームに反映しました' + (docId === 'zairyu' && window._lapseStatus ? '（失効照会:' + window._lapseStatus + ' も備考へ）' : ''), 'success');
   };
 }
 
@@ -34498,6 +34513,49 @@ function _lapseMark(status) {
     badge.textContent = (status === 'OK') ? '✅ 有効（OK）として記録' : '❌ 失効/該当（NG）として記録';
     badge.style.color = (status === 'OK') ? '#1b5e20' : '#c62828';
   }
+}
+
+// ── 新規登録時の在留カード偽造チェック（A失効照会＋B券面クロス照合＋C公式アプリ誘導）──
+function _ymd(s) { return String(s || '').substring(0, 10); }
+// B: 在留カードの生年月日を、同時に撮影した免許証・マイナンバーのOCR結果と自動照合
+function _crossCheckZairyuHtml(parsed) {
+  var cloud = window._lastCloudOcr || {};
+  var zBirth = parsed.birthday || (cloud.zairyu && cloud.zairyu.birthday) || '';
+  var others = [];
+  if (cloud.license && cloud.license.birthday) others.push({ l: '免許証', v: cloud.license.birthday });
+  if (cloud.mynumber && cloud.mynumber.birthday) others.push({ l: 'マイナンバー', v: cloud.mynumber.birthday });
+  if (!zBirth || !others.length) {
+    return '<div style="font-size:10.5px;color:#777;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">② <b>他の身分証との照合</b>: <span style="color:#999;">免許証・マイナンバーも撮影してOCRすると、生年月日を自動照合します（1枚だけ偽造したカードを検知）。</span></div>';
+  }
+  var mism = others.filter(function(o) { return _ymd(o.v) !== _ymd(zBirth); });
+  var detail = others.map(function(o) { return o.l + ' ' + _ymd(o.v) + (_ymd(o.v) === _ymd(zBirth) ? '✓' : '✗'); }).join(' ／ ');
+  if (mism.length) {
+    return '<div style="font-size:11px;color:#c62828;font-weight:700;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">② ⚠ <b>生年月日が他の身分証と不一致</b>（偽造/誤りの疑い）<br><span style="font-weight:400;">在留 ' + _ymd(zBirth) + ' ／ ' + escHtml(detail) + '</span></div>';
+  }
+  return '<div style="font-size:11px;color:#1b5e20;font-weight:700;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">② ✅ <b>生年月日が他の身分証と一致</b><br><span style="font-weight:400;color:#555;">在留 ' + _ymd(zBirth) + ' ／ ' + escHtml(detail) + '</span></div>';
+}
+// 在留カード確認ポップアップ最上部に出す偽造チェックバナー
+function _buildAntiForgeryBanner(parsed) {
+  var cardNo = String(parsed.zairyuBikou || '').replace(/^.*在留カード番号:\s*/, '').trim();
+  window._lapseCardNo = cardNo;
+  window._lapseStatus = null;
+  var aHtml = cardNo
+    ? '<div style="font-size:11px;color:#555;">カード番号: <b style="font-family:monospace;font-size:12.5px;letter-spacing:0.5px;">' + escHtml(cardNo) + '</b></div>' +
+      '<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:6px;">' +
+        '<button type="button" onclick="_lapseOpen()" style="background:#1565c0;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;">🔎 番号をコピーして照会</button>' +
+        '<span style="font-size:11px;color:#777;">結果:</span>' +
+        '<button type="button" id="lapseBtnOK" onclick="_lapseMark(\'OK\')" style="' + _lapseBtnCss('OK', false) + '">OK 有効</button>' +
+        '<button type="button" id="lapseBtnNG" onclick="_lapseMark(\'NG\')" style="' + _lapseBtnCss('NG', false) + '">NG 失効/該当</button>' +
+        '<span id="lapseBadge" style="font-size:11.5px;font-weight:800;"></span>' +
+      '</div>'
+    : '<div style="font-size:10.5px;color:#999;">在留カード番号が読み取れていません。番号が読めると失効照会ができます。</div>';
+  return '<div style="margin-bottom:10px;border:1.5px solid #f0c36d;background:#fffaf0;border-radius:9px;padding:10px 12px;">' +
+      '<div style="font-size:12.5px;font-weight:800;color:#9a6a00;margin-bottom:7px;">🛡 在留カード 偽造チェック</div>' +
+      '<div style="font-size:10.5px;color:#9a6a00;font-weight:700;margin-bottom:3px;">① 番号の有効性（法務省 失効情報照会）</div>' +
+      aHtml +
+      _crossCheckZairyuHtml(parsed) +
+      '<div style="font-size:10px;color:#888;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">③ ICチップの真贋は法務省「在留カード等読取アプリ」（スマホ＋NFC）で最終確認できます。</div>' +
+    '</div>';
 }
 
 async function _applyEmpOcrToSp() {
