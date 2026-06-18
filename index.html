@@ -23694,14 +23694,42 @@ async function getEmpFolderPath(emp) {
       }
     } catch(e) { console.warn('resolveSyainServerRelativeUrl failed:', e); }
   }
-  // 優先2: フォールバック - 部課+番号+氏名 で構築
   var buka = (typeof getBukaValue === 'function') ? getBukaValue(emp) : '';
   if (!buka && typeof bukaODataKey !== 'undefined' && bukaODataKey) buka = String(emp[bukaODataKey] || '');
   var syainNo = emp[F.syainNo];
   var name = emp.Title || '';
-  if (!buka || !syainNo || !name) return null;
+  if (!syainNo) return null;
+  var syainNoStr = String(syainNo).replace(/\.0+$/, '').trim();   // 70381.0 → 70381
+
+  // 優先2: 実フォルダを番号で検索（命名ゆれ=全角/半角スペース・コロン有無 を吸収）
+  //   部課フォルダは先頭数字で照合 (071:三和→"071三和…")、社員フォルダは社員番号で照合
+  try {
+    var _tk = await getToken();
+    var _listFolders = function(p) {
+      var ep = encodeURIComponent(p).replace(/%2F/g, '/');
+      return fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + ep + "')/folders?$select=Name,ServerRelativeUrl&$top=600",
+        { headers: { 'Authorization': 'Bearer ' + _tk, 'Accept': 'application/json;odata=verbose' } })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(j) { return j ? (((j.d || {}).results) || []) : []; })
+        .catch(function() { return []; });
+    };
+    var bukaNum = (String(buka).match(/(\d+)/) || [])[1];
+    if (bukaNum) {
+      var tops = await _listFolders(SP_DOC_LIB_PATH);
+      var bf = tops.find(function(f) { var m = f.Name.match(/^\s*(\d+)/); return m && parseInt(m[1], 10) === parseInt(bukaNum, 10); });
+      if (bf) {
+        var subs = await _listFolders(bf.ServerRelativeUrl);
+        var hit = subs.find(function(f) { return f.Name.replace(/^\s+/, '').indexOf(syainNoStr) === 0; })
+               || subs.find(function(f) { return f.Name.indexOf(syainNoStr) >= 0; });
+        if (hit) { console.log('[社員フォルダ] 検索一致:', hit.ServerRelativeUrl); return hit.ServerRelativeUrl; }
+      }
+    }
+  } catch (e) { console.warn('[社員フォルダ] 検索失敗、構築パスへ:', e); }
+
+  // 優先3: フォールバック構築（新規でフォルダ未作成のケース）
+  if (!buka || !name) return null;
   function sanitize(s) { return String(s).replace(/[:*?"<>|#%~&{}]/g, '-'); }
-  var fallback = SP_DOC_LIB_PATH + '/' + sanitize(buka) + '/' + syainNo + ' ' + sanitize(name);
+  var fallback = SP_DOC_LIB_PATH + '/' + sanitize(buka) + '/' + syainNoStr + ' ' + sanitize(name);
   console.log('[社員フォルダ] フォールバック構築パス:', fallback);
   return fallback;
 }
@@ -33893,6 +33921,33 @@ var OCR_DOC_CLASSIFY = [
   { docType: 'bank',      re: /通帳|キャッシュ|銀行|口座/, label: '銀行口座' }
 ];
 
+// PDFを pdf.js で画像化（GPT Vision は画像のみ対応のため）。先頭 maxPages ページを JPEG dataURL で返す
+async function _fetchPdfAsImages(serverRelativeUrl, maxPages) {
+  maxPages = maxPages || 2;
+  var pdfjsLib = (typeof loadPdfJsIfNeeded === 'function') ? await loadPdfJsIfNeeded() : window.pdfjsLib;
+  if (!pdfjsLib) throw new Error('pdf.js未ロード');
+  var token = await getToken();
+  var enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
+  var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value",
+    { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) throw new Error('PDF取得失敗 ' + r.status);
+  var buf = await r.arrayBuffer();
+  var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  var out = [];
+  var n = Math.min(pdf.numPages, maxPages);
+  for (var p = 1; p <= n; p++) {
+    var page = await pdf.getPage(p);
+    var base = page.getViewport({ scale: 1 });
+    var scale = Math.min(2.5, Math.max(1, 2000 / base.width));   // 長辺 ~2000px 目標
+    var vp = page.getViewport({ scale: scale });
+    var cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+    var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    out.push(cv.toDataURL('image/jpeg', 0.85));
+  }
+  return out;
+}
+
 async function ocrAllFromEmpFolder() {
   var emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
@@ -33938,7 +33993,21 @@ async function ocrAllFromEmpFolder() {
       });
       _empOcrProg('☁️ ' + g.label + ' をAIで読み取り中… (' + (d + 1) + '/' + docTypes.length + ')');
       try {
-        var ocr = await cloudDocOcr(dt, { paths: g.files.map(function(f) { return f.ServerRelativeUrl; }) });
+        // 画像はpaths(サーバー側で取得)、PDFはpdf.jsで画像化してimagesで送る
+        var _imgPaths = [], _pdfImgs = [];
+        for (var _fi = 0; _fi < g.files.length; _fi++) {
+          if (/\.pdf$/i.test(g.files[_fi].Name)) {
+            try { _pdfImgs = _pdfImgs.concat(await _fetchPdfAsImages(g.files[_fi].ServerRelativeUrl, 2)); }
+            catch (pe) { console.warn('[一括OCR] PDF画像化失敗:', g.files[_fi].Name, pe); }
+          } else {
+            _imgPaths.push(g.files[_fi].ServerRelativeUrl);
+          }
+        }
+        var _ocrOpts = {};
+        if (_imgPaths.length) _ocrOpts.paths = _imgPaths.slice(0, 4);
+        if (_pdfImgs.length) _ocrOpts.images = _pdfImgs.slice(0, 4);
+        if (!_ocrOpts.paths && !_ocrOpts.images) throw new Error('読み取り可能なページがありません');
+        var ocr = await cloudDocOcr(dt, _ocrOpts);
         var mapped = mapCloudOcrToFields(dt, ocr);
         var added = 0;
         Object.keys(mapped).forEach(function(k) {
