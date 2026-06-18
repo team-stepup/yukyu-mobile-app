@@ -17044,7 +17044,7 @@ const PROFILE_CATEGORIES = [
       { key: 'bankName', label: '銀行' },
       { key: 'bankBranch', label: '支店' },
       { key: 'bankAccount', label: '口座番号' },
-      { key: 'bankMeigi', label: '氏名フリガナ' },
+      { key: 'bankMeigi', label: '氏名フリガナ', format: 'hankakuKana' },
     ]
   },
   {
@@ -17472,6 +17472,10 @@ function formatProfileValue(val, format) {
   }
   if (format === 'stripRomaji') {
     return escHtml(str.replace(/\s*[A-Za-z].*$/, '').trim() || str);
+  }
+  if (format === 'hankakuKana') {
+    // 振込先 氏名フリガナ は常に半角カナで表示（銀行振込仕様）
+    return escHtml((typeof toHankakuKana === 'function' ? toHankakuKana(str) : str).trim());
   }
   return escHtml(str);
 }
@@ -32011,6 +32015,11 @@ async function saveEditField(catId, fieldKey) {
     newVal = newVal ? parseFloat(newVal) : null;
   } else if (newVal === '') {
     newVal = null;
+  }
+
+  // 振込先 氏名フリガナ は銀行振込仕様に合わせ 半角カナへ自動変換（全角入力・OCR全角を吸収）
+  if (field.key === 'bankMeigi' && newVal && typeof toHankakuKana === 'function') {
+    newVal = toHankakuKana(String(newVal)).trim();
   }
 
   // 有給使用後退社日チェック: 既存の有給申請より前の退社日は設定不可
