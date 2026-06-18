@@ -34131,7 +34131,15 @@ async function ocrAllFromEmpFolder() {
     if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch) {
       try { await _normalizeBankOcr(allParsed); } catch (be) { console.warn('[一括OCR] 銀行正規化失敗:', be); }
     }
-    _showEmpOcrApplyPreview(allParsed, srcNote, { skipMissing: true });
+    // 読み取り元ファイル一覧（確認モーダルで見ながらチェックできるようにする）
+    var _srcFiles = [];
+    docTypes.forEach(function(dt) {
+      var gg = groups[dt];
+      (gg.files || []).forEach(function(f) {
+        _srcFiles.push({ label: gg.label, name: f.Name, url: f.ServerRelativeUrl, isPdf: /\.pdf$/i.test(f.Name) });
+      });
+    });
+    _showEmpOcrApplyPreview(allParsed, srcNote, { skipMissing: true, files: _srcFiles });
   } catch (e) {
     _empOcrProg(null);
     console.error('ocrAllFromEmpFolder error:', e);
@@ -34277,7 +34285,7 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
   function _ocrRow(k, isEmpty) {
     var cv = curVal(k);
     return '<tr>' +
-      '<td style="padding:5px 6px;border-bottom:1px solid #eee;text-align:center;"><input type="checkbox" class="emp-ocr-chk" data-ocr-key="' + escHtml(k) + '"' + (isEmpty ? ' checked' : '') + ' style="width:17px;height:17px;"></td>' +
+      '<td style="padding:5px 6px;border-bottom:1px solid #eee;text-align:center;"><input type="checkbox" class="emp-ocr-chk" data-ocr-key="' + escHtml(k) + '" data-ocr-empty="' + (isEmpty ? '1' : '0') + '"' + (isEmpty ? ' checked' : '') + ' style="width:17px;height:17px;"></td>' +
       '<th style="text-align:left;padding:5px 8px;color:#555;border-bottom:1px solid #eee;white-space:nowrap;font-weight:600;">' + escHtml(labelMap[k] || k) + '</th>' +
       '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #eee;font-size:11px;">' + (cv ? escHtml(cv) : '<span style="color:#ccc;">（空欄）</span>') + '</td>' +
       '<td style="padding:5px 8px;font-weight:700;color:' + (isEmpty ? '#00695c' : '#c62828') + ';border-bottom:1px solid #eee;">→ ' + escHtml(String(parsed[k])) + '</td>' +
@@ -34312,6 +34320,30 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
   var missingHtml = missing.length
     ? '<div style="font-size:11px;color:#666;background:#f5f5f5;border-radius:6px;padding:7px 10px;margin-top:8px;">📝 読み取れなかった項目（手入力してください）: <b>' + escHtml(missing.join('、')) + '</b><br><span style="font-size:10px;color:#999;">裏面しか無い・画像が不鮮明な場合に起こります。鮮明な表面の画像で再実行すると改善することがあります。</span></div>'
     : '';
+  // ── 一括チェック操作バー（全てチェック / 必要分のみ） ──
+  var hasChk = (newCount + confCount) > 0;
+  var toolbar = hasChk
+    ? '<div style="display:flex;gap:7px;align-items:center;margin-bottom:9px;flex-wrap:wrap;">' +
+        '<span style="font-size:11px;color:#888;">チェック:</span>' +
+        '<button type="button" onclick="_ocrCheckAll(true)" style="background:#00695c;color:#fff;border:none;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;">☑ 全てチェック</button>' +
+        '<button type="button" onclick="_ocrCheckNeeded()" style="background:#fff;color:#00695c;border:1.4px solid #00695c;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;">↺ 必要分のみ</button>' +
+        '<button type="button" onclick="_ocrCheckAll(false)" style="background:#fff;color:#777;border:1.4px solid #ccc;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:600;cursor:pointer;">☐ 全て外す</button>' +
+      '</div>'
+    : '';
+  // ── 読み取り元ファイルを見ながら確認できるサムネイル ──
+  var srcFiles = (opts.files && opts.files.length) ? opts.files : null;
+  window._ocrSrcFiles = srcFiles;
+  var filesHtml = srcFiles
+    ? '<div style="margin-bottom:11px;border:1px solid #d8e6e4;border-radius:9px;overflow:hidden;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;background:#f0f7f6;padding:7px 10px;">' +
+          '<span style="font-size:11.5px;font-weight:700;color:#00695c;">📂 読み取り元の書類（' + srcFiles.length + '件）— 見ながら確認</span>' +
+          '<button type="button" id="ocrThumbLoadBtn" onclick="_loadOcrSrcThumbs()" style="background:#00897b;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">画像を表示</button>' +
+        '</div>' +
+        '<div id="ocrSrcThumbs" style="display:flex;gap:8px;overflow-x:auto;padding:9px 10px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">' +
+          '<div style="font-size:10.5px;color:#999;padding:6px 2px;">「画像を表示」を押すと、各書類を横スクロールで確認しながらチェックできます（タップで拡大）。</div>' +
+        '</div>' +
+      '</div>'
+    : '';
   var old = document.getElementById('empOcrApplyOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
   ov.id = 'empOcrApplyOverlay'; ov.className = 'no-print';
@@ -34323,10 +34355,12 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
         '<div style="font-size:10.5px;color:#777;margin-top:2px;">画像: ' + escHtml(fileName || '') + '</div>' +
       '</div>' +
       '<div style="padding:14px 16px;">' +
+        filesHtml +
+        toolbar +
         '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
           rows +
         '</table>' +
-        '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:6px;padding:7px 10px;margin-top:10px;">✅ <b>チェックした項目だけ</b>を保存します。空欄は自動でチェック済み。<b>現在値と異なる項目は誤読の恐れがあるので既定オフ</b>です（必要なものだけチェック）。</div>' +
+        '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:6px;padding:7px 10px;margin-top:10px;">✅ <b>チェックした項目だけ</b>を保存します。空欄は自動でチェック済み。<b>現在値と異なる項目は誤読の恐れがあるので既定オフ</b>です（上の「全てチェック」「必要分のみ」で一括切替できます）。</div>' +
         missingHtml +
       '</div>' +
       '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
@@ -34334,6 +34368,87 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
         '<button onclick="_applyEmpOcrToSp()" id="empOcrApplyBtn" style="background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">✓ チェックした項目を保存</button>' +
       '</div>' +
     '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+// チェック一括操作: state=true で全ON / false で全OFF
+function _ocrCheckAll(state) {
+  document.querySelectorAll('.emp-ocr-chk').forEach(function(c) { c.checked = !!state; });
+}
+// 既定（必要分のみ）に戻す: 空欄=ON / 現在値と異なる=OFF
+function _ocrCheckNeeded() {
+  document.querySelectorAll('.emp-ocr-chk').forEach(function(c) {
+    c.checked = (c.getAttribute('data-ocr-empty') === '1');
+  });
+}
+
+// 読み取り元の書類を、確認モーダル内に横スクロールのサムネイルで表示（タップで拡大）
+async function _loadOcrSrcThumbs() {
+  var box = document.getElementById('ocrSrcThumbs');
+  var btn = document.getElementById('ocrThumbLoadBtn');
+  var files = window._ocrSrcFiles || [];
+  if (!box || !files.length) return;
+  if (btn) { btn.disabled = true; btn.textContent = '読込中…'; }
+  box.innerHTML = '<div style="font-size:11px;color:#00695c;padding:6px 2px;">⏳ 書類を読み込み中…</div>';
+  try {
+    var token = await getToken();
+    var thumbs = [];
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      try {
+        if (f.isPdf) {
+          var imgs = await _fetchPdfAsImages(f.url, 2);   // PDFは先頭2ページ
+          for (var p = 0; p < imgs.length; p++) thumbs.push({ src: imgs[p], cap: f.label + (imgs.length > 1 ? ' p' + (p + 1) : '') });
+        } else {
+          var enc = encodeURIComponent(f.url).replace(/%2F/g, '/');
+          var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value",
+            { headers: { 'Authorization': 'Bearer ' + token } });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          var blob = await r.blob();
+          thumbs.push({ src: URL.createObjectURL(blob), cap: f.label });
+        }
+      } catch (fe) {
+        thumbs.push({ src: null, cap: f.label + '（取得失敗）' });
+      }
+    }
+    window._ocrThumbSrcs = thumbs.map(function(t) { return t.src; });
+    box.innerHTML = thumbs.map(function(t, idx) {
+      if (!t.src) return '<div style="flex:0 0 auto;width:90px;font-size:9.5px;color:#c62828;text-align:center;scroll-snap-align:start;">⚠<br>' + escHtml(t.cap) + '</div>';
+      return '<div style="flex:0 0 auto;width:120px;scroll-snap-align:start;text-align:center;">' +
+          '<img src="' + t.src + '" onclick="_openOcrImgFull(' + idx + ')" style="width:120px;height:150px;object-fit:cover;border:1.5px solid #cfe0de;border-radius:7px;cursor:zoom-in;background:#fafafa;" loading="lazy">' +
+          '<div style="font-size:9.5px;color:#666;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(t.cap) + '</div>' +
+        '</div>';
+    }).join('');
+    if (btn) { btn.textContent = '✓ 表示中'; }
+  } catch (e) {
+    console.error('_loadOcrSrcThumbs error:', e);
+    box.innerHTML = '<div style="font-size:11px;color:#c62828;padding:6px 2px;">読み込みに失敗しました: ' + escHtml(e.message || String(e)) + '</div>';
+    if (btn) { btn.disabled = false; btn.textContent = '再試行'; }
+  }
+}
+
+// サムネイルをタップ → 全画面で拡大表示（左右に複数枚あれば送り可）
+function _openOcrImgFull(idx) {
+  var srcs = (window._ocrThumbSrcs || []).filter(Boolean);
+  if (!srcs.length) return;
+  var cur = idx || 0;
+  var old = document.getElementById('ocrImgFullOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'ocrImgFullOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:10001;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;';
+  function render() {
+    ov.innerHTML =
+      '<div style="position:absolute;top:12px;right:14px;display:flex;gap:10px;align-items:center;">' +
+        '<span style="color:#fff;font-size:12px;">' + (cur + 1) + ' / ' + srcs.length + '</span>' +
+        '<button onclick="document.getElementById(\'ocrImgFullOverlay\').remove()" style="background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:34px;height:34px;font-size:20px;cursor:pointer;">×</button>' +
+      '</div>' +
+      (srcs.length > 1 ? '<button onclick="window._ocrImgNav(-1)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:22px;cursor:pointer;">‹</button>' : '') +
+      '<img src="' + srcs[cur] + '" style="max-width:96vw;max-height:88vh;object-fit:contain;border-radius:6px;">' +
+      (srcs.length > 1 ? '<button onclick="window._ocrImgNav(1)" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:22px;cursor:pointer;">›</button>' : '');
+  }
+  window._ocrImgNav = function(d) { cur = (cur + d + srcs.length) % srcs.length; render(); };
+  render();
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
 }
