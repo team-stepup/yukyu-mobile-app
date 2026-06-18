@@ -34003,20 +34003,23 @@ async function _normalizeBankOcr(parsed) {
   var bankOpts = (_editDropdownCache && _editDropdownCache['bankName']) || [];
   var branchOpts = (_editDropdownCache && _editDropdownCache['bankBranch']) || [];
   function nameOf(o) { var i = String(o).indexOf(':'); return i >= 0 ? String(o).substring(i + 1) : String(o); }
+  function codeOf(o) { var i = String(o).indexOf(':'); return i >= 0 ? String(o).substring(0, i) : ''; }
+  function numEq(a, b) { a = String(a || '').replace(/[^\d]/g, ''); b = String(b || '').replace(/[^\d]/g, ''); return !!a && !!b && (a === b || parseInt(a, 10) === parseInt(b, 10)); }
 
   var rawBank = String(parsed.bankName || '').trim();
-  var isYucho = /ゆうち[ょよ]|郵便貯金|ゆうちょ/.test(rawBank) || /^9900/.test(rawBank);
+  var bankCode = String(parsed.bankCode || '').replace(/[^\d]/g, '');
+  var branchCode = String(parsed.branchCode || '').replace(/[^\d]/g, '');
+  var isYucho = /ゆうち[ょよ]|郵便貯金|ゆうちょ/.test(rawBank) || /^9900/.test(rawBank) || bankCode === '9900';
 
-  // ① 銀行名 → ドロップダウン一致
-  if (rawBank) {
-    if (isYucho) {
-      var y = bankOpts.find(function(o) { return /^9900/.test(o); });
-      parsed.bankName = y || '9900:ゆうちよ';
-    } else {
-      var bm = bankOpts.find(function(o) { var n = nameOf(o).replace(/銀行$/, ''); return n && rawBank.indexOf(n) >= 0; })
-            || bankOpts.find(function(o) { return rawBank.indexOf(nameOf(o)) >= 0 || nameOf(o).indexOf(rawBank.replace(/銀行$/, '')) >= 0; });
-      if (bm) parsed.bankName = bm;
-    }
+  // ① 銀行 → ドロップダウン一致 (金融機関コード優先 → 名前)
+  if (isYucho) {
+    var y = bankOpts.find(function(o) { return /^9900/.test(o); });
+    parsed.bankName = y || '9900:ゆうちよ';
+  } else {
+    var bm = (bankCode ? bankOpts.find(function(o) { return numEq(codeOf(o), bankCode); }) : null)
+          || (rawBank ? bankOpts.find(function(o) { var n = nameOf(o).replace(/銀行$/, ''); return n && rawBank.indexOf(n) >= 0; }) : null)
+          || (rawBank ? bankOpts.find(function(o) { return rawBank.indexOf(nameOf(o)) >= 0 || nameOf(o).indexOf(rawBank.replace(/銀行$/, '')) >= 0; }) : null);
+    if (bm) parsed.bankName = bm;
   }
 
   if (isYucho) {
@@ -34035,17 +34038,17 @@ async function _normalizeBankOcr(parsed) {
     }
     // 妥当な記号番号(1+4桁 と 7〜8桁)が読めない場合は変換せず原文のまま → 確認画面で人が気づける
   } else {
-    // ③ 通常銀行: 支店名 → ドロップダウン一致 (銀行に連動した支店候補を優先)
+    // ③ 通常銀行: 支店 → ドロップダウン一致 (店番優先 → 名前。銀行に連動した支店候補を優先)
     var rawBr = String(parsed.bankBranch || '').trim();
-    if (rawBr) {
-      var linked = (_editDropdownLinkMaps && _editDropdownLinkMaps['bankBranch'] && parsed.bankName)
-        ? (_editDropdownLinkMaps['bankBranch'][parsed.bankName] || []) : [];
-      var pool = linked.length ? linked : branchOpts;
-      var brm = pool.find(function(o) { var n = nameOf(o).replace(/支店$/, ''); return n && rawBr.indexOf(n) >= 0; })
-             || pool.find(function(o) { return rawBr.indexOf(nameOf(o)) >= 0; });
-      if (brm) parsed.bankBranch = brm;
-    }
+    var linked = (_editDropdownLinkMaps && _editDropdownLinkMaps['bankBranch'] && parsed.bankName)
+      ? (_editDropdownLinkMaps['bankBranch'][parsed.bankName] || []) : [];
+    var pool = linked.length ? linked : branchOpts;
+    var brm = (branchCode ? pool.find(function(o) { return numEq(codeOf(o), branchCode); }) : null)
+           || (rawBr ? pool.find(function(o) { var n = nameOf(o).replace(/支店$/, ''); return n && rawBr.indexOf(n) >= 0; }) : null)
+           || (rawBr ? pool.find(function(o) { return rawBr.indexOf(nameOf(o)) >= 0; }) : null);
+    if (brm) parsed.bankBranch = brm;
   }
+  delete parsed.bankCode; delete parsed.branchCode;   // 一時キー(SPフィールドでない)を除去
   return parsed;
 }
 
@@ -34148,7 +34151,7 @@ async function _runEmpFolderOcr(groups) {
       try { _resolveCarName(allParsed); } catch (ce) { console.warn('[一括OCR] 車名解決失敗:', ce); }
     }
     // 銀行・支店をドロップダウン値に正規化 ＋ ゆうちょは振込用(店番・口座番号)へ変換
-    if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch) {
+    if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch || allParsed.bankCode || allParsed.branchCode) {
       try { await _normalizeBankOcr(allParsed); } catch (be) { console.warn('[一括OCR] 銀行正規化失敗:', be); }
     }
     var _srcFiles = [];
@@ -34334,7 +34337,7 @@ async function ocrAllForNewReg() {
     if (allParsed.carName || allParsed._niniCarName || allParsed._carModel) {
       try { _resolveCarName(allParsed); } catch (ce) { console.warn('[新規OCR] 車名解決失敗:', ce); }
     }
-    if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch) {
+    if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch || allParsed.bankCode || allParsed.branchCode) {
       try { await _normalizeBankOcr(allParsed); } catch (be) { console.warn('[新規OCR] 銀行正規化失敗:', be); }
     }
     var srcNote = okDocs.join('、') + (ngDocs.length ? '　⚠失敗: ' + ngDocs.join('、') : '');
