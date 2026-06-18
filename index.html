@@ -32867,15 +32867,12 @@ function _openOcrEditPopup(docId, parsed) {
       '</div>' + inputHtml + '</div>';
   });
 
-  // 在留カードは確認画面の最上部に偽造チェック（失効照会＋券面クロス照合）を表示
-  var forgeryBanner = (docId === 'zairyu') ? _buildAntiForgeryBanner(parsed) : '';
   const overlay = document.createElement('div');
   overlay.className = 'confirm-overlay';
   overlay.style.zIndex = '99999';
   overlay.innerHTML = '<div class="confirm-box" style="max-width:440px;max-height:88vh;display:flex;flex-direction:column;">' +
     '<div class="confirm-title">🤖 読み取り結果の確認・修正</div>' +
     '<div style="overflow-y:auto;flex:1;text-align:left;">' +
-      forgeryBanner +
       '<div class="confirm-msg" style="text-align:left;font-size:11.5px;color:#666;margin:0 0 8px;">' +
         '✓緑 = 読み取れた項目（' + okCount + '件）。<b>間違いはこの場で直せます</b>。空欄の項目も入力できます。' +
       '</div>' +
@@ -32917,18 +32914,8 @@ function _openOcrEditPopup(docId, parsed) {
       }
       applied++;
     });
-    // 失効照会の結果(OK/NG)を在留備考フォームへ追記（登録時に保存される）
-    if (docId === 'zairyu' && window._lapseStatus) {
-      var bk = document.getElementById('addField_zairyuBikou');
-      if (bk) {
-        var dd = new Date();
-        var ds = dd.getFullYear() + '-' + ('0' + (dd.getMonth() + 1)).slice(-2) + '-' + ('0' + dd.getDate()).slice(-2);
-        var cur = String(bk.value || '').trim();
-        bk.value = (cur ? cur + ' ／ ' : '') + '失効照会:' + window._lapseStatus + '(' + ds + ')';
-      }
-    }
     overlay.remove();
-    showToast('🤖 ' + applied + '項目をフォームに反映しました' + (docId === 'zairyu' && window._lapseStatus ? '（失効照会:' + window._lapseStatus + ' も備考へ）' : ''), 'success');
+    showToast('🤖 ' + applied + '項目をフォームに反映しました', 'success');
   };
 }
 
@@ -34188,7 +34175,10 @@ function _showEmpDocAssignOverlay(imgs, folderPath) {
     var selOpts = opts.map(function(o) { return '<option value="' + o[0] + '"' + (o[0] === g ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
     return '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0;">' +
         '<img id="assignThumb_' + i + '" onclick="_openEmpAssignThumb(' + i + ')" style="width:46px;height:46px;object-fit:cover;border-radius:6px;background:#f0f0f0;border:1px solid #ddd;cursor:zoom-in;flex:0 0 auto;" alt="">' +
-        '<span style="flex:1;min-width:0;font-size:11px;color:#555;word-break:break-all;">' + escHtml(f.Name) + '</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:11px;color:#555;word-break:break-all;">' + escHtml(f.Name) + '</div>' +
+          '<div id="assignStatus_' + i + '" style="font-size:10px;color:#00897b;margin-top:1px;">🔎 AIで判定中…</div>' +
+        '</div>' +
         '<select id="assignSel_' + i + '" style="flex:0 0 auto;padding:5px 6px;border:1.5px solid #cfd8dc;border-radius:7px;font-size:12px;background:#fff;">' + selOpts + '</select>' +
       '</div>';
   }).join('');
@@ -34199,8 +34189,8 @@ function _showEmpDocAssignOverlay(imgs, folderPath) {
   ov.innerHTML =
     '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
       '<div style="padding:13px 16px;border-bottom:1px solid #eee;background:#fff3e0;border-radius:12px 12px 0 0;">' +
-        '<h3 style="margin:0;font-size:14.5px;color:#e65100;">📂 書類の種別を選んでください</h3>' +
-        '<div style="font-size:10.5px;color:#777;margin-top:3px;">ファイル名から自動分類できませんでした。各ファイルの種別を選び「OCR実行」を押してください（不要なものは「対象外」のまま）。画像タップで拡大できます。</div>' +
+        '<h3 style="margin:0;font-size:14.5px;color:#e65100;">📂 書類の種別を確認してください</h3>' +
+        '<div style="font-size:10.5px;color:#777;margin-top:3px;">AIが画像から書類の種別を自動判定して選択します。間違いがあればプルダウンで直し、不要なものは「対象外」にして「OCR実行」を押してください（画像タップで拡大）。</div>' +
       '</div>' +
       '<div style="padding:12px 16px;">' + rows +
         '<div style="font-size:10px;color:#999;margin-top:8px;word-break:break-all;">フォルダ: ' + escHtml(folderPath || '') + '</div>' +
@@ -34213,6 +34203,39 @@ function _showEmpDocAssignOverlay(imgs, folderPath) {
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
   _loadEmpAssignThumbs(imgs);   // サムネイルを順次ロード(best-effort)
+  _autoClassifyAssign(imgs);    // AIで書類種別を自動判定してプルダウンに反映
+}
+
+// 各ファイルの中身をAI(classify)で判定し、種別プルダウンに自動セット(ファイル名で判定済みは尊重)
+async function _autoClassifyAssign(imgs) {
+  var labelOf = { zairyu: '在留カード', license: '免許証', koyou: '雇用保険被保険者証', shaken: '車検証', jibaiseki: '自賠責保険証', nini: '任意保険証', bank: '銀行口座', mynumber: 'マイナンバー', other: '対象外' };
+  for (var i = 0; i < imgs.length; i++) {
+    var f = imgs[i];
+    var sel = document.getElementById('assignSel_' + i);
+    var st = document.getElementById('assignStatus_' + i);
+    if (!sel) continue;
+    if (sel.value) { if (st) { st.textContent = '📄 ファイル名から判定: ' + (labelOf[sel.value] || sel.value); st.style.color = '#1b5e20'; } continue; }
+    try {
+      var opts = {};
+      if (/\.pdf$/i.test(f.Name)) { var pg = await _fetchPdfAsImages(f.ServerRelativeUrl, 1); opts.images = pg; }
+      else opts.paths = [f.ServerRelativeUrl];
+      var res = await cloudDocOcr('classify', opts);
+      var dt = res && (res.docType || res.doctype || '');
+      var selEl = document.getElementById('assignSel_' + i);   // 再取得(DOM保持)
+      var stEl = document.getElementById('assignStatus_' + i);
+      if (!selEl) continue;
+      if (dt && dt !== 'other' && dt !== 'mynumber' && labelOf[dt]) {
+        selEl.value = dt;
+        if (stEl) { stEl.textContent = '🤖 AI判定: ' + labelOf[dt]; stEl.style.color = '#1b5e20'; }
+      } else {
+        if (stEl) { stEl.textContent = (dt === 'mynumber') ? '🤖 AI判定: マイナンバー(対象外)' : '🤖 AI判定: 不明 → 手動で選択'; stEl.style.color = '#999'; }
+      }
+    } catch (e) {
+      console.warn('[classify] 失敗', f.Name, e);
+      var stEl2 = document.getElementById('assignStatus_' + i);
+      if (stEl2) { stEl2.textContent = '判定できず → 手動で選択'; stEl2.style.color = '#c62828'; }
+    }
+  }
 }
 
 async function _loadEmpAssignThumbs(imgs) {
@@ -34387,7 +34410,6 @@ function _showNewRegOcrPreview(parsed, srcNote) {
         '<button type="button" onclick="_ocrCheckAll(false)" style="background:#fff;color:#777;border:1.4px solid #ccc;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:600;cursor:pointer;">☐ 全て外す</button>' +
       '</div>'
     : '';
-  var forgery = (parsed.zairyuBikou) ? _buildAntiForgeryBanner(parsed) : '';
   var thumbs = _newRegThumbsHtml();
   var old = document.getElementById('empOcrApplyOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
@@ -34400,7 +34422,6 @@ function _showNewRegOcrPreview(parsed, srcNote) {
         '<div style="font-size:10.5px;color:#777;margin-top:2px;">読取: ' + escHtml(srcNote || '') + '</div>' +
       '</div>' +
       '<div style="padding:14px 16px;">' +
-        forgery +
         thumbs +
         toolbar +
         '<table style="width:100%;border-collapse:collapse;font-size:12px;">' + rows + '</table>' +
@@ -34420,7 +34441,7 @@ function _applyNewRegOcr() {
   var parsed = window._empOcrParsed || {};
   var checkedKeys = {};
   document.querySelectorAll('.emp-ocr-chk').forEach(function(c) { if (c.checked) checkedKeys[c.getAttribute('data-ocr-key')] = true; });
-  if (!Object.keys(checkedKeys).length && !window._lapseStatus) { showToast('転記する項目が選択されていません', 'error'); return; }
+  if (!Object.keys(checkedKeys).length) { showToast('転記する項目が選択されていません', 'error'); return; }
   var applied = 0;
   Object.keys(parsed).forEach(function(k) {
     if (!checkedKeys[k]) return;
@@ -34437,17 +34458,6 @@ function _applyNewRegOcr() {
     } else { el.value = v; }
     applied++;
   });
-  // 失効照会(OK/NG)を在留備考へ追記
-  if (window._lapseStatus) {
-    var bk = document.getElementById('addField_zairyuBikou');
-    if (bk) {
-      var dd = new Date();
-      var ds = dd.getFullYear() + '-' + ('0' + (dd.getMonth() + 1)).slice(-2) + '-' + ('0' + dd.getDate()).slice(-2);
-      var cur = String(bk.value || '').trim();
-      bk.value = (cur ? cur + ' ／ ' : '') + '失効照会:' + window._lapseStatus + '(' + ds + ')';
-      applied++;
-    }
-  }
   var ov = document.getElementById('empOcrApplyOverlay'); if (ov) ov.remove();
   showToast('🤖 ' + applied + '項目を登録フォームに転記しました。内容を確認して登録してください', 'success');
 }
@@ -34644,26 +34654,6 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
         '</div>' +
       '</div>'
     : '';
-  // ── 在留カード等番号 失効情報照会（法務省）── 一番上に表示
-  var _lapseCardNo = String(parsed.zairyuBikou || '').replace(/^.*在留カード番号:\s*/, '').trim();
-  window._lapseCardNo = _lapseCardNo;
-  window._lapseStatus = null;   // モーダルを開くたびにリセット
-  var lapseHtml = _lapseCardNo
-    ? '<div style="margin-bottom:11px;border:1.5px solid #b3c7e6;border-radius:9px;overflow:hidden;">' +
-        '<div style="background:#e8eef9;padding:8px 11px;">' +
-          '<div style="font-size:12px;font-weight:800;color:#1a3a6b;">🛂 法務省 在留カード等番号 失効情報照会</div>' +
-          '<div style="font-size:11px;color:#555;margin-top:3px;">カード番号: <b style="font-family:monospace;font-size:12.5px;letter-spacing:0.5px;">' + escHtml(_lapseCardNo) + '</b></div>' +
-        '</div>' +
-        '<div style="padding:9px 11px;display:flex;gap:7px;align-items:center;flex-wrap:wrap;">' +
-          '<button type="button" onclick="_lapseOpen()" style="background:#1565c0;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;">🔎 番号をコピーして照会</button>' +
-          '<span style="font-size:11px;color:#777;">→ 照会結果:</span>' +
-          '<button type="button" id="lapseBtnOK" onclick="_lapseMark(\'OK\')" style="' + _lapseBtnCss('OK', false) + '">OK 有効</button>' +
-          '<button type="button" id="lapseBtnNG" onclick="_lapseMark(\'NG\')" style="' + _lapseBtnCss('NG', false) + '">NG 失効/該当</button>' +
-          '<span id="lapseBadge" style="font-size:11.5px;font-weight:800;margin-left:2px;"></span>' +
-        '</div>' +
-        '<div style="font-size:10px;color:#888;padding:0 11px 8px;">公式サイトでカード番号＋満了日を入力し、有効ならOK・「失効」表示ならNGを押してください（結果は在留備考に記録されます）。</div>' +
-      '</div>'
-    : '';
   var old = document.getElementById('empOcrApplyOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
   ov.id = 'empOcrApplyOverlay'; ov.className = 'no-print';
@@ -34675,7 +34665,6 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
         '<div style="font-size:10.5px;color:#777;margin-top:2px;">画像: ' + escHtml(fileName || '') + '</div>' +
       '</div>' +
       '<div style="padding:14px 16px;">' +
-        lapseHtml +
         filesHtml +
         toolbar +
         '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
@@ -34805,75 +34794,6 @@ function _openOcrImgFull(idx) {
   document.body.appendChild(ov);
 }
 
-// ── 在留カード等番号 失効情報照会（法務省）導線 ──
-function _lapseBtnCss(kind, active) {
-  var base = 'border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;';
-  if (kind === 'OK') return base + (active ? 'background:#2e7d32;color:#fff;border:2px solid #1b5e20;' : 'background:#fff;color:#2e7d32;border:1.5px solid #2e7d32;');
-  return base + (active ? 'background:#c62828;color:#fff;border:2px solid #8e0000;' : 'background:#fff;color:#c62828;border:1.5px solid #c62828;');
-}
-// 番号をコピーして公式の失効情報照会サイトを開く
-function _lapseOpen() {
-  var no = window._lapseCardNo || '';
-  if (no && navigator.clipboard && navigator.clipboard.writeText) {
-    try { navigator.clipboard.writeText(no); showToast('在留カード番号「' + no + '」をコピーしました。照会サイトに貼り付けてください', 'info'); } catch (e) {}
-  }
-  window.open('https://lapse-immi.moj.go.jp/', '_blank', 'noopener');
-}
-// 照会結果 OK/NG をマーク（在留備考に記録される）
-function _lapseMark(status) {
-  window._lapseStatus = status;
-  var ok = document.getElementById('lapseBtnOK'), ng = document.getElementById('lapseBtnNG'), badge = document.getElementById('lapseBadge');
-  if (ok) ok.setAttribute('style', _lapseBtnCss('OK', status === 'OK'));
-  if (ng) ng.setAttribute('style', _lapseBtnCss('NG', status === 'NG'));
-  if (badge) {
-    badge.textContent = (status === 'OK') ? '✅ 有効（OK）として記録' : '❌ 失効/該当（NG）として記録';
-    badge.style.color = (status === 'OK') ? '#1b5e20' : '#c62828';
-  }
-}
-
-// ── 新規登録時の在留カード偽造チェック（A失効照会＋B券面クロス照合＋C公式アプリ誘導）──
-function _ymd(s) { return String(s || '').substring(0, 10); }
-// B: 在留カードの生年月日を、同時に撮影した免許証・マイナンバーのOCR結果と自動照合
-function _crossCheckZairyuHtml(parsed) {
-  var cloud = window._lastCloudOcr || {};
-  var zBirth = parsed.birthday || (cloud.zairyu && cloud.zairyu.birthday) || '';
-  var others = [];
-  if (cloud.license && cloud.license.birthday) others.push({ l: '免許証', v: cloud.license.birthday });
-  if (cloud.mynumber && cloud.mynumber.birthday) others.push({ l: 'マイナンバー', v: cloud.mynumber.birthday });
-  if (!zBirth || !others.length) {
-    return '<div style="font-size:10.5px;color:#777;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">② <b>他の身分証との照合</b>: <span style="color:#999;">免許証・マイナンバーも撮影してOCRすると、生年月日を自動照合します（1枚だけ偽造したカードを検知）。</span></div>';
-  }
-  var mism = others.filter(function(o) { return _ymd(o.v) !== _ymd(zBirth); });
-  var detail = others.map(function(o) { return o.l + ' ' + _ymd(o.v) + (_ymd(o.v) === _ymd(zBirth) ? '✓' : '✗'); }).join(' ／ ');
-  if (mism.length) {
-    return '<div style="font-size:11px;color:#c62828;font-weight:700;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">② ⚠ <b>生年月日が他の身分証と不一致</b>（偽造/誤りの疑い）<br><span style="font-weight:400;">在留 ' + _ymd(zBirth) + ' ／ ' + escHtml(detail) + '</span></div>';
-  }
-  return '<div style="font-size:11px;color:#1b5e20;font-weight:700;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">② ✅ <b>生年月日が他の身分証と一致</b><br><span style="font-weight:400;color:#555;">在留 ' + _ymd(zBirth) + ' ／ ' + escHtml(detail) + '</span></div>';
-}
-// 在留カード確認ポップアップ最上部に出す偽造チェックバナー
-function _buildAntiForgeryBanner(parsed) {
-  var cardNo = String(parsed.zairyuBikou || '').replace(/^.*在留カード番号:\s*/, '').trim();
-  window._lapseCardNo = cardNo;
-  window._lapseStatus = null;
-  var aHtml = cardNo
-    ? '<div style="font-size:11px;color:#555;">カード番号: <b style="font-family:monospace;font-size:12.5px;letter-spacing:0.5px;">' + escHtml(cardNo) + '</b></div>' +
-      '<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:6px;">' +
-        '<button type="button" onclick="_lapseOpen()" style="background:#1565c0;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;">🔎 番号をコピーして照会</button>' +
-        '<span style="font-size:11px;color:#777;">結果:</span>' +
-        '<button type="button" id="lapseBtnOK" onclick="_lapseMark(\'OK\')" style="' + _lapseBtnCss('OK', false) + '">OK 有効</button>' +
-        '<button type="button" id="lapseBtnNG" onclick="_lapseMark(\'NG\')" style="' + _lapseBtnCss('NG', false) + '">NG 失効/該当</button>' +
-        '<span id="lapseBadge" style="font-size:11.5px;font-weight:800;"></span>' +
-      '</div>'
-    : '<div style="font-size:10.5px;color:#999;">在留カード番号が読み取れていません。番号が読めると失効照会ができます。</div>';
-  return '<div style="margin-bottom:10px;border:1.5px solid #f0c36d;background:#fffaf0;border-radius:9px;padding:10px 12px;">' +
-      '<div style="font-size:12.5px;font-weight:800;color:#9a6a00;margin-bottom:7px;">🛡 在留カード 偽造チェック</div>' +
-      '<div style="font-size:10.5px;color:#9a6a00;font-weight:700;margin-bottom:3px;">① 番号の有効性（法務省 失効情報照会）</div>' +
-      aHtml +
-      _crossCheckZairyuHtml(parsed) +
-      '<div style="font-size:10px;color:#888;margin-top:8px;border-top:1px dashed #e3d3a8;padding-top:7px;">③ ICチップの真贋は法務省「在留カード等読取アプリ」（スマホ＋NFC）で最終確認できます。</div>' +
-    '</div>';
-}
-
 async function _applyEmpOcrToSp() {
   var emp = currentEmployee;
   var parsed = window._empOcrParsed || {};
@@ -34881,7 +34801,7 @@ async function _applyEmpOcrToSp() {
   // チェックされた項目だけを対象にする (空欄=既定ON / 既存値と異なる=既定OFF)
   var checkedKeys = {};
   document.querySelectorAll('.emp-ocr-chk').forEach(function(c) { if (c.checked) checkedKeys[c.getAttribute('data-ocr-key')] = true; });
-  if (!Object.keys(checkedKeys).length && !window._lapseStatus) { showToast('保存する項目が選択されていません', 'error'); return; }
+  if (!Object.keys(checkedKeys).length) { showToast('保存する項目が選択されていません', 'error'); return; }
   var btn = document.getElementById('empOcrApplyBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
   try {
@@ -34901,20 +34821,10 @@ async function _applyEmpOcrToSp() {
       }
       body[od.replace(/^OData_/, '')] = v;   // spPatchEmployee が EntityPropertyName へ変換
     });
-    // 失効情報照会の結果(OK/NG)を在留備考へ記録
-    if (window._lapseStatus) {
-      var bod = km['zairyuBikou'];
-      if (bod) {
-        var dd = new Date();
-        var ds = dd.getFullYear() + '-' + ('0' + (dd.getMonth() + 1)).slice(-2) + '-' + ('0' + dd.getDate()).slice(-2);
-        var baseNote = parsed.zairyuBikou || (window._lapseCardNo ? '在留カード番号: ' + window._lapseCardNo : '');
-        body[bod.replace(/^OData_/, '')] = (baseNote ? baseNote + ' ／ ' : '') + '失効照会:' + window._lapseStatus + '(' + ds + ')';
-      }
-    }
     if (!Object.keys(body).length) { showToast('保存できる項目がありません', 'error'); return; }
     await spPatchEmployee(emp.Id, body);
     var ov = document.getElementById('empOcrApplyOverlay'); if (ov) ov.remove();
-    showToast('✓ 在留カードの情報を社員データに保存しました' + (window._lapseStatus ? '（失効照会:' + window._lapseStatus + ' も記録）' : ''), 'success');
+    showToast('✓ 社員データに保存しました', 'success');
     // 最新データで画面を再描画
     var updated = await fetchFullEmployee(emp[F.syainNo]);
     if (updated) {
@@ -35095,7 +35005,7 @@ async function renderAddEmployeeForm() {
   });
   // 撮影した全書類をまとめてAI(Claude)でOCR → 入社時に必要なSP項目を抽出してフォームへ転記
   html += '<button type="button" id="newRegOcrBtn" onclick="ocrAllForNewReg()" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(0,105,92,0.25);">🤖 撮影した書類をまとめてOCR読込 → フォームへ転記</button>';
-  html += '<div style="font-size:10.5px;color:var(--text-light);margin-top:5px;line-height:1.5;">在留カード・免許証・車検証・保険・通帳などを撮影してからこのボタンを押すと、高精度AI(Claude)が氏名・生年月日・在留情報・口座・車両・保険などを読み取り、確認画面でチェックして一括転記できます。在留カードは偽造チェック(失効照会＋券面照合)付き。</div>';
+  html += '<div style="font-size:10.5px;color:var(--text-light);margin-top:5px;line-height:1.5;">在留カード・免許証・車検証・保険・通帳などを撮影してからこのボタンを押すと、高精度AI(Claude)が氏名・生年月日・在留情報・口座・車両・保険などを読み取り、確認画面でチェックして一括転記できます。</div>';
   html += '</div>';
 
   // Other categories
