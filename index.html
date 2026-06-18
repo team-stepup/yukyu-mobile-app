@@ -32443,6 +32443,50 @@ async function cloudDocOcr(docType, opts) {
   return data.ocr || {};
 }
 
+// 銀行カード/通帳用: エンボス(銀色凸文字)を読みやすくする高解像度化＋グレースケール＋コントラスト強調
+//   小さい画像は最大2.2倍に拡大、長辺は最大2800pxへ。陰影しか無いエンボス文字を伸長で浮き立たせる
+function _enhanceCardForOcr(dataUrl) {
+  return new Promise(function(resolve) {
+    try {
+      var img = new Image();
+      img.onload = function() {
+        try {
+          var longEdge = Math.max(img.width, img.height);
+          var TARGET = 2600;
+          var scale = longEdge < TARGET ? Math.min(2.2, TARGET / longEdge) : Math.min(1, 2800 / longEdge);
+          var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+          var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+          var ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+          var im = ctx.getImageData(0, 0, w, h); var d = im.data;
+          var hist = new Array(256).fill(0);
+          for (var i = 0; i < d.length; i += 4) { var g = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0; d[i] = d[i + 1] = d[i + 2] = g; hist[g]++; }
+          var total = w * h, acc = 0, lo = 0, hi = 255;
+          for (var v = 0; v < 256; v++) { acc += hist[v]; if (acc >= total * 0.05) { lo = v; break; } }
+          acc = 0;
+          for (var v2 = 255; v2 >= 0; v2--) { acc += hist[v2]; if (acc >= total * 0.05) { hi = v2; break; } }
+          var range = Math.max(1, hi - lo);
+          for (var j = 0; j < d.length; j += 4) { var nv = Math.max(0, Math.min(255, Math.round((d[j] - lo) * 255 / range))); d[j] = d[j + 1] = d[j + 2] = nv; }
+          ctx.putImageData(im, 0, 0);
+          resolve(cv.toDataURL('image/jpeg', 0.92));
+        } catch (e) { resolve(dataUrl); }
+      };
+      img.onerror = function() { resolve(dataUrl); };
+      img.src = dataUrl;
+    } catch (e) { resolve(dataUrl); }
+  });
+}
+
+// SP上の画像ファイルを取得してエンボス強調 dataURL にする (銀行カードの一括OCR用)
+async function _fetchAndEnhanceCard(serverRelativeUrl) {
+  var token = await getToken();
+  var enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
+  var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  var blob = await r.blob();
+  var du = await new Promise(function(res, rej) { var fr = new FileReader(); fr.onload = function() { res(fr.result); }; fr.onerror = function() { rej(new Error('read fail')); }; fr.readAsDataURL(blob); });
+  return await _enhanceCardForOcr(du);
+}
+
 // クラウド送信用に画像をリサイズ (カラー維持・長辺2000px・JPEG)
 function _resizeForCloud(dataUrl) {
   return new Promise(function(resolve) {
@@ -34114,11 +34158,15 @@ async function _runEmpFolderOcr(groups) {
       _empOcrProg('☁️ ' + g.label + ' をAIで読み取り中… (' + (d + 1) + '/' + docTypes.length + ')');
       try {
         // 画像はpaths(サーバー側で取得)、PDFはpdf.jsで画像化してimagesで送る
+        // 銀行(キャッシュカード/通帳)はエンボス低コントラスト対策で高解像度＋コントラスト強調して images で送る
         var _imgPaths = [], _pdfImgs = [];
         for (var _fi = 0; _fi < g.files.length; _fi++) {
           if (/\.pdf$/i.test(g.files[_fi].Name)) {
             try { _pdfImgs = _pdfImgs.concat(await _fetchPdfAsImages(g.files[_fi].ServerRelativeUrl, 2)); }
             catch (pe) { console.warn('[一括OCR] PDF画像化失敗:', g.files[_fi].Name, pe); }
+          } else if (dt === 'bank') {
+            try { _pdfImgs.push(await _fetchAndEnhanceCard(g.files[_fi].ServerRelativeUrl)); }
+            catch (ee) { console.warn('[一括OCR] 銀行画像強調失敗→パス送り:', ee); _imgPaths.push(g.files[_fi].ServerRelativeUrl); }
           } else {
             _imgPaths.push(g.files[_fi].ServerRelativeUrl);
           }
@@ -34316,7 +34364,8 @@ async function ocrAllForNewReg() {
       _empOcrProg('☁️ ' + label + ' をAIで読み取り中… (' + (i + 1) + '/' + targets.length + ')');
       try {
         var sendImgs = [];
-        for (var k = 0; k < Math.min(imgs.length, 4); k++) sendImgs.push(await _resizeForCloud(imgs[k].dataUrl));
+        // 銀行はエンボス低コントラスト対策で高解像度＋コントラスト強調、他は通常リサイズ
+        for (var k = 0; k < Math.min(imgs.length, 4); k++) sendImgs.push(await (dt === 'bank' ? _enhanceCardForOcr : _resizeForCloud)(imgs[k].dataUrl));
         var ocr = await cloudDocOcr(dt, { images: sendImgs, model: 'claude' });
         var mapped = mapCloudOcrToFields(dt, ocr);
         window._lastCloudOcr[dt] = mapped;   // 券面クロス照合(生年月日突合)に使用
