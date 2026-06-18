@@ -34771,12 +34771,21 @@ function _ocrViewerApplyZoom() {
   if (!img || !box) return;
   var z = window._ocrViewerZoomLevel || 1;
   if (z <= 1) {
+    box.style.height = '36vh';
     box.style.display = 'flex';
     img.style.cssText = 'max-width:100%;max-height:36vh;object-fit:contain;display:block;cursor:zoom-in;';
     box.scrollTop = 0; box.scrollLeft = 0;
   } else {
+    box.style.height = '50vh';   // 拡大中は表示領域を広げて見やすく
     box.style.display = 'block';
     img.style.cssText = 'width:' + (z * 100) + '%;max-width:none;height:auto;display:block;cursor:zoom-out;';
+    // 上部の余白でなく画像の中央が見えるようスクロール位置を中央へ
+    var center = function () {
+      box.scrollLeft = Math.max(0, (box.scrollWidth - box.clientWidth) / 2);
+      box.scrollTop = Math.max(0, (box.scrollHeight - box.clientHeight) / 2);
+    };
+    center();
+    if (window.requestAnimationFrame) requestAnimationFrame(center);
   }
 }
 function _ocrViewerZoom(d) {
