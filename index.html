@@ -34167,6 +34167,202 @@ async function ocrAllFromEmpFolder() {
 //   登録時にOCRが失敗した社員 (例: イワノ ケレン) を、アップロード済みの
 //   画像から後追いでデータ化する。在留・国籍セクションのボタンから起動。
 // ============================================================
+// ============================================================
+// 新規社員登録: 撮影済みの全書類を Claude OCR でまとめて読み取り、登録フォームへ転記
+//   入社時に必要な SP 社員項目(氏名/生年月日/在留/口座/車両/保険など)を抽出。
+//   マイナンバーは SP に保存しないため OCR 対象外。
+// ============================================================
+async function ocrAllForNewReg() {
+  var order = ['zairyu', 'license', 'koyou', 'shaken', 'jibaiseki', 'nini', 'bank'];   // マイナンバー除外
+  var targets = order.filter(function(d) { return (capturedDocs[d] || []).length > 0; });
+  if (!targets.length) {
+    showToast('先に書類を撮影・選択してください（在留/免許/雇用保険/車検/自賠責/任意/銀行）', 'error');
+    return;
+  }
+  // 銀行などドロップダウン正規化のため editKeyMap を用意
+  try { var _m = await fetchEmployeeFields(); if (_m) editKeyMap = buildFieldKeyMap(_m); } catch (_) {}
+  var btn = document.getElementById('newRegOcrBtn');
+  if (btn) btn.disabled = true;
+  var allParsed = {}, okDocs = [], ngDocs = [];
+  try {
+    window._lastCloudOcr = window._lastCloudOcr || {};
+    for (var i = 0; i < targets.length; i++) {
+      var dt = targets[i];
+      var label = (DOC_TYPES.find(function(t) { return t.id === dt; }) || {}).label || dt;
+      var imgs = capturedDocs[dt] || [];
+      _empOcrProg('☁️ ' + label + ' をAIで読み取り中… (' + (i + 1) + '/' + targets.length + ')');
+      try {
+        var sendImgs = [];
+        for (var k = 0; k < Math.min(imgs.length, 4); k++) sendImgs.push(await _resizeForCloud(imgs[k].dataUrl));
+        var ocr = await cloudDocOcr(dt, { images: sendImgs, model: 'claude' });
+        var mapped = mapCloudOcrToFields(dt, ocr);
+        window._lastCloudOcr[dt] = mapped;   // 券面クロス照合(生年月日突合)に使用
+        var added = 0;
+        Object.keys(mapped).forEach(function(kk) { if (!(kk in allParsed)) { allParsed[kk] = mapped[kk]; added++; } });
+        okDocs.push(label + '(' + added + '項目)');
+      } catch (e) {
+        console.warn('[新規OCR] ' + dt + ' 失敗:', e);
+        ngDocs.push(label);
+      }
+    }
+    _empOcrProg(null);
+    if (btn) btn.disabled = false;
+    if (!Object.keys(allParsed).length) {
+      showToast('読み取れた項目がありません' + (ngDocs.length ? '（失敗: ' + ngDocs.join('、') + '）' : ''), 'error');
+      return;
+    }
+    if (allParsed.carName || allParsed._niniCarName || allParsed._carModel) {
+      try { _resolveCarName(allParsed); } catch (ce) { console.warn('[新規OCR] 車名解決失敗:', ce); }
+    }
+    if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch) {
+      try { await _normalizeBankOcr(allParsed); } catch (be) { console.warn('[新規OCR] 銀行正規化失敗:', be); }
+    }
+    var srcNote = okDocs.join('、') + (ngDocs.length ? '　⚠失敗: ' + ngDocs.join('、') : '');
+    _showNewRegOcrPreview(allParsed, srcNote);
+  } catch (e) {
+    _empOcrProg(null);
+    if (btn) btn.disabled = false;
+    console.error('ocrAllForNewReg error:', e);
+    showToast('読み取りに失敗: ' + (e.message || e), 'error');
+  }
+}
+
+// 撮影画像(dataUrl)を見ながら確認できるサムネイル列
+function _newRegThumbsHtml() {
+  var srcs = [], cells = '';
+  Object.keys(capturedDocs).forEach(function(d) {
+    var label = (DOC_TYPES.find(function(t) { return t.id === d; }) || {}).label || d;
+    (capturedDocs[d] || []).forEach(function(img) {
+      var idx = srcs.length; srcs.push(img.dataUrl);
+      cells += '<div style="flex:0 0 auto;width:110px;scroll-snap-align:start;text-align:center;">' +
+          '<img src="' + img.dataUrl + '" onclick="_openOcrImgFull(' + idx + ')" style="width:110px;height:138px;object-fit:cover;border:1.5px solid #cfe0de;border-radius:7px;cursor:zoom-in;background:#fafafa;">' +
+          '<div style="font-size:9.5px;color:#666;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(label) + '</div>' +
+        '</div>';
+    });
+  });
+  window._ocrThumbSrcs = srcs;
+  if (!srcs.length) return '';
+  return '<div style="margin-bottom:11px;border:1px solid #d8e6e4;border-radius:9px;overflow:hidden;">' +
+      '<div style="background:#f0f7f6;padding:7px 10px;font-size:11.5px;font-weight:700;color:#00695c;">📂 撮影した書類（' + srcs.length + '枚）— 見ながら確認（タップで拡大）</div>' +
+      '<div style="display:flex;gap:8px;overflow-x:auto;padding:9px 10px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;">' + cells + '</div>' +
+    '</div>';
+}
+
+// 新規登録OCRの確認プレビュー（フォームの現在値と比較 → チェックして転記）
+function _showNewRegOcrPreview(parsed, srcNote) {
+  var labelMap = OCR_FIELD_LABELS;
+  function curVal(k) { var el = document.getElementById('addField_' + k); return el ? String(el.value || '').trim() : ''; }
+  function hasField(k) { return !!document.getElementById('addField_' + k); }
+  function normCmp(k, v) { var s = String(v == null ? '' : v).trim(); if (k === 'sex') s = (s === '女') ? '女性' : (s === '男') ? '男性' : s; return s; }
+  function row(k, isEmpty) {
+    var cv = curVal(k);
+    return '<tr>' +
+      '<td style="padding:5px 6px;border-bottom:1px solid #eee;text-align:center;"><input type="checkbox" class="emp-ocr-chk" data-ocr-key="' + escHtml(k) + '" data-ocr-empty="' + (isEmpty ? '1' : '0') + '"' + (isEmpty ? ' checked' : '') + ' style="width:17px;height:17px;"></td>' +
+      '<th style="text-align:left;padding:5px 8px;color:#555;border-bottom:1px solid #eee;white-space:nowrap;font-weight:600;">' + escHtml(labelMap[k] || k) + '</th>' +
+      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #eee;font-size:11px;">' + (cv ? escHtml(cv) : '<span style="color:#ccc;">（空欄）</span>') + '</td>' +
+      '<td style="padding:5px 8px;font-weight:700;color:' + (isEmpty ? '#00695c' : '#c62828') + ';border-bottom:1px solid #eee;">→ ' + escHtml(String(parsed[k])) + '</td>' +
+    '</tr>';
+  }
+  function sameRow(k) {
+    var cv = curVal(k);
+    return '<tr style="opacity:0.65;">' +
+      '<td style="padding:5px 6px;border-bottom:1px solid #f0f0f0;text-align:center;color:#bbb;">―</td>' +
+      '<th style="text-align:left;padding:5px 8px;color:#888;border-bottom:1px solid #f0f0f0;white-space:nowrap;font-weight:500;">' + escHtml(labelMap[k] || k) + '</th>' +
+      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #f0f0f0;font-size:11px;">' + escHtml(cv) + '</td>' +
+      '<td style="padding:5px 8px;color:#999;border-bottom:1px solid #f0f0f0;">＝ 同じ</td>' +
+    '</tr>';
+  }
+  var newRows = '', conflictRows = '', sameRows = '', newCount = 0, confCount = 0, sameCount = 0;
+  Object.keys(parsed).forEach(function(k) {
+    if (k.charAt(0) === '_') return;        // 内部キー(_niniCarName 等)は除外
+    if (!(k in labelMap)) return;           // 表示対象の項目のみ
+    if (!hasField(k)) return;               // 登録フォームに無い項目はスキップ
+    var cv = curVal(k);
+    if (normCmp(k, cv) === normCmp(k, parsed[k])) { sameRows += sameRow(k); sameCount++; return; }
+    if (!String(cv).trim()) { newRows += row(k, true); newCount++; }
+    else { conflictRows += row(k, false); confCount++; }
+  });
+  var _hdr = '<tr style="background:#f0f7f6;"><th style="padding:4px 6px;"></th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">項目</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">現在</th><th style="text-align:left;padding:4px 8px;color:#888;font-size:10.5px;">読み取り値</th></tr>';
+  var rows = '';
+  if (newCount) rows += '<tr><td colspan="4" style="padding:7px 8px 3px;font-size:11px;font-weight:800;color:#00695c;">🆕 空欄へ転記（' + newCount + '件・チェック済みを反映）</td></tr>' + _hdr + newRows;
+  if (confCount) rows += '<tr><td colspan="4" style="padding:11px 8px 3px;font-size:11px;font-weight:800;color:#c62828;">⚠ 入力済みと異なる（' + confCount + '件・上書き注意。必要なものだけチェック）</td></tr>' + _hdr + conflictRows;
+  if (sameCount) rows += '<tr><td colspan="4" style="padding:11px 8px 3px;font-size:11px;font-weight:800;color:#2e7d32;">✓ 入力済みと同じ（' + sameCount + '件）</td></tr>' + _hdr + sameRows;
+  if (!newCount && !confCount && !sameCount) rows = '<tr><td colspan="4" style="padding:14px;text-align:center;color:#888;font-size:12px;">転記できる項目がありません</td></tr>';
+  window._empOcrParsed = parsed;
+  var hasChk = (newCount + confCount) > 0;
+  var toolbar = hasChk
+    ? '<div style="display:flex;gap:7px;align-items:center;margin-bottom:9px;flex-wrap:wrap;">' +
+        '<span style="font-size:11px;color:#888;">チェック:</span>' +
+        '<button type="button" onclick="_ocrCheckAll(true)" style="background:#00695c;color:#fff;border:none;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;">☑ 全てチェック</button>' +
+        '<button type="button" onclick="_ocrCheckNeeded()" style="background:#fff;color:#00695c;border:1.4px solid #00695c;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;">↺ 必要分のみ</button>' +
+        '<button type="button" onclick="_ocrCheckAll(false)" style="background:#fff;color:#777;border:1.4px solid #ccc;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:600;cursor:pointer;">☐ 全て外す</button>' +
+      '</div>'
+    : '';
+  var forgery = (parsed.zairyuBikou) ? _buildAntiForgeryBanner(parsed) : '';
+  var thumbs = _newRegThumbsHtml();
+  var old = document.getElementById('empOcrApplyOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'empOcrApplyOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:13px 16px;border-bottom:1px solid #eee;background:#e0f2f1;border-radius:12px 12px 0 0;">' +
+        '<h3 style="margin:0;font-size:14.5px;color:#00695c;">🤖 OCR読み取り結果 → 登録フォームへ転記</h3>' +
+        '<div style="font-size:10.5px;color:#777;margin-top:2px;">読取: ' + escHtml(srcNote || '') + '</div>' +
+      '</div>' +
+      '<div style="padding:14px 16px;">' +
+        forgery +
+        thumbs +
+        toolbar +
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;">' + rows + '</table>' +
+        '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:6px;padding:7px 10px;margin-top:10px;">✅ <b>チェックした項目だけ</b>をフォームに転記します。空欄は自動でチェック済み。入力済みと異なる項目は誤読の恐れがあるので既定オフ（上の「全てチェック」「必要分のみ」で一括切替）。転記後は登録前に内容を確認してください。</div>' +
+      '</div>' +
+      '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button onclick="document.getElementById(\'empOcrApplyOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+        '<button onclick="_applyNewRegOcr()" id="empOcrApplyBtn" style="background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">✓ チェックした項目を転記</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+// 確認画面でチェックした項目を登録フォーム(addField_*)へ転記
+function _applyNewRegOcr() {
+  var parsed = window._empOcrParsed || {};
+  var checkedKeys = {};
+  document.querySelectorAll('.emp-ocr-chk').forEach(function(c) { if (c.checked) checkedKeys[c.getAttribute('data-ocr-key')] = true; });
+  if (!Object.keys(checkedKeys).length && !window._lapseStatus) { showToast('転記する項目が選択されていません', 'error'); return; }
+  var applied = 0;
+  Object.keys(parsed).forEach(function(k) {
+    if (!checkedKeys[k]) return;
+    var el = document.getElementById('addField_' + k);
+    if (!el) return;
+    var v = parsed[k];
+    if (k === 'sex') v = (v === '女') ? '女性' : (v === '男') ? '男性' : v;
+    if (OCR_DATE_KEYS[k] && !/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return;
+    if (el.tagName === 'SELECT') {
+      var found = false;
+      Array.from(el.options).forEach(function(o) { if (o.value === v) found = true; });
+      if (!found) { var opt = document.createElement('option'); opt.value = v; opt.text = v; el.appendChild(opt); }
+      el.value = v;
+    } else { el.value = v; }
+    applied++;
+  });
+  // 失効照会(OK/NG)を在留備考へ追記
+  if (window._lapseStatus) {
+    var bk = document.getElementById('addField_zairyuBikou');
+    if (bk) {
+      var dd = new Date();
+      var ds = dd.getFullYear() + '-' + ('0' + (dd.getMonth() + 1)).slice(-2) + '-' + ('0' + dd.getDate()).slice(-2);
+      var cur = String(bk.value || '').trim();
+      bk.value = (cur ? cur + ' ／ ' : '') + '失効照会:' + window._lapseStatus + '(' + ds + ')';
+      applied++;
+    }
+  }
+  var ov = document.getElementById('empOcrApplyOverlay'); if (ov) ov.remove();
+  showToast('🤖 ' + applied + '項目を登録フォームに転記しました。内容を確認して登録してください', 'success');
+}
+
 async function ocrZairyuFromEmpFolder() {
   var emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
@@ -34777,6 +34973,9 @@ async function renderAddEmployeeForm() {
     html += '<div class="doc-preview" id="docPreview_' + doc.id + '" style="display:none;"></div>';
     html += '</div>';
   });
+  // 撮影した全書類をまとめてAI(Claude)でOCR → 入社時に必要なSP項目を抽出してフォームへ転記
+  html += '<button type="button" id="newRegOcrBtn" onclick="ocrAllForNewReg()" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(0,105,92,0.25);">🤖 撮影した書類をまとめてOCR読込 → フォームへ転記</button>';
+  html += '<div style="font-size:10.5px;color:var(--text-light);margin-top:5px;line-height:1.5;">在留カード・免許証・車検証・保険・通帳などを撮影してからこのボタンを押すと、高精度AI(Claude)が氏名・生年月日・在留情報・口座・車両・保険などを読み取り、確認画面でチェックして一括転記できます。在留カードは偽造チェック(失効照会＋券面照合)付き。</div>';
   html += '</div>';
 
   // Other categories
