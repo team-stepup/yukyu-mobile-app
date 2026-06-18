@@ -34079,24 +34079,40 @@ async function ocrAllFromEmpFolder() {
     var imgs = files.filter(function(f) { return /\.(jpe?g|png|webp|heic|pdf)$/i.test(f.Name || ''); });
     if (!imgs.length) { _empOcrProg(null); showToast('フォルダに読み取れるファイルがありません', 'error'); return; }
 
-    // ファイル名で書類タイプに分類 (表→裏の順に整列)
-    var groups = {};   // docType → { label, paths: [] }
+    // ファイル名で書類タイプに分類。マイナンバーはSP非保存のため対象外
+    var groups = {};   // docType → { label, files: [] }
     imgs.forEach(function(f) {
       for (var i = 0; i < OCR_DOC_CLASSIFY.length; i++) {
         var c = OCR_DOC_CLASSIFY[i];
-        if (c.re.test(f.Name)) {
+        if (c.docType !== 'mynumber' && c.re.test(f.Name)) {
           if (!groups[c.docType]) groups[c.docType] = { label: c.label, files: [] };
           groups[c.docType].files.push(f);
           break;
         }
       }
     });
-    var docTypes = ['zairyu', 'license', 'koyou', 'mynumber', 'shaken', 'jibaiseki', 'nini', 'bank'].filter(function(t) { return groups[t]; });
-    if (!docTypes.length) { _empOcrProg(null); showToast('分類できる書類がありません (在留カード/免許/保険など名前を含むファイルが対象)', 'error'); return; }
+    var docTypes = ['zairyu', 'license', 'koyou', 'shaken', 'jibaiseki', 'nini', 'bank'].filter(function(t) { return groups[t]; });
+    if (!docTypes.length) {
+      // ファイル名から書類を判別できない → 手動で種別を割り当ててもらう(ファイル名が汎用名の場合に対応)
+      _empOcrProg(null);
+      _showEmpDocAssignOverlay(imgs, path);
+      return;
+    }
+    await _runEmpFolderOcr(groups);
+  } catch (e) {
+    _empOcrProg(null);
+    console.error('ocrAllFromEmpFolder error:', e);
+    showToast('一括読み取りに失敗: ' + (e.message || e), 'error');
+  }
+}
 
-    // 書類ごとに順次クラウドAIで抽出 → 先勝ちでマージ
-    var allParsed = {};
-    var okDocs = [], ngDocs = [];
+// 分類済み groups(docType→{label,files}) を順次Claude OCR → マージ → 確認プレビュー
+async function _runEmpFolderOcr(groups) {
+  try {
+    var docTypes = ['zairyu', 'license', 'koyou', 'shaken', 'jibaiseki', 'nini', 'bank'].filter(function(t) { return groups[t]; });
+    if (!docTypes.length) { _empOcrProg(null); showToast('OCR対象の書類がありません', 'error'); return; }
+    var allParsed = {}, okDocs = [], ngDocs = [];
+    window._lastCloudOcr = window._lastCloudOcr || {};
     for (var d = 0; d < docTypes.length; d++) {
       var dt = docTypes[d];
       var g = groups[dt];
@@ -34116,12 +34132,13 @@ async function ocrAllFromEmpFolder() {
             _imgPaths.push(g.files[_fi].ServerRelativeUrl);
           }
         }
-        var _ocrOpts = { model: 'claude' };   // 社員ファイルOCRは高精度Claude(キー未設定時はgpt-4oに自動フォールバック)
+        var _ocrOpts = { model: 'claude' };   // 高精度Claude(キー未設定時はgpt-4oに自動フォールバック)
         if (_imgPaths.length) _ocrOpts.paths = _imgPaths.slice(0, 4);
         if (_pdfImgs.length) _ocrOpts.images = _pdfImgs.slice(0, 4);
         if (!_ocrOpts.paths && !_ocrOpts.images) throw new Error('読み取り可能なページがありません');
         var ocr = await cloudDocOcr(dt, _ocrOpts);
         var mapped = mapCloudOcrToFields(dt, ocr);
+        window._lastCloudOcr[dt] = mapped;   // 券面クロス照合(生年月日突合)に使用
         var added = 0;
         Object.keys(mapped).forEach(function(k) {
           if (!(k in allParsed)) { allParsed[k] = mapped[k]; added++; }
@@ -34138,7 +34155,7 @@ async function ocrAllFromEmpFolder() {
       return;
     }
     var srcNote = okDocs.join('、') + (ngDocs.length ? '　⚠失敗: ' + ngDocs.join('、') : '');
-    // 車名(通称名)を 任意保険 > 車検証 > 型式逆引き の優先で確定 (型式が車名欄に入るのを防ぐ)
+    // 車名(通称名)を 任意保険 > 車検証 > 型式逆引き の優先で確定
     if (allParsed.carName || allParsed._niniCarName || allParsed._carModel) {
       try { _resolveCarName(allParsed); } catch (ce) { console.warn('[一括OCR] 車名解決失敗:', ce); }
     }
@@ -34146,7 +34163,6 @@ async function ocrAllFromEmpFolder() {
     if (allParsed.bankName || allParsed.bankAccount || allParsed.bankBranch) {
       try { await _normalizeBankOcr(allParsed); } catch (be) { console.warn('[一括OCR] 銀行正規化失敗:', be); }
     }
-    // 読み取り元ファイル一覧（確認モーダルで見ながらチェックできるようにする）
     var _srcFiles = [];
     docTypes.forEach(function(dt) {
       var gg = groups[dt];
@@ -34157,9 +34173,89 @@ async function ocrAllFromEmpFolder() {
     _showEmpOcrApplyPreview(allParsed, srcNote, { skipMissing: true, files: _srcFiles });
   } catch (e) {
     _empOcrProg(null);
-    console.error('ocrAllFromEmpFolder error:', e);
+    console.error('_runEmpFolderOcr error:', e);
     showToast('一括読み取りに失敗: ' + (e.message || e), 'error');
   }
+}
+
+// ファイル名で分類できない時: 各ファイルに種別を手動割り当て → OCR
+function _showEmpDocAssignOverlay(imgs, folderPath) {
+  window._empAssignFiles = imgs;
+  var opts = [['', '― 対象外 ―'], ['zairyu', '在留カード'], ['license', '免許証'], ['koyou', '雇用保険被保険者証'], ['shaken', '車検証'], ['jibaiseki', '自賠責保険証'], ['nini', '任意保険証'], ['bank', '銀行口座(通帳/カード)']];
+  function guess(name) { for (var i = 0; i < OCR_DOC_CLASSIFY.length; i++) { var c = OCR_DOC_CLASSIFY[i]; if (c.docType !== 'mynumber' && c.re.test(name || '')) return c.docType; } return ''; }
+  var rows = imgs.map(function(f, i) {
+    var g = guess(f.Name);
+    var selOpts = opts.map(function(o) { return '<option value="' + o[0] + '"' + (o[0] === g ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
+    return '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0;">' +
+        '<img id="assignThumb_' + i + '" onclick="_openEmpAssignThumb(' + i + ')" style="width:46px;height:46px;object-fit:cover;border-radius:6px;background:#f0f0f0;border:1px solid #ddd;cursor:zoom-in;flex:0 0 auto;" alt="">' +
+        '<span style="flex:1;min-width:0;font-size:11px;color:#555;word-break:break-all;">' + escHtml(f.Name) + '</span>' +
+        '<select id="assignSel_' + i + '" style="flex:0 0 auto;padding:5px 6px;border:1.5px solid #cfd8dc;border-radius:7px;font-size:12px;background:#fff;">' + selOpts + '</select>' +
+      '</div>';
+  }).join('');
+  var old = document.getElementById('empDocAssignOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'empDocAssignOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:13px 16px;border-bottom:1px solid #eee;background:#fff3e0;border-radius:12px 12px 0 0;">' +
+        '<h3 style="margin:0;font-size:14.5px;color:#e65100;">📂 書類の種別を選んでください</h3>' +
+        '<div style="font-size:10.5px;color:#777;margin-top:3px;">ファイル名から自動分類できませんでした。各ファイルの種別を選び「OCR実行」を押してください（不要なものは「対象外」のまま）。画像タップで拡大できます。</div>' +
+      '</div>' +
+      '<div style="padding:12px 16px;">' + rows +
+        '<div style="font-size:10px;color:#999;margin-top:8px;word-break:break-all;">フォルダ: ' + escHtml(folderPath || '') + '</div>' +
+      '</div>' +
+      '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button onclick="document.getElementById(\'empDocAssignOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+        '<button onclick="_runEmpAssignedOcr()" style="background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">🤖 OCR実行</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  _loadEmpAssignThumbs(imgs);   // サムネイルを順次ロード(best-effort)
+}
+
+async function _loadEmpAssignThumbs(imgs) {
+  var token;
+  try { token = await getToken(); } catch (e) { return; }
+  window._empAssignThumbSrcs = [];
+  for (var i = 0; i < imgs.length; i++) {
+    var f = imgs[i];
+    try {
+      var src = null;
+      if (/\.pdf$/i.test(f.Name)) { var pg = await _fetchPdfAsImages(f.ServerRelativeUrl, 1); src = pg[0]; }
+      else {
+        var enc = encodeURIComponent(f.ServerRelativeUrl).replace(/%2F/g, '/');
+        var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
+        if (r.ok) src = URL.createObjectURL(await r.blob());
+      }
+      window._empAssignThumbSrcs[i] = src;
+      var el = document.getElementById('assignThumb_' + i);
+      if (el && src) el.src = src;
+    } catch (e) { /* skip this thumbnail */ }
+  }
+}
+function _openEmpAssignThumb(i) {
+  var src = (window._empAssignThumbSrcs || [])[i];
+  if (!src) return;
+  window._ocrThumbSrcs = [src];
+  _openOcrImgFull(0);
+}
+function _runEmpAssignedOcr() {
+  var imgs = window._empAssignFiles || [];
+  var labelOf = { zairyu: '在留カード', license: '免許証', koyou: '雇用保険被保険者証', shaken: '車検証', jibaiseki: '自賠責保険証', nini: '任意保険証', bank: '銀行口座' };
+  var groups = {};
+  imgs.forEach(function(f, i) {
+    var sel = document.getElementById('assignSel_' + i);
+    var dt = sel ? sel.value : '';
+    if (!dt) return;
+    if (!groups[dt]) groups[dt] = { label: labelOf[dt] || dt, files: [] };
+    groups[dt].files.push(f);
+  });
+  if (!Object.keys(groups).length) { showToast('OCRする書類を1つ以上選んでください', 'error'); return; }
+  var ov = document.getElementById('empDocAssignOverlay'); if (ov) ov.remove();
+  _empOcrProg('☁️ 選んだ書類をAIで読み取り中…');
+  _runEmpFolderOcr(groups);
 }
 
 // ============================================================
