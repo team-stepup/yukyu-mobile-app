@@ -34739,32 +34739,61 @@ async function _loadOcrSrcThumbs() {
 
 // 確認モーダル上部に「固定（sticky）」表示する1枚ずつのインライン画像ビューア
 //   表をスクロールしても画像は上部に残り、◀▶で1枚ずつ切替えて見ながら確認できる
+function _ocrVBtn() { return 'background:#fff;border:1px solid #b9d4d0;color:#00695c;border-radius:6px;width:30px;height:28px;font-size:15px;font-weight:700;cursor:pointer;flex:0 0 auto;line-height:1;padding:0;'; }
 function _ocrViewerInit(srcs, caps) {
   srcs = (srcs || []).filter(Boolean);
   window._ocrViewerSrcs = srcs;
   window._ocrViewerCaps = caps || [];
   window._ocrViewerIdx = 0;
+  window._ocrViewerZoom = 1;
   window._ocrThumbSrcs = srcs;   // 全画面拡大(_openOcrImgFull)と共用
   if (!srcs.length) return '';
   var nav = srcs.length > 1;
   return '<div style="position:sticky;top:0;z-index:6;background:#fff;margin-bottom:11px;border:1px solid #cfe0de;border-radius:9px;overflow:hidden;box-shadow:0 3px 9px rgba(0,0,0,0.14);">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:#f0f7f6;padding:6px 10px;">' +
-        '<span style="font-size:11px;font-weight:700;color:#00695c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📂 <span id="ocrViewerCap">' + escHtml((caps && caps[0]) || '') + '</span></span>' +
-        '<span style="font-size:11px;color:#555;white-space:nowrap;">見ながら確認 <b id="ocrViewerCnt">1 / ' + srcs.length + '</b></span>' +
+      '<div style="display:flex;align-items:center;gap:5px;background:#f0f7f6;padding:6px 8px;">' +
+        '<span style="font-size:10.5px;font-weight:700;color:#00695c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">📂 <span id="ocrViewerCap">' + escHtml((caps && caps[0]) || '') + '</span></span>' +
+        (nav ? '<button type="button" onclick="_ocrViewerNav(-1)" style="' + _ocrVBtn() + '">‹</button>' +
+               '<b id="ocrViewerCnt" style="font-size:11px;color:#555;min-width:40px;text-align:center;white-space:nowrap;">1 / ' + srcs.length + '</b>' +
+               '<button type="button" onclick="_ocrViewerNav(1)" style="' + _ocrVBtn() + '">›</button>' : '<b id="ocrViewerCnt" style="display:none;"></b>') +
+        '<button type="button" onclick="_ocrViewerZoom(-1)" title="縮小" style="' + _ocrVBtn() + '">－</button>' +
+        '<button type="button" onclick="_ocrViewerZoom(1)" title="拡大" style="' + _ocrVBtn() + '">＋</button>' +
       '</div>' +
-      '<div style="position:relative;background:#1b1b1b;text-align:center;">' +
-        (nav ? '<button type="button" onclick="_ocrViewerNav(-1)" style="position:absolute;left:5px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.3);color:#fff;border:none;border-radius:50%;width:36px;height:36px;font-size:21px;cursor:pointer;z-index:2;line-height:1;">‹</button>' : '') +
-        '<img id="ocrViewerImg" src="' + srcs[0] + '" onclick="_openOcrImgFull(window._ocrViewerIdx||0)" style="max-width:100%;max-height:36vh;object-fit:contain;display:block;margin:0 auto;cursor:zoom-in;">' +
-        (nav ? '<button type="button" onclick="_ocrViewerNav(1)" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.3);color:#fff;border:none;border-radius:50%;width:36px;height:36px;font-size:21px;cursor:pointer;z-index:2;line-height:1;">›</button>' : '') +
+      '<div id="ocrViewerScroll" style="height:36vh;overflow:auto;background:#1b1b1b;display:flex;align-items:center;justify-content:center;-webkit-overflow-scrolling:touch;">' +
+        '<img id="ocrViewerImg" src="' + srcs[0] + '" ondblclick="_ocrViewerZoomReset()" style="max-width:100%;max-height:36vh;object-fit:contain;display:block;cursor:zoom-in;">' +
       '</div>' +
-      '<div style="font-size:9.5px;color:#888;text-align:center;padding:3px 4px;">◀ ▶ で1枚ずつ切替・画像タップで全画面拡大</div>' +
+      '<div style="font-size:9.5px;color:#888;text-align:center;padding:3px 4px;">＋ －で拡大縮小（拡大中はスワイプで移動）' + (nav ? '・◀ ▶で1枚ずつ' : '') + '</div>' +
     '</div>';
 }
+function _ocrViewerApplyZoom() {
+  var img = document.getElementById('ocrViewerImg');
+  var box = document.getElementById('ocrViewerScroll');
+  if (!img || !box) return;
+  var z = window._ocrViewerZoom || 1;
+  if (z <= 1) {
+    box.style.display = 'flex';
+    img.style.cssText = 'max-width:100%;max-height:36vh;object-fit:contain;display:block;cursor:zoom-in;';
+    box.scrollTop = 0; box.scrollLeft = 0;
+  } else {
+    box.style.display = 'block';
+    img.style.cssText = 'width:' + (z * 100) + '%;max-width:none;height:auto;display:block;cursor:zoom-out;';
+  }
+}
+function _ocrViewerZoom(d) {
+  var steps = [1, 1.75, 2.5, 3.5];
+  var z = window._ocrViewerZoom || 1;
+  var i = steps.indexOf(z); if (i < 0) i = 0;
+  i = Math.max(0, Math.min(steps.length - 1, i + d));
+  window._ocrViewerZoom = steps[i];
+  _ocrViewerApplyZoom();
+}
+function _ocrViewerZoomReset() { window._ocrViewerZoom = 1; _ocrViewerApplyZoom(); }
 function _ocrViewerNav(d) {
   var srcs = window._ocrViewerSrcs || []; if (!srcs.length) return;
   var n = srcs.length;
   window._ocrViewerIdx = ((window._ocrViewerIdx || 0) + d + n) % n;
+  window._ocrViewerZoom = 1;
   var img = document.getElementById('ocrViewerImg'); if (img) img.src = srcs[window._ocrViewerIdx];
+  _ocrViewerApplyZoom();
   var cnt = document.getElementById('ocrViewerCnt'); if (cnt) cnt.textContent = (window._ocrViewerIdx + 1) + ' / ' + n;
   var cap = document.getElementById('ocrViewerCap'); if (cap) cap.textContent = (window._ocrViewerCaps || [])[window._ocrViewerIdx] || '';
 }
