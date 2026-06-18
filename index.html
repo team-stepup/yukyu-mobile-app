@@ -34344,6 +34344,26 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
         '</div>' +
       '</div>'
     : '';
+  // ── 在留カード等番号 失効情報照会（法務省）── 一番上に表示
+  var _lapseCardNo = String(parsed.zairyuBikou || '').replace(/^.*在留カード番号:\s*/, '').trim();
+  window._lapseCardNo = _lapseCardNo;
+  window._lapseStatus = null;   // モーダルを開くたびにリセット
+  var lapseHtml = _lapseCardNo
+    ? '<div style="margin-bottom:11px;border:1.5px solid #b3c7e6;border-radius:9px;overflow:hidden;">' +
+        '<div style="background:#e8eef9;padding:8px 11px;">' +
+          '<div style="font-size:12px;font-weight:800;color:#1a3a6b;">🛂 法務省 在留カード等番号 失効情報照会</div>' +
+          '<div style="font-size:11px;color:#555;margin-top:3px;">カード番号: <b style="font-family:monospace;font-size:12.5px;letter-spacing:0.5px;">' + escHtml(_lapseCardNo) + '</b></div>' +
+        '</div>' +
+        '<div style="padding:9px 11px;display:flex;gap:7px;align-items:center;flex-wrap:wrap;">' +
+          '<button type="button" onclick="_lapseOpen()" style="background:#1565c0;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;">🔎 番号をコピーして照会</button>' +
+          '<span style="font-size:11px;color:#777;">→ 照会結果:</span>' +
+          '<button type="button" id="lapseBtnOK" onclick="_lapseMark(\'OK\')" style="' + _lapseBtnCss('OK', false) + '">OK 有効</button>' +
+          '<button type="button" id="lapseBtnNG" onclick="_lapseMark(\'NG\')" style="' + _lapseBtnCss('NG', false) + '">NG 失効/該当</button>' +
+          '<span id="lapseBadge" style="font-size:11.5px;font-weight:800;margin-left:2px;"></span>' +
+        '</div>' +
+        '<div style="font-size:10px;color:#888;padding:0 11px 8px;">公式サイトでカード番号＋満了日を入力し、有効ならOK・「失効」表示ならNGを押してください（結果は在留備考に記録されます）。</div>' +
+      '</div>'
+    : '';
   var old = document.getElementById('empOcrApplyOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
   ov.id = 'empOcrApplyOverlay'; ov.className = 'no-print';
@@ -34355,6 +34375,7 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
         '<div style="font-size:10.5px;color:#777;margin-top:2px;">画像: ' + escHtml(fileName || '') + '</div>' +
       '</div>' +
       '<div style="padding:14px 16px;">' +
+        lapseHtml +
         filesHtml +
         toolbar +
         '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
@@ -34453,6 +34474,32 @@ function _openOcrImgFull(idx) {
   document.body.appendChild(ov);
 }
 
+// ── 在留カード等番号 失効情報照会（法務省）導線 ──
+function _lapseBtnCss(kind, active) {
+  var base = 'border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;';
+  if (kind === 'OK') return base + (active ? 'background:#2e7d32;color:#fff;border:2px solid #1b5e20;' : 'background:#fff;color:#2e7d32;border:1.5px solid #2e7d32;');
+  return base + (active ? 'background:#c62828;color:#fff;border:2px solid #8e0000;' : 'background:#fff;color:#c62828;border:1.5px solid #c62828;');
+}
+// 番号をコピーして公式の失効情報照会サイトを開く
+function _lapseOpen() {
+  var no = window._lapseCardNo || '';
+  if (no && navigator.clipboard && navigator.clipboard.writeText) {
+    try { navigator.clipboard.writeText(no); showToast('在留カード番号「' + no + '」をコピーしました。照会サイトに貼り付けてください', 'info'); } catch (e) {}
+  }
+  window.open('https://lapse-immi.moj.go.jp/', '_blank', 'noopener');
+}
+// 照会結果 OK/NG をマーク（在留備考に記録される）
+function _lapseMark(status) {
+  window._lapseStatus = status;
+  var ok = document.getElementById('lapseBtnOK'), ng = document.getElementById('lapseBtnNG'), badge = document.getElementById('lapseBadge');
+  if (ok) ok.setAttribute('style', _lapseBtnCss('OK', status === 'OK'));
+  if (ng) ng.setAttribute('style', _lapseBtnCss('NG', status === 'NG'));
+  if (badge) {
+    badge.textContent = (status === 'OK') ? '✅ 有効（OK）として記録' : '❌ 失効/該当（NG）として記録';
+    badge.style.color = (status === 'OK') ? '#1b5e20' : '#c62828';
+  }
+}
+
 async function _applyEmpOcrToSp() {
   var emp = currentEmployee;
   var parsed = window._empOcrParsed || {};
@@ -34460,7 +34507,7 @@ async function _applyEmpOcrToSp() {
   // チェックされた項目だけを対象にする (空欄=既定ON / 既存値と異なる=既定OFF)
   var checkedKeys = {};
   document.querySelectorAll('.emp-ocr-chk').forEach(function(c) { if (c.checked) checkedKeys[c.getAttribute('data-ocr-key')] = true; });
-  if (!Object.keys(checkedKeys).length) { showToast('保存する項目が選択されていません', 'error'); return; }
+  if (!Object.keys(checkedKeys).length && !window._lapseStatus) { showToast('保存する項目が選択されていません', 'error'); return; }
   var btn = document.getElementById('empOcrApplyBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
   try {
@@ -34480,10 +34527,20 @@ async function _applyEmpOcrToSp() {
       }
       body[od.replace(/^OData_/, '')] = v;   // spPatchEmployee が EntityPropertyName へ変換
     });
+    // 失効情報照会の結果(OK/NG)を在留備考へ記録
+    if (window._lapseStatus) {
+      var bod = km['zairyuBikou'];
+      if (bod) {
+        var dd = new Date();
+        var ds = dd.getFullYear() + '-' + ('0' + (dd.getMonth() + 1)).slice(-2) + '-' + ('0' + dd.getDate()).slice(-2);
+        var baseNote = parsed.zairyuBikou || (window._lapseCardNo ? '在留カード番号: ' + window._lapseCardNo : '');
+        body[bod.replace(/^OData_/, '')] = (baseNote ? baseNote + ' ／ ' : '') + '失効照会:' + window._lapseStatus + '(' + ds + ')';
+      }
+    }
     if (!Object.keys(body).length) { showToast('保存できる項目がありません', 'error'); return; }
     await spPatchEmployee(emp.Id, body);
     var ov = document.getElementById('empOcrApplyOverlay'); if (ov) ov.remove();
-    showToast('✓ 在留カードの情報を社員データに保存しました', 'success');
+    showToast('✓ 在留カードの情報を社員データに保存しました' + (window._lapseStatus ? '（失効照会:' + window._lapseStatus + ' も記録）' : ''), 'success');
     // 最新データで画面を再描画
     var updated = await fetchFullEmployee(emp[F.syainNo]);
     if (updated) {
