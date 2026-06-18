@@ -32428,6 +32428,7 @@ async function cloudDocOcr(docType, opts) {
   const body = { docType: docType };
   if (opts && opts.images && opts.images.length) body.images = opts.images.slice(0, 4);
   if (opts && opts.paths && opts.paths.length) body.paths = opts.paths.slice(0, 4);
+  if (opts && opts.model) body.model = opts.model;   // 'gpt-4o' 指定で高精度モデル
   const resp = await fetch(FUNC_OCR_BASE + '/yukyu/file-ocr', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -34054,7 +34055,7 @@ async function ocrAllFromEmpFolder() {
             _imgPaths.push(g.files[_fi].ServerRelativeUrl);
           }
         }
-        var _ocrOpts = {};
+        var _ocrOpts = { model: 'gpt-4o' };   // 社員ファイルOCRは高精度のgpt-4oを使用
         if (_imgPaths.length) _ocrOpts.paths = _imgPaths.slice(0, 4);
         if (_pdfImgs.length) _ocrOpts.images = _pdfImgs.slice(0, 4);
         if (!_ocrOpts.paths && !_ocrOpts.images) throw new Error('読み取り可能なページがありません');
