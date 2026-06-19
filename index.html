@@ -34650,7 +34650,13 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
   function curVal(k) {
     var od = km[k];
     var v = od ? emp[od] : '';
-    if (v && /^\d{4}-\d{2}-\d{2}T/.test(String(v))) return String(v).substring(0, 10);
+    // SP保存の日時はUTC。旧PowerApps入力分は「JST午前0時=前日T15:00Z」で入るため、
+    // UTCのまま日付を切ると1日早くなる → +9hでJST日付に変換してから切り出す
+    if (v && /^\d{4}-\d{2}-\d{2}T/.test(String(v))) {
+      var d = new Date(String(v));
+      if (!isNaN(d.getTime())) return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().substring(0, 10);
+      return String(v).substring(0, 10);
+    }
     return (v === null || v === undefined) ? '' : String(v);
   }
   function normCmp(k, v) {
