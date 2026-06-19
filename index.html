@@ -5358,6 +5358,11 @@ select.sankyu-edit-input {
         <span class="ql-icon">🚐</span>
         <span class="ql-text">送迎連絡</span>
       </button>
+      <button class="quick-link-btn admin-only" onclick="switchScreen('bentoScreen')" style="position:relative;display:none;">
+        <span class="ql-icon">🍱</span>
+        <span class="ql-text">弁当注文</span>
+        <span id="bentoAdminBadge" class="ql-badge" title="承認待ち" style="background:#e65100;display:none;top:4px;right:4px;"></span>
+      </button>
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
         <span class="ql-text">車両管理</span>
@@ -5916,6 +5921,11 @@ select.sankyu-edit-input {
     <div id="sougeiHakenList"></div>
     <div id="sougeiRoster" style="display:none;"></div>
     <div id="sougeiConfirm" style="display:none;"></div>
+  </div>
+
+  <!-- Screen: 弁当注文 (役員: 当日の注文一覧＋承認/拒否) -->
+  <div class="screen" id="bentoScreen">
+    <div id="bentoBody"><div style="text-align:center;padding:24px;color:#888;">読み込み中...</div></div>
   </div>
 
   <!-- Screen: 前払い一覧 -->
@@ -7231,7 +7241,7 @@ function switchScreen(screenId, skipHistory) {
   }
   var _mainContent = document.querySelector('.main-content');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -7267,6 +7277,7 @@ function switchScreen(screenId, skipHistory) {
   if (screenId === 'yukyuListScreen') initYukyuListDate();
   if (screenId === 'nyutaiScreen') loadNyutaiScreen();
   if (screenId === 'sougeiScreen') loadSougeiScreen();
+  if (screenId === 'bentoScreen') loadBentoScreen();
   if (screenId === 'vehicleListScreen') loadVehicleList();
 }
 
@@ -17609,6 +17620,8 @@ async function loadHomeBadges() {
   try { renderMinWageBanner(); } catch(e) { console.warn('minWage banner error:', e); }
   // 前払い申請 承認権限ボタン (employee-portal 経由の本人申請)
   try { refreshMaebariApproverUI(); updateMaebariApprovalBadge(); } catch(e) { console.warn('approver UI error:', e); }
+  // 弁当注文 承認待ちバッジ (役員のみ)
+  try { updateBentoAdminBadge(); } catch(e) { console.warn('bento badge error:', e); }
   var today = new Date();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
@@ -41897,6 +41910,101 @@ async function loadSougeiVehicleOptions() {
     });
     return opts;
   } catch (e) { console.warn('送迎車両候補の取得失敗', e); return []; }
+}
+
+// ====== 弁当注文 (役員: 当日の注文一覧＋承認/拒否) ======
+const BENTO_LIST_GUID = '1d0f9e26-ad32-4fc0-8c9e-02f22a87fe35';
+const BENTO_MENU_PRICE = { '①': 315, '④': 355, '⑥': 460 };
+var _bentoDate = null;
+function _btEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _btYen(n){ return '¥' + Number(n || 0).toLocaleString('ja-JP'); }
+function _btTodayIso(){ var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+
+async function _btFetch(dateIso){
+  var startUtc = new Date(dateIso + 'T00:00:00+09:00').toISOString().slice(0, 19);
+  var endUtc = new Date(new Date(dateIso + 'T00:00:00+09:00').getTime() + 86400000).toISOString().slice(0, 19);
+  var flt = "OrderDate ge datetime'" + startUtc + "' and OrderDate lt datetime'" + endUtc + "'";
+  var q = "$select=Id,OrderDate,ShainNo,EmpName,Hakensaki,MenuNo,Price,OrderStatus,ApprovedBy&$filter=" + encodeURIComponent(flt) + "&$orderby=Id asc&$top=500";
+  return await spGetAll(BENTO_LIST_GUID, q);
+}
+
+async function loadBentoScreen(){
+  if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('この機能は役員のみ利用できます', 'error'); switchScreen('searchScreen'); return; }
+  var body = document.getElementById('bentoBody');
+  if (!_bentoDate) _bentoDate = _btTodayIso();
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:#888;">読み込み中...</div>';
+  try {
+    _btRender(await _btFetch(_bentoDate));
+  } catch (e) {
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _btEsc(String(e && e.message || e)) + '</div>';
+  }
+}
+
+function _btRender(items){
+  var body = document.getElementById('bentoBody');
+  var pend = [], appr = [], rej = [];
+  items.forEach(function(it){ var s = (it.OrderStatus || '').toLowerCase();
+    if (s === 'approved') appr.push(it); else if (s === 'rejected') rej.push(it); else pend.push(it); });
+  var todayIso = _btTodayIso();
+  var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;flex-wrap:wrap;">'
+    + '<span style="font-weight:800;color:var(--primary);">🍱 弁当注文</span>'
+    + '<input type="date" value="' + _btEsc(_bentoDate) + '" max="' + todayIso + '" onchange="_bentoDate=this.value;loadBentoScreen();" style="font-size:14px;padding:5px;">'
+    + '<button class="nyutai-range-btn" style="margin-left:auto;font-size:13px;" onclick="loadBentoScreen()">🔄 更新</button></div>';
+  var sum = 0, cnt = { '①': 0, '④': 0, '⑥': 0 };
+  appr.forEach(function(it){ sum += Number(it.Price || 0); if (cnt[it.MenuNo] != null) cnt[it.MenuNo]++; });
+  html += '<div class="card" style="padding:10px;margin:0 4px 8px;background:#f1f8e9;">'
+    + '<div style="font-weight:800;color:#2e7d32;margin-bottom:4px;">承認済み 集計</div>';
+  if (appr.length) {
+    ['①', '④', '⑥'].forEach(function(m){ if (cnt[m]) html += '<div style="font-size:13px;">' + m + ' ' + _btYen(BENTO_MENU_PRICE[m]) + ' × ' + cnt[m] + '食</div>'; });
+    html += '<div style="text-align:right;font-weight:800;margin-top:4px;">合計 ' + appr.length + '食 ／ ' + _btYen(sum) + '</div>';
+  } else { html += '<div style="font-size:13px;color:#888;">承認済みなし</div>'; }
+  html += '</div>';
+  html += '<div style="font-weight:800;color:#e65100;padding:4px 8px;">承認待ち ' + pend.length + '件</div>';
+  if (!pend.length) html += '<div style="padding:0 8px 8px;color:#888;font-size:13px;">なし</div>';
+  pend.forEach(function(it){
+    html += '<div class="card" style="padding:10px;margin:0 4px 8px;display:flex;align-items:center;gap:8px;">'
+      + '<div style="flex:1;min-width:90px;"><div style="font-weight:700;">' + _btEsc(it.EmpName || it.ShainNo) + '</div>'
+      + '<div style="color:#666;font-size:12px;">' + _btEsc(stripBukaPrefix(it.Hakensaki || '')) + ' ／ ' + _btEsc(it.MenuNo || '') + ' ' + _btYen(it.Price) + '</div></div>'
+      + '<button class="nyutai-asti-btn" style="background:#2e7d32;font-size:13px;padding:7px 12px;" onclick="bentoYukyuApprove(' + it.Id + ',\'approve\')">承認</button>'
+      + '<button class="nyutai-range-btn" style="background:#e53935;color:#fff;font-size:13px;" onclick="bentoYukyuApprove(' + it.Id + ',\'reject\')">拒否</button></div>';
+  });
+  if (appr.length) {
+    html += '<div style="font-weight:800;color:#2e7d32;padding:8px 8px 2px;">承認済み ' + appr.length + '件</div>';
+    appr.forEach(function(it){ html += '<div style="display:flex;justify-content:space-between;padding:5px 10px;border-bottom:1px solid #eee;font-size:13px;"><span>' + _btEsc(it.EmpName || it.ShainNo) + '</span><span>' + _btEsc(it.MenuNo || '') + ' ' + _btYen(it.Price) + '</span></div>'; });
+  }
+  if (rej.length) {
+    html += '<div style="font-weight:800;color:#b71c1c;padding:8px 8px 2px;">拒否 ' + rej.length + '件</div>';
+    rej.forEach(function(it){ html += '<div style="display:flex;justify-content:space-between;padding:5px 10px;border-bottom:1px solid #eee;font-size:13px;color:#999;"><span>' + _btEsc(it.EmpName || it.ShainNo) + '</span><span>' + _btEsc(it.MenuNo || '') + '</span></div>'; });
+  }
+  body.innerHTML = html;
+}
+
+async function bentoYukyuApprove(itemId, action){
+  if (action === 'reject' && !confirm('この注文を拒否しますか？')) return;
+  try {
+    var token = await getToken();
+    var entityType = await getListItemEntityType(BENTO_LIST_GUID);
+    var body = { '__metadata': { type: entityType }, OrderStatus: (action === 'reject' ? 'rejected' : 'approved'),
+      ApprovedBy: '役員', ApprovedAt: new Date().toISOString() };
+    var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + BENTO_LIST_GUID + "')/items(" + itemId + ")", {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+      body: JSON.stringify(body) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showToast(action === 'reject' ? '拒否しました' : '承認しました', 'success');
+    loadBentoScreen();
+    updateBentoAdminBadge();
+  } catch (e) { showToast('更新失敗: ' + (e.message || e), 'error'); }
+}
+
+async function updateBentoAdminBadge(){
+  try {
+    if (typeof isAdminUser === 'function' && !isAdminUser()) return;
+    var items = await _btFetch(_btTodayIso());
+    var n = items.filter(function(it){ return ((it.OrderStatus || '').toLowerCase() === 'pending') || !it.OrderStatus; }).length;
+    var b = document.getElementById('bentoAdminBadge');
+    if (b) { if (n > 0) { b.textContent = String(n); b.style.display = ''; } else b.style.display = 'none'; }
+  } catch (e) { /* silent */ }
 }
 
 async function loadSougeiScreen() {
