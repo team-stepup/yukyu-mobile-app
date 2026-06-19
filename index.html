@@ -5358,7 +5358,7 @@ select.sankyu-edit-input {
         <span class="ql-icon">🚐</span>
         <span class="ql-text">送迎連絡</span>
       </button>
-      <button class="quick-link-btn admin-only" onclick="switchScreen('bentoScreen')" style="position:relative;display:none;">
+      <button class="quick-link-btn bento-allowed" onclick="switchScreen('bentoScreen')" style="position:relative;display:none;">
         <span class="ql-icon">🍱</span>
         <span class="ql-text">弁当注文</span>
         <span id="bentoAdminBadge" class="ql-badge" title="承認待ち" style="background:#e65100;display:none;top:4px;right:4px;"></span>
@@ -36293,6 +36293,17 @@ function canUseSougei() {
   } catch (e) { return false; }
 }
 
+// 弁当注文の承認は 役員 + 森まこと + 森ゆうじ が利用可
+const BENTO_APPROVERS = ['m.mori@team-stepup.com', 'y.mori@team-stepup.com'];
+function canUseBento() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    const email = getLoggedInEmail();
+    if (!email) return false;
+    return ADMIN_USERS.indexOf(email) >= 0 || BENTO_APPROVERS.indexOf(email) >= 0;
+  } catch (e) { return false; }
+}
+
 function isAllowedUser() {
   try {
     if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
@@ -36785,6 +36796,11 @@ function applyAdminVisibility() {
   const sougeiOk = canUseSougei();
   document.querySelectorAll('.sougei-allowed').forEach(el => {
     el.style.display = sougeiOk ? '' : 'none';
+  });
+  // 弁当注文は役員＋森まこと＋森ゆうじが利用可
+  const bentoOk = canUseBento();
+  document.querySelectorAll('.bento-allowed').forEach(el => {
+    el.style.display = bentoOk ? '' : 'none';
   });
   // 役員セクションは常に閉じた状態で開始（ページロード/画面遷移ごと）
   if (admin) {
@@ -41929,7 +41945,7 @@ async function _btFetch(dateIso){
 }
 
 async function loadBentoScreen(){
-  if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('この機能は役員のみ利用できます', 'error'); switchScreen('searchScreen'); return; }
+  if (typeof canUseBento === 'function' && !canUseBento()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
   var body = document.getElementById('bentoBody');
   if (!_bentoDate) _bentoDate = _btTodayIso();
   body.innerHTML = '<div style="text-align:center;padding:24px;color:#888;">読み込み中...</div>';
@@ -41999,7 +42015,7 @@ async function bentoYukyuApprove(itemId, action){
 
 async function updateBentoAdminBadge(){
   try {
-    if (typeof isAdminUser === 'function' && !isAdminUser()) return;
+    if (typeof canUseBento === 'function' && !canUseBento()) return;
     var items = await _btFetch(_btTodayIso());
     var n = items.filter(function(it){ return ((it.OrderStatus || '').toLowerCase() === 'pending') || !it.OrderStatus; }).length;
     var b = document.getElementById('bentoAdminBadge');
