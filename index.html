@@ -5354,7 +5354,7 @@ select.sankyu-edit-input {
         <span class="ql-text">期限注意</span>
         <span id="expiryBadgeCount" class="ql-badge" style="background:#d32f2f;display:none;"></span>
       </button>
-      <button class="quick-link-btn admin-only" onclick="switchScreen('sougeiScreen')" style="position:relative;display:none;">
+      <button class="quick-link-btn sougei-allowed" onclick="switchScreen('sougeiScreen')" style="position:relative;display:none;">
         <span class="ql-icon">🚐</span>
         <span class="ql-text">送迎連絡</span>
       </button>
@@ -36259,6 +36259,16 @@ function isAdminUser() {
   } catch (e) { return false; }
 }
 
+// 送迎連絡は 役員 + 担当者(森まこと・森ゆうじ・吉浦マルセロ・城かおり) が利用可
+function canUseSougei() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    const email = getLoggedInEmail();
+    if (!email) return false;
+    return ADMIN_USERS.indexOf(email) >= 0 || STAFF_USERS.indexOf(email) >= 0;
+  } catch (e) { return false; }
+}
+
 function isAllowedUser() {
   try {
     if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
@@ -36746,6 +36756,11 @@ function applyAdminVisibility() {
   const admin = isAdminUser();
   document.querySelectorAll('.admin-only').forEach(el => {
     el.style.display = admin ? '' : 'none';
+  });
+  // 送迎連絡は役員＋担当者が利用可
+  const sougeiOk = canUseSougei();
+  document.querySelectorAll('.sougei-allowed').forEach(el => {
+    el.style.display = sougeiOk ? '' : 'none';
   });
   // 役員セクションは常に閉じた状態で開始（ページロード/画面遷移ごと）
   if (admin) {
@@ -41874,7 +41889,7 @@ async function loadSougeiVehicleOptions() {
 }
 
 async function loadSougeiScreen() {
-  if (typeof isAdminUser === 'function' && !isAdminUser()) { showToast('この機能は役員のみ利用できます', 'error'); switchScreen('searchScreen'); return; }
+  if (typeof canUseSougei === 'function' && !canUseSougei()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
   document.getElementById('sougeiRoster').style.display = 'none';
   document.getElementById('sougeiConfirm').style.display = 'none';
   var list = document.getElementById('sougeiHakenList');
