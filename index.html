@@ -29762,7 +29762,7 @@ function openMaebariEdit(itemId) {
       ${bank ? '<div>' + escHtml(bank) + '</div>' : ''}
       ${branch ? '<div>' + escHtml(branch) + '</div>' : ''}
       ${account ? '<div style="display:flex;align-items:center;gap:6px;margin:4px 0;"><b style="font-size:16px;">' + escHtml(account) + '</b><button onclick="copyAccountNumber()" style="background:var(--primary);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;" id="copyAccBtn">コピー</button></div>' : ''}
-      ${meigi ? '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;"><div style="font-size:18px;font-weight:700;">' + escHtml(meigi) + '</div><button onclick="copyMeigiFirst10()" id="copyMeigiBtn" style="background:var(--primary);color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">左10字 全角コピー</button></div>' : ''}
+      ${meigi ? '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;"><div style="font-size:18px;font-weight:700;">' + escHtml(meigi) + '</div><button onclick="copyMeigiFirst10()" id="copyMeigiBtn" style="background:var(--primary);color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">左12文字 全角コピー</button></div>' : ''}
       ${!bank && !branch && !account ? '<span style="color:var(--warning);">口座情報なし</span>' : ''}
     </div>
 
@@ -29891,8 +29891,8 @@ function copyAccountNumber() {
   }).catch(() => showToast('コピーに失敗しました', 'error'));
 }
 
-// 前払い 口座名義の左10文字を全角カタカナへ変換してクリップボードへコピー
-//   例: "ｺﾊﾞﾔｼ ﾀﾞﾝﾉ ﾙｲｽ ｶﾐﾗ ｱｹﾐ" → 全角化 → "コバヤシ ダンノ ル" (左10文字)
+// 前払い 口座名義の左12文字を全角カタカナへ変換してクリップボードへコピー
+//   例: "ｺﾊﾞﾔｼ ﾀﾞﾝﾉ ﾙｲｽ ｶﾐﾗ ｱｹﾐ" → 全角化 → "コバヤシ ダンノ ルイ" (左12文字)
 //   半角カタカナ + 濁点/半濁点を結合し、英数字も全角化する
 function copyMeigiFirst10() {
   if (!editingMaebariRecord) return;
@@ -29931,14 +29931,14 @@ function copyMeigiFirst10() {
     return String.fromCharCode(c.charCodeAt(0) + 0xFEE0);
   });
 
-  // 2. 左から10文字を抽出
-  var first10 = zenkaku.slice(0, 10);
+  // 2. 左から12文字を抽出
+  var first12 = zenkaku.slice(0, 12);
 
-  navigator.clipboard.writeText(first10).then(function() {
+  navigator.clipboard.writeText(first12).then(function() {
     var btn = document.getElementById('copyMeigiBtn');
     if (btn) {
       var orig = btn.textContent;
-      btn.textContent = '✓ ' + first10;
+      btn.textContent = '✓ ' + first12;
       btn.style.background = 'var(--success)';
       setTimeout(function() {
         btn.textContent = orig;
