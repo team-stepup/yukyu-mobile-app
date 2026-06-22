@@ -37127,8 +37127,15 @@ async function updateStaffPushUI() {
   if (!_pushSupported() && !isIos) { btn.style.display = 'none'; return; }
   btn.style.display = '';
   let subscribed = false;
-  try { if (_pushSupported()) { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); subscribed = !!sub; } } catch (e) {}
+  var _localSub = null;
+  try { if (_pushSupported()) { const reg = await navigator.serviceWorker.ready; _localSub = await reg.pushManager.getSubscription(); subscribed = !!_localSub; } } catch (e) {}
   const on = subscribed && Notification.permission === 'granted';
+  // 自己修復(複数端末対応): ONならこの端末の購読をサーバへ再登録(セッション1回)。
+  // 他端末で再購読してサーバが取りこぼしても、アプリを開くだけでこの端末が復帰する。
+  if (on && _localSub && !window._staffPushResynced) {
+    window._staffPushResynced = true;
+    try { _postStaffSubscription({ subscription: _localSub.toJSON() }); } catch (e) {}
+  }
   btn.classList.toggle('push-off', !on);   // OFF時はベルに赤✕を重ねる
   btn.style.opacity = on ? '1' : '0.9';   // OFF時も薄くしすぎない(ヘッダーで見つけやすく)
   btn.title = on ? '通知ON（タップでオフ）'
