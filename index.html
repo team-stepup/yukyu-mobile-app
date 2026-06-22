@@ -181,6 +181,20 @@ body {
   padding: 0;
 }
 .push-btn:active { background: rgba(255,255,255,0.35); transform: scale(0.95); }
+/* 通知OFF時: ベル🔔に赤い✕を重ねて「通知オフ」を明示 */
+.push-btn.push-off::after {
+  content: '✕';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 17px;
+  font-weight: 900;
+  color: #e53935;
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff;
+  line-height: 1;
+  pointer-events: none;
+}
 .teams-badge-count {
   position: absolute;
   top: -5px;
@@ -37092,6 +37106,7 @@ async function updateStaffPushUI() {
   let subscribed = false;
   try { if (_pushSupported()) { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); subscribed = !!sub; } } catch (e) {}
   const on = subscribed && Notification.permission === 'granted';
+  btn.classList.toggle('push-off', !on);   // OFF時はベルに赤✕を重ねる
   btn.style.opacity = on ? '1' : '0.9';   // OFF時も薄くしすぎない(ヘッダーで見つけやすく)
   btn.title = on ? '通知ON（タップでオフ）'
             : (isIos && !standalone ? 'ホーム画面に追加したアプリから通知をオンにできます' : '通知をオンにする(タップ)');
