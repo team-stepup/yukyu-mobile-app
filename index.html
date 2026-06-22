@@ -3100,6 +3100,15 @@ select.sankyu-edit-input {
 .fee-button-group.collapsed .fee-btn:not(.selected) { display: none; }
 .fee-button-group.collapsed .fee-btn.selected { flex: none; min-width: 140px; }
 .fee-change-btn { margin-top: 8px; background: #fff; border: 1.5px solid var(--border); color: var(--text-light); border-radius: 8px; padding: 7px 16px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+/* 承認画面 タブ (承認待ち / 承認済み) */
+.approve-tabs { display: flex; border-bottom: 1px solid #eee; padding: 0 8px; background: #fff; position: sticky; top: 0; z-index: 3; }
+.approve-tab { flex: 1; background: none; border: none; border-bottom: 3px solid transparent; padding: 12px 4px; font-size: 14px; font-weight: 700; color: #999; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.approve-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.approve-tab .tab-badge { background: #e91e63; color: #fff; font-size: 11px; font-weight: 800; min-width: 18px; height: 18px; line-height: 18px; border-radius: 9px; padding: 0 5px; text-align: center; }
+.approve-tab .tab-badge.zero { display: none; }
+.approve-search { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1.5px solid #d8dcf0; border-radius: 9px; font-size: 14px; }
+.approve-done-card { background: #fff; border: 1px solid #e8e8e8; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.approve-done-card .dc-status { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 8px; }
 .fee-locked-display { padding: 14px 18px; font-size: 18px; font-weight: 700; border-radius: 10px; text-align: center; border: 2px solid var(--border); background: #f5f5f5; }
 .fee-locked-display.fee-locked-0   { color: #555;    border-color: #555;    background: #f5f5f5; }
 .fee-locked-display.fee-locked-275 { color: #1976d2; border-color: #1976d2; background: #e3f2fd; }
@@ -5930,7 +5939,20 @@ select.sankyu-edit-input {
 
   <!-- Screen: 弁当注文 (役員: 当日の注文一覧＋承認/拒否) -->
   <div class="screen" id="bentoScreen">
-    <div id="bentoBody"><div style="text-align:center;padding:24px;color:#888;">読み込み中...</div></div>
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('approveHubScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">🍱 弁当 承認</h2>
+      <button class="refresh-btn" onclick="reloadBentoCurrentTab()" style="margin-left:auto;">&#x21bb; 更新</button>
+    </div>
+    <div class="approve-tabs">
+      <button id="bentoTabPending" class="approve-tab active" onclick="switchBentoTab('pending')">承認待ち <span id="bentoTabPendingBadge" class="tab-badge zero" style="background:#e65100;">0</span></button>
+      <button id="bentoTabApproved" class="approve-tab" onclick="switchBentoTab('approved')">承認済み</button>
+    </div>
+    <div id="bentoApprovedSearchWrap" style="display:none;padding:8px 12px 0;">
+      <input id="bentoApprovedSearch" type="search" class="approve-search" placeholder="🔍 氏名・社員番号・派遣先で検索" oninput="renderBentoApprovedFiltered()">
+    </div>
+    <div id="bentoPendingBody" style="padding:8px 12px;"><div style="text-align:center;padding:24px;color:#888;">読み込み中...</div></div>
+    <div id="bentoApprovedBody" style="padding:8px 12px;display:none;"></div>
   </div>
 
   <!-- Screen: 前払い一覧 -->
@@ -5966,11 +5988,19 @@ select.sankyu-edit-input {
   <!-- Screen: 前払い申請 承認 (employee-portal 経由) -->
   <div class="screen" id="maebariApprovalScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
-      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
-      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">💴 前払い申請 承認待ち</h2>
-      <button class="refresh-btn" onclick="loadMaebariPending()" style="margin-left:auto;">&#x21bb; 更新</button>
+      <button onclick="switchScreen('approveHubScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">💴 前払い 承認</h2>
+      <button class="refresh-btn" onclick="reloadMaebariCurrentTab()" style="margin-left:auto;">&#x21bb; 更新</button>
+    </div>
+    <div class="approve-tabs">
+      <button id="maebariTabPending" class="approve-tab active" onclick="switchMaebariTab('pending')">承認待ち <span id="maebariTabPendingBadge" class="tab-badge zero">0</span></button>
+      <button id="maebariTabApproved" class="approve-tab" onclick="switchMaebariTab('approved')">承認済み</button>
+    </div>
+    <div id="maebariApprovedSearchWrap" style="display:none;padding:8px 12px 0;">
+      <input id="maebariApprovedSearch" type="search" class="approve-search" placeholder="🔍 氏名・社員番号・派遣先で検索" oninput="renderMaebariApprovedFiltered()">
     </div>
     <div id="maebariPendingList" style="padding:8px 12px;"></div>
+    <div id="maebariApprovedList" style="padding:8px 12px;display:none;"></div>
   </div>
 
   <!-- Screen: 承認ハブ (前払い / 弁当 を分けて表示) -->
@@ -36407,6 +36437,7 @@ function openApproveHub() {
 async function openMaebariApprovalScreen() {
   if (!isMaebariApprover()) { showToast('承認権限がありません', 'error'); return; }
   switchScreen('maebariApprovalScreen');
+  switchMaebariTab('pending');   // 既定は承認待ちタブ
   await loadMaebariPending();
 }
 
@@ -36427,6 +36458,8 @@ async function loadMaebariPending() {
     // 担当者は自分の担当分(派遣先別)のみ表示、役員は全件
     const myTanto = _myMaebariTanto();
     if (myTanto !== null) items = items.filter(it => _normName(it[MS.tantou]) === _normName(myTanto));
+    window._pendMaebari = items.length;
+    if (typeof _setMaebariTabBadge === 'function') _setMaebariTabBadge();
 
     // 氏名 & 今月前払い合計を並列で一括取得
     const nameMap = {};
@@ -36545,6 +36578,93 @@ function renderMaebariPending(items, nameMap, totalsMap) {
       + '</div>';
   }).join('');
   listEl.innerHTML = html;
+}
+
+// ====== 前払い 承認画面: 承認待ち / 承認済み タブ ======
+var _maebariTab = 'pending';
+function switchMaebariTab(tab) {
+  _maebariTab = tab;
+  var tp = document.getElementById('maebariTabPending'), ta = document.getElementById('maebariTabApproved');
+  if (tp) tp.classList.toggle('active', tab === 'pending');
+  if (ta) ta.classList.toggle('active', tab === 'approved');
+  var pl = document.getElementById('maebariPendingList'), al = document.getElementById('maebariApprovedList'),
+      sw = document.getElementById('maebariApprovedSearchWrap');
+  if (pl) pl.style.display = (tab === 'pending') ? '' : 'none';
+  if (al) al.style.display = (tab === 'approved') ? '' : 'none';
+  if (sw) sw.style.display = (tab === 'approved') ? '' : 'none';
+  if (tab === 'approved') loadMaebariApproved();
+}
+function reloadMaebariCurrentTab() {
+  if (_maebariTab === 'approved') loadMaebariApproved(); else loadMaebariPending();
+}
+function _setMaebariTabBadge() {
+  var b = document.getElementById('maebariTabPendingBadge');
+  if (!b) return;
+  var n = window._pendMaebari || 0;
+  b.textContent = String(n);
+  b.classList.toggle('zero', n <= 0);
+}
+async function loadMaebariApproved() {
+  var listEl = document.getElementById('maebariApprovedList');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#666;">読み込み中...</div>';
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    const select = encodeURIComponent(['Id', MS.shainNo, MS.amount, MS.kiboubi, MS.hakensaki, MS.tantou, MS.status, MS.approvedAt, MS.approver, 'Created'].join(','));
+    const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items?$filter="
+      + encodeURIComponent("Status eq 'approved'") + "&$select=" + select + "&$orderby=Id desc&$top=200";
+    const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('取得失敗 ' + resp.status);
+    const data = await resp.json();
+    let items = (data.d && data.d.results) || [];
+    const myTanto = _myMaebariTanto();   // 担当者は自分の担当分のみ、役員は全件
+    if (myTanto !== null) items = items.filter(it => _normName(it[MS.tantou]) === _normName(myTanto));
+    // 氏名を一括取得
+    const nameMap = {};
+    const shainNos = Array.from(new Set(items.map(it => it[MS.shainNo]).filter(x => x != null)));
+    if (shainNos.length) {
+      const orF = shainNos.map(n => F.syainNo + " eq " + n).join(' or ');
+      const eUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items?$filter=" + encodeURIComponent(orF)
+        + "&$select=" + encodeURIComponent(['Title', F.syainNo].join(',')) + "&$top=500";
+      try {
+        const r = await fetch(eUrl, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+        if (r.ok) { const d = await r.json(); ((d.d && d.d.results) || []).forEach(e => { if (e[F.syainNo] != null) nameMap[e[F.syainNo]] = e.Title || ''; }); }
+      } catch (e) {}
+    }
+    window._maebariApproved = items.map(it => ({ it: it, name: nameMap[it[MS.shainNo]] || nameMap[String(it[MS.shainNo])] || '' }));
+    renderMaebariApprovedFiltered();
+  } catch (e) {
+    listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _esc(e.message || String(e)) + '</div>';
+  }
+}
+function renderMaebariApprovedFiltered() {
+  var listEl = document.getElementById('maebariApprovedList');
+  if (!listEl) return;
+  var rows = window._maebariApproved || [];
+  var q = ((document.getElementById('maebariApprovedSearch') || {}).value || '').trim().toLowerCase();
+  if (q) rows = rows.filter(function (r) {
+    var it = r.it;
+    return String(it[MS.shainNo] || '').toLowerCase().indexOf(q) >= 0
+      || String(r.name || '').toLowerCase().indexOf(q) >= 0
+      || String(it[MS.hakensaki] || '').toLowerCase().indexOf(q) >= 0
+      || String(it[MS.tantou] || '').toLowerCase().indexOf(q) >= 0;
+  });
+  if (!rows.length) { listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">該当する承認済みの申請はありません</div>'; return; }
+  listEl.innerHTML = rows.map(function (r) {
+    var it = r.it;
+    var done = it[MS.approvedAt] ? new Date(it[MS.approvedAt]) : (it.Created ? new Date(it.Created) : null);
+    var doneStr = done ? (done.getFullYear() + '/' + String(done.getMonth() + 1).padStart(2, '0') + '/' + String(done.getDate()).padStart(2, '0')) : '―';
+    var kibou = it[MS.kiboubi] ? new Date(it[MS.kiboubi]) : null;
+    var kibouStr = kibou ? (kibou.getFullYear() + '/' + String(kibou.getMonth() + 1).padStart(2, '0') + '/' + String(kibou.getDate()).padStart(2, '0')) : '―';
+    return '<div class="approve-done-card">'
+      + '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:1.15em;font-weight:800;color:#1f3864;">¥' + Number(it[MS.amount] || 0).toLocaleString('ja-JP') + '</span>'
+      + '<span class="dc-status" style="background:#e8f5e9;color:#2e7d32;">承認済</span>'
+      + '<span style="margin-left:auto;font-size:11px;color:#888;">承認 ' + doneStr + '</span></div>'
+      + '<div style="font-size:13px;font-weight:700;color:#333;margin-top:3px;">' + _esc(r.name || ('No.' + (it[MS.shainNo] || ''))) + ' <span style="font-weight:400;color:#999;">No.' + _esc(it[MS.shainNo] || '') + '</span></div>'
+      + '<div style="font-size:12px;color:#666;margin-top:1px;">希望日: ' + kibouStr + ' ｜ ' + _esc(it[MS.hakensaki] || '―') + ' ｜ 担当: ' + _esc(it[MS.tantou] || '―') + '</div>'
+      + '</div>';
+  }).join('');
 }
 
 // 承認カードから「今月分前払合計」チップをクリック → 該当社員の前払い詳細画面へ
@@ -42111,55 +42231,99 @@ async function _btFetch(dateIso){
   return await spGetAll(BENTO_LIST_GUID, q);
 }
 
+var _bentoTab = 'pending';
 async function loadBentoScreen(){
   if (typeof canUseBento === 'function' && !canUseBento()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
-  var body = document.getElementById('bentoBody');
-  if (!_bentoDate) _bentoDate = _btTodayIso();
+  switchBentoTab('pending');
+  await loadBentoPending();
+}
+function switchBentoTab(tab){
+  _bentoTab = tab;
+  var tp = document.getElementById('bentoTabPending'), ta = document.getElementById('bentoTabApproved');
+  if (tp) tp.classList.toggle('active', tab === 'pending');
+  if (ta) ta.classList.toggle('active', tab === 'approved');
+  var pb = document.getElementById('bentoPendingBody'), ab = document.getElementById('bentoApprovedBody'),
+      sw = document.getElementById('bentoApprovedSearchWrap');
+  if (pb) pb.style.display = (tab === 'pending') ? '' : 'none';
+  if (ab) ab.style.display = (tab === 'approved') ? '' : 'none';
+  if (sw) sw.style.display = (tab === 'approved') ? '' : 'none';
+  if (tab === 'approved') loadBentoApproved();
+}
+function reloadBentoCurrentTab(){ if (_bentoTab === 'approved') loadBentoApproved(); else loadBentoPending(); }
+
+async function loadBentoPending(){
+  var body = document.getElementById('bentoPendingBody');
+  if (!body) return;
   body.innerHTML = '<div style="text-align:center;padding:24px;color:#888;">読み込み中...</div>';
   try {
-    _btRender(await _btFetch(_bentoDate));
+    _btRenderPending(await _btFetch(_btTodayIso()));
   } catch (e) {
     body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _btEsc(String(e && e.message || e)) + '</div>';
   }
 }
-
-function _btRender(items){
-  var body = document.getElementById('bentoBody');
-  var pend = [], appr = [], rej = [];
+function _btRenderPending(items){
+  var body = document.getElementById('bentoPendingBody');
+  var pend = [], appr = [];
   items.forEach(function(it){ var s = (it.OrderStatus || '').toLowerCase();
-    if (s === 'approved') appr.push(it); else if (s === 'rejected') rej.push(it); else pend.push(it); });
-  var todayIso = _btTodayIso();
-  var html = '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;flex-wrap:wrap;">'
-    + '<span style="font-weight:800;color:var(--primary);">🍱 弁当注文</span>'
-    + '<input type="date" value="' + _btEsc(_bentoDate) + '" max="' + todayIso + '" onchange="_bentoDate=this.value;loadBentoScreen();" style="font-size:14px;padding:5px;">'
-    + '<button class="nyutai-range-btn" style="margin-left:auto;font-size:13px;" onclick="loadBentoScreen()">🔄 更新</button></div>';
-  var sum = 0, cnt = { '①': 0, '④': 0, '⑥': 0 };
-  appr.forEach(function(it){ sum += Number(it.Price || 0); if (cnt[it.MenuNo] != null) cnt[it.MenuNo]++; });
-  html += '<div class="card" style="padding:10px;margin:0 4px 8px;background:#f1f8e9;">'
-    + '<div style="font-weight:800;color:#2e7d32;margin-bottom:4px;">承認済み 集計</div>';
-  if (appr.length) {
-    ['①', '④', '⑥'].forEach(function(m){ if (cnt[m]) html += '<div style="font-size:13px;">' + m + ' ' + _btYen(BENTO_MENU_PRICE[m]) + ' × ' + cnt[m] + '食</div>'; });
-    html += '<div style="text-align:right;font-weight:800;margin-top:4px;">合計 ' + appr.length + '食 ／ ' + _btYen(sum) + '</div>';
-  } else { html += '<div style="font-size:13px;color:#888;">承認済みなし</div>'; }
-  html += '</div>';
-  html += '<div style="font-weight:800;color:#e65100;padding:4px 8px;">承認待ち ' + pend.length + '件</div>';
-  if (!pend.length) html += '<div style="padding:0 8px 8px;color:#888;font-size:13px;">なし</div>';
+    if (s === 'approved') appr.push(it); else if (s === 'rejected') {} else pend.push(it); });
+  window._pendBento = pend.length;
+  var tb = document.getElementById('bentoTabPendingBadge');
+  if (tb) { tb.textContent = String(pend.length); tb.classList.toggle('zero', pend.length <= 0); }
+  var html = '<div style="font-size:12px;color:#888;padding:2px 2px 8px;">本日 ' + _btEsc(_btTodayIso()) + ' の注文</div>';
+  html += '<div style="font-weight:800;color:#e65100;padding:2px 2px 6px;">承認待ち ' + pend.length + '件</div>';
+  if (!pend.length) html += '<div style="padding:0 2px 10px;color:#888;font-size:13px;">承認待ちはありません</div>';
   pend.forEach(function(it){
-    html += '<div class="card" style="padding:10px;margin:0 4px 8px;display:flex;align-items:center;gap:8px;">'
+    html += '<div class="card" style="padding:10px;margin:0 0 8px;display:flex;align-items:center;gap:8px;">'
       + '<div style="flex:1;min-width:90px;"><div style="font-weight:700;">' + _btEsc(it.EmpName || it.ShainNo) + '</div>'
       + '<div style="color:#666;font-size:12px;">' + _btEsc(stripBukaPrefix(it.Hakensaki || '')) + ' ／ ' + _btEsc(it.MenuNo || '') + ' ' + _btYen(it.Price) + '</div></div>'
       + '<button class="nyutai-asti-btn" style="background:#2e7d32;font-size:13px;padding:7px 12px;" onclick="bentoYukyuApprove(' + it.Id + ',\'approve\')">承認</button>'
       + '<button class="nyutai-range-btn" style="background:#e53935;color:#fff;font-size:13px;" onclick="bentoYukyuApprove(' + it.Id + ',\'reject\')">拒否</button></div>';
   });
+  var sum = 0, cnt = { '①': 0, '④': 0, '⑥': 0 };
+  appr.forEach(function(it){ sum += Number(it.Price || 0); if (cnt[it.MenuNo] != null) cnt[it.MenuNo]++; });
+  html += '<div class="card" style="padding:10px;margin:6px 0 0;background:#f1f8e9;"><div style="font-weight:800;color:#2e7d32;margin-bottom:4px;">本日の承認済み 集計</div>';
   if (appr.length) {
-    html += '<div style="font-weight:800;color:#2e7d32;padding:8px 8px 2px;">承認済み ' + appr.length + '件</div>';
-    appr.forEach(function(it){ html += '<div style="display:flex;justify-content:space-between;padding:5px 10px;border-bottom:1px solid #eee;font-size:13px;"><span>' + _btEsc(it.EmpName || it.ShainNo) + '</span><span>' + _btEsc(it.MenuNo || '') + ' ' + _btYen(it.Price) + '</span></div>'; });
-  }
-  if (rej.length) {
-    html += '<div style="font-weight:800;color:#b71c1c;padding:8px 8px 2px;">拒否 ' + rej.length + '件</div>';
-    rej.forEach(function(it){ html += '<div style="display:flex;justify-content:space-between;padding:5px 10px;border-bottom:1px solid #eee;font-size:13px;color:#999;"><span>' + _btEsc(it.EmpName || it.ShainNo) + '</span><span>' + _btEsc(it.MenuNo || '') + '</span></div>'; });
-  }
+    ['①', '④', '⑥'].forEach(function(m){ if (cnt[m]) html += '<div style="font-size:13px;">' + m + ' ' + _btYen(BENTO_MENU_PRICE[m]) + ' × ' + cnt[m] + '食</div>'; });
+    html += '<div style="text-align:right;font-weight:800;margin-top:4px;">合計 ' + appr.length + '食 ／ ' + _btYen(sum) + '</div>';
+  } else { html += '<div style="font-size:13px;color:#888;">承認済みなし</div>'; }
+  html += '</div>';
   body.innerHTML = html;
+}
+
+async function _btFetchApproved(){
+  var q = "$select=Id,OrderDate,ShainNo,EmpName,Hakensaki,MenuNo,Price,OrderStatus,ApprovedAt&$filter="
+    + encodeURIComponent("OrderStatus eq 'approved'") + "&$orderby=Id desc&$top=300";
+  return await spGetAll(BENTO_LIST_GUID, q);
+}
+async function loadBentoApproved(){
+  var body = document.getElementById('bentoApprovedBody');
+  if (!body) return;
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:#666;">読み込み中...</div>';
+  try { window._bentoApproved = await _btFetchApproved(); renderBentoApprovedFiltered(); }
+  catch (e) { body.innerHTML = '<div style="text-align:center;padding:20px;color:#c62828;">読み込み失敗: ' + _btEsc(String(e && e.message || e)) + '</div>'; }
+}
+function renderBentoApprovedFiltered(){
+  var body = document.getElementById('bentoApprovedBody');
+  if (!body) return;
+  var rows = window._bentoApproved || [];
+  var q = ((document.getElementById('bentoApprovedSearch') || {}).value || '').trim().toLowerCase();
+  if (q) rows = rows.filter(function(it){
+    return String(it.ShainNo || '').toLowerCase().indexOf(q) >= 0
+      || String(it.EmpName || '').toLowerCase().indexOf(q) >= 0
+      || String(it.Hakensaki || '').toLowerCase().indexOf(q) >= 0;
+  });
+  if (!rows.length) { body.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">該当する承認済みの注文はありません</div>'; return; }
+  body.innerHTML = rows.map(function(it){
+    var od = it.OrderDate ? new Date(it.OrderDate) : null;
+    var odStr = od && !isNaN(od.getTime()) ? new Date(od.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10) : '―';
+    return '<div class="approve-done-card">'
+      + '<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:800;color:#1f3864;">' + _btEsc(it.MenuNo || '') + ' ' + _btYen(it.Price) + '</span>'
+      + '<span class="dc-status" style="background:#e8f5e9;color:#2e7d32;">承認済</span>'
+      + '<span style="margin-left:auto;font-size:11px;color:#888;">' + odStr + '</span></div>'
+      + '<div style="font-size:13px;font-weight:700;color:#333;margin-top:2px;">' + _btEsc(it.EmpName || ('No.' + (it.ShainNo || ''))) + ' <span style="font-weight:400;color:#999;">No.' + _btEsc(it.ShainNo || '') + '</span></div>'
+      + '<div style="font-size:12px;color:#666;">' + _btEsc(stripBukaPrefix(it.Hakensaki || '―')) + '</div>'
+      + '</div>';
+  }).join('');
 }
 
 async function bentoYukyuApprove(itemId, action){
