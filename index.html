@@ -5331,7 +5331,7 @@ select.sankyu-edit-input {
         <span id="maebariBadgeCount" class="ql-badge" style="background:#f57c00;display:none;top:4px;right:4px;"></span>
         <div id="maebariBadgeTotal" class="maebari-amt-chip" style="display:none;top:22px;right:4px;"></div>
       </button>
-      <button class="quick-link-btn maebari-approver-only" onclick="openMaebariApprovalScreen()" style="position:relative;display:none;">
+      <button class="quick-link-btn maebari-approver-only" onclick="openApproveHub()" style="position:relative;display:none;">
         <span class="ql-icon">✅</span>
         <span class="ql-text">承認</span>
         <span id="maebariApprovalBadge" class="ql-badge" title="前払い 承認待ち" style="background:#e91e63;display:none;top:4px;right:4px;"></span>
@@ -5971,6 +5971,29 @@ select.sankyu-edit-input {
       <button class="refresh-btn" onclick="loadMaebariPending()" style="margin-left:auto;">&#x21bb; 更新</button>
     </div>
     <div id="maebariPendingList" style="padding:8px 12px;"></div>
+  </div>
+
+  <!-- Screen: 承認ハブ (前払い / 弁当 を分けて表示) -->
+  <div class="screen" id="approveHubScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">✅ 承認</h2>
+    </div>
+    <div style="padding:16px 14px;display:flex;flex-direction:column;gap:14px;">
+      <button onclick="openMaebariApprovalScreen()" style="display:flex;align-items:center;gap:12px;width:100%;background:#fff;border:1.5px solid #f5b6cd;border-radius:14px;padding:18px 16px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <span style="font-size:30px;">💴</span>
+        <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#c2185b;">前払い 承認</span>
+        <span id="hubMaebariCount" style="min-width:54px;text-align:center;background:#fce4ec;color:#c2185b;border-radius:20px;padding:6px 12px;font-size:14px;font-weight:800;">0件</span>
+        <span style="font-size:20px;color:#bbb;">›</span>
+      </button>
+      <button onclick="switchScreen('bentoScreen')" style="display:flex;align-items:center;gap:12px;width:100%;background:#fff;border:1.5px solid #ffcc80;border-radius:14px;padding:18px 16px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <span style="font-size:30px;">🍱</span>
+        <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#e65100;">弁当 承認</span>
+        <span id="hubBentoCount" style="min-width:54px;text-align:center;background:#fff3e0;color:#e65100;border-radius:20px;padding:6px 12px;font-size:14px;font-weight:800;">0件</span>
+        <span style="font-size:20px;color:#bbb;">›</span>
+      </button>
+      <div style="font-size:11px;color:var(--text-light);text-align:center;margin-top:4px;">各ボタンを開くと申請の詳細・承認/却下ができます</div>
+    </div>
   </div>
 
   <!-- Screen: 有給確認一覧 -->
@@ -7255,7 +7278,7 @@ function switchScreen(screenId, skipHistory) {
   }
   var _mainContent = document.querySelector('.main-content');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', approveHubScreen: '承認', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -36358,6 +36381,27 @@ function refreshMaebariApproverUI() {
   });
 }
 
+// 承認ハブ: 前払い / 弁当 を分けて件数バッジ付きで表示
+function openApproveHub() {
+  if (!isMaebariApprover() && !(typeof canUseBento === 'function' && canUseBento())) {
+    showToast('承認権限がありません', 'error'); return;
+  }
+  switchScreen('approveHubScreen');
+  function paint() {
+    var m = window._pendMaebari || 0, b = window._pendBento || 0;
+    var em = document.getElementById('hubMaebariCount');
+    if (em) { em.textContent = m + '件'; em.style.opacity = m > 0 ? '1' : '0.45'; }
+    var eb = document.getElementById('hubBentoCount');
+    if (eb) { eb.textContent = b + '件'; eb.style.opacity = b > 0 ? '1' : '0.45'; }
+  }
+  paint();
+  // 最新件数を取得して再描画
+  Promise.allSettled([
+    (typeof isMaebariApprover === 'function' && isMaebariApprover()) ? updateMaebariApprovalBadge() : Promise.resolve(),
+    (typeof canUseBento === 'function' && canUseBento()) ? updateBentoAdminBadge() : Promise.resolve()
+  ]).then(paint);
+}
+
 async function openMaebariApprovalScreen() {
   if (!isMaebariApprover()) { showToast('承認権限がありません', 'error'); return; }
   switchScreen('maebariApprovalScreen');
@@ -42103,12 +42147,18 @@ function _btRender(items){
 }
 
 async function bentoYukyuApprove(itemId, action){
-  if (action === 'reject' && !confirm('この注文を拒否しますか？')) return;
+  var reason = '';
+  if (action === 'reject') {
+    reason = prompt('拒否の理由を入力してください（本人のポータルに表示されます）:');
+    if (reason === null) return;                       // キャンセル
+    if (!reason.trim()) { alert('理由は必須です。'); return; }
+    reason = reason.trim();
+  }
   try {
     var token = await getToken();
     var entityType = await getListItemEntityType(BENTO_LIST_GUID);
     var body = { '__metadata': { type: entityType }, OrderStatus: (action === 'reject' ? 'rejected' : 'approved'),
-      ApprovedBy: '役員', ApprovedAt: new Date().toISOString() };
+      ApprovedBy: '役員', ApprovedAt: new Date().toISOString(), RejectReason: (action === 'reject' ? reason : '') };
     var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + BENTO_LIST_GUID + "')/items(" + itemId + ")", {
       method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
         'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
