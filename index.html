@@ -5993,6 +5993,8 @@ select.sankyu-edit-input {
         <span style="font-size:20px;color:#bbb;">›</span>
       </button>
       <div style="font-size:11px;color:var(--text-light);text-align:center;margin-top:4px;">各ボタンを開くと申請の詳細・承認/却下ができます</div>
+      <button onclick="sendTestPush()" style="margin-top:10px;background:#eef1f8;color:#3a4a6b;border:1px solid #cfd8e8;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">🔔 テスト通知を送る（自分のスマホへ）</button>
+      <div style="font-size:10.5px;color:var(--text-light);text-align:center;">先に「🔔通知をオン」にしてから押してください</div>
     </div>
   </div>
 
@@ -36936,6 +36938,20 @@ async function _postStaffSubscription(bodyObj) {
   if (!resp.ok) throw new Error('購読登録失敗 HTTP ' + resp.status);
   return resp.json();
 }
+// 承認者が自分のスマホへ前払い/弁当のテスト通知を送る
+async function sendTestPush() {
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    const resp = await fetch(FUNC_OCR_BASE + '/push/test', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: '{}'
+    });
+    const data = await resp.json().catch(function () { return {}; });
+    if (resp.ok && data.ok) showToast('テスト通知を送信しました。ロック画面/通知センターをご確認ください', 'success');
+    else showToast('テスト通知: ' + (data.message || ('HTTP ' + resp.status)), 'error');
+  } catch (e) { showToast('テスト通知エラー: ' + (e.message || e), 'error'); }
+}
+
 async function toggleStaffPush() {
   if (!_pushSupported()) { showToast('この端末は通知に対応していません', 'error'); return; }
   const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
