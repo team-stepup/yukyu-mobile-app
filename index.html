@@ -5979,6 +5979,29 @@ select.sankyu-edit-input {
     <div id="bentoApprovedSearchWrap" style="display:none;padding:8px 12px 0;">
       <input id="bentoApprovedSearch" type="search" class="approve-search" placeholder="🔍 氏名・社員番号・派遣先で検索" oninput="renderBentoApprovedFiltered()">
     </div>
+    <!-- 代理注文: 従業員がポータルから注文できない時に、担当者・役員が代わりに注文するバックアップ -->
+    <div id="bentoProxyWrap" style="padding:8px 12px 0;">
+      <button id="bentoProxyToggle" onclick="toggleBentoProxy()" style="width:100%;background:#fff3e0;color:#e65100;border:1.5px dashed #ffb74d;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">＋ 代理で弁当を注文（従業員が申請できない時用）</button>
+      <div id="bentoProxyForm" style="display:none;background:#fff;border:1.5px solid #ffcc80;border-radius:12px;padding:12px;margin-top:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">社員番号を入れて「確認」を押すと氏名・派遣先が表示されます</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="bentoProxyShain" type="number" inputmode="numeric" placeholder="社員番号" style="flex:1;border:1px solid #ccc;border-radius:8px;padding:8px;font-size:14px;">
+          <button onclick="bentoProxyLookup()" style="background:#5e35b1;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;">確認</button>
+        </div>
+        <div id="bentoProxyEmp" style="font-size:13px;margin:8px 0;color:#333;min-height:18px;"></div>
+        <div style="font-size:12px;color:#888;margin-bottom:4px;">メニュー</div>
+        <div id="bentoProxyMenu" style="display:flex;gap:6px;margin-bottom:10px;">
+          <button type="button" class="bento-menu-pick" data-menu="①" onclick="bentoProxyPickMenu('①')" style="flex:1;border:1.5px solid #ddd;border-radius:8px;padding:10px 4px;font-size:13px;font-weight:700;background:#fff;color:#333;cursor:pointer;">① ¥315</button>
+          <button type="button" class="bento-menu-pick" data-menu="④" onclick="bentoProxyPickMenu('④')" style="flex:1;border:1.5px solid #ddd;border-radius:8px;padding:10px 4px;font-size:13px;font-weight:700;background:#fff;color:#333;cursor:pointer;">④ ¥355</button>
+          <button type="button" class="bento-menu-pick" data-menu="⑥" onclick="bentoProxyPickMenu('⑥')" style="flex:1;border:1.5px solid #ddd;border-radius:8px;padding:10px 4px;font-size:13px;font-weight:700;background:#fff;color:#333;cursor:pointer;">⑥ ¥460</button>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button id="bentoProxySubmitBtn" onclick="bentoProxySubmit()" style="flex:1;background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:800;cursor:pointer;">この内容で注文する</button>
+          <button onclick="toggleBentoProxy(false)" style="background:#eee;color:#555;border:none;border-radius:8px;padding:11px 14px;font-size:13px;cursor:pointer;">閉じる</button>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:6px;">作成後は「承認待ち」に入ります。承認するとその日の集計に含まれます（当日9:00の締切に注意）。</div>
+      </div>
+    </div>
     <div id="bentoPendingBody" style="padding:8px 12px;"><div style="text-align:center;padding:24px;color:#888;">読み込み中...</div></div>
     <div id="bentoApprovedBody" style="padding:8px 12px;display:none;"></div>
   </div>
@@ -42312,6 +42335,9 @@ function switchBentoTab(tab){
   if (pb) pb.style.display = (tab === 'pending') ? '' : 'none';
   if (ab) ab.style.display = (tab === 'approved') ? '' : 'none';
   if (sw) sw.style.display = (tab === 'approved') ? '' : 'none';
+  var pw = document.getElementById('bentoProxyWrap');   // 代理注文は承認待ちタブのみ表示
+  if (pw) pw.style.display = (tab === 'pending') ? '' : 'none';
+  if (tab !== 'pending') toggleBentoProxy(false);
   if (tab === 'approved') loadBentoApproved();
 }
 function reloadBentoCurrentTab(){ if (_bentoTab === 'approved') loadBentoApproved(); else loadBentoPending(); }
@@ -42413,6 +42439,98 @@ async function bentoYukyuApprove(itemId, action){
     loadBentoScreen();
     updateBentoAdminBadge();
   } catch (e) { showToast('更新失敗: ' + (e.message || e), 'error'); }
+}
+
+// ====== 代理注文 (担当者・役員が従業員の代わりに弁当を注文するバックアップ) ======
+function toggleBentoProxy(force){
+  var form = document.getElementById('bentoProxyForm');
+  if (!form) return;
+  var open = (typeof force === 'boolean') ? force : (form.style.display === 'none');
+  form.style.display = open ? '' : 'none';
+  if (open) {                               // 開くたびにリセット
+    var inp = document.getElementById('bentoProxyShain'); if (inp) inp.value = '';
+    var box = document.getElementById('bentoProxyEmp'); if (box) box.innerHTML = '';
+    window._bentoProxyEmp = null; window._bentoProxyMenu = null;
+    bentoProxyPickMenu('');
+    if (inp) try { inp.focus(); } catch (e) {}
+  }
+}
+function bentoProxyPickMenu(m){
+  window._bentoProxyMenu = m;
+  document.querySelectorAll('#bentoProxyMenu .bento-menu-pick').forEach(function(b){
+    var on = b.getAttribute('data-menu') === m;
+    b.style.background = on ? '#e65100' : '#fff';
+    b.style.color = on ? '#fff' : '#333';
+    b.style.borderColor = on ? '#e65100' : '#ddd';
+  });
+}
+async function bentoProxyLookup(){
+  var raw = (document.getElementById('bentoProxyShain') || {}).value;
+  var shain = String(raw || '').trim().replace(/\.0+$/, '');
+  var box = document.getElementById('bentoProxyEmp');
+  window._bentoProxyEmp = null;
+  if (!shain) { if (box) box.innerHTML = '<span style="color:#c62828;">社員番号を入力してください</span>'; return; }
+  if (box) box.textContent = '検索中...';
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items?$filter="
+      + encodeURIComponent(F.syainNo + " eq " + shain) + "&$top=30";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    var rows = (data.d && data.d.results) || [];
+    if (!rows.length) { if (box) box.innerHTML = '<span style="color:#c62828;">該当する社員が見つかりません</span>'; return; }
+    rows.sort(function(a, b){ return (b.Id || 0) - (a.Id || 0); });               // 念のため新しいId優先
+    var active = rows.filter(function(e){ return !(e[F.hakenTaisha] || e[F.yukyuTaisha]); });
+    var emp = active.length ? active[0] : rows[0];                                 // 在職を優先、無ければ最新
+    var name = emp.Title || '';
+    var hk = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(emp)) : getBukaValue(emp);
+    var resigned = !active.length;
+    window._bentoProxyEmp = { shainNo: shain, name: name, hakensaki: hk };
+    var warn = (/ユーシン|ﾕｰｼﾝ|委託/.test(hk)) ? '' : '<div style="color:#e65100;font-size:11px;margin-top:2px;">※派遣先が弁当対象(ユーシン/委託管理)でない可能性があります</div>';
+    if (resigned) warn += '<div style="color:#c62828;font-size:11px;margin-top:2px;">※退職フラグありの可能性。社員番号をご確認ください</div>';
+    if (box) box.innerHTML = '<b>' + _btEsc(name) + '</b>　<span style="color:#666;">No.' + _btEsc(shain) + '</span>'
+      + '<br><span style="color:#666;font-size:12px;">派遣先: ' + _btEsc(hk || '(不明)') + '</span>' + warn;
+  } catch (e) { if (box) box.innerHTML = '<span style="color:#c62828;">検索失敗: ' + _btEsc(String(e && e.message || e)) + '</span>'; }
+}
+async function bentoProxySubmit(){
+  var emp = window._bentoProxyEmp, menu = window._bentoProxyMenu;
+  if (!emp) { showToast('先に社員番号を「確認」してください', 'error'); return; }
+  if (!menu || !(menu in BENTO_MENU_PRICE)) { showToast('メニューを選択してください', 'error'); return; }
+  var btn = document.getElementById('bentoProxySubmitBtn');
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '送信中...'; }
+    var today = _btTodayIso();
+    var todays = await _btFetch(today);                                            // 本日の同一社員 重複チェック
+    var dup = (todays || []).find(function(it){ return String(it.ShainNo) === String(emp.shainNo) && (it.OrderStatus || '').toLowerCase() !== 'rejected'; });
+    if (dup && !confirm(emp.name + ' さんは本日すでに注文があります（' + (dup.MenuNo || '') + '）。重ねて注文しますか？')) return;
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var entityType = await getListItemEntityType(BENTO_LIST_GUID);
+    var rec = {
+      '__metadata': { type: entityType },
+      Title: today + ' ' + emp.shainNo,
+      OrderDate: today.replace(/-/g, '/'),                                          // ポータルと同じ slash 形式
+      ShainNo: String(emp.shainNo),
+      EmpName: emp.name,
+      Hakensaki: emp.hakensaki || '',
+      MenuNo: menu,
+      Price: String(BENTO_MENU_PRICE[menu]),
+      OrderStatus: 'pending',
+    };
+    var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + BENTO_LIST_GUID + "')/items", {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'Content-Type': 'application/json;odata=verbose' },
+      body: JSON.stringify(rec) });
+    if (!resp.ok) { var t = await resp.text(); throw new Error('HTTP ' + resp.status + ' ' + t.slice(0, 120)); }
+    showToast(emp.name + ' さんの弁当注文（' + menu + ' ' + _btYen(BENTO_MENU_PRICE[menu]) + '）を作成しました。承認待ちに追加されました', 'success');
+    toggleBentoProxy(false);
+    switchBentoTab('pending');
+    loadBentoPending();
+    updateBentoAdminBadge();
+  } catch (e) { showToast('注文作成に失敗: ' + (e.message || e), 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'この内容で注文する'; } }
 }
 
 async function updateBentoAdminBadge(){
