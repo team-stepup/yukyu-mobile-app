@@ -5300,6 +5300,7 @@ select.sankyu-edit-input {
     💬
     <span class="teams-badge-count" id="teamsBadge"></span>
   </button>
+  <button class="teams-btn approve-notify" id="staffPushHeaderBtn" onclick="toggleStaffPush()" title="通知をオンにする" style="display:none;">🔔</button>
   <span class="header-version" id="versionDisplay" onclick="onVersionClick()"><span id="versionText">…</span></span>
   <button class="header-logout-sm" id="authBtn" onclick="handleAuth()">ログイン</button>
 </header>
@@ -5345,10 +5346,6 @@ select.sankyu-edit-input {
         <span class="ql-text">承認</span>
         <span id="maebariApprovalBadge" class="ql-badge" title="前払い 承認待ち" style="background:#e91e63;display:none;top:3px;right:3px;font-size:9px;padding:0 5px;border-radius:8px;"></span>
         <span id="approveBentoBadge" class="ql-badge" title="弁当 承認待ち" style="background:#e65100;display:none;top:23px;right:3px;font-size:9px;padding:0 5px;border-radius:8px;"></span>
-      </button>
-      <button class="quick-link-btn approve-notify" onclick="toggleStaffPush()" style="position:relative;display:none;">
-        <span class="ql-icon">🔔</span>
-        <span class="ql-text" id="staffPushLabel">通知をオン</span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
@@ -37054,12 +37051,14 @@ async function registerYukyuSW() {
   try { _yukyuSWReg = await navigator.serviceWorker.register('service-worker.js'); } catch (e) { console.warn('SW register error:', e); }
 }
 async function updateStaffPushUI() {
-  const label = document.getElementById('staffPushLabel');
-  if (!label) return;
-  if (!_pushSupported()) { label.textContent = '通知 非対応'; return; }
+  const btn = document.getElementById('staffPushHeaderBtn');
+  if (!btn) return;
+  if (!_pushSupported()) { btn.style.display = 'none'; return; }
   let subscribed = false;
   try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); subscribed = !!sub; } catch (e) {}
-  label.textContent = (subscribed && Notification.permission === 'granted') ? '通知ON' : '通知をオン';
+  const on = subscribed && Notification.permission === 'granted';
+  btn.style.opacity = on ? '1' : '0.5';
+  btn.title = on ? '通知ON（タップでオフ）' : '通知をオンにする';
 }
 async function _postStaffSubscription(bodyObj) {
   const token = await getToken();
