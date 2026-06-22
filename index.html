@@ -5333,8 +5333,9 @@ select.sankyu-edit-input {
       </button>
       <button class="quick-link-btn maebari-approver-only" onclick="openMaebariApprovalScreen()" style="position:relative;display:none;">
         <span class="ql-icon">✅</span>
-        <span class="ql-text">前払承認</span>
-        <span id="maebariApprovalBadge" class="ql-badge" style="background:#e91e63;display:none;top:4px;right:4px;"></span>
+        <span class="ql-text">承認</span>
+        <span id="maebariApprovalBadge" class="ql-badge" title="前払い 承認待ち" style="background:#e91e63;display:none;top:4px;right:4px;"></span>
+        <span id="approveBentoBadge" class="ql-badge" title="弁当 承認待ち" style="background:#e65100;display:none;top:4px;right:28px;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
@@ -36694,13 +36695,26 @@ async function updateMaebariApprovalBadge() {
     if (!resp.ok) return;
     const data = await resp.json();
     const count = ((data.d && data.d.results) || []).length;
+    window._pendMaebari = count;
     if (count > 0) {
       badge.textContent = String(count);
       badge.style.display = '';
     } else {
       badge.style.display = 'none';
     }
+    _updateApproveAppBadge();
   } catch (e) { /* silent */ }
+}
+
+// アプリアイコン(PWA)バッジ = 前払い承認待ち + 弁当承認待ち の合計
+function _updateApproveAppBadge() {
+  try {
+    var total = (window._pendMaebari || 0) + (window._pendBento || 0);
+    if (navigator.setAppBadge) {
+      if (total > 0) navigator.setAppBadge(total);
+      else if (navigator.clearAppBadge) navigator.clearAppBadge();
+    }
+  } catch (e) { /* badging未対応端末は無視 */ }
 }
 
 // ===== 👑 雇用保険資格喪失届CSV 作成依頼 (役員のみ) =====
@@ -42018,8 +42032,13 @@ async function updateBentoAdminBadge(){
     if (typeof canUseBento === 'function' && !canUseBento()) return;
     var items = await _btFetch(_btTodayIso());
     var n = items.filter(function(it){ return ((it.OrderStatus || '').toLowerCase() === 'pending') || !it.OrderStatus; }).length;
+    window._pendBento = n;
     var b = document.getElementById('bentoAdminBadge');
     if (b) { if (n > 0) { b.textContent = String(n); b.style.display = ''; } else b.style.display = 'none'; }
+    // 承認ボタンの弁当バッジ
+    var b2 = document.getElementById('approveBentoBadge');
+    if (b2) { if (n > 0) { b2.textContent = String(n); b2.style.display = ''; } else b2.style.display = 'none'; }
+    if (typeof _updateApproveAppBadge === 'function') _updateApproveAppBadge();
   } catch (e) { /* silent */ }
 }
 
