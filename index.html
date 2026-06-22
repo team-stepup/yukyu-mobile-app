@@ -6605,21 +6605,34 @@ async function clearCacheAndReload(reloadUrl) {
 // during normal app operation. Use the header ⟳ button instead.
 // ============================================================
 
+// 承認バッジ(前払い/弁当)を在席中でも最新化する共通ヘルパー。
+// ログイン前/権限なしは各関数が内部で早期return するので呼び出し自体は無害。
+function refreshApprovalBadges() {
+  try { if (typeof updateMaebariApprovalBadge === 'function') updateMaebariApprovalBadge(); } catch (e) {}
+  try { if (typeof updateBentoAdminBadge === 'function') updateBentoAdminBadge(); } catch (e) {}
+}
+
 // Check when user returns to the app (tab switch, phone unlock)
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible') {
     checkForUpdate();
     if (typeof updateTeamsBadge === 'function') updateTeamsBadge();
+    refreshApprovalBadges();   // 復帰時に承認待ち件数を取り直す
   }
 });
 window.addEventListener('focus', function() {
   checkForUpdate();
   if (typeof updateTeamsBadge === 'function') updateTeamsBadge();
+  refreshApprovalBadges();
 });
 // Initial baseline fetch after 3 seconds
 setTimeout(checkForUpdate, 3000);
 // Also poll every 3 minutes as fallback
 setInterval(checkForUpdate, 3 * 60 * 1000);
+// 承認待ちバッジは在席中でも 90秒ごとに自動更新(新しい申請が来たら開いたままでも気づける)
+if (!window._approveBadgeInterval) {
+  window._approveBadgeInterval = setInterval(refreshApprovalBadges, 90 * 1000);
+}
 
 // ============================================================
 // 認証状態インジケーター / セッション切れリカバリー
