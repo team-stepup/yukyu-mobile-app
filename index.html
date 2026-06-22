@@ -37062,12 +37062,18 @@ async function registerYukyuSW() {
 async function updateStaffPushUI() {
   const btn = document.getElementById('staffPushHeaderBtn');
   if (!btn) return;
-  if (!_pushSupported()) { btn.style.display = 'none'; return; }
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  // iPhoneのSafariタブは PushManager が無く _pushSupported()=false になるが、
+  // 「ホーム画面に追加」を促すためボタンは残す。完全非対応(非iOSでpush無し)のみ隠す。
+  if (!_pushSupported() && !isIos) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
   let subscribed = false;
-  try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); subscribed = !!sub; } catch (e) {}
+  try { if (_pushSupported()) { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); subscribed = !!sub; } } catch (e) {}
   const on = subscribed && Notification.permission === 'granted';
   btn.style.opacity = on ? '1' : '0.9';   // OFF時も薄くしすぎない(ヘッダーで見つけやすく)
-  btn.title = on ? '通知ON（タップでオフ）' : '通知をオンにする(タップ)';
+  btn.title = on ? '通知ON（タップでオフ）'
+            : (isIos && !standalone ? 'ホーム画面に追加したアプリから通知をオンにできます' : '通知をオンにする(タップ)');
 }
 async function _postStaffSubscription(bodyObj) {
   const token = await getToken();
@@ -37095,10 +37101,11 @@ async function sendTestPush() {
 }
 
 async function toggleStaffPush() {
-  if (!_pushSupported()) { showToast('この端末は通知に対応していません', 'error'); return; }
   const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
   const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  if (isIos && !standalone) { showToast('iPhoneは「ホーム画面に追加」したアプリから開くと通知をオンにできます', 'info'); return; }
+  // iPhone はホーム画面に追加したPWAでないと通知不可。Safariタブでは _pushSupported()=false なので先に案内。
+  if (isIos && !standalone) { showToast('iPhoneは「ホーム画面に追加」したアプリから開くと通知をオンにできます。共有→ホーム画面に追加→そのアプリで開いてください', 'info'); return; }
+  if (!_pushSupported()) { showToast('この端末は通知に対応していません', 'error'); return; }
   try {
     if (!_yukyuSWReg) await registerYukyuSW();
     const reg = await navigator.serviceWorker.ready;
