@@ -5337,6 +5337,10 @@ select.sankyu-edit-input {
         <span id="maebariApprovalBadge" class="ql-badge" title="前払い 承認待ち" style="background:#e91e63;display:none;top:4px;right:4px;"></span>
         <span id="approveBentoBadge" class="ql-badge" title="弁当 承認待ち" style="background:#e65100;display:none;top:4px;right:28px;"></span>
       </button>
+      <button class="quick-link-btn approve-notify" onclick="toggleStaffPush()" style="position:relative;display:none;">
+        <span class="ql-icon">🔔</span>
+        <span class="ql-text" id="staffPushLabel">通知をオン</span>
+      </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
         <span class="ql-text">有給確認</span>
@@ -6673,6 +6677,7 @@ async function onLoginSuccess(resp) {
   applyAdminVisibility();
   loadHomeBadges();
   loadSharedConfig();
+  try { registerYukyuSW(); } catch (e) {}   // Push通知用 Service Worker 登録
   // Teams 未読バッジ初期化
   updateTeamsBadge();
   if (!window._teamsBadgeInterval) {
@@ -36839,11 +36844,76 @@ function applyAdminVisibility() {
   document.querySelectorAll('.bento-allowed').forEach(el => {
     el.style.display = bentoOk ? '' : 'none';
   });
+  // 通知ボタンは承認者(前払い担当者 or 弁当承認者)に表示
+  const approveOk = _canApprove();
+  document.querySelectorAll('.approve-notify').forEach(el => {
+    el.style.display = approveOk ? '' : 'none';
+  });
+  if (approveOk) { try { updateStaffPushUI(); } catch (e) {} }
   // 役員セクションは常に閉じた状態で開始（ページロード/画面遷移ごと）
   if (admin) {
     var sec = document.getElementById('adminSection');
     if (sec) sec.classList.add('collapsed');
   }
+}
+
+// ====== Web Push (承認者: 前払い/弁当の承認待ちをロック画面通知) ======
+const YUKYU_VAPID_PUBLIC_KEY = 'BNWnDxndU3ynEbmglh0asjSc3o0_PIS0M_KF9vPdzEynkVe4eKNqB1-aIOCncsx04n7ymJkRMb2TrVwZyUnh8mU';
+function _urlB64ToUint8(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64); const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+function _pushSupported() { return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window); }
+function _canApprove() { return (typeof isMaebariApprover === 'function' && isMaebariApprover()) || (typeof canUseBento === 'function' && canUseBento()); }
+let _yukyuSWReg = null;
+async function registerYukyuSW() {
+  if (!('serviceWorker' in navigator)) return;
+  try { _yukyuSWReg = await navigator.serviceWorker.register('service-worker.js'); } catch (e) { console.warn('SW register error:', e); }
+}
+async function updateStaffPushUI() {
+  const label = document.getElementById('staffPushLabel');
+  if (!label) return;
+  if (!_pushSupported()) { label.textContent = '通知 非対応'; return; }
+  let subscribed = false;
+  try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); subscribed = !!sub; } catch (e) {}
+  label.textContent = (subscribed && Notification.permission === 'granted') ? '通知ON' : '通知をオン';
+}
+async function _postStaffSubscription(bodyObj) {
+  const token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  const resp = await fetch(FUNC_OCR_BASE + '/push/subscribe-staff', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(bodyObj)
+  });
+  if (!resp.ok) throw new Error('購読登録失敗 HTTP ' + resp.status);
+  return resp.json();
+}
+async function toggleStaffPush() {
+  if (!_pushSupported()) { showToast('この端末は通知に対応していません', 'error'); return; }
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isIos && !standalone) { showToast('iPhoneは「ホーム画面に追加」したアプリから開くと通知をオンにできます', 'info'); return; }
+  try {
+    if (!_yukyuSWReg) await registerYukyuSW();
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    if (existing && Notification.permission === 'granted') {
+      try { await existing.unsubscribe(); await _postStaffSubscription({ unsubscribe: true }); } catch (e) {}
+      showToast('通知をオフにしました', 'info'); updateStaffPushUI(); return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { showToast('通知が許可されませんでした', 'warn'); updateStaffPushUI(); return; }
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _urlB64ToUint8(YUKYU_VAPID_PUBLIC_KEY) });
+    await _postStaffSubscription({ subscription: sub.toJSON() });
+    showToast('通知をオンにしました。前払い・弁当の申請が来るとお知らせします', 'success');
+  } catch (e) {
+    showToast('通知設定に失敗: ' + (e.message || e), 'error');
+  }
+  updateStaffPushUI();
 }
 
 function toggleAdminSection() {
