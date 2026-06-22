@@ -5973,12 +5973,12 @@ select.sankyu-edit-input {
         <label style="margin:0;">前払日</label>
         <button type="button" onclick="shiftMaebariListDate(-7)" title="前週の金曜" style="background:#eef2ff;color:#3949ab;border:1px solid #c5cae9;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;line-height:1;">← 前週</button>
         <div class="date-display-wrap" style="flex:1;">
-          <div onclick="try{document.getElementById('maebariListDate').showPicker()}catch(e){}" style="display:flex;align-items:center;justify-content:center;gap:6px;border:1.5px solid #c5cae9;border-radius:8px;background:#fff;padding:6px 8px;cursor:pointer;">
+          <div onclick="openMaebariListPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;border:1.5px solid #c5cae9;border-radius:8px;background:#fff;padding:6px 8px;cursor:pointer;">
             <span style="font-size:15px;">📅</span>
             <span class="date-display-text" id="maebariListDateDisplay" style="font-weight:700;color:var(--primary);font-size:14px;"></span>
             <span style="color:#9aa;font-size:11px;">▼</span>
           </div>
-          <input type="date" id="maebariListDate" class="date-hidden-input" onchange="onMaebariListDateChange()">
+          <input type="date" id="maebariListDate" class="date-hidden-input" style="pointer-events:none;" onchange="onMaebariListDateChange()">
         </div>
         <button type="button" onclick="shiftMaebariListDate(7)" title="次週の金曜" style="background:#eef2ff;color:#3949ab;border:1px solid #c5cae9;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;line-height:1;">次週 →</button>
         <button type="button" onclick="resetMaebariListDate()" title="次の金曜日に戻す" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">📅 今週</button>
@@ -29636,6 +29636,16 @@ function onMaebariListDateChange() {
   const inp = document.getElementById('maebariListDate');
   onDateInputChange('maebariListDate', 'maebariListDateDisplay');
   loadMaebariList();
+}
+
+// 前払い一覧の日付欄タップ → カレンダーを開く (PCはshowPicker、非対応端末はfocus/clickフォールバック)
+function openMaebariListPicker() {
+  var inp = document.getElementById('maebariListDate');
+  if (!inp) return;
+  if (typeof inp.showPicker === 'function') {
+    try { inp.showPicker(); return; } catch (e) {}
+  }
+  try { inp.style.pointerEvents = 'auto'; inp.focus(); inp.click(); } catch (e) {}
 }
 
 // 前払一覧 — 「← 前週」「次週 →」ボタン: N 日シフトしてリロード
