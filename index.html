@@ -6235,8 +6235,16 @@ const LIST_MAEBARI_ENTITY = 'SP.Data.List1ListItem';
 
 // 前払い申請 (employee-portal 経由の本人申請) — 承認用
 const LIST_MAEBARI_SHINSEI_GUID = '9e84553c-73ec-405b-862f-6caaae65900f';
-// 承認権限を持つメアド (テスト中は山下浩俊のみ)
+// 承認権限を持つメアド (役員)
 const MAEBARI_APPROVERS = ['h.yamashita@team-stepup.com'];
+// 前払い承認の担当者(派遣先別)。申請の「担当者」名(ポータルが派遣先から自動設定)と突合して
+// バッジ/一覧を本人担当分のみに絞り込む。役員(ADMIN_USERS)は全件表示。
+const MAEBARI_TANTO_BY_EMAIL = {
+  'm.yoshiura@team-stepup.com': '吉浦マルセロ',
+  'y.mori@team-stepup.com': '森ゆうじ',
+  'm.mori@team-stepup.com': '森まこと',
+  'kaori.j@team-stepup.com': '城かおり'
+};
 
 // 前払い申請 field names (新規 List) — POST 時は OData_ プレフィックスを外す
 const MS = {
@@ -36322,10 +36330,19 @@ function isAllowedUser() {
 // ============================================================
 function isMaebariApprover() {
   try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
     const email = getLoggedInEmail();
     if (!email) return false;
-    return MAEBARI_APPROVERS.indexOf(email) >= 0;
+    return ADMIN_USERS.indexOf(email) >= 0 || (email in MAEBARI_TANTO_BY_EMAIL);
   } catch (e) { return false; }
+}
+// 比較用に氏名の空白を除去
+function _normName(s) { return String(s == null ? '' : s).replace(/[\s　]/g, ''); }
+// 現在ユーザーの担当者名。役員→null(全件)、担当者→担当者名、対象外→''(なし)
+function _myMaebariTanto() {
+  const email = getLoggedInEmail();
+  if (ADMIN_USERS.indexOf(email) >= 0) return null;        // 役員は全件
+  return MAEBARI_TANTO_BY_EMAIL[email] || '';
 }
 
 // 承認権限ボタン/UIの表示切替 (ログイン後に呼ぶ)
@@ -36355,7 +36372,10 @@ async function loadMaebariPending() {
     const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     if (!resp.ok) throw new Error('一覧取得失敗: ' + resp.status);
     const data = await resp.json();
-    const items = (data.d && data.d.results) || [];
+    let items = (data.d && data.d.results) || [];
+    // 担当者は自分の担当分(派遣先別)のみ表示、役員は全件
+    const myTanto = _myMaebariTanto();
+    if (myTanto !== null) items = items.filter(it => _normName(it[MS.tantou]) === _normName(myTanto));
 
     // 氏名 & 今月前払い合計を並列で一括取得
     const nameMap = {};
@@ -36690,11 +36710,14 @@ async function updateMaebariApprovalBadge() {
     const token = await getToken();
     if (!token) return;
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items?$filter="
-      + encodeURIComponent("Status eq 'pending'") + "&$select=Id&$top=200";
+      + encodeURIComponent("Status eq 'pending'") + "&$select=" + encodeURIComponent(['Id', MS.tantou].join(',')) + "&$top=500";
     const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
     if (!resp.ok) return;
     const data = await resp.json();
-    const count = ((data.d && data.d.results) || []).length;
+    let rows = (data.d && data.d.results) || [];
+    const myTanto = _myMaebariTanto();   // 担当者は自分の担当分のみ、役員は全件
+    if (myTanto !== null) rows = rows.filter(it => _normName(it[MS.tantou]) === _normName(myTanto));
+    const count = rows.length;
     window._pendMaebari = count;
     if (count > 0) {
       badge.textContent = String(count);
