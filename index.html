@@ -44238,11 +44238,93 @@ function _onRepairPdfDrop(e) {
   _onRepairPdfFileSelected({ files: files });
 }
 
+// 新クラウドOCR(Claude Vision)で請求書PDFを伝票ごとに自動解析 → プレビュー登録
 async function _onRepairPdfFileSelected(input) {
   var f = input && input.files && input.files[0];
   if (!f) return;
   var body = document.getElementById('repairPdfBulkBody');
-  if (body) body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);font-size:13px;">📄 PDF を解析中...</div>';
+  var setMsg = function(html){ if (body) body.innerHTML = '<div style="text-align:center;padding:32px 16px;color:var(--text-light);font-size:13px;line-height:1.7;">' + html + '</div>'; };
+  setMsg('<div style="font-size:30px;margin-bottom:8px;">🤖</div>📄 PDFを画像化しています...');
+  try {
+    var rendered = await _renderPdfPagesToImages(f, 12);
+    var pages = rendered.images || [];
+    if (!pages.length) throw new Error('PDFを画像化できませんでした');
+    var note = rendered.numPages > pages.length ? ('（先頭' + pages.length + '/' + rendered.numPages + 'ページのみ処理）') : '';
+    // クラウドOCR(Claude Vision)で伝票ごとに構造化抽出。4枚ずつ送って集約
+    var ocrRecords = [];
+    for (var i = 0; i < pages.length; i += 4) {
+      var batch = pages.slice(i, i + 4);
+      setMsg('<div style="font-size:30px;margin-bottom:8px;">🔎</div>新OCRで解析中... ' + Math.min(i + batch.length, pages.length) + '/' + pages.length + 'ページ<br><span style="font-size:11px;color:#aaa;">(AIが伝票ごとに車両・日付・金額・内容を読み取っています)</span>');
+      var ocr = await cloudDocOcr('repair', { images: batch, model: 'claude' });
+      var recs = (ocr && (ocr.records || ocr.items)) || [];
+      if (Array.isArray(recs)) ocrRecords = ocrRecords.concat(recs);
+    }
+    if (!ocrRecords.length) {                       // 0件 → テキスト抽出方式へフォールバック
+      setMsg('🔎 AIで明細が取れなかったため、テキスト抽出で再試行中...');
+      await _fallbackRepairTextParse(f);
+      return;
+    }
+    var records = ocrRecords.map(function(o) {
+      return {
+        date: _normRepairDate(o.date),
+        plate: String(o.plate || '').replace(/[\s　\-‐ー－]/g, ''),
+        no2: String(o.no2 == null ? '' : o.no2).replace(/[^0-9]/g, ''),
+        vehicleName: o.vehicleName || '',
+        mileage: String(o.mileage == null ? '' : o.mileage).replace(/[^0-9]/g, ''),
+        descriptionStr: o.detail || o.description || '',
+        amount: String(o.amount == null ? '' : o.amount).replace(/[^0-9]/g, ''),
+        checked: true
+      };
+    }).filter(function(r){ return r.date || r.plate || r.amount || r.descriptionStr; });
+    if (!_repairPdfVehicles) _repairPdfVehicles = await _loadVehiclesForRepairMatching();
+    records.forEach(function(r) { _matchVehicleForRepairRecord(r); });
+    _repairPdfRecords = records;
+    window._repairPdfRawText = '【新OCR(Claude Vision) ' + records.length + '件抽出】' + note;
+    _renderRepairPdfPreview();
+  } catch (e) {
+    console.error('[RepairPdfBulk] cloud OCR error:', e);
+    setMsg('⚠ 新OCRに失敗。テキスト抽出で再試行中...<br><span style="font-size:11px;color:#c62828;">(' + escHtml(e.message || String(e)) + ')</span>');
+    try { await _fallbackRepairTextParse(f); }
+    catch (e2) { if (body) body.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;font-size:13px;">⚠ 解析失敗: ' + escHtml(e2.message || String(e2)) + '</div>'; }
+  }
+}
+
+// PDF各ページを画像(dataURL)化。長辺~1800pxのJPEG。
+async function _renderPdfPagesToImages(file, maxPages) {
+  await _loadPdfJsLib();
+  var buf = await file.arrayBuffer();
+  var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  var n = Math.min(pdf.numPages, maxPages || 12);
+  var imgs = [];
+  for (var p = 1; p <= n; p++) {
+    var page = await pdf.getPage(p);
+    var v1 = page.getViewport({ scale: 1 });
+    var scale = Math.min(2.5, 1800 / Math.max(v1.width, v1.height));
+    if (!isFinite(scale) || scale <= 0) scale = 1.5;
+    var vp = page.getViewport({ scale: scale });
+    var cv = document.createElement('canvas');
+    cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    imgs.push(cv.toDataURL('image/jpeg', 0.85));
+  }
+  return { images: imgs, numPages: pdf.numPages };
+}
+
+// OCRが返す日付を YYYY-MM-DD に正規化
+function _normRepairDate(s) {
+  if (!s) return '';
+  s = String(s).trim();
+  var m = s.match(/(\d{4})[\/\-\.年](\d{1,2})[\/\-\.月](\d{1,2})/);
+  if (m) return m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0');
+  return s;
+}
+
+// テキスト抽出フォールバック (テキスト層を持つPDF用)
+async function _fallbackRepairTextParse(f) {
+  var body = document.getElementById('repairPdfBulkBody');
+  if (body) body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);font-size:13px;">📄 テキスト抽出中...</div>';
   try {
     await _loadPdfJsLib();
     var text = await _extractPdfText(f);
