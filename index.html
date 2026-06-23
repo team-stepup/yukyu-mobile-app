@@ -42576,6 +42576,9 @@ async function updateBentoAdminBadge(){
 // ===== 📣 連絡事項: 派遣社員ポータルへ通知＋お知らせ =====
 var _renrakuEmps = null;   // [{sn,name,haken,soshiki,bukaNo,rawBuka}]
 var _renrakuSel = {};      // sn -> true
+var _renrakuTrans = null;  // {ja:{title,body},en:{...},pt:{...}} AI翻訳(送信前に編集可)
+var _renrakuTransTab = 'ja';
+var RENRAKU_LANGS = [['ja','やさしい日本語'], ['en','English'], ['pt','Português']];
 // 部課番号→担当者 (前払い承認 get_tantou と同じルール)。役員は全件、本社送迎は全員。
 var RENRAKU_TANTOU = {
   '吉浦マルセロ': { '114': 1, '083': 1, '086': 1, '105': 1, '043': 1 },
@@ -42597,6 +42600,7 @@ function _renrakuCanSee(p) {
 }
 async function loadRenrakuScreen() {
   if (typeof canUseSougei === 'function' && !canUseSougei()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
+  _renrakuTrans = null;   // 新規作成は翻訳クリアから
   var body = document.getElementById('renrakuBody');
   body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
   try {
@@ -42631,6 +42635,11 @@ function _renderRenraku() {
     + '<input id="renrakuTitle" type="text" placeholder="件名（例: 健康診断のお知らせ）" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;margin-bottom:8px;box-sizing:border-box;">'
     + '<textarea id="renrakuBodyText" rows="4" placeholder="本文を入力してください" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>'
     + '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;"><span style="font-size:18px;">📎</span><input id="renrakuFile" type="file" accept="application/pdf,image/*,.pdf,.doc,.docx,.xls,.xlsx" style="font-size:12px;flex:1;"><span style="font-size:11px;color:#999;">資料(PDF等・任意)</span></div>'
+    + '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+      + '<button type="button" onclick="_renrakuTranslate()" style="background:#0277bd;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;">🌐 AI翻訳</button>'
+      + '<span style="font-size:11px;color:#999;">やさしい日本語＋英語＋ポルトガル語（送信前に確認・修正OK）</span>'
+    + '</div>'
+    + '<div id="renrakuTransPreview"></div>'
     + '</div>'
     + '<input id="renrakuSearch" type="search" placeholder="🔍 社員番号・氏名で検索" oninput="_renrakuSearch(this.value)" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:8px;font-size:13px;margin:2px 0 8px;box-sizing:border-box;">'
     + '<div style="font-size:12px;color:#888;margin:4px 2px;">宛先を選択（派遣先まるごと／組織で絞って個別選択）</div>'
@@ -42721,13 +42730,13 @@ async function _renrakuSend() {
     var targets = sns.map(function(sn){ var p = byName[sn] || {}; return { shainNo: sn, name: p.name || '', hakensaki: p.haken || '' }; });
     var resp = await fetch(FUNC_OCR_BASE + '/yukyu/renraku-send', {
       method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: title, body: bodyText, targets: targets, fileName: fileName, fileUrl: fileUrl })
+      body: JSON.stringify({ title: title, body: bodyText, targets: targets, fileName: fileName, fileUrl: fileUrl, trans: _renrakuTrans || null })
     });
     hideSpinner();
     if (!resp.ok) { var t = await resp.text(); throw new Error('HTTP ' + resp.status + ' ' + t.slice(0, 150)); }
     var d = await resp.json();
-    showToast('送信しました（' + (d.created || 0) + '名に配信／Push ' + (d.pushed || 0) + '件' + (fileName ? '／📎' + fileName : '') + '）', 'success');
-    _renrakuSel = {};
+    showToast('送信しました（' + (d.created || 0) + '名に配信／Push ' + (d.pushed || 0) + '件' + (_renrakuTrans ? '／🌐翻訳付' : '') + (fileName ? '／📎' + fileName : '') + '）', 'success');
+    _renrakuSel = {}; _renrakuTrans = null;
     switchScreen('searchScreen');
   } catch (e) { hideSpinner(); showToast('送信失敗: ' + (e.message || e), 'error'); }
 }
@@ -42756,6 +42765,50 @@ async function _renrakuUploadFile(file, token) {
   var uj = await up.json();
   return { fileName: file.name, fileUrl: (uj.d && uj.d.ServerRelativeUrl) || (folder + '/' + fname) };
 }
+// 🌐 AI翻訳: 件名・本文を やさしい日本語/英/葡 に。送信前に編集できるプレビュー表示。
+async function _renrakuTranslate() {
+  var title = ((document.getElementById('renrakuTitle')||{}).value || '').trim();
+  var bodyText = ((document.getElementById('renrakuBodyText')||{}).value || '').trim();
+  if (!title && !bodyText) { showToast('先に件名か本文を入力してください', 'error'); return; }
+  var box = document.getElementById('renrakuTransPreview');
+  if (box) box.innerHTML = '<div style="padding:12px;color:#888;font-size:13px;">🌐 翻訳中…（数秒）</div>';
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/translate', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ title: title, body: bodyText }) });
+    if (!resp.ok) { var t = await resp.text(); throw new Error('HTTP ' + resp.status + ' ' + t.slice(0, 120)); }
+    var d = await resp.json();
+    _renrakuTrans = d.trans || null;
+    _renrakuTransTab = 'ja';
+    _renderRenrakuTransPreview();
+  } catch (e) { if (box) box.innerHTML = '<div style="padding:12px;color:#c62828;font-size:13px;">翻訳失敗: ' + escHtml(e.message || String(e)) + '</div>'; }
+}
+function _renrakuRubyHtml(s) { return escHtml(s || '').replace(/([一-鿿々〆ヶ]+)《([^》]+)》/g, '<ruby>$1<rt style="font-size:0.6em;color:#666;">$2<\/rt><\/ruby>'); }
+function _renderRenrakuTransPreview() {
+  var box = document.getElementById('renrakuTransPreview');
+  if (!box) return;
+  if (!_renrakuTrans) { box.innerHTML = ''; return; }
+  var tabs = RENRAKU_LANGS.map(function(l){
+    var on = _renrakuTransTab === l[0];
+    return '<button type="button" onclick="_renrakuTransSetTab(\'' + l[0] + '\')" style="border:none;border-bottom:3px solid ' + (on ? '#0277bd' : 'transparent') + ';background:none;padding:6px 10px;font-size:12px;font-weight:' + (on ? '800' : '600') + ';color:' + (on ? '#0277bd' : '#888') + ';cursor:pointer;">' + l[1] + '</button>';
+  }).join('');
+  var cur = _renrakuTrans[_renrakuTransTab] || { title: '', body: '' };
+  var html = '<div style="margin-top:10px;border:1.5px solid #b3e5fc;border-radius:10px;padding:10px;background:#f5fbff;">'
+    + '<div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap;border-bottom:1px solid #e0e0e8;margin-bottom:8px;">' + tabs
+      + '<button type="button" onclick="_renrakuTransClear()" style="margin-left:auto;background:none;border:1px solid #ddd;border-radius:6px;padding:4px 8px;font-size:11px;color:#888;cursor:pointer;">翻訳を使わない</button></div>'
+    + '<input type="text" value="' + escHtml(cur.title || '') + '" oninput="_renrakuTransEdit(\'title\',this.value)" placeholder="件名" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:8px;font-size:13px;box-sizing:border-box;margin-bottom:6px;">'
+    + '<textarea oninput="_renrakuTransEdit(\'body\',this.value)" rows="4" placeholder="本文" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:8px;font-size:13px;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.6;">' + escHtml(cur.body || '') + '</textarea>';
+  if (_renrakuTransTab === 'ja') html += '<div style="font-size:11px;color:#999;margin-top:4px;">ふりがなは <b>漢字《かんじ》</b> 形式。表示プレビュー↓</div><div id="renrakuRubyPrev" style="background:#fff;border:1px dashed #ddd;border-radius:8px;padding:8px;margin-top:4px;font-size:14px;line-height:2.1;white-space:pre-wrap;">' + _renrakuRubyHtml(cur.body || '') + '</div>';
+  html += '<div style="font-size:11px;color:#0277bd;margin-top:6px;">✓ 送信すると各社員は自分の言語でこの内容を読みます（原文も見られます）</div></div>';
+  box.innerHTML = html;
+}
+function _renrakuTransSetTab(l) { _renrakuTransTab = l; _renderRenrakuTransPreview(); }
+function _renrakuTransEdit(k, v) {
+  if (!_renrakuTrans) return;
+  if (!_renrakuTrans[_renrakuTransTab]) _renrakuTrans[_renrakuTransTab] = {};
+  _renrakuTrans[_renrakuTransTab][k] = v;
+  if (_renrakuTransTab === 'ja' && k === 'body') { var p = document.getElementById('renrakuRubyPrev'); if (p) p.innerHTML = _renrakuRubyHtml(v); }
+}
+function _renrakuTransClear() { _renrakuTrans = null; _renderRenrakuTransPreview(); showToast('翻訳をクリアしました（原文のみ送信）', 'info'); }
 // 社員番号・氏名で検索 (担当範囲内の社員から)
 function _renrakuSearch(q) {
   q = (q || '').trim().toLowerCase();
