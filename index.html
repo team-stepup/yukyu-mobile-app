@@ -42573,8 +42573,27 @@ async function updateBentoAdminBadge(){
 }
 
 // ===== 📣 連絡事項: 派遣社員ポータルへ通知＋お知らせ =====
-var _renrakuEmps = null;   // [{sn,name,haken,soshiki}]
+var _renrakuEmps = null;   // [{sn,name,haken,soshiki,bukaNo,rawBuka}]
 var _renrakuSel = {};      // sn -> true
+// 部課番号→担当者 (前払い承認 get_tantou と同じルール)。役員は全件、本社送迎は全員。
+var RENRAKU_TANTOU = {
+  '吉浦マルセロ': { '114': 1, '083': 1, '086': 1, '105': 1, '043': 1 },
+  '森ゆうじ':     { '077': 1, '078': 1, '071': 1, '052': 1, '040': 1 },
+  '森まこと':     { '002': 1, '093': 1, '091': 1, '094': 1, '107': 1, '116': 1, '117': 1, '112': 1 }
+};
+function _renrakuBukaNo(buka) { var m = String(buka == null ? '' : buka).match(/^\s*(\d+)/); return m ? m[1] : ''; }
+function _renrakuTantoOf(bukaNo) {
+  var no = String(bukaNo || '').split('-')[0];
+  for (var t in RENRAKU_TANTOU) { if (RENRAKU_TANTOU[t][no]) return t; }
+  return '';
+}
+function _renrakuIsHonshaSougei(p) { return p.bukaNo === '094' || /送迎/.test(String(p.rawBuka || '')); }
+function _renrakuCanSee(p) {
+  var my = (typeof _myMaebariTanto === 'function') ? _myMaebariTanto() : null;
+  if (my === null || my === '') return true;       // 役員(全件) / 担当未設定は全件
+  if (_renrakuIsHonshaSougei(p)) return true;       // 本社送迎は全員に表示
+  return _renrakuTantoOf(p.bukaNo) === my;          // 担当者は自分の派遣先のみ
+}
 async function loadRenrakuScreen() {
   if (typeof canUseSougei === 'function' && !canUseSougei()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
   var body = document.getElementById('renrakuBody');
@@ -42589,9 +42608,11 @@ async function loadRenrakuScreen() {
         if (e[SG_F_TAISHA]) return;                       // 退社者除外
         var sn = String(e[SG_F_SHAINNO] || '').trim();
         if (!sn || seen[sn]) return; seen[sn] = true;     // 社員番号重複は1件
-        var haken = stripBukaPrefix(e[SG_F_BUKA] || '') || '(派遣先未設定)';
-        _renrakuEmps.push({ sn: sn, name: e[SG_F_NAME] || sn, haken: haken, soshiki: String(e[SG_F_SOSHIKI] || '').trim() });
+        var rawBuka = e[SG_F_BUKA] || '';
+        _renrakuEmps.push({ sn: sn, name: e[SG_F_NAME] || sn, haken: stripBukaPrefix(rawBuka) || '(派遣先未設定)',
+          soshiki: String(e[SG_F_SOSHIKI] || '').trim(), bukaNo: _renrakuBukaNo(rawBuka), rawBuka: rawBuka });
       });
+      _renrakuEmps = _renrakuEmps.filter(_renrakuCanSee);  // 担当者は自分の派遣先のみ(役員=全件・本社送迎=全員)
       _renrakuEmps.sort(function(a,b){ return a.haken.localeCompare(b.haken, 'ja') || a.name.localeCompare(b.name, 'ja'); });
     }
     _renderRenraku();
@@ -42610,6 +42631,7 @@ function _renderRenraku() {
     + '<textarea id="renrakuBodyText" rows="4" placeholder="本文を入力してください" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>'
     + '</div>'
     + '<div style="font-size:12px;color:#888;margin:4px 2px;">宛先を選択（派遣先まるごと／組織で絞って個別選択）</div>';
+  if (!hakens.length) html += '<div style="text-align:center;padding:18px;color:#999;font-size:13px;border:1px dashed #ddd;border-radius:10px;">担当の派遣先（送信先）がありません</div>';
   hakens.forEach(function(h, hi){
     var list = byH[h];
     var allSel = list.every(function(p){ return _renrakuSel[p.sn]; });
