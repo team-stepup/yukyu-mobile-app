@@ -5974,6 +5974,7 @@ select.sankyu-edit-input {
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📣 連絡事項</h2>
+      <button onclick="openRenrakuHistory()" style="margin-left:auto;background:#ede7f6;color:#5e35b1;border:1px solid #d1c4e9;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;">📋 送信履歴</button>
     </div>
     <div id="renrakuBody" style="padding:10px 12px;"></div>
   </div>
@@ -42630,7 +42631,10 @@ function _renderRenraku() {
     + '<input id="renrakuTitle" type="text" placeholder="件名（例: 健康診断のお知らせ）" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;margin-bottom:8px;box-sizing:border-box;">'
     + '<textarea id="renrakuBodyText" rows="4" placeholder="本文を入力してください" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>'
     + '</div>'
-    + '<div style="font-size:12px;color:#888;margin:4px 2px;">宛先を選択（派遣先まるごと／組織で絞って個別選択）</div>';
+    + '<input id="renrakuSearch" type="search" placeholder="🔍 社員番号・氏名で検索" oninput="_renrakuSearch(this.value)" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:8px;font-size:13px;margin:2px 0 8px;box-sizing:border-box;">'
+    + '<div style="font-size:12px;color:#888;margin:4px 2px;">宛先を選択（派遣先まるごと／組織で絞って個別選択）</div>'
+    + '<div id="renrakuSearchResults" style="display:none;"></div>'
+    + '<div id="renrakuHakenWrap">';
   if (!hakens.length) html += '<div style="text-align:center;padding:18px;color:#999;font-size:13px;border:1px dashed #ddd;border-radius:10px;">担当の派遣先（送信先）がありません</div>';
   hakens.forEach(function(h, hi){
     var list = byH[h];
@@ -42646,6 +42650,7 @@ function _renderRenraku() {
       + '<div id="renrakuRoster' + hi + '" style="display:none;padding:6px 12px 10px;">' + _renrakuRosterHtml(list) + '</div>'
       + '</div>';
   });
+  html += '</div>';   // close renrakuHakenWrap
   html += '<div style="position:sticky;bottom:0;background:linear-gradient(to bottom,rgba(255,255,255,0.4),#fff 40%);padding:10px 0;margin-top:6px;">'
     + '<button onclick="_renrakuSend()" style="width:100%;padding:14px;background:linear-gradient(135deg,#5e35b1,#4527a0);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;">📣 選択中 <span id="renrakuSelCount">' + _renrakuSelCount() + '</span>名 に送信</button>'
     + '</div>';
@@ -42720,6 +42725,61 @@ async function _renrakuSend() {
     switchScreen('searchScreen');
   } catch (e) { hideSpinner(); showToast('送信失敗: ' + (e.message || e), 'error'); }
 }
+// 社員番号・氏名で検索 (担当範囲内の社員から)
+function _renrakuSearch(q) {
+  q = (q || '').trim().toLowerCase();
+  var wrap = document.getElementById('renrakuHakenWrap');
+  var res = document.getElementById('renrakuSearchResults');
+  if (!res || !wrap) return;
+  if (!q) { res.style.display = 'none'; res.innerHTML = ''; wrap.style.display = ''; return; }
+  wrap.style.display = 'none'; res.style.display = '';
+  var matches = (_renrakuEmps || []).filter(function(p){
+    return String(p.sn).toLowerCase().indexOf(q) >= 0 || String(p.name).toLowerCase().indexOf(q) >= 0;
+  }).slice(0, 100);
+  if (!matches.length) { res.innerHTML = '<div style="text-align:center;padding:18px;color:#999;font-size:13px;">該当する社員がいません</div>'; return; }
+  res.innerHTML = '<div style="border:1px solid #e0e0e8;border-radius:10px;padding:8px 12px;">' + matches.map(function(p){
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer;">'
+      + '<input type="checkbox" data-sn="' + escHtml(p.sn) + '" ' + (_renrakuSel[p.sn] ? 'checked' : '') + ' onchange="_renrakuToggleOne(\'' + escHtml(p.sn) + '\',this.checked)">'
+      + escHtml(p.name) + ' <span style="color:#bbb;font-size:11px;">No.' + escHtml(p.sn) + ' ／ ' + escHtml(p.haken) + '</span></label>';
+  }).join('') + '</div>';
+}
+// 📋 送信履歴 ＋ 既読確認
+async function openRenrakuHistory() {
+  var body = document.getElementById('renrakuBody');
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/renraku-sent', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var d = await resp.json();
+    _renderRenrakuHistory(d.items || []);
+  } catch (e) { body.innerHTML = '<div style="text-align:center;padding:24px;color:#c62828;">読み込み失敗: ' + escHtml(e.message || String(e)) + '</div>'; }
+}
+function _renderRenrakuHistory(items) {
+  var body = document.getElementById('renrakuBody');
+  var html = '<button onclick="loadRenrakuScreen()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;margin-bottom:10px;">← 連絡作成に戻る</button>';
+  if (!items.length) { body.innerHTML = html + '<div style="text-align:center;padding:24px;color:#999;">送信履歴はありません</div>'; return; }
+  items.forEach(function(it, idx){
+    var created = it.created ? new Date(it.created) : null;
+    var dstr = (created && !isNaN(created.getTime())) ? new Date(created.getTime() + 9 * 3600000).toISOString().slice(0, 10) : '';
+    var pct = it.total ? Math.round(it.read / it.total * 100) : 0;
+    var done = it.read >= it.total;
+    html += '<div style="background:#fff;border:1.5px solid #e0e0e8;border-radius:10px;padding:10px 12px;margin-bottom:8px;">'
+      + '<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:800;color:#1f3864;flex:1;">' + escHtml(it.title || '(件名なし)') + '</span>'
+        + '<span style="font-size:11px;color:#888;">' + dstr + '</span></div>'
+      + '<div style="font-size:12px;color:#666;white-space:pre-wrap;margin:4px 0;max-height:60px;overflow:hidden;">' + escHtml(it.body || '') + '</div>'
+      + '<div style="display:flex;align-items:center;gap:8px;font-size:12px;">'
+        + '<span style="background:' + (done ? '#e8f5e9' : '#fff3e0') + ';color:' + (done ? '#2e7d32' : '#e65100') + ';font-weight:800;padding:2px 8px;border-radius:8px;">既読 ' + it.read + '/' + it.total + '名 (' + pct + '%)</span>'
+        + '<button onclick="_renrakuToggleRcp(' + idx + ')" style="margin-left:auto;background:#eef;color:#5e35b1;border:none;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;">宛先別 ▼</button>'
+      + '</div>'
+      + '<div id="renrakuRcp' + idx + '" style="display:none;margin-top:6px;border-top:1px solid #eee;padding-top:6px;max-height:240px;overflow-y:auto;">'
+        + (it.recipients || []).map(function(r){ return '<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:1px 0;"><span style="width:16px;">' + (r.isRead ? '✅' : '⬜') + '</span><span style="flex:1;">' + escHtml(r.name || '') + '</span><span style="color:#bbb;font-size:11px;">' + escHtml(stripBukaPrefix(r.hakensaki || '')) + '</span></div>'; }).join('')
+      + '</div>'
+      + '</div>';
+  });
+  body.innerHTML = html;
+}
+function _renrakuToggleRcp(idx) { var el = document.getElementById('renrakuRcp' + idx); if (el) el.style.display = (el.style.display === 'none' ? '' : 'none'); }
 
 async function loadSougeiScreen() {
   if (typeof canUseSougei === 'function' && !canUseSougei()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
