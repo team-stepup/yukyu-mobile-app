@@ -5404,6 +5404,10 @@ select.sankyu-edit-input {
         <span class="ql-icon">🚐</span>
         <span class="ql-text">送迎連絡</span>
       </button>
+      <button class="quick-link-btn sougei-allowed" onclick="switchScreen('renrakuScreen')" style="position:relative;display:none;">
+        <span class="ql-icon">📣</span>
+        <span class="ql-text">連絡事項</span>
+      </button>
       <!-- 弁当注文ボタンは廃止: 弁当の承認は「承認」ハブ(✅)→「弁当 承認」に統合 (重複のため削除 2026-06-22) -->
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
@@ -5963,6 +5967,15 @@ select.sankyu-edit-input {
     <div id="sougeiHakenList"></div>
     <div id="sougeiRoster" style="display:none;"></div>
     <div id="sougeiConfirm" style="display:none;"></div>
+  </div>
+
+  <!-- Screen: 連絡事項 (派遣先/組織→名前選択→件名・本文→ポータルへ配信) -->
+  <div class="screen" id="renrakuScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📣 連絡事項</h2>
+    </div>
+    <div id="renrakuBody" style="padding:10px 12px;"></div>
   </div>
 
   <!-- Screen: 弁当注文 (役員: 当日の注文一覧＋承認/拒否) -->
@@ -7414,6 +7427,7 @@ function switchScreen(screenId, skipHistory) {
   if (screenId === 'yukyuListScreen') initYukyuListDate();
   if (screenId === 'nyutaiScreen') loadNyutaiScreen();
   if (screenId === 'sougeiScreen') loadSougeiScreen();
+  if (screenId === 'renrakuScreen') loadRenrakuScreen();
   if (screenId === 'bentoScreen') loadBentoScreen();
   if (screenId === 'vehicleListScreen') loadVehicleList();
 }
@@ -42556,6 +42570,133 @@ async function updateBentoAdminBadge(){
     if (b2) { if (n > 0) { b2.textContent = '弁当' + n; b2.style.display = ''; } else b2.style.display = 'none'; }
     if (typeof _updateApproveAppBadge === 'function') _updateApproveAppBadge();
   } catch (e) { /* silent */ }
+}
+
+// ===== 📣 連絡事項: 派遣社員ポータルへ通知＋お知らせ =====
+var _renrakuEmps = null;   // [{sn,name,haken,soshiki}]
+var _renrakuSel = {};      // sn -> true
+async function loadRenrakuScreen() {
+  if (typeof canUseSougei === 'function' && !canUseSougei()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
+  var body = document.getElementById('renrakuBody');
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
+  try {
+    if (!_renrakuEmps) {
+      var sel = '$select=Id,' + [SG_F_NAME, SG_F_SHAINNO, SG_F_BUKA, SG_F_SOSHIKI, SG_F_TAISHA].join(',') + '&$top=5000';
+      var emps = await spGetAll(LIST_EMPLOYEES_GUID, sel);
+      var seen = {};
+      _renrakuEmps = [];
+      emps.forEach(function(e){
+        if (e[SG_F_TAISHA]) return;                       // 退社者除外
+        var sn = String(e[SG_F_SHAINNO] || '').trim();
+        if (!sn || seen[sn]) return; seen[sn] = true;     // 社員番号重複は1件
+        var haken = stripBukaPrefix(e[SG_F_BUKA] || '') || '(派遣先未設定)';
+        _renrakuEmps.push({ sn: sn, name: e[SG_F_NAME] || sn, haken: haken, soshiki: String(e[SG_F_SOSHIKI] || '').trim() });
+      });
+      _renrakuEmps.sort(function(a,b){ return a.haken.localeCompare(b.haken, 'ja') || a.name.localeCompare(b.name, 'ja'); });
+    }
+    _renderRenraku();
+  } catch (e) {
+    body.innerHTML = '<div style="text-align:center;padding:24px;color:#c62828;">読み込み失敗: ' + escHtml(e.message || String(e)) + '</div>';
+  }
+}
+function _renrakuByHaken() { var m = {}; (_renrakuEmps||[]).forEach(function(p){ (m[p.haken] = m[p.haken] || []).push(p); }); return m; }
+function _renrakuSelCount() { return Object.keys(_renrakuSel).length; }
+function _renderRenraku() {
+  var body = document.getElementById('renrakuBody');
+  var byH = _renrakuByHaken();
+  var hakens = Object.keys(byH).sort(function(a,b){ return a.localeCompare(b,'ja'); });
+  var html = '<div style="background:#fff;border:1.5px solid #e0e0e8;border-radius:12px;padding:12px;margin-bottom:12px;">'
+    + '<input id="renrakuTitle" type="text" placeholder="件名（例: 健康診断のお知らせ）" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;margin-bottom:8px;box-sizing:border-box;">'
+    + '<textarea id="renrakuBodyText" rows="4" placeholder="本文を入力してください" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>'
+    + '</div>'
+    + '<div style="font-size:12px;color:#888;margin:4px 2px;">宛先を選択（派遣先まるごと／組織で絞って個別選択）</div>';
+  hakens.forEach(function(h, hi){
+    var list = byH[h];
+    var allSel = list.every(function(p){ return _renrakuSel[p.sn]; });
+    var selN = list.filter(function(p){ return _renrakuSel[p.sn]; }).length;
+    html += '<div style="border:1px solid #e0e0e8;border-radius:10px;margin-bottom:8px;overflow:hidden;">'
+      + '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#f7f7fb;">'
+        + '<input type="checkbox" ' + (allSel ? 'checked' : '') + ' onclick="_renrakuToggleHaken(' + hi + ',this.checked)" style="transform:scale(1.2);">'
+        + '<span style="flex:1;font-weight:700;color:#1f3864;cursor:pointer;" onclick="_renrakuExpand(' + hi + ')">' + escHtml(h) + ' <span style="font-weight:400;color:#999;font-size:12px;">(' + list.length + '名)</span></span>'
+        + '<span id="renrakuCnt' + hi + '" style="font-size:11px;color:#5e35b1;font-weight:700;">' + selN + '</span>'
+        + '<span onclick="_renrakuExpand(' + hi + ')" style="cursor:pointer;color:#bbb;">▼</span>'
+      + '</div>'
+      + '<div id="renrakuRoster' + hi + '" style="display:none;padding:6px 12px 10px;">' + _renrakuRosterHtml(list) + '</div>'
+      + '</div>';
+  });
+  html += '<div style="position:sticky;bottom:0;background:linear-gradient(to bottom,rgba(255,255,255,0.4),#fff 40%);padding:10px 0;margin-top:6px;">'
+    + '<button onclick="_renrakuSend()" style="width:100%;padding:14px;background:linear-gradient(135deg,#5e35b1,#4527a0);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;">📣 選択中 <span id="renrakuSelCount">' + _renrakuSelCount() + '</span>名 に送信</button>'
+    + '</div>';
+  body.innerHTML = html;
+}
+function _renrakuRosterHtml(list) {
+  var byS = {};
+  list.forEach(function(p){ var s = p.soshiki || '(組織なし)'; (byS[s] = byS[s] || []).push(p); });
+  var html = '';
+  Object.keys(byS).sort(function(a,b){ return a.localeCompare(b,'ja'); }).forEach(function(s){
+    var grp = byS[s];
+    var allSel = grp.every(function(p){ return _renrakuSel[p.sn]; });
+    var snsArg = grp.map(function(p){ return "'" + p.sn + "'"; }).join(',');
+    html += '<div style="margin:4px 0;">'
+      + '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5e35b1;font-weight:700;cursor:pointer;">'
+        + '<input type="checkbox" ' + (allSel ? 'checked' : '') + ' onchange="_renrakuToggleList([' + snsArg + '],this.checked)">'
+        + '🏢 ' + escHtml(stripBukaPrefix(s)) + ' <span style="color:#aaa;font-weight:400;">(' + grp.length + ')</span></label>'
+      + '<div style="padding-left:18px;">';
+    grp.forEach(function(p){
+      html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;cursor:pointer;">'
+        + '<input type="checkbox" data-sn="' + escHtml(p.sn) + '" ' + (_renrakuSel[p.sn] ? 'checked' : '') + ' onchange="_renrakuToggleOne(\'' + escHtml(p.sn) + '\',this.checked)">'
+        + escHtml(p.name) + ' <span style="color:#bbb;font-size:11px;">No.' + escHtml(p.sn) + '</span></label>';
+    });
+    html += '</div></div>';
+  });
+  return html;
+}
+function _renrakuExpand(hi) { var el = document.getElementById('renrakuRoster' + hi); if (el) el.style.display = (el.style.display === 'none' ? '' : 'none'); }
+function _renrakuUpdateCount() {
+  var el = document.getElementById('renrakuSelCount'); if (el) el.textContent = _renrakuSelCount();
+  var byH = _renrakuByHaken(); var hakens = Object.keys(byH).sort(function(a,b){ return a.localeCompare(b,'ja'); });
+  hakens.forEach(function(h, hi){ var c = document.getElementById('renrakuCnt' + hi); if (c) c.textContent = byH[h].filter(function(p){ return _renrakuSel[p.sn]; }).length; });
+}
+function _renrakuSetSns(sns, on) {
+  sns.forEach(function(sn){
+    if (on) _renrakuSel[sn] = true; else delete _renrakuSel[sn];
+    var cb = document.querySelector('#renrakuBody input[data-sn="' + sn + '"]');
+    if (cb) cb.checked = on;
+  });
+  _renrakuUpdateCount();
+}
+function _renrakuToggleOne(sn, on) { if (on) _renrakuSel[sn] = true; else delete _renrakuSel[sn]; _renrakuUpdateCount(); }
+function _renrakuToggleList(sns, on) { _renrakuSetSns(sns, on); }
+function _renrakuToggleHaken(hi, on) {
+  var byH = _renrakuByHaken(); var h = Object.keys(byH).sort(function(a,b){ return a.localeCompare(b,'ja'); })[hi];
+  _renrakuSetSns((byH[h]||[]).map(function(p){ return p.sn; }), on);
+  var roster = document.getElementById('renrakuRoster' + hi);
+  if (roster) roster.querySelectorAll('input[type=checkbox]:not([data-sn])').forEach(function(cb){ cb.checked = on; });
+}
+async function _renrakuSend() {
+  var title = ((document.getElementById('renrakuTitle')||{}).value || '').trim();
+  var bodyText = ((document.getElementById('renrakuBodyText')||{}).value || '').trim();
+  var sns = Object.keys(_renrakuSel);
+  if (!title && !bodyText) { showToast('件名か本文を入力してください', 'error'); return; }
+  if (!sns.length) { showToast('宛先を選択してください', 'error'); return; }
+  if (!confirm(sns.length + '名に連絡を送信します。よろしいですか？')) return;
+  showSpinner();
+  try {
+    var token = await getToken();
+    if (!token) throw new Error('認証エラー');
+    var byName = {}; (_renrakuEmps||[]).forEach(function(p){ byName[p.sn] = p; });
+    var targets = sns.map(function(sn){ var p = byName[sn] || {}; return { shainNo: sn, name: p.name || '', hakensaki: p.haken || '' }; });
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/renraku-send', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title, body: bodyText, targets: targets })
+    });
+    hideSpinner();
+    if (!resp.ok) { var t = await resp.text(); throw new Error('HTTP ' + resp.status + ' ' + t.slice(0, 150)); }
+    var d = await resp.json();
+    showToast('送信しました（' + (d.created || 0) + '名に配信／Push ' + (d.pushed || 0) + '件）', 'success');
+    _renrakuSel = {};
+    switchScreen('searchScreen');
+  } catch (e) { hideSpinner(); showToast('送信失敗: ' + (e.message || e), 'error'); }
 }
 
 async function loadSougeiScreen() {
