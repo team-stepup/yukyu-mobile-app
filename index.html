@@ -17939,6 +17939,8 @@ async function loadHomeBadges() {
         sOverdueBadge.style.display = 'none';
       }
     }
+    window._pendSankyu = sankyuResult.overdue || 0;   // アプリアイコンのバッジに産休育休の遅れ(注N)も含める
+    if (typeof _updateApproveAppBadge === 'function') _updateApproveAppBadge();
   }
 
   // 派遣先バッジ（期限切れ赤・更新注意黄）
@@ -36981,7 +36983,7 @@ async function updateMaebariApprovalBadge() {
 // アプリアイコン(PWA)バッジ = 前払い承認待ち + 弁当承認待ち の合計
 function _updateApproveAppBadge() {
   try {
-    var total = (window._pendMaebari || 0) + (window._pendBento || 0);
+    var total = (window._pendMaebari || 0) + (window._pendBento || 0) + (window._pendSankyu || 0);
     if (navigator.setAppBadge) {
       if (total > 0) navigator.setAppBadge(total);
       else if (navigator.clearAppBadge) navigator.clearAppBadge();
