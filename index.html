@@ -42630,6 +42630,7 @@ function _renderRenraku() {
   var html = '<div style="background:#fff;border:1.5px solid #e0e0e8;border-radius:12px;padding:12px;margin-bottom:12px;">'
     + '<input id="renrakuTitle" type="text" placeholder="件名（例: 健康診断のお知らせ）" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;margin-bottom:8px;box-sizing:border-box;">'
     + '<textarea id="renrakuBodyText" rows="4" placeholder="本文を入力してください" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:14px;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>'
+    + '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;"><span style="font-size:18px;">📎</span><input id="renrakuFile" type="file" accept="application/pdf,image/*,.pdf,.doc,.docx,.xls,.xlsx" style="font-size:12px;flex:1;"><span style="font-size:11px;color:#999;">資料(PDF等・任意)</span></div>'
     + '</div>'
     + '<input id="renrakuSearch" type="search" placeholder="🔍 社員番号・氏名で検索" oninput="_renrakuSearch(this.value)" style="width:100%;border:1px solid #ccc;border-radius:8px;padding:8px;font-size:13px;margin:2px 0 8px;box-sizing:border-box;">'
     + '<div style="font-size:12px;color:#888;margin:4px 2px;">宛先を選択（派遣先まるごと／組織で絞って個別選択）</div>'
@@ -42703,27 +42704,57 @@ function _renrakuToggleHaken(hi, on) {
 async function _renrakuSend() {
   var title = ((document.getElementById('renrakuTitle')||{}).value || '').trim();
   var bodyText = ((document.getElementById('renrakuBodyText')||{}).value || '').trim();
+  var fileInput = document.getElementById('renrakuFile');
+  var file = fileInput && fileInput.files && fileInput.files[0];
   var sns = Object.keys(_renrakuSel);
-  if (!title && !bodyText) { showToast('件名か本文を入力してください', 'error'); return; }
+  if (!title && !bodyText && !file) { showToast('件名・本文・資料のいずれかを入力してください', 'error'); return; }
   if (!sns.length) { showToast('宛先を選択してください', 'error'); return; }
+  if (file && file.size > 20 * 1024 * 1024) { showToast('資料が大きすぎます（20MBまで）', 'error'); return; }
   if (!confirm(sns.length + '名に連絡を送信します。よろしいですか？')) return;
   showSpinner();
   try {
     var token = await getToken();
     if (!token) throw new Error('認証エラー');
+    var fileName = '', fileUrl = '';
+    if (file) { var up = await _renrakuUploadFile(file, token); fileName = up.fileName; fileUrl = up.fileUrl; }
     var byName = {}; (_renrakuEmps||[]).forEach(function(p){ byName[p.sn] = p; });
     var targets = sns.map(function(sn){ var p = byName[sn] || {}; return { shainNo: sn, name: p.name || '', hakensaki: p.haken || '' }; });
     var resp = await fetch(FUNC_OCR_BASE + '/yukyu/renraku-send', {
       method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: title, body: bodyText, targets: targets })
+      body: JSON.stringify({ title: title, body: bodyText, targets: targets, fileName: fileName, fileUrl: fileUrl })
     });
     hideSpinner();
     if (!resp.ok) { var t = await resp.text(); throw new Error('HTTP ' + resp.status + ' ' + t.slice(0, 150)); }
     var d = await resp.json();
-    showToast('送信しました（' + (d.created || 0) + '名に配信／Push ' + (d.pushed || 0) + '件）', 'success');
+    showToast('送信しました（' + (d.created || 0) + '名に配信／Push ' + (d.pushed || 0) + '件' + (fileName ? '／📎' + fileName : '') + '）', 'success');
     _renrakuSel = {};
     switchScreen('searchScreen');
   } catch (e) { hideSpinner(); showToast('送信失敗: ' + (e.message || e), 'error'); }
+}
+// 添付ファイルを SP ドキュメントライブラリ(連絡事項添付フォルダ)へアップロード → {fileName,fileUrl}
+async function _renrakuUploadFile(file, token) {
+  var dj = await (await fetch(SP_SITE_URL + '/_api/contextinfo', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } })).json();
+  var digest = (dj.d && dj.d.GetContextWebInformation && dj.d.GetContextWebInformation.FormDigestValue) || dj.FormDigestValue;
+  var lj = await (await fetch(SP_SITE_URL + "/_api/web/lists?$filter=BaseTemplate eq 101 and Hidden eq false&$select=Title&$expand=RootFolder&$top=20", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } })).json();
+  var libs = (lj.d && lj.d.results) || [];
+  var pick = libs.filter(function(l){ return /Documents|ドキュメント|共有/.test(l.Title); })[0] || libs[0];
+  var root = pick && pick.RootFolder ? pick.RootFolder.ServerRelativeUrl : null;
+  if (!root) throw new Error('保存先ライブラリが見つかりません');
+  var folder = root + '/連絡事項添付';
+  try {
+    await fetch(SP_SITE_URL + "/_api/web/folders", { method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'Content-Type': 'application/json;odata=verbose', 'X-RequestDigest': digest },
+      body: JSON.stringify({ '__metadata': { type: 'SP.Folder' }, 'ServerRelativeUrl': folder }) });
+  } catch (e) {}
+  var ts = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  var fname = ts + '_' + file.name.replace(/[#%*?<>|"&{}~\\\/]/g, '_');
+  var buf = await file.arrayBuffer();
+  var folderEnc = encodeURIComponent(folder).replace(/%2F/g, '/');
+  var up = await fetch(SP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + folderEnc + "')/Files/add(url='" + encodeURIComponent(fname) + "',overwrite=true)", {
+    method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'X-RequestDigest': digest }, body: buf });
+  if (!up.ok) { var et = await up.text(); throw new Error('資料アップロード失敗(' + up.status + ') ' + et.slice(0, 120)); }
+  var uj = await up.json();
+  return { fileName: file.name, fileUrl: (uj.d && uj.d.ServerRelativeUrl) || (folder + '/' + fname) };
 }
 // 社員番号・氏名で検索 (担当範囲内の社員から)
 function _renrakuSearch(q) {
