@@ -5998,6 +5998,15 @@ select.sankyu-edit-input {
     <div id="renrakuBody" style="padding:10px 12px;"></div>
   </div>
 
+  <!-- Screen: 派遣契約 hmc下書き作成 (新規社員登録の後に表示) -->
+  <div class="screen" id="hmcKeiyakuScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📝 派遣契約 作成</h2>
+    </div>
+    <div id="hmcKeiyakuBody" style="padding:10px 12px;"></div>
+  </div>
+
   <!-- Screen: 弁当注文 (役員: 当日の注文一覧＋承認/拒否) -->
   <div class="screen" id="bentoScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
@@ -36160,6 +36169,11 @@ async function saveNewEmployee() {
     showToast(nameVal + ' を登録しました', 'success');
     Object.keys(capturedDocs).forEach(k => delete capturedDocs[k]);
     resetSearch();
+    // 続けて派遣契約(hmc下書き)を作成するか (ASTI/ユーシンの新入社員)
+    if (confirm(nameVal + ' を登録しました。\n続けて派遣契約書（hmc下書き）を作成しますか？')) {
+      openHmcKeiyaku(noVal);
+      return;
+    }
     switchScreen('searchScreen');
 
   } catch (e) {
@@ -42507,6 +42521,9 @@ async function loadSougeiVehicleOptions() {
 
 // ====== 弁当注文 (役員: 当日の注文一覧＋承認/拒否) ======
 const BENTO_LIST_GUID = '1d0f9e26-ad32-4fc0-8c9e-02f22a87fe35';
+// hmc派遣契約 自動下書き作成(契約作成キュー → PCのPlaywright処理)
+const HMC_KEIYAKU_QUEUE_GUID = '40d063a3-543d-47fe-bb24-3a3bdcec7deb';
+var HMC_MATTERS = [{"id":"1849","label":"【00001849】【ASTI株式会社】都田工場センサ生産課　製造作業者","haken":"ASTI株式会社","bc":[{"id":"2821","d":"車載センサ・ＥＣＵの組立・検査\n業務及び付随業務"}]},{"id":"1872","label":"【00001872】【ASTI株式会社】掛川工場　実装課　付帯業務　日勤","haken":"ASTI株式会社","bc":[{"id":"7711","d":"電子機器製造設備オペレーター及び付随業務"},{"id":"7712","d":"電子機器製造設備へのプログラミング技術者及び製造設備技術オペレーション業務その他製造に関する技術付随業務全般"},{"id":"7713","d":"電子機器製造設備へのプログラミング及び検査オペレーション業務その他付帯技術業務全般"},{"id":"7714","d":"電子機器製造設備へのプログラム電子制御及び製造設備技術オペレーション業務その他技術付帯業務全般"},{"id":"7715","d":"電子基板製造における帳票類翻訳及び外国籍就労者への教育・通訳その他付帯業務全般"}]},{"id":"1873","label":"【00001873】【ASTI株式会社】掛川工場　実装課　生産業務　2交替8/20","haken":"ASTI株式会社","bc":[{"id":"7711","d":"電子機器製造設備オペレーター及び付随業務"},{"id":"7712","d":"電子機器製造設備へのプログラミング技術者及び製造設備技術オペレーション業務その他製造に関する技術付随業務全般"},{"id":"7713","d":"電子機器製造設備へのプログラミング及び検査オペレーション業務その他付帯技術業務全般"},{"id":"7714","d":"電子機器製造設備へのプログラム電子制御及び製造設備技術オペレーション業務その他技術付帯業務全般"},{"id":"7715","d":"電子基板製造における帳票類翻訳及び外国籍就労者への教育・通訳その他付帯業務全般"}]},{"id":"1874","label":"【00001874】【ASTI株式会社】掛川工場　実装課　生産業務　3交替8/15/2330","haken":"ASTI株式会社","bc":[{"id":"7711","d":"電子機器製造設備オペレーター及び付随業務"},{"id":"7712","d":"電子機器製造設備へのプログラミング技術者及び製造設備技術オペレーション業務その他製造に関する技術付随業務全般"},{"id":"7713","d":"電子機器製造設備へのプログラミング及び検査オペレーション業務その他付帯技術業務全般"},{"id":"7714","d":"電子機器製造設備へのプログラム電子制御及び製造設備技術オペレーション業務その他技術付帯業務全般"},{"id":"7715","d":"電子基板製造における帳票類翻訳及び外国籍就労者への教育・通訳その他付帯業務全般"}]},{"id":"1875","label":"【00001875】【ASTI株式会社】掛川工場　実装課　生産業務　3交替8/16/24","haken":"ASTI株式会社","bc":[{"id":"7711","d":"電子機器製造設備オペレーター及び付随業務"},{"id":"7712","d":"電子機器製造設備へのプログラミング技術者及び製造設備技術オペレーション業務その他製造に関する技術付随業務全般"},{"id":"7713","d":"電子機器製造設備へのプログラミング及び検査オペレーション業務その他付帯技術業務全般"},{"id":"7714","d":"電子機器製造設備へのプログラム電子制御及び製造設備技術オペレーション業務その他技術付帯業務全般"},{"id":"7715","d":"電子基板製造における帳票類翻訳及び外国籍就労者への教育・通訳その他付帯業務全般"}]},{"id":"1876","label":"【00001876】【ASTI株式会社】掛川工場　実装課　検査業務　2交替8/20","haken":"ASTI株式会社","bc":[{"id":"7711","d":"電子機器製造設備オペレーター及び付随業務"},{"id":"7712","d":"電子機器製造設備へのプログラミング技術者及び製造設備技術オペレーション業務その他製造に関する技術付随業務全般"},{"id":"7713","d":"電子機器製造設備へのプログラミング及び検査オペレーション業務その他付帯技術業務全般"},{"id":"7714","d":"電子機器製造設備へのプログラム電子制御及び製造設備技術オペレーション業務その他技術付帯業務全般"},{"id":"7715","d":"電子基板製造における帳票類翻訳及び外国籍就労者への教育・通訳その他付帯業務全般"}]},{"id":"1877","label":"【00001877】【ASTI株式会社】掛川工場　実装課　検査業務　3交替8/15/2330","haken":"ASTI株式会社","bc":[{"id":"7711","d":"電子機器製造設備オペレーター及び付随業務"},{"id":"7712","d":"電子機器製造設備へのプログラミング技術者及び製造設備技術オペレーション業務その他製造に関する技術付随業務全般"},{"id":"7713","d":"電子機器製造設備へのプログラミング及び検査オペレーション業務その他付帯技術業務全般"},{"id":"7714","d":"電子機器製造設備へのプログラム電子制御及び製造設備技術オペレーション業務その他技術付帯業務全般"},{"id":"7715","d":"電子基板製造における帳票類翻訳及び外国籍就労者への教育・通訳その他付帯業務全般"}]},{"id":"1878","label":"【00001878】【ASTI株式会社】掛川工場　実装課　検査業務　3交替8/16/24","haken":"ASTI株式会社","bc":[{"id":"7711","d":"電子機器製造設備オペレーター及び付随業務"},{"id":"7712","d":"電子機器製造設備へのプログラミング技術者及び製造設備技術オペレーション業務その他製造に関する技術付随業務全般"},{"id":"7713","d":"電子機器製造設備へのプログラミング及び検査オペレーション業務その他付帯技術業務全般"},{"id":"7714","d":"電子機器製造設備へのプログラム電子制御及び製造設備技術オペレーション業務その他技術付帯業務全般"},{"id":"7715","d":"電子基板製造における帳票類翻訳及び外国籍就労者への教育・通訳その他付帯業務全般"}]},{"id":"1989","label":"【00001989】【ASTI株式会社】袋井工場　生産一課　切圧","haken":"ASTI株式会社","bc":[{"id":"2850","d":"切圧工程に付随する業務"}]},{"id":"1991","label":"【00001991】【ASTI株式会社】袋井工場　生産一課　組立","haken":"ASTI株式会社","bc":[{"id":"2851","d":"ワイヤーハーネス組立・検査\n及び付随業務"}]},{"id":"1992","label":"【00001992】【ASTI株式会社】袋井工場　生産一課　発電機","haken":"ASTI株式会社","bc":[{"id":"2852","d":"発電機パネルの組立・検査\n及び付随業務"}]},{"id":"2055","label":"【00002055】【ASTI株式会社】磐田工場　制御機器生産課","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"2056","label":"【00002056】【ASTI株式会社】磐田工場　制御機器生産課　超音波組立","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"2057","label":"【00002057】【ASTI株式会社】磐田工場　制御機器生産課　組立1","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"2058","label":"【00002058】【ASTI株式会社】磐田工場　制御機器生産課　組立2","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"2059","label":"【00002059】【ASTI株式会社】磐田工場　制御機器生産課　基板生産","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"3869","label":"【00003869】【ASTI株式会社】組立、教育","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"4814","label":"【00004814】【ASTI株式会社】磐田工場　制御機器生産課","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"9397","label":"【00009397】【ASTI株式会社】磐田工場　制御機器生産課","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"14010","label":"【00014010】【ASTI株式会社】掛川工場　制御機器生産課　生産業務（8:00~17:00）170","haken":"ASTI株式会社","bc":[{"id":"2823","d":"電子部品の組立・検査及び付随作業"},{"id":"2824","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"2825","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"2826","d":"超音波製品の組立・検査及び付随作業"},{"id":"2827","d":"清掃作業"}]},{"id":"14114","label":"【00014114】【ASTI株式会社】リーダー補佐（通訳）","haken":"ASTI株式会社","bc":[{"id":"24333","d":"リーダー補佐及び通訳"},{"id":"24334","d":"通訳及び、設備点検等の間接作業"}]},{"id":"14121","label":"【00014121】【ASTI株式会社】浜松工場　生産三課","haken":"ASTI株式会社","bc":[{"id":"20045","d":"電子部品の組立・検査及び付随作業"},{"id":"20046","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"20047","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"20048","d":"超音波製品の組立・検査及び付随作業"},{"id":"20049","d":"清掃作業"}]},{"id":"14188","label":"【00014188】【ASTI株式会社】浜松工場　生産一課","haken":"ASTI株式会社","bc":[{"id":"20045","d":"電子部品の組立・検査及び付随作業"},{"id":"20046","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"20047","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"20048","d":"超音波製品の組立・検査及び付随作業"},{"id":"20049","d":"清掃作業"}]},{"id":"14204","label":"【00014204】【ASTI株式会社】浜松工場　生産二課　基板生産","haken":"ASTI株式会社","bc":[{"id":"20045","d":"電子部品の組立・検査及び付随作業"},{"id":"20046","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"20047","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"20048","d":"超音波製品の組立・検査及び付随作業"},{"id":"20049","d":"清掃作業"}]},{"id":"14205","label":"【00014205】【ASTI株式会社】浜松工場　生産二課　組立1","haken":"ASTI株式会社","bc":[{"id":"20045","d":"電子部品の組立・検査及び付随作業"},{"id":"20046","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"20047","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"20048","d":"超音波製品の組立・検査及び付随作業"},{"id":"20049","d":"清掃作業"}]},{"id":"14206","label":"【00014206】【ASTI株式会社】浜松工場　生産二課　組立2","haken":"ASTI株式会社","bc":[{"id":"20045","d":"電子部品の組立・検査及び付随作業"},{"id":"20046","d":"自転車変速スイッチ組立・検査及び付随作業"},{"id":"20047","d":"家電用制御基板の組立・検査及び付随作業"},{"id":"20048","d":"超音波製品の組立・検査及び付随作業"},{"id":"20049","d":"清掃作業"}]},{"id":"14341","label":"【00014341】【ASTI株式会社】掛川工場　生産一課　組立業務　（昼勤）","haken":"ASTI株式会社","bc":[{"id":"52268","d":"電子機器部品の組立・検査業務及び付随業務"},{"id":"52269","d":"電子機器部品の組立、製品検査設備オペレーション及びその他付帯業務"}]},{"id":"14342","label":"【00014342】【ASTI株式会社】掛川工場　生産一課　組立業務 （夜勤）","haken":"ASTI株式会社","bc":[{"id":"52268","d":"電子機器部品の組立・検査業務及び付随業務"},{"id":"52269","d":"電子機器部品の組立、製品検査設備オペレーション及びその他付帯業務"}]},{"id":"14503","label":"【00014503】【ASTI株式会社】掛川工場(掛川勤務）　生産二課　生産業務（8:00~17:00）","haken":"ASTI株式会社","bc":[{"id":"52268","d":"電子機器部品の組立・検査業務及び付随業務"},{"id":"52269","d":"電子機器部品の組立、製品検査設備オペレーション及びその他付帯業務"}]},{"id":"14504","label":"【00014504】【ASTI株式会社】掛川工場　生産二課　生産業務（19:00~4:00）","haken":"ASTI株式会社","bc":[{"id":"52268","d":"電子機器部品の組立・検査業務及び付随業務"},{"id":"52269","d":"電子機器部品の組立、製品検査設備オペレーション及びその他付帯業務"}]},{"id":"15811","label":"【00015811】【ASTI株式会社】袋井工場　生産二課　E5","haken":"ASTI株式会社","bc":[{"id":"2853","d":"ワイヤーハーネス製造及び付随業務"}]},{"id":"23601","label":"【00023601】【ASTI株式会社】組み立て、教育","haken":"ASTI株式会社","bc":[{"id":"24333","d":"リーダー補佐及び通訳"},{"id":"24334","d":"通訳及び、設備点検等の間接作業"}]},{"id":"41959","label":"【00041959】【株式会社ユーシン】【製造】組立・検査・運搬（作業者） 組立一グループ_キーセット","haken":"株式会社ユーシン","bc":[{"id":"59991","d":"自動車内外装部品の検査・組立て・運搬作業及びその他付随する業務"}]},{"id":"41960","label":"【00041960】【株式会社ユーシン】【製造】組立・検査・運搬（作業者） 組立二グループ_ラッチ","haken":"株式会社ユーシン","bc":[{"id":"59991","d":"自動車内外装部品の検査・組立て・運搬作業及びその他付随する業務"}]},{"id":"41961","label":"【00041961】【株式会社ユーシン】【製造】組立・検査・運搬（作業者） 組立三グループ_エアーSW・","haken":"株式会社ユーシン","bc":[{"id":"59991","d":"自動車内外装部品の検査・組立て・運搬作業及びその他付随する業務"}]},{"id":"41962","label":"【00041962】【株式会社ユーシン】【製造】組立・検査・運搬（作業者） 組立二グループ_電子","haken":"株式会社ユーシン","bc":[{"id":"59991","d":"自動車内外装部品の検査・組立て・運搬作業及びその他付随する業務"}]},{"id":"41964","label":"【00041964】【株式会社ユーシン】【製造】事務 組立三グループ","haken":"株式会社ユーシン","bc":[{"id":"59992","d":"製造一般事務\n　①勤怠管理\n　②資料の作成、書類整理、データ入力及びその他付随する業務"}]},{"id":"41967","label":"【00041967】【株式会社ユーシン】【工程管理】入出庫作業","haken":"株式会社ユーシン","bc":[{"id":"60001","d":"工程管理入出庫作業\n　①入出庫管理・在庫管理\n　②納期管理\n　③運搬作業　\n及びその他付随する業務"}]}];
 const BENTO_MENU_PRICE = { '①': 315, '④': 355, '⑥': 460 };
 var _bentoDate = null;
 function _btEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -43079,6 +43096,115 @@ function _renderRenrakuHistory(items) {
   body.innerHTML = html;
 }
 function _renrakuToggleRcp(idx) { var el = document.getElementById('renrakuRcp' + idx); if (el) el.style.display = (el.style.display === 'none' ? '' : 'none'); }
+
+// ===== 📝 派遣契約 hmc下書き作成 (新規社員登録の後) =====
+var _hmcEmp = null;
+function _hmcQuarterEnd(d) {   // d以降で最初の四半期末(3/31,6/30,9/30,12/31)
+  var y = d.getFullYear();
+  var ends = [new Date(y, 2, 31), new Date(y, 5, 30), new Date(y, 8, 30), new Date(y, 11, 31), new Date(y + 1, 2, 31), new Date(y + 1, 5, 30)];
+  for (var i = 0; i < ends.length; i++) { if (ends[i] >= d) return ends[i]; }
+  return ends[ends.length - 1];
+}
+function _hmcCalcPeriodTo(joinDate) {   // 近い四半期末。ただし1ヶ月未満なら次の四半期末
+  var d = new Date(joinDate); if (isNaN(d.getTime())) return null; d.setHours(0, 0, 0, 0);
+  var q = _hmcQuarterEnd(d);
+  var oneMonth = new Date(d); oneMonth.setMonth(oneMonth.getMonth() + 1);
+  if (q < oneMonth) { var nxt = new Date(q); nxt.setDate(nxt.getDate() + 1); q = _hmcQuarterEnd(nxt); }
+  return q;
+}
+function _hmcDateStr(d) { if (!d) return ''; var x = new Date(d); if (isNaN(x.getTime())) return ''; return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+async function openHmcKeiyaku(shainNo) {
+  switchScreen('hmcKeiyakuScreen');
+  var body = document.getElementById('hmcKeiyakuBody');
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
+  try {
+    var rows = await spGet(LIST_EMPLOYEES_GUID, '$filter=' + F.syainNo + ' eq ' + shainNo + '&$top=5&$orderby=Id desc');
+    if (!rows || !rows.length) throw new Error('社員番号 ' + shainNo + ' が見つかりません');
+    var emp = rows.find(function(r) { return !r[F.hakenTaisha]; }) || rows[0];   // 在職優先
+    _hmcEmp = { sn: shainNo, name: emp.Title || '', join: emp[F.nyushaDate] || '', rate: Number(emp[F.seikyu]) || 0, buka: stripBukaPrefix(emp[bukaODataKey] || '') };
+    _hmcRenderKeiyaku();
+  } catch (e) { body.innerHTML = '<div style="text-align:center;padding:24px;color:#c62828;">読み込み失敗: ' + escHtml(e.message || String(e)) + '</div>'; }
+}
+function _hmcRenderKeiyaku() {
+  var e = _hmcEmp, body = document.getElementById('hmcKeiyakuBody');
+  var to = e.join ? _hmcCalcPeriodTo(e.join) : null;
+  var fromStr = _hmcDateStr(e.join), toStr = to ? _hmcDateStr(to) : '';
+  var byH = {}; HMC_MATTERS.forEach(function(m) { (byH[m.haken] = byH[m.haken] || []).push(m); });
+  var matterOpts = '<option value="">案件を選択してください</option>';
+  Object.keys(byH).forEach(function(h) {
+    matterOpts += '<optgroup label="' + escHtml(h) + '">';
+    byH[h].forEach(function(m) { matterOpts += '<option value="' + m.id + '">' + escHtml(m.label) + '</option>'; });
+    matterOpts += '</optgroup>';
+  });
+  var inp = 'width:100%;border:1px solid #ccc;border-radius:8px;padding:9px;font-size:13px;box-sizing:border-box;';
+  var lbl = 'font-size:12px;color:#888;font-weight:700;';
+  body.innerHTML = '<div style="background:#fff;border:1.5px solid #e0e0e8;border-radius:12px;padding:12px;margin-bottom:12px;">'
+    + '<div style="font-weight:800;color:#1f3864;font-size:1.05em;">' + escHtml(e.name) + ' <span style="font-weight:400;color:#999;font-size:0.85em;">No.' + escHtml(e.sn) + '</span></div>'
+    + '<div style="font-size:13px;color:#666;margin-top:2px;">派遣先(部課): ' + escHtml(e.buka || '―') + '</div></div>'
+    + '<div style="background:#fff;border:1.5px solid #e0e0e8;border-radius:12px;padding:12px;">'
+    + '<label style="' + lbl + '">案件</label>'
+    + '<select id="hmcMatter" onchange="_hmcOnMatterChange()" style="' + inp + 'margin:4px 0 10px;">' + matterOpts + '</select>'
+    + '<label style="' + lbl + '">業務内容（契約文言）</label>'
+    + '<select id="hmcBizContent" style="' + inp + 'margin:4px 0 10px;"><option value="">先に案件を選択</option></select>'
+    + '<div style="display:flex;gap:8px;">'
+    + '<div style="flex:1;"><label style="' + lbl + '">契約期間 開始（入社日）</label><input id="hmcFrom" type="date" value="' + fromStr + '" style="' + inp + 'margin-top:4px;"></div>'
+    + '<div style="flex:1;"><label style="' + lbl + '">契約期間 終了</label><input id="hmcTo" type="date" value="' + toStr + '" style="' + inp + 'margin-top:4px;"></div></div>'
+    + '<div style="font-size:11px;color:#999;margin:4px 2px 10px;">※終了＝入社日に近い四半期末（1ヶ月未満なら次）。変更可</div>'
+    + '<label style="' + lbl + '">賃金（請求単価）</label>'
+    + '<input id="hmcRate" type="number" value="' + (e.rate || '') + '" style="' + inp + 'margin:4px 0 10px;">'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:4px 0 12px;"><input type="checkbox" id="hmcDoStaff" checked style="width:18px;height:18px;"> 入社時（hmcスタッフ登録も行う）</label>'
+    + '<button onclick="_hmcSubmitQueue()" style="width:100%;padding:14px;background:linear-gradient(135deg,#0277bd,#01579b);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;">📝 hmcに下書き作成（送信）</button>'
+    + '<div style="font-size:11px;color:#888;text-align:center;margin-top:8px;">送信後、PCの処理がhmcに下書き（一時保存）を作成します。総務が確認して提出してください。</div></div>';
+}
+function _hmcOnMatterChange() {
+  var mid = document.getElementById('hmcMatter').value;
+  var sel = document.getElementById('hmcBizContent');
+  var m = HMC_MATTERS.find(function(x) { return x.id === mid; });
+  if (!m) { sel.innerHTML = '<option value="">先に案件を選択</option>'; return; }
+  sel.innerHTML = (m.bc.length > 1 ? '<option value="">業務内容を選択してください</option>' : '')
+    + m.bc.map(function(b) { return '<option value="' + b.id + '">' + escHtml((b.d || '').replace(/\n/g, ' / ')) + '</option>'; }).join('');
+  if (m.bc.length === 1) sel.value = m.bc[0].id;
+}
+async function _hmcSubmitQueue() {
+  var mid = document.getElementById('hmcMatter').value, bid = document.getElementById('hmcBizContent').value;
+  var from = document.getElementById('hmcFrom').value, to = document.getElementById('hmcTo').value;
+  var rate = Number(document.getElementById('hmcRate').value) || 0, doStaff = document.getElementById('hmcDoStaff').checked;
+  var m = HMC_MATTERS.find(function(x) { return x.id === mid; });
+  var b = m && m.bc.find(function(x) { return x.id === bid; });
+  if (!mid) { showToast('案件を選択してください', 'error'); return; }
+  if (m && m.bc.length && !bid) { showToast('業務内容を選択してください', 'error'); return; }
+  if (!from || !to) { showToast('契約期間を入力してください', 'error'); return; }
+  if (!rate && !confirm('請求単価が0です。このまま送信しますか？')) return;
+  if (!confirm(_hmcEmp.name + ' の派遣契約をhmcに下書き作成します。\n案件: ' + (m ? m.label : '') + '\n期間: ' + from + ' 〜 ' + to + '\n単価: ¥' + rate.toLocaleString('ja-JP') + (doStaff ? '\n（スタッフ登録も実施）' : '') + '\n\nよろしいですか？')) return;
+  showSpinner();
+  try {
+    var token = await getToken();
+    var dj = await (await fetch(SP_SITE_URL + '/_api/contextinfo', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } })).json();
+    var digest = (dj.d && dj.d.GetContextWebInformation && dj.d.GetContextWebInformation.FormDigestValue) || dj.FormDigestValue;
+    var lj = await (await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + HMC_KEIYAKU_QUEUE_GUID + "')/RootFolder?$select=ServerRelativeUrl", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } })).json();
+    var listUrl = lj.d.ServerRelativeUrl;
+    var fv = [
+      { FieldName: 'Title', FieldValue: _hmcEmp.name + ' ' + from }, { FieldName: 'ShainNo', FieldValue: String(_hmcEmp.sn) },
+      { FieldName: 'EmpName', FieldValue: _hmcEmp.name }, { FieldName: 'MatterId', FieldValue: mid },
+      { FieldName: 'MatterLabel', FieldValue: m ? m.label : '' }, { FieldName: 'BusinessContentId', FieldValue: bid || '' },
+      { FieldName: 'BusinessContentDetail', FieldValue: b ? b.d : '' }, { FieldName: 'BillingRate', FieldValue: String(rate) },
+      { FieldName: 'PeriodFrom', FieldValue: from }, { FieldName: 'PeriodTo', FieldValue: to },
+      { FieldName: 'DoStaffRegister', FieldValue: doStaff ? '1' : '0' }, { FieldName: 'JobStatus', FieldValue: 'pending' },
+      { FieldName: 'RequestedBy', FieldValue: (typeof getLoggedInEmail === 'function' && getLoggedInEmail()) || '' }
+    ];
+    var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + HMC_KEIYAKU_QUEUE_GUID + "')/AddValidateUpdateItemUsingPath", {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=nometadata', 'Content-Type': 'application/json;odata=nometadata', 'X-RequestDigest': digest },
+      body: JSON.stringify({ listItemCreateInfo: { FolderPath: { DecodedUrl: listUrl }, UnderlyingObjectType: 0 }, formValues: fv, bNewDocumentUpdate: false })
+    });
+    hideSpinner();
+    if (!resp.ok) { var t = await resp.text(); throw new Error('HTTP ' + resp.status + ' ' + t.slice(0, 150)); }
+    var rj = await resp.json();
+    var errs = (rj.value || []).filter(function(v) { return v.HasException; });
+    if (errs.length) throw new Error('項目エラー: ' + errs.map(function(v) { return v.FieldName; }).join(','));
+    showToast('契約作成を送信しました（PCがhmcに下書きを作成します）', 'success');
+    switchScreen('searchScreen');
+  } catch (e) { hideSpinner(); showToast('送信失敗: ' + (e.message || e), 'error'); }
+}
 
 async function loadSougeiScreen() {
   if (typeof canUseSougei === 'function' && !canUseSougei()) { showToast('この機能を利用する権限がありません', 'error'); switchScreen('searchScreen'); return; }
