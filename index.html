@@ -36790,8 +36790,10 @@ function renderMaebariPending(items, nameMap, totalsMap) {
       + 'style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;background:#ede7f6;color:#5e35b1;padding:6px 12px;border-radius:10px;font-size:0.9em;font-weight:700;margin:6px 0;border:1px solid #d1c4e9;">'
       + '📊 今月分前払合計: ¥' + monthTotal.toLocaleString('ja-JP') + ' <span style="font-size:0.8em;opacity:0.7;">▶ 詳細</span>'
       + '</div>';
-    return '<div class="maebari-pending-card" data-id="' + it.Id + '">'
-      + '<div class="row1"><span class="amount">¥' + Number(it[MS.amount] || 0).toLocaleString('ja-JP') + '</span><span class="shain">No.' + _esc(shainNo || '') + retiredBadge + '</span></div>'
+    const amtVal = Number(it[MS.amount] || 0);
+    return '<div class="maebari-pending-card" data-id="' + it.Id + '" data-amount="' + amtVal + '">'
+      + '<label class="mb-sel" style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#5e35b1;font-weight:700;margin-bottom:4px;"><input type="checkbox" class="mb-chk" value="' + it.Id + '" onchange="updateMaebariBulkBar()" style="width:18px;height:18px;"> 選択</label>'
+      + '<div class="row1"><span class="amount">¥' + amtVal.toLocaleString('ja-JP') + '</span><span class="shain">No.' + _esc(shainNo || '') + retiredBadge + '</span></div>'
       + (empName ? '<div class="emp-name" style="font-size:1.05em;font-weight:700;color:#1f3864;margin:2px 0 6px;">' + _esc(empName) + '</div>' : '')
       + totalChip
       + '<div class="row2">希望日: <b>' + kibouStr + '</b></div>'
@@ -36804,7 +36806,48 @@ function renderMaebariPending(items, nameMap, totalsMap) {
       + '</div>'
       + '</div>';
   }).join('');
-  listEl.innerHTML = html;
+  const bar = '<div id="maebariBulkBar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #eee;padding:8px 4px;display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="maebariSelectAll" onchange="toggleMaebariSelectAll(this.checked)" style="width:18px;height:18px;"> 全選択</label>'
+    + '<span id="maebariBulkCount" style="font-size:12px;color:#888;">選択 0件</span>'
+    + '<button id="maebariBulkBtn" onclick="bulkApproveMaebari()" disabled style="margin-left:auto;background:#9e9e9e;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:800;cursor:not-allowed;">✅ まとめて承認</button>'
+    + '</div>';
+  listEl.innerHTML = bar + html;
+}
+function updateMaebariBulkBar() {
+  const all = Array.prototype.slice.call(document.querySelectorAll('#maebariPendingList .mb-chk'));
+  const checked = all.filter(c => c.checked);
+  let total = 0;
+  checked.forEach(c => { const card = c.closest('.maebari-pending-card'); if (card) total += Number(card.getAttribute('data-amount') || 0); });
+  const lbl = document.getElementById('maebariBulkCount');
+  if (lbl) lbl.textContent = '選択 ' + checked.length + '件' + (checked.length ? '（¥' + total.toLocaleString('ja-JP') + '）' : '');
+  const btn = document.getElementById('maebariBulkBtn');
+  if (btn) { btn.disabled = (checked.length === 0); btn.style.background = checked.length ? 'linear-gradient(135deg,#43a047,#2e7d32)' : '#9e9e9e'; btn.style.cursor = checked.length ? 'pointer' : 'not-allowed'; }
+  const allc = document.getElementById('maebariSelectAll');
+  if (allc) allc.checked = (all.length > 0 && checked.length === all.length);
+}
+function toggleMaebariSelectAll(on) {
+  document.querySelectorAll('#maebariPendingList .mb-chk').forEach(c => { c.checked = on; });
+  updateMaebariBulkBar();
+}
+async function bulkApproveMaebari() {
+  if (!isMaebariApprover()) { showToast('承認権限がありません', 'error'); return; }
+  const checked = Array.prototype.slice.call(document.querySelectorAll('#maebariPendingList .mb-chk:checked'));
+  if (!checked.length) return;
+  const ids = checked.map(c => c.value);
+  let total = 0;
+  checked.forEach(c => { const card = c.closest('.maebari-pending-card'); if (card) total += Number(card.getAttribute('data-amount') || 0); });
+  if (!confirm('選択した ' + ids.length + '件（合計 ¥' + total.toLocaleString('ja-JP') + '）を承認します。よろしいですか？\n承認すると前払いリストに自動追加されます。')) return;
+  const btn = document.getElementById('maebariBulkBtn');
+  let ok = 0, fail = 0;
+  for (let i = 0; i < ids.length; i++) {
+    if (btn) { btn.disabled = true; btn.style.cursor = 'wait'; btn.textContent = '承認中… ' + (i + 1) + '/' + ids.length; }
+    try { await approveMaebariShinsei(ids[i], true); ok++; }
+    catch (e) { console.error('bulk maebari fail id=' + ids[i], e); fail++; }
+    await new Promise(r => setTimeout(r, 250));   // SPスロットリング回避(順次)
+  }
+  showToast('一括承認: 成功 ' + ok + '件' + (fail ? ' / 失敗 ' + fail + '件' : ''), fail ? 'error' : 'success');
+  loadMaebariPending();
+  updateMaebariApprovalBadge();
 }
 
 // ====== 前払い 承認画面: 承認待ち / 承認済み タブ ======
@@ -36940,7 +36983,7 @@ async function confirmRejectMaebari(shinseiId) {
   await rejectMaebariShinsei(shinseiId, reason.trim());
 }
 
-async function approveMaebariShinsei(shinseiId) {
+async function approveMaebariShinsei(shinseiId, bulk) {
   if (!isMaebariApprover()) { showToast('承認権限がありません', 'error'); return; }
   try {
     const token = await getToken();
@@ -37046,15 +37089,17 @@ async function approveMaebariShinsei(shinseiId) {
     if (!patchResp.ok) {
       const errTxt = await patchResp.text();
       console.warn('申請 PATCH 失敗 (前払い INSERT は成功):', patchResp.status, errTxt);
-      showToast('承認しましたが、ステータス更新に失敗しました', 'success');
+      if (!bulk) showToast('承認しましたが、ステータス更新に失敗しました', 'success');
     } else {
-      showToast('承認しました (前払い#' + newMaebariId + ')', 'success');
+      if (!bulk) showToast('承認しました (前払い#' + newMaebariId + ')', 'success');
     }
-    loadMaebariPending();
-    updateMaebariApprovalBadge();
+    if (!bulk) { loadMaebariPending(); updateMaebariApprovalBadge(); }
+    return true;
   } catch (e) {
     console.error('approveMaebariShinsei error:', e);
+    if (bulk) throw e;                          // 一括時は呼び出し側で件数集計
     showToast('承認エラー: ' + e.message, 'error');
+    return false;
   }
 }
 
@@ -42519,9 +42564,15 @@ function _btRenderPending(items){
   if (tb) { tb.textContent = String(pend.length); tb.classList.toggle('zero', pend.length <= 0); }
   var html = '<div style="font-size:12px;color:#888;padding:2px 2px 8px;">本日 ' + _btEsc(_btTodayIso()) + ' の注文</div>';
   html += '<div style="font-weight:800;color:#e65100;padding:2px 2px 6px;">承認待ち ' + pend.length + '件</div>';
+  if (pend.length) html += '<div id="bentoBulkBar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #eee;padding:8px 4px;display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="bentoSelectAll" onchange="toggleBentoSelectAll(this.checked)" style="width:18px;height:18px;"> 全選択</label>'
+    + '<span id="bentoBulkCount" style="font-size:12px;color:#888;">選択 0件</span>'
+    + '<button id="bentoBulkBtn" onclick="bulkApproveBento()" disabled style="margin-left:auto;background:#9e9e9e;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:800;cursor:not-allowed;">✅ まとめて承認</button>'
+    + '</div>';
   if (!pend.length) html += '<div style="padding:0 2px 10px;color:#888;font-size:13px;">承認待ちはありません</div>';
   pend.forEach(function(it){
     html += '<div class="card" style="padding:10px;margin:0 0 8px;display:flex;align-items:center;gap:8px;">'
+      + '<input type="checkbox" class="bt-chk" value="' + it.Id + '" data-price="' + Number(it.Price || 0) + '" onchange="updateBentoBulkBar()" style="width:18px;height:18px;flex:none;">'
       + '<div style="flex:1;min-width:90px;"><div style="font-weight:700;">' + _btEsc(it.EmpName || it.ShainNo) + '</div>'
       + '<div style="color:#666;font-size:12px;">' + _btEsc(stripBukaPrefix(it.Hakensaki || '')) + ' ／ ' + _btEsc(it.MenuNo || '') + ' ' + _btYen(it.Price) + '</div></div>'
       + '<button class="nyutai-asti-btn" style="background:#2e7d32;font-size:13px;padding:7px 12px;" onclick="bentoYukyuApprove(' + it.Id + ',\'approve\')">承認</button>'
@@ -42574,7 +42625,7 @@ function renderBentoApprovedFiltered(){
   }).join('');
 }
 
-async function bentoYukyuApprove(itemId, action){
+async function bentoYukyuApprove(itemId, action, bulk){
   var reason = '';
   if (action === 'reject') {
     reason = prompt('拒否の理由を入力してください（本人のポータルに表示されます）:');
@@ -42592,10 +42643,42 @@ async function bentoYukyuApprove(itemId, action){
         'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
       body: JSON.stringify(body) });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    showToast(action === 'reject' ? '拒否しました' : '承認しました', 'success');
-    loadBentoScreen();
-    updateBentoAdminBadge();
-  } catch (e) { showToast('更新失敗: ' + (e.message || e), 'error'); }
+    if (!bulk) { showToast(action === 'reject' ? '拒否しました' : '承認しました', 'success'); loadBentoScreen(); updateBentoAdminBadge(); }
+    return true;
+  } catch (e) { if (bulk) throw e; showToast('更新失敗: ' + (e.message || e), 'error'); return false; }
+}
+function updateBentoBulkBar(){
+  var all = Array.prototype.slice.call(document.querySelectorAll('#bentoPendingBody .bt-chk'));
+  var checked = all.filter(function(c){ return c.checked; });
+  var total = 0; checked.forEach(function(c){ total += Number(c.getAttribute('data-price') || 0); });
+  var lbl = document.getElementById('bentoBulkCount');
+  if (lbl) lbl.textContent = '選択 ' + checked.length + '件' + (checked.length ? '（' + _btYen(total) + '）' : '');
+  var btn = document.getElementById('bentoBulkBtn');
+  if (btn) { btn.disabled = (checked.length === 0); btn.style.background = checked.length ? 'linear-gradient(135deg,#43a047,#2e7d32)' : '#9e9e9e'; btn.style.cursor = checked.length ? 'pointer' : 'not-allowed'; }
+  var allc = document.getElementById('bentoSelectAll');
+  if (allc) allc.checked = (all.length > 0 && checked.length === all.length);
+}
+function toggleBentoSelectAll(on){
+  document.querySelectorAll('#bentoPendingBody .bt-chk').forEach(function(c){ c.checked = on; });
+  updateBentoBulkBar();
+}
+async function bulkApproveBento(){
+  var checked = Array.prototype.slice.call(document.querySelectorAll('#bentoPendingBody .bt-chk:checked'));
+  if (!checked.length) return;
+  var ids = checked.map(function(c){ return c.value; });
+  var total = 0; checked.forEach(function(c){ total += Number(c.getAttribute('data-price') || 0); });
+  if (!confirm('選択した ' + ids.length + '件（合計 ' + _btYen(total) + '）を承認します。よろしいですか？')) return;
+  var btn = document.getElementById('bentoBulkBtn');
+  var ok = 0, fail = 0;
+  for (var i = 0; i < ids.length; i++) {
+    if (btn) { btn.disabled = true; btn.textContent = '承認中… ' + (i + 1) + '/' + ids.length; }
+    try { await bentoYukyuApprove(ids[i], 'approve', true); ok++; }
+    catch (e) { console.error('bulk bento fail id=' + ids[i], e); fail++; }
+    await new Promise(function(r){ setTimeout(r, 200); });   // SPスロットリング回避(順次)
+  }
+  showToast('一括承認: 成功 ' + ok + '件' + (fail ? ' / 失敗 ' + fail + '件' : ''), fail ? 'error' : 'success');
+  loadBentoScreen();
+  updateBentoAdminBadge();
 }
 
 // ====== 代理注文 (担当者・役員が従業員の代わりに弁当を注文するバックアップ) ======
