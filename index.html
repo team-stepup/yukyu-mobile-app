@@ -5537,8 +5537,27 @@ select.sankyu-edit-input {
           <span style="flex:1;font-weight:600;">証憑スキャン <span style="font-size:10px;color:#999;font-weight:500;">(AI読取り→証憑保存)</span></span>
           <span style="color:#bbb;font-size:14px;">›</span>
         </button>
+        <button type="button" onclick="openNippouScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:linear-gradient(135deg,#fff,#f7faff);cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">📋</span>
+          <span style="flex:1;font-weight:600;">業務日報 <span style="font-size:10px;color:#999;font-weight:500;">(担当者×日別)</span></span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
       </div>
     </div>
+  </div>
+
+  <!-- Screen: 業務日報（役員専用 / SP List「業務日報」を担当者×日別に閲覧） -->
+  <div class="screen" id="nippouScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;flex:1;">📋 業務日報</h2>
+      <button onclick="reloadNippou()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;">↻</button>
+      <span style="font-size:9px;font-weight:800;color:#fff;background:linear-gradient(135deg,#f0b000,#d99000);padding:2px 7px;border-radius:8px;">👑 役員</span>
+    </div>
+    <div style="background:#f4f7fc;border:1px solid #d6e2f0;border-radius:10px;padding:9px 12px;font-size:11.5px;color:#3b556e;line-height:1.6;margin-bottom:12px;">
+      担当者を選ぶと、日別の業務日報（要点・⚠要対応・訪問詳細）を確認できます。<b>取扱注意（機密情報）</b>。
+    </div>
+    <div id="nippouBody"></div>
   </div>
 
   <!-- Screen: 証憑スキャン（役員専用 / AI-OCR→電帳法準拠PDF→証憑フォルダ保存） -->
@@ -33438,6 +33457,116 @@ async function uploadFileToSp(folderPath, fileName, file) {
     throw new Error('アップロード失敗: ' + resp.status);
   }
   return await resp.json();
+}
+
+// ============================================================
+// 📋 業務日報 (役員専用) — SP List「業務日報」を担当者×日別に閲覧
+//   データは PC の nippou_auto が日次で解析・同期。取扱注意(機密)。
+// ============================================================
+const NIPPOU_LIST_GUID = 'c11f5c7a-6dfd-44c6-9497-f0d20357f102';
+const NIPPOU_STAFF = ['吉浦 マルセロ','森 ゆうじ','森 まこと','城 かおり'];
+var _nippouItems = null;
+function nipEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtNippouDate(s){
+  if(!s) return '';
+  var p = String(s).split('-'); if(p.length<3) return s;
+  var dt = new Date(+p[0], +p[1]-1, +p[2]);
+  var w = ['日','月','火','水','木','金','土'][dt.getDay()];
+  return (+p[1])+'/'+(+p[2])+'('+w+')';
+}
+async function openNippouScreen(){
+  switchScreen('nippouScreen');
+  if (!_nippouItems) await loadNippou();
+  renderNippouStaffList();
+}
+async function reloadNippou(){ _nippouItems = null; await openNippouScreen(); }
+async function loadNippou(){
+  var box = document.getElementById('nippouBody');
+  box.innerHTML = '<div style="text-align:center;color:#999;padding:30px;">読み込み中…</div>';
+  try {
+    var items = await spGetAll(NIPPOU_LIST_GUID, "$select=Staff,StaffEmail,RepDate,HasFlag,Data&$top=5000&$orderby=RepDate desc");
+    _nippouItems = items.map(function(it){
+      var d = {}; try { d = JSON.parse(it.Data || '{}'); } catch(e){}
+      return { staff: it.Staff, email: it.StaffEmail, date: it.RepDate, hasFlag: Number(it.HasFlag)||0, d: d };
+    });
+  } catch(e){
+    box.innerHTML = '<div style="color:#c0392b;padding:20px;">読み込み失敗: '+ nipEsc(e.message||e) +'</div>';
+    _nippouItems = [];
+  }
+}
+function renderNippouStaffList(){
+  var box = document.getElementById('nippouBody');
+  if (!_nippouItems || !_nippouItems.length){ box.innerHTML = '<div style="color:#999;padding:20px;text-align:center;">データがありません</div>'; return; }
+  var flagged = _nippouItems.filter(function(x){return x.hasFlag;}).slice(0,8);
+  var html = '';
+  if (flagged.length){
+    html += '<div style="background:#fff5f5;border:1px solid #f3c0c0;border-radius:10px;padding:10px 12px;margin-bottom:12px;">';
+    html += '<div style="font-size:12px;font-weight:700;color:#c0392b;margin-bottom:6px;">⚠ 最近の要対応</div>';
+    flagged.forEach(function(x){
+      html += '<div style="font-size:11.5px;color:#7a2b2b;line-height:1.55;margin-bottom:4px;">・<b>'+nipEsc(x.staff)+'</b> '+fmtNippouDate(x.date)+'：'+nipEsc((x.d.flags||[]).join(' / '))+'</div>';
+    });
+    html += '</div>';
+  }
+  NIPPOU_STAFF.forEach(function(name){
+    var rows = _nippouItems.filter(function(x){return x.staff===name;});
+    var fcnt = rows.filter(function(x){return x.hasFlag;}).length;
+    var latest = rows.length ? fmtNippouDate(rows[0].date) : '—';
+    html += '<button type="button" onclick="renderNippouDates(\''+name+'\')" style="width:100%;margin-top:6px;padding:12px;border:none;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">';
+    html += '<span style="font-size:20px;">🧑‍💼</span>';
+    html += '<span style="flex:1;font-weight:600;">'+nipEsc(name)+'<span style="font-size:11px;color:#999;font-weight:500;"> ('+rows.length+'日 / 最新 '+latest+')</span></span>';
+    if (fcnt) html += '<span style="font-size:10px;color:#fff;background:#e74c3c;padding:1px 7px;border-radius:8px;font-weight:700;">⚠'+fcnt+'</span>';
+    html += '<span style="color:#bbb;font-size:14px;">›</span></button>';
+  });
+  box.innerHTML = html;
+}
+function renderNippouDates(name){
+  var box = document.getElementById('nippouBody');
+  var rows = _nippouItems.filter(function(x){return x.staff===name;});
+  rows.sort(function(a,b){return a.date<b.date?1:(a.date>b.date?-1:0);});
+  var html = '<button onclick="renderNippouStaffList()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 担当者一覧</button>';
+  html += '<div style="font-weight:700;font-size:15px;margin:10px 2px 8px;">'+nipEsc(name)+' <span style="font-size:11px;color:#999;font-weight:500;">('+rows.length+'日)</span></div>';
+  if (!rows.length){ html += '<div style="color:#999;padding:10px;">日報がありません</div>'; box.innerHTML = html; return; }
+  rows.forEach(function(x){
+    var id = 'nip_'+(x.email||'').replace(/[^a-z0-9]/gi,'')+'_'+x.date.replace(/-/g,'');
+    html += '<div style="border:1px solid #e6e6ef;border-radius:10px;margin-bottom:6px;overflow:hidden;background:#fff;">';
+    html += '<button onclick="toggleNippou(\''+id+'\')" style="width:100%;text-align:left;padding:11px 12px;border:none;background:#fff;cursor:pointer;display:flex;align-items:center;gap:8px;">';
+    html += '<span style="font-weight:700;font-size:13px;">'+fmtNippouDate(x.date)+'</span>';
+    if (x.hasFlag) html += '<span style="font-size:10px;color:#fff;background:#e74c3c;padding:1px 7px;border-radius:7px;font-weight:700;">⚠ 要対応</span>';
+    html += '<span style="flex:1;"></span><span id="'+id+'_chev" style="color:#bbb;font-size:13px;">▾</span></button>';
+    html += '<div id="'+id+'" style="display:none;padding:2px 12px 12px;border-top:1px solid #f0f0f5;">'+renderNippouDetail(x)+'</div>';
+    html += '</div>';
+  });
+  box.innerHTML = html;
+}
+function renderNippouDetail(x){
+  var d = x.d || {};
+  function sec(title, arr, color){
+    if (!arr || !arr.length) return '';
+    var s = '<div style="margin-top:9px;"><div style="font-size:11px;font-weight:700;color:'+color+';margin-bottom:3px;">'+title+'</div>';
+    arr.forEach(function(line){ s += '<div style="font-size:12px;color:#333;line-height:1.55;white-space:pre-wrap;margin-bottom:3px;">'+nipEsc(line)+'</div>'; });
+    return s + '</div>';
+  }
+  var html = '';
+  if (d.flags && d.flags.length){
+    html += '<div style="background:#fff5f5;border:1px solid #f3c0c0;border-radius:8px;padding:7px 9px;margin-top:9px;">';
+    d.flags.forEach(function(f){ html += '<div style="font-size:11.5px;color:#c0392b;line-height:1.5;">⚠ '+nipEsc(f)+'</div>'; });
+    html += '</div>';
+  }
+  html += sec('お客様からの依頼', d.requests, '#1565c0');
+  html += sec('派遣社員からの相談', d.consults, '#8e44ad');
+  html += sec('トラブル・クレーム', d.troubles, '#c0392b');
+  html += sec('翌日以降のフォロー', d.followups, '#2e7d32');
+  html += sec('その他特記事項', d.notes, '#555');
+  html += sec('訪問・対応', d.visits, '#00838f');
+  if (d.url) html += '<div style="margin-top:11px;"><a href="'+nipEsc(d.url)+'" target="_blank" rel="noopener" style="font-size:12px;color:#1565c0;text-decoration:none;">📄 原本Excelを開く ↗</a></div>';
+  if (!html) html = '<div style="color:#999;font-size:12px;padding:6px 0;">記載内容なし（ルーチンのみ）</div>';
+  return html;
+}
+function toggleNippou(id){
+  var el = document.getElementById(id); if (!el) return;
+  var ch = document.getElementById(id+'_chev');
+  if (el.style.display==='none'){ el.style.display='block'; if(ch) ch.textContent='▴'; }
+  else { el.style.display='none'; if(ch) ch.textContent='▾'; }
 }
 
 // ============================================================
