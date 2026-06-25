@@ -7772,17 +7772,11 @@ async function searchEmployee() {
       const br = isResigned(b) ? 1 : 0;
       return ar - br;
     });
-    // 退社者カード用: 次回採用フィールドの OData キーを解決
+    // 退社者カード用: 次回採用フィールドの OData キーを解決 (buildFieldKeyMap で統一)
     let _jikaiKeySearch = null;
     try {
       if (!employeeFieldsCache) await fetchEmployeeFields();
-      if (employeeFieldsCache) {
-        for (var _jk in employeeFieldsCache) {
-          if (employeeFieldsCache[_jk] && employeeFieldsCache[_jk].title === '次回の採用') {
-            _jikaiKeySearch = _jk.charAt(0) === '_' ? 'OData_' + _jk : _jk; break;
-          }
-        }
-      }
+      if (employeeFieldsCache) _jikaiKeySearch = buildFieldKeyMap(employeeFieldsCache)['jikaiSaiyou'] || null;
     } catch (_) {}
     container.innerHTML = sortedResults.map(emp => {
       const nyushaRaw = emp[F.nyushaDate];
@@ -17566,7 +17560,7 @@ function buildFieldKeyMap(fieldsMeta) {
     rishokuhyou: '離職票risyokuhyou',
     rishokuWatashi: '離職票渡し方risyokuhyou watashikata',
     taisyokuRiyuu: '退職理由',
-    jikaiSaiyou: '次回の採用',
+    jikaiSaiyou: '次回採用',  // 実フィールド名は「次回採用」(の ナシ)
     shahoKanyuubi: '加入日kanyuubi',
     shahoHuyou: '扶養huyou',
     shahoHuyouBaai: '扶養がある場合huyouga aru baai',
