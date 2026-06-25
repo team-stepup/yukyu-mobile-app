@@ -5555,7 +5555,7 @@ select.sankyu-edit-input {
       <span style="font-size:9px;font-weight:800;color:#fff;background:linear-gradient(135deg,#f0b000,#d99000);padding:2px 7px;border-radius:8px;">👑 役員</span>
     </div>
     <div style="background:#f4f7fc;border:1px solid #d6e2f0;border-radius:10px;padding:9px 12px;font-size:11.5px;color:#3b556e;line-height:1.6;margin-bottom:12px;">
-      担当者を選ぶと、日別の業務日報（要点・⚠要対応・訪問詳細）を確認できます。<b>取扱注意（機密情報）</b>。
+      🔍で全業務日報を横断検索、または担当者を選ぶと日別に確認できます。<b>取扱注意（機密情報）</b>。
     </div>
     <div id="nippouBody"></div>
   </div>
@@ -33510,6 +33510,13 @@ async function loadNippou(){
 function renderNippouStaffList(){
   var box = document.getElementById('nippouBody');
   if (!_nippouItems || !_nippouItems.length){ box.innerHTML = '<div style="color:#999;padding:20px;text-align:center;">データがありません</div>'; return; }
+  // 全業務日報を横断検索する検索ボックス(最初の画面・常設)＋本体
+  box.innerHTML = '<input id="nippouSearch" type="search" placeholder="🔍 全業務日報を検索（担当者・日付・内容）" oninput="nippouSearch(this.value)" style="width:100%;border:1px solid #ccc;border-radius:9px;padding:9px 11px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">'
+    + '<div id="nippouMain"></div>';
+  _nippouRenderDefault();
+}
+function _nippouRenderDefault(){
+  var main = document.getElementById('nippouMain'); if (!main) return;
   var flagged = _nippouItems.filter(function(x){return x.hasFlag;}).slice(0,8);
   var html = '';
   if (flagged.length){
@@ -33530,7 +33537,32 @@ function renderNippouStaffList(){
     if (fcnt) html += '<span style="font-size:10px;color:#fff;background:#e74c3c;padding:1px 7px;border-radius:8px;font-weight:700;">⚠'+fcnt+'</span>';
     html += '<span style="color:#bbb;font-size:14px;">›</span></button>';
   });
-  box.innerHTML = html;
+  main.innerHTML = html;
+}
+function _nippouSearchText(x){
+  var d = x.d || {}, parts = [x.staff||'', x.date||'', fmtNippouDate(x.date)];
+  ['flags','requests','consults','troubles','followups','notes','visits'].forEach(function(k){ if (Array.isArray(d[k])) parts = parts.concat(d[k]); });
+  return parts.join(' ').toLowerCase();
+}
+function nippouSearch(q){
+  q = (q||'').trim().toLowerCase();
+  var main = document.getElementById('nippouMain'); if (!main) return;
+  if (!q){ _nippouRenderDefault(); return; }
+  var hits = _nippouItems.filter(function(x){ return _nippouSearchText(x).indexOf(q) >= 0; });
+  hits.sort(function(a,b){return a.date<b.date?1:(a.date>b.date?-1:0);});
+  if (!hits.length){ main.innerHTML = '<div style="color:#999;padding:18px;text-align:center;font-size:13px;">「'+nipEsc(q)+'」に該当する業務日報がありません</div>'; return; }
+  var html = '<div style="font-size:12px;color:#888;margin:2px 2px 8px;">'+hits.length+'件 ヒット</div>';
+  hits.slice(0,200).forEach(function(x){
+    var id = 'nipS_'+(x.email||'').replace(/[^a-z0-9]/gi,'')+'_'+String(x.date).replace(/-/g,'');
+    html += '<div style="border:1px solid #e6e6ef;border-radius:10px;margin-bottom:6px;overflow:hidden;background:#fff;">';
+    html += '<button onclick="toggleNippou(\''+id+'\')" style="width:100%;text-align:left;padding:11px 12px;border:none;background:#fff;cursor:pointer;display:flex;align-items:center;gap:8px;">';
+    html += '<span style="font-size:16px;">🧑‍💼</span><span style="font-weight:700;font-size:13px;">'+nipEsc(x.staff)+'</span><span style="font-size:12px;color:#666;">'+fmtNippouDate(x.date)+'</span>';
+    if (x.hasFlag) html += '<span style="font-size:10px;color:#fff;background:#e74c3c;padding:1px 7px;border-radius:7px;font-weight:700;">⚠ 要対応</span>';
+    html += '<span style="flex:1;"></span><span id="'+id+'_chev" style="color:#bbb;font-size:13px;">▾</span></button>';
+    html += '<div id="'+id+'" style="display:none;padding:2px 12px 12px;border-top:1px solid #f0f0f5;">'+renderNippouDetail(x)+'</div>';
+    html += '</div>';
+  });
+  main.innerHTML = html;
 }
 function renderNippouDates(name){
   var box = document.getElementById('nippouBody');
