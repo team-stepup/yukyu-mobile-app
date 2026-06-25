@@ -5423,7 +5423,9 @@ select.sankyu-edit-input {
       <button class="quick-link-btn" onclick="openSoumuScreen()" style="position:relative;">
         <span class="ql-icon">🏢</span>
         <span class="ql-text">総務部</span>
-        <span id="soumuBadgeCount" class="ql-badge" style="background:#7b1fa2;display:none;"></span>
+        <span id="soumuBadgeShahoIn" class="ql-badge" title="社保加入 未処理" style="background:#00897b;display:none;top:4px;right:4px;"></span>
+        <span id="soumuBadgeShahoOut" class="ql-badge" title="社保喪失 未処理" style="background:#c62828;display:none;top:32px;right:4px;"></span>
+        <span id="soumuBadgeRishoku" class="ql-badge" title="離職票 未処理" style="background:#6d4c41;display:none;top:60px;right:4px;"></span>
       </button>
       <button class="quick-link-btn" onclick="openSankyuScreen()" style="position:relative;">
         <span class="ql-icon">🌸</span>
@@ -17827,6 +17829,68 @@ function categoryHasAlert(emp, keyMap, category) {
 
 // Open expiry alert list — shows all employees with deadlines within 60 days
 // Home badge counts (前払い・入退・期限注意)
+// ── 総務バッジ用カウント (社保加入/社保喪失/離職票) ──
+// ※集計ルールは 総務ダッシュボード(renderSoumuDashboard / loadSoumuDashboard)と同一。変更時は両方更新。
+function _dedupeSoumuShahoInItems(items, allEmps, km) {
+  if (!items || !items.length || !allEmps || !km || !km['soumuShaho']) return items || [];
+  var bangoKey = (_soumuShahoInFields && _soumuShahoInFields.bango) || null;
+  if (!bangoKey) return items;
+  var odShaho = km['soumuShaho'];
+  function _norm(v){ var s=String(v==null?'':v).trim(); if(/^\d+$/.test(s)) s=String(parseInt(s,10)); return s; }
+  var skip = {};
+  allEmps.forEach(function(e){
+    var sv = String(e[odShaho] || '').trim();
+    if (sv && (sv.indexOf('申請')>=0 || sv.indexOf('完了')>=0 || sv.indexOf('喪失')>=0 || sv.indexOf('移動')>=0)) {
+      var bn = _norm(F.syainNo ? e[F.syainNo] : ''); if (bn) skip[bn] = true;
+    }
+  });
+  return items.filter(function(it){ var bn=_norm(it[bangoKey]); return !(bn && skip[bn]); });
+}
+function computeSoumuBadgeCounts(allEmps, km, shahoInResult) {
+  var res = { shahoIn: 0, shahoOut: 0, rishokuhyou: 0 };
+  if (!allEmps || !km) return res;
+  var today = new Date(); today.setHours(0,0,0,0);
+  var odZaisyoku = km['zaisyoku'];
+  function zaisyoku(emp){
+    if (odZaisyoku) return String(emp[odZaisyoku] || '');
+    return isResigned(emp) ? '退社' : '在職';
+  }
+  // 社保加入: 加入申請リストから 申請中/完了/喪失/移動 の社員を除外した残り
+  res.shahoIn = _dedupeSoumuShahoInItems((shahoInResult && shahoInResult.items) || [], allEmps, km).length;
+  var odShaho = km['soumuShaho'];
+  var odRishokuhyou = km['rishokuhyou'], odRishoku = km['soumuRishoku'];
+  allEmps.forEach(function(emp){
+    if (!emp.Title) return;
+    // 社保喪失: 退社日(遅い方)<=今日 AND soumuShaho に「取得完了」含み「喪失」含まない
+    if (odShaho) {
+      var yd = emp[F.yukyuTaisha] ? new Date(emp[F.yukyuTaisha]) : null;
+      var hd = emp[F.hakenTaisha] ? new Date(emp[F.hakenTaisha]) : null;
+      if (yd || hd) {
+        var latest = (yd && hd) ? (yd.getTime()>hd.getTime()?yd:hd) : (yd||hd);
+        latest.setHours(0,0,0,0);
+        if (latest <= today) {
+          var sv = String(emp[odShaho] || '');
+          if (sv.indexOf('取得完了')>=0 && sv.indexOf('喪失')<0) res.shahoOut++;
+        }
+      }
+    }
+    // 離職票: 退社 AND rishokuhyou=必要 AND soumuRishoku=不要/空(未処理)
+    if (odRishokuhyou && odRishoku) {
+      if (zaisyoku(emp) === '退社' && String(emp[odRishokuhyou]||'').trim()==='必要') {
+        var srVal = String(emp[odRishoku]||'').trim();
+        if (srVal==='不要' || srVal==='') res.rishokuhyou++;
+      }
+    }
+  });
+  return res;
+}
+function _setSoumuBadge(id, n){
+  var el = document.getElementById(id);
+  if (!el) return;
+  if (n > 0){ el.textContent = n; el.style.display = 'inline-block'; }
+  else { el.style.display = 'none'; }
+}
+
 async function loadHomeBadges() {
   // 最低賃金チェックとリマインダーバナー (APIコール不要なので先に描画)
   try { renderMinWageBanner(); } catch(e) { console.warn('minWage banner error:', e); }
@@ -17859,7 +17923,8 @@ async function loadHomeBadges() {
     loadVehicleBadgeData().catch(function(e) { console.log('Vehicle badge error:', e); return null; }),
     fetchSankyuSummary().catch(function(e) { console.log('Sankyu badge error:', e); return null; }),
     fetchHakensakiBadgeData().catch(function(e) { console.log('Hakensaki badge error:', e); return null; }),
-    spGetAll(LIST_LEAVE_GUID, leaveAllSelect).catch(function(e) { console.log('Yukyu all fetch error:', e); return []; })
+    spGetAll(LIST_LEAVE_GUID, leaveAllSelect).catch(function(e) { console.log('Yukyu all fetch error:', e); return []; }),
+    fetchSoumuShahoInCount().catch(function(e) { console.log('Soumu shahoIn badge error:', e); return { count: 0, items: [] }; })
   ]);
 
   var mRecs = results[0].value || [];
@@ -17870,6 +17935,16 @@ async function loadHomeBadges() {
   var sankyuResult = results[5].value;
   var hakenBadgeResult = results[6].value;
   var leaveAll = results[7].value || [];
+
+  // 総務バッジ (社保加入/社保喪失/離職票) — allEmps + fieldsMeta を再利用
+  try {
+    var _soumuKm = (meta && Object.keys(meta).length > 0) ? buildFieldKeyMap(meta) : {};
+    var _shahoInRaw = results[8].value || { count: 0, items: [] };
+    var _sc = computeSoumuBadgeCounts(allEmps, _soumuKm, _shahoInRaw);
+    _setSoumuBadge('soumuBadgeShahoIn', _sc.shahoIn);
+    _setSoumuBadge('soumuBadgeShahoOut', _sc.shahoOut);
+    _setSoumuBadge('soumuBadgeRishoku', _sc.rishokuhyou);
+  } catch (e) { console.warn('Soumu badge compute error:', e); }
 
   // 前払いバッジ（件数）
   var mBadge = document.getElementById('maebariBadgeCount');
