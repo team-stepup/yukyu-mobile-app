@@ -6278,7 +6278,7 @@ select.sankyu-edit-input {
             <span class="asi-card-icon" style="background:#fff3e0;color:#e65100;">🔄</span>
             <span class="asi-card-label">更新用<br>就業条件通知書</span>
           </button>
-          <button class="asi-card" onclick="openHmcKeiyakuFromDetail()">
+          <button class="asi-card" id="docCardHmc" onclick="openHmcKeiyakuFromDetail()">
             <span class="asi-card-icon" style="background:#e1f5fe;color:#0277bd;">📝</span>
             <span class="asi-card-label">派遣契約書<br>(hmc下書き)</span>
           </button>
@@ -6296,11 +6296,11 @@ select.sankyu-edit-input {
           </button>
         </div>
 
-        <!-- ASTI 派遣社員専用書類 -->
-        <div class="asi-subgroup">
+        <!-- ASTI 派遣社員専用書類 (ASTI在職者のみ表示) -->
+        <div class="asi-subgroup" id="docGrpAstiLabel">
           <span class="asi-subgroup-dot" style="background:#1565c0;"></span>ASTI 派遣社員
         </div>
-        <div class="asi-grid asi-grid-asti">
+        <div class="asi-grid asi-grid-asti" id="docGrpAstiGrid">
           <button class="asi-card" onclick="openMaicarTsukinASTI()">
             <span class="asi-card-icon" style="background:#e3f2fd;color:#1565c0;">🚗</span>
             <span class="asi-card-label">マイカー通勤<br>申請書</span>
@@ -6315,11 +6315,11 @@ select.sankyu-edit-input {
           </button>
         </div>
 
-        <!-- 三和電子 派遣社員専用書類 -->
-        <div class="asi-subgroup">
+        <!-- 三和電子 派遣社員専用書類 (三和在職者のみ表示) -->
+        <div class="asi-subgroup" id="docGrpSanwaLabel">
           <span class="asi-subgroup-dot" style="background:#e65100;"></span>三和電子 派遣社員
         </div>
-        <div class="asi-grid">
+        <div class="asi-grid" id="docGrpSanwaGrid">
           <button class="asi-card" onclick="openTsukinTodoke()">
             <span class="asi-card-icon" style="background:#fff3e0;color:#e65100;">🚗</span>
             <span class="asi-card-label">通勤手段等<br>届出書</span>
@@ -40317,6 +40317,35 @@ function renderNyutaiAnalysis(nyusha, taishaList, startY, startM) {
 // ============================================================
 // FAB & Action Sheet (手続きメニュー)
 // ============================================================
+// 手続きメニューの派遣先別カード表示制御
+function _empBukaVal(emp){
+  if (!emp) return '';
+  if (emp['OData__x90e8__x8ab2_']) return String(emp['OData__x90e8__x8ab2_']);
+  if (typeof bukaODataKey !== 'undefined' && bukaODataKey && emp[bukaODataKey]) return String(emp[bukaODataKey]);
+  for (var k in emp){ if (/_x90e8__x8ab2_/.test(k) && emp[k]) return String(emp[k]); }   // 部課らしきキーを探す
+  return '';
+}
+function _empHakenKind(emp){
+  emp = emp || currentEmployee || {};
+  var buka = _empBukaVal(emp);
+  var zaishoku = !(emp[F.yukyuTaisha] || emp[F.hakenTaisha]);   // 退社日なし=在職
+  var itaku = buka.indexOf('委託') >= 0;                          // ㈱ユーシン 委託管理は除外
+  return {
+    asti:   /ASTI|asti/.test(buka),
+    yushin: (buka.indexOf('ﾕｰｼﾝ') >= 0 || buka.indexOf('ユーシン') >= 0) && !itaku,
+    sanwa:  buka.indexOf('三和') >= 0,
+    zaishoku: zaishoku
+  };
+}
+function _applyDocMenuVisibility(){
+  var k = _empHakenKind(currentEmployee);
+  function show(id, on){ var el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; }
+  show('docCardHmc',     (k.asti || k.yushin) && k.zaishoku);   // 派遣契約書(hmc): ASTI・ユーシン(委託除く)の在職者のみ
+  show('docGrpAstiLabel', k.asti && k.zaishoku);                // ASTI派遣社員 書類: ASTI在職者のみ
+  show('docGrpAstiGrid',  k.asti && k.zaishoku);
+  show('docGrpSanwaLabel', k.sanwa && k.zaishoku);              // 三和電子 書類: 三和在職者のみ
+  show('docGrpSanwaGrid',  k.sanwa && k.zaishoku);
+}
 function toggleActionSheet() {
   const overlay = document.getElementById('actionSheetOverlay');
   const fab = document.getElementById('fabBtn');
@@ -40331,6 +40360,7 @@ function toggleActionSheet() {
       const no = emp[F.syainNo] || '';
       document.getElementById('actionSheetEmpName').textContent = no + ' ' + name;
     }
+    _applyDocMenuVisibility();   // 派遣先別の書類カード表示制御
     overlay.classList.add('open');
     if (fab) fab.classList.add('open');
     if (ssbAct) ssbAct.classList.add('open');
