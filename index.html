@@ -33508,6 +33508,7 @@ const NIPPOU_STAFF = ['吉浦 マルセロ','森 ゆうじ','森 まこと','城
 var _nippouItems = null;
 var _nippouMissing;   // [{name,count,days[]}] 休日以外で日報未提出の担当者(直近~1ヶ月)
 function nipEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function nipEmpty(d){ d=d||{}; if(d.flags&&d.flags.length) return false; var ks=['visits','requests','consults','troubles','followups','notes']; for(var i=0;i<ks.length;i++){ if(d[ks[i]]&&d[ks[i]].length) return false; } return true; }
 function _nipDateKey(dt){ return dt.getFullYear()+'-'+('0'+(dt.getMonth()+1)).slice(-2)+'-'+('0'+dt.getDate()).slice(-2); }
 function _nipNormKey(s){ var p=String(s).slice(0,10).split('-'); if(p.length<3) return String(s).slice(0,10); return p[0]+'-'+('0'+ +p[1]).slice(-2)+'-'+('0'+ +p[2]).slice(-2); }
 // 直近~1ヶ月の稼働日(土日祝・会社休日を除く)で日報が無い担当者を集計
@@ -33629,6 +33630,7 @@ function nippouSearch(q){
     html += '<button onclick="toggleNippou(\''+id+'\')" style="width:100%;text-align:left;padding:11px 12px;border:none;background:#fff;cursor:pointer;display:flex;align-items:center;gap:8px;">';
     html += '<span style="font-size:16px;">🧑‍💼</span><span style="font-weight:700;font-size:13px;">'+nipEsc(x.staff)+'</span><span style="font-size:12px;color:#666;">'+fmtNippouDate(x.date)+'</span>';
     if (x.hasFlag) html += '<span style="font-size:10px;color:#fff;background:#e74c3c;padding:1px 7px;border-radius:7px;font-weight:700;">⚠ 要対応</span>';
+    else if (nipEmpty(x.d)) html += '<span style="font-size:10px;color:#999;background:#f0f0f0;padding:1px 7px;border-radius:7px;">記載なし</span>';
     html += '<span style="flex:1;"></span><span id="'+id+'_chev" style="color:#bbb;font-size:13px;">▾</span></button>';
     html += '<div id="'+id+'" style="display:none;padding:2px 12px 12px;border-top:1px solid #f0f0f5;">'+renderNippouDetail(x)+'</div>';
     html += '</div>';
@@ -33648,6 +33650,7 @@ function renderNippouDates(name){
     html += '<button onclick="toggleNippou(\''+id+'\')" style="width:100%;text-align:left;padding:11px 12px;border:none;background:#fff;cursor:pointer;display:flex;align-items:center;gap:8px;">';
     html += '<span style="font-weight:700;font-size:13px;">'+fmtNippouDate(x.date)+'</span>';
     if (x.hasFlag) html += '<span style="font-size:10px;color:#fff;background:#e74c3c;padding:1px 7px;border-radius:7px;font-weight:700;">⚠ 要対応</span>';
+    else if (nipEmpty(x.d)) html += '<span style="font-size:10px;color:#999;background:#f0f0f0;padding:1px 7px;border-radius:7px;">記載なし</span>';
     html += '<span style="flex:1;"></span><span id="'+id+'_chev" style="color:#bbb;font-size:13px;">▾</span></button>';
     html += '<div id="'+id+'" style="display:none;padding:2px 12px 12px;border-top:1px solid #f0f0f5;">'+renderNippouDetail(x)+'</div>';
     html += '</div>';
@@ -33674,7 +33677,7 @@ function renderNippouDetail(x){
   html += sec('翌日以降のフォロー', d.followups, '#2e7d32');
   html += sec('その他特記事項', d.notes, '#555');
   html += sec('訪問・対応', d.visits, '#00838f');
-  if (!html) html = '<div style="color:#999;font-size:12px;padding:6px 0;">記載内容なし（ルーチンのみ）</div>';
+  if (!html) html = '<div style="color:#999;font-size:12px;padding:8px 6px;background:#f7f7f9;border-radius:8px;">📝 記載なし — この日は<b>提出されています</b>が、訪問・特記事項の記入がありません（空欄／「なし」）。</div>';
   var msg = encodeURIComponent('【'+fmtNippouDate(x.date)+' 業務日報について】\n');
   var actions = '<a href="https://teams.microsoft.com/l/chat/0/0?users='+encodeURIComponent(x.email||'')+'&message='+msg+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#5b5fc7,#4b4fb5);color:#fff;font-size:12px;font-weight:700;padding:8px 14px;border-radius:9px;text-decoration:none;">💬 Teamsで返信</a>';
   if (d.url) actions += '<a href="'+nipEsc(d.url)+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#1565c0;text-decoration:none;padding:8px 4px;">📄 原本Excelを開く ↗</a>';
