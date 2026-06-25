@@ -7772,12 +7772,36 @@ async function searchEmployee() {
       const br = isResigned(b) ? 1 : 0;
       return ar - br;
     });
+    // 退社者カード用: 次回採用フィールドの OData キーを解決
+    let _jikaiKeySearch = null;
+    try {
+      if (!employeeFieldsCache) await fetchEmployeeFields();
+      if (employeeFieldsCache) {
+        for (var _jk in employeeFieldsCache) {
+          if (employeeFieldsCache[_jk] && employeeFieldsCache[_jk].title === '次回の採用') {
+            _jikaiKeySearch = _jk.charAt(0) === '_' ? 'OData_' + _jk : _jk; break;
+          }
+        }
+      }
+    } catch (_) {}
     container.innerHTML = sortedResults.map(emp => {
       const nyushaRaw = emp[F.nyushaDate];
       const kisanRaw = emp[F.kisanDate];
       const resigned = isResigned(emp);
       const hakensaki = getHakensaki(emp);
       const resignedStyle = resigned ? 'background:#f0f0f0;opacity:0.75;' : '';
+      // 退社者: 次回採用フラグ (再雇用判断用)
+      let jikaiFlagHtml = '';
+      if (resigned && _jikaiKeySearch) {
+        const _jv = String(emp[_jikaiKeySearch] || '').trim();
+        if (_jv) {
+          let _jc, _jbg, _ji;
+          if (/しない|不可|NG|×/.test(_jv)) { _jc = '#b71c1c'; _jbg = 'linear-gradient(135deg,#ffebee,#ffcdd2)'; _ji = '🚫'; }
+          else if (/条件|要相談|△/.test(_jv)) { _jc = '#bf360c'; _jbg = 'linear-gradient(135deg,#fff3e0,#ffe0b2)'; _ji = '⚠'; }
+          else { _jc = '#1b5e20'; _jbg = 'linear-gradient(135deg,#e8f5e9,#c8e6c9)'; _ji = '✅'; }
+          jikaiFlagHtml = '<span style="display:inline-flex;align-items:center;gap:3px;background:' + _jbg + ';color:' + _jc + ';border:1px solid ' + _jc + '55;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:800;white-space:nowrap;">' + _ji + ' 次回' + escHtml(_jv) + '</span>';
+        }
+      }
       const retireForTenure = resigned ? (emp[F.yukyuTaisha] || emp[F.hakenTaisha]) : null;
       const tenure = calcTenure(nyushaRaw, retireForTenure);
       const showKisan = kisanRaw && nyushaRaw && formatDate(kisanRaw) !== formatDate(nyushaRaw);
@@ -7815,6 +7839,7 @@ async function searchEmployee() {
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
             <span class="emp-card-name" style="margin:0;">${nameEsc}</span>
             ${resigned ? '<span class="resigned-badge">退社</span>' : ''}
+            ${jikaiFlagHtml}
             <span style="display:inline-flex;align-items:center;padding:2px 9px;background:#eef0f8;border-radius:10px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.3px;">№ ${escHtml(String(syainNo))}</span>
           </div>
           ${romajiChipHtml}
