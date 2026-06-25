@@ -33479,7 +33479,38 @@ async function uploadFileToSp(folderPath, fileName, file) {
 const NIPPOU_LIST_GUID = 'c11f5c7a-6dfd-44c6-9497-f0d20357f102';
 const NIPPOU_STAFF = ['吉浦 マルセロ','森 ゆうじ','森 まこと','城 かおり'];
 var _nippouItems = null;
+var _nippouMissing;   // [{name,count,days[]}] 休日以外で日報未提出の担当者(直近~1ヶ月)
 function nipEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _nipDateKey(dt){ return dt.getFullYear()+'-'+('0'+(dt.getMonth()+1)).slice(-2)+'-'+('0'+dt.getDate()).slice(-2); }
+function _nipNormKey(s){ var p=String(s).slice(0,10).split('-'); if(p.length<3) return String(s).slice(0,10); return p[0]+'-'+('0'+ +p[1]).slice(-2)+'-'+('0'+ +p[2]).slice(-2); }
+// 直近~1ヶ月の稼働日(土日祝・会社休日を除く)で日報が無い担当者を集計
+function _nippouComputeMissing(compSet){
+  var WINDOW_DAYS = 31;
+  var today = new Date(); today.setHours(0,0,0,0);
+  var windowStart = new Date(today.getTime() - WINDOW_DAYS*86400000); windowStart.setHours(0,0,0,0);
+  var end = new Date(today.getTime() - 86400000); end.setHours(0,0,0,0);   // 今日より前の最後の稼働日
+  for (var g=0; g<15 && !_isWorkday(end.getFullYear(), end.getMonth()+1, end.getDate(), compSet); g++){ end = new Date(end.getTime()-86400000); }
+  var by = {}; NIPPOU_STAFF.forEach(function(n){ by[n]={set:new Set(), first:null}; });
+  (_nippouItems||[]).forEach(function(x){
+    if (!by[x.staff]) return;
+    var k=_nipNormKey(x.date); by[x.staff].set.add(k);
+    if (!by[x.staff].first || k < by[x.staff].first) by[x.staff].first = k;
+  });
+  var res = [];
+  NIPPOU_STAFF.forEach(function(name){
+    var info = by[name];
+    var eff = new Date(windowStart);
+    if (info.first){ var fp=info.first.split('-'); var fd=new Date(+fp[0],+fp[1]-1,+fp[2]); if (fd>eff) eff=fd; }  // 提出開始前は数えない
+    var days = [];
+    for (var dt=new Date(eff); dt<=end; dt=new Date(dt.getTime()+86400000)){
+      if (!_isWorkday(dt.getFullYear(), dt.getMonth()+1, dt.getDate(), compSet)) continue;
+      if (!info.set.has(_nipDateKey(dt))) days.push(_nipDateKey(dt));
+    }
+    if (days.length) res.push({name:name, count:days.length, days:days});
+  });
+  res.sort(function(a,b){return b.count-a.count;});
+  return res;
+}
 function fmtNippouDate(s){
   if(!s) return '';
   var p = String(s).split('-'); if(p.length<3) return s;
@@ -33490,9 +33521,13 @@ function fmtNippouDate(s){
 async function openNippouScreen(){
   switchScreen('nippouScreen');
   if (!_nippouItems) await loadNippou();
+  if (_nippouMissing === undefined) {
+    try { var cs = await fetchCompanyHolidays(); _nippouMissing = _nippouComputeMissing(cs); }
+    catch(e){ console.warn('日報未提出の計算失敗:', e); _nippouMissing = []; }
+  }
   renderNippouStaffList();
 }
-async function reloadNippou(){ _nippouItems = null; await openNippouScreen(); }
+async function reloadNippou(){ _nippouItems = null; _nippouMissing = undefined; await openNippouScreen(); }
 async function loadNippou(){
   var box = document.getElementById('nippouBody');
   box.innerHTML = '<div style="text-align:center;color:#999;padding:30px;">読み込み中…</div>';
@@ -33519,6 +33554,15 @@ function _nippouRenderDefault(){
   var main = document.getElementById('nippouMain'); if (!main) return;
   var flagged = _nippouItems.filter(function(x){return x.hasFlag;}).slice(0,8);
   var html = '';
+  if (_nippouMissing && _nippouMissing.length){
+    html += '<div style="background:#fffaf0;border:1px solid #f0d9a8;border-radius:10px;padding:10px 12px;margin-bottom:12px;">';
+    html += '<div style="font-size:12px;font-weight:700;color:#b9770e;margin-bottom:6px;">📝 日報 未提出（休日除く・直近1ヶ月）</div>';
+    _nippouMissing.forEach(function(mi){
+      var ds = mi.days.map(function(k){return fmtNippouDate(k);}).join('・');
+      html += '<div style="font-size:12px;color:#8a5a00;line-height:1.6;margin-bottom:3px;">・<b>'+nipEsc(mi.name)+'</b>：<span style="color:#c0392b;font-weight:700;">'+mi.count+'日分</span> <span style="font-size:11px;color:#a8854a;">('+nipEsc(ds)+')</span></div>';
+    });
+    html += '</div>';
+  }
   if (flagged.length){
     html += '<div style="background:#fff5f5;border:1px solid #f3c0c0;border-radius:10px;padding:10px 12px;margin-bottom:12px;">';
     html += '<div style="font-size:12px;font-weight:700;color:#c0392b;margin-bottom:6px;">⚠ 最近の要対応</div>';
