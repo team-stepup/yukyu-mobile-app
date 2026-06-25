@@ -18604,6 +18604,7 @@ async function loadHakenTantoMapFromSP() {
     }
 
     _hakenTantoSPMap = newMap;
+    _rebuildTantoCanonMap();
   } catch (e) {
     console.warn('loadHakenTantoMapFromSP error:', e);
   }
@@ -18713,6 +18714,35 @@ function _normalizeTantoName(name) {
   return String(name).replace(/[\s　]+/g, '').trim();
 }
 
+// 担当者氏名 の表記ゆれ統合キー (ひらがな↔カタカナ): 森ゆうじ ≡ 森ユウジ
+function _canonTantoKey(name) {
+  var s = _normalizeTantoName(name);
+  // ひらがな → カタカナ に寄せて比較キーにする
+  return s.replace(/[\u3041-\u3096]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) + 0x60); });
+}
+// 表記ゆれ統合キー → 代表表記(派遣先数が最多の綴り)。loadHakenTantoMapFromSP で構築。
+var _tantoCanonMap = {};
+function _rebuildTantoCanonMap() {
+  var freq = {};
+  Object.keys(_hakenTantoSPMap).forEach(function(title) {
+    var disp = _normalizeTantoName(_hakenTantoSPMap[title]);
+    if (!disp) return;
+    var key = _canonTantoKey(disp);
+    if (!key) return;
+    if (!freq[key]) freq[key] = {};
+    freq[key][disp] = (freq[key][disp] || 0) + 1;
+  });
+  var m = {};
+  Object.keys(freq).forEach(function(key) {
+    var names = freq[key];
+    m[key] = Object.keys(names).sort(function(a, b) {
+      var d = names[b] - names[a];
+      return d !== 0 ? d : String(a).localeCompare(String(b), 'ja');
+    })[0];
+  });
+  _tantoCanonMap = m;
+}
+
 // 派遣先名のマッチング用に正規化
 //   "002:㈱ユーシン"            → "ユーシン"
 //   "株式会社ユーシン・浜松工場"  → "ユーシン浜松工場"
@@ -18737,7 +18767,9 @@ function _normalizeHakenName(name) {
 // 戻り値は _normalizeTantoName で正規化済み (吉浦マルセロ / 吉浦　マルセロ を統合)
 function getHakenTanto(hakenName) {
   var raw = _getHakenTantoRaw(hakenName);
-  return _normalizeTantoName(raw) || raw;
+  var norm = _normalizeTantoName(raw) || raw;
+  // 表記ゆれ(ひらがな/カタカナ)を代表表記へ統合 (森ゆうじ → 森ユウジ)
+  return _tantoCanonMap[_canonTantoKey(norm)] || norm;
 }
 function _getHakenTantoRaw(hakenName) {
   if (!hakenName) return HAKEN_TANTO_DEFAULT;
