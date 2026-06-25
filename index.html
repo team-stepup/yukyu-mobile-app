@@ -5969,6 +5969,7 @@ select.sankyu-edit-input {
       <button class="nyutai-asti-btn" onclick="openAstiNyutaiOverlay()">🏭 ASTI 入退社 (浜松・都田・掛川)</button>
     </div>
     <div id="nyutaiSummary" style="display:flex;gap:6px;padding:0 4px 8px;flex-wrap:wrap;justify-content:center;"></div>
+    <div id="nyutaiTaishaBasisToggle" style="padding:0 4px 10px;"></div>
     <div id="nyutaiAnalysisWrap" style="display:none;">
       <div class="card nyutai-analysis-panel" style="padding:0;margin-bottom:10px;overflow:hidden;">
         <div class="nyutai-analysis-header" onclick="toggleNyutaiAnalysis()">
@@ -39521,6 +39522,45 @@ function downloadAnalyticsExcel() {
 let nyutaiYear = new Date().getFullYear();
 let nyutaiMonth = new Date().getMonth(); // 0-based
 let nyutaiRange = 1; // 1~3 months
+let nyutaiTaishaBasis = 'yukyu'; // 退社の基準日: 'yukyu'=有給使用後退社日(優先) / 'haken'=派遣先退社日
+
+// 選択中の基準での「退社の主たる日付(文字列)」。無ければ他方で代用。
+function _taishaRaw(emp){
+  var hd = emp[F.hakenTaisha], yd = emp[F.yukyuTaisha];
+  return (nyutaiTaishaBasis === 'haken') ? (hd || yd) : (yd || hd);
+}
+// 退社をカウントする月 (year*12+month) or null
+function _taishaMonthIdx(emp){
+  var hd = emp[F.hakenTaisha], yd = emp[F.yukyuTaisha];
+  if (nyutaiTaishaBasis === 'haken') {
+    var r = hd || yd;
+    return r ? (new Date(r).getFullYear() * 12 + new Date(r).getMonth()) : null;
+  }
+  if (hd && yd) {
+    var hdM = new Date(hd).getFullYear() * 12 + new Date(hd).getMonth();
+    var ydM = new Date(yd).getFullYear() * 12 + new Date(yd).getMonth();
+    return (hdM === ydM) ? hdM : ydM; // 同月→その月 / 異月→有給退社月
+  }
+  var r2 = yd || hd;
+  return r2 ? (new Date(r2).getFullYear() * 12 + new Date(r2).getMonth()) : null;
+}
+function setNyutaiTaishaBasis(b){
+  if (nyutaiTaishaBasis === b) return;
+  nyutaiTaishaBasis = b;
+  loadNyutaiScreen();
+}
+function nyutaiBasisToggleHtml(){
+  var y = (nyutaiTaishaBasis === 'yukyu');
+  var btn = 'flex:1;padding:7px 6px;font-size:11.5px;font-weight:700;border:none;cursor:pointer;text-align:center;line-height:1.2;';
+  var on = 'background:linear-gradient(135deg,#c62828,#b71c1c);color:#fff;';
+  var off = 'background:transparent;color:#999;';
+  return '<div style="display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #eee;border-radius:10px;padding:7px 10px;box-shadow:0 1px 3px rgba(0,0,0,.05);">'
+    + '<span style="font-size:11px;color:#888;font-weight:700;white-space:nowrap;">🏁 退社の<br>基準日</span>'
+    + '<div style="display:flex;flex:1;background:#f0f0f4;border-radius:8px;overflow:hidden;">'
+    + '<button onclick="setNyutaiTaishaBasis(\'yukyu\')" style="' + btn + (y ? on : off) + '">有給使用後<br>退社日</button>'
+    + '<button onclick="setNyutaiTaishaBasis(\'haken\')" style="' + btn + (y ? off : on) + '">派遣先<br>退社日</button>'
+    + '</div></div>';
+}
 
 function changeNyutaiMonth(delta) {
   nyutaiMonth += delta;
@@ -39835,6 +39875,7 @@ async function loadNyutaiScreen() {
     label.textContent = startY + '年' + (startM + 1) + '月〜' + (nyutaiYear !== startY ? nyutaiYear + '年' : '') + (nyutaiMonth + 1) + '月';
   }
   summary.innerHTML = '';
+  var _basisTgl = document.getElementById('nyutaiTaishaBasisToggle'); if (_basisTgl) _basisTgl.innerHTML = nyutaiBasisToggleHtml();
   body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-light);">読み込み中...</div>';
 
   try {
@@ -39997,28 +40038,10 @@ async function loadNyutaiScreen() {
       // - 有給退社が派遣退社の翌月 → 有給退社月にカウント
       // - 片方だけ → その日付の月に1カウント
       // 判定月が表示範囲内ならリストに追加
-      if (hd && yd) {
-        const hdDate = new Date(hd);
-        const ydDate = new Date(yd);
-        const hdM = hdDate.getFullYear() * 12 + hdDate.getMonth();
-        const ydM = ydDate.getFullYear() * 12 + ydDate.getMonth();
-
-        // Determine count month
-        let countM;
-        if (hdM === ydM) {
-          countM = hdM; // 同月
-        } else if (ydM === hdM + 1) {
-          countM = ydM; // 有給退社が翌月 → 有給退社月
-        } else {
-          countM = ydM; // それ以外 → 有給退社月
-        }
-        if (countM >= rangeStartM && countM <= rangeEndM) {
-          taishaList.push(emp);
-        }
-      } else if (yd) {
-        if (inRange(yd)) taishaList.push(emp);
-      } else if (hd) {
-        if (inRange(hd)) taishaList.push(emp);
+      // 退社カウント月 = 選択中の基準日(_taishaMonthIdx)で判定
+      const _cm = _taishaMonthIdx(emp);
+      if (_cm !== null && _cm >= rangeStartM && _cm <= rangeEndM) {
+        taishaList.push(emp);
       }
     });
 
@@ -40066,19 +40089,7 @@ async function loadNyutaiScreen() {
         const mKey = yy * 12 + mm;
 
         const mNyusha = nyusha.filter(e => { const d = new Date(e[F.nyushaDate]); return d >= ms && d <= me; }).length;
-        const mTaisha = taishaList.filter(e => {
-          const hd = e[F.hakenTaisha], yd = e[F.yukyuTaisha];
-          // Re-apply count logic for this specific month
-          if (hd && yd) {
-            const hdM = new Date(hd).getFullYear() * 12 + new Date(hd).getMonth();
-            const ydM = new Date(yd).getFullYear() * 12 + new Date(yd).getMonth();
-            const countM = (hdM === ydM) ? hdM : ydM;
-            return countM === mKey;
-          }
-          if (yd) { const d = new Date(yd); return d >= ms && d <= me; }
-          if (hd) { const d = new Date(hd); return d >= ms && d <= me; }
-          return false;
-        }).length;
+        const mTaisha = taishaList.filter(e => _taishaMonthIdx(e) === mKey).length;
         const mJisseki = mNyusha - mTaisha;
         const isCurrentMonth = (yy === new Date().getFullYear() && mm === new Date().getMonth());
         const rowBg = isCurrentMonth ? 'background:#f0f4ff;' : (m % 2 === 0 ? '' : 'background:#fafafa;');
@@ -40162,7 +40173,7 @@ async function loadNyutaiScreen() {
       const taishaStats = { retire: 0, 'transfer-out': 0, plan: 0 };
       taishaList.forEach(e => {
         const _hd = e[F.hakenTaisha], _yd = e[F.yukyuTaisha];
-        const _retDate = new Date(_yd || _hd);
+        const _retDate = new Date(_taishaRaw(e) || _yd || _hd);
         if (_retDate > new Date()) taishaStats.plan++;
         else taishaStats[classifyExit(e)]++;
       });
@@ -40175,8 +40186,8 @@ async function loadNyutaiScreen() {
         html += '<div class="nyutai-empty">この期間の退社はありません</div>';
       } else {
         taishaList.sort((a, b) => {
-          const da = new Date(a[F.yukyuTaisha] || a[F.hakenTaisha]);
-          const db = new Date(b[F.yukyuTaisha] || b[F.hakenTaisha]);
+          const da = new Date(_taishaRaw(a) || a[F.yukyuTaisha] || a[F.hakenTaisha]);
+          const db = new Date(_taishaRaw(b) || b[F.yukyuTaisha] || b[F.hakenTaisha]);
           return da - db;
         });
         taishaList.forEach(emp => {
@@ -40188,12 +40199,15 @@ async function loadNyutaiScreen() {
           const nameLen = name.length;
           const nameCls = nameLen > 18 ? 'tiny' : nameLen > 14 ? 'small' : nameLen > 11 ? 'medium' : '';
           const tenure = calcTenure(emp[F.nyushaDate], yd || hd);
-          let dateInfo = '';
-          if (hd) dateInfo += '派遣退社:' + formatDate(hd).replace(/^\d{4}\//, '');
-          if (yd) dateInfo += (dateInfo ? ' ' : '') + '有給退社:' + formatDate(yd).replace(/^\d{4}\//, '');
-          const displayDate = formatDate(yd || hd).replace(/^\d{4}\//, '');
+          const _hdStr = hd ? '派遣退社:' + formatDate(hd).replace(/^\d{4}\//, '') : '';
+          const _ydStr = yd ? '有給退社:' + formatDate(yd).replace(/^\d{4}\//, '') : '';
+          let dateInfo = (nyutaiTaishaBasis === 'haken')
+            ? [_hdStr ? '▶' + _hdStr : '', _ydStr].filter(Boolean).join('  ')
+            : [_ydStr ? '▶' + _ydStr : '', _hdStr].filter(Boolean).join('  ');
+          const _primaryRaw = _taishaRaw(emp) || yd || hd;
+          const displayDate = formatDate(_primaryRaw).replace(/^\d{4}\//, '');
           const now = new Date();
-          const retDate = new Date(yd || hd);
+          const retDate = new Date(_primaryRaw);
           const isPlan = retDate > now;
           const xType = classifyExit(emp);
           const xBd = exitBadge(xType, isPlan);
@@ -40311,17 +40325,7 @@ function renderNyutaiAnalysis(nyusha, taishaList, startY, startM) {
     const mKey = yy * 12 + mm;
 
     const mN = nyusha.filter(e => { const d = new Date(e[F.nyushaDate]); return d >= ms && d <= me; }).length;
-    const mT = taishaList.filter(e => {
-      const hd = e[F.hakenTaisha], yd = e[F.yukyuTaisha];
-      if (hd && yd) {
-        const hdM = new Date(hd).getFullYear() * 12 + new Date(hd).getMonth();
-        const ydM = new Date(yd).getFullYear() * 12 + new Date(yd).getMonth();
-        return ((hdM === ydM) ? hdM : ydM) === mKey;
-      }
-      if (yd) { const d = new Date(yd); return d >= ms && d <= me; }
-      if (hd) { const d = new Date(hd); return d >= ms && d <= me; }
-      return false;
-    }).length;
+    const mT = taishaList.filter(e => _taishaMonthIdx(e) === mKey).length;
 
     const _lbl = (nyutaiRange > 12) ? (yy + '/' + (mm + 1)) : ((mm + 1) + '月');
     monthlyData.push({ label: _lbl, n: mN, t: mT });
