@@ -6004,7 +6004,23 @@ select.sankyu-edit-input {
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📝 派遣契約 作成</h2>
     </div>
+    <div id="astiWizardHmcBar" class="no-print" style="display:none;position:sticky;top:0;z-index:60;background:linear-gradient(135deg,#3949ab,#283593);color:#fff;padding:9px 12px;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 3px 10px rgba(0,0,0,.25);">
+      <span class="aw-bar-label" style="font-size:12px;font-weight:700;line-height:1.35;flex:1;min-width:0;"></span>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button onclick="astiWizardBackToList()" style="background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.55);border-radius:7px;padding:8px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;cursor:pointer;">📋 一覧</button>
+        <button onclick="astiWizardMarkDoneNext()" style="background:#fff;color:#283593;border:none;border-radius:7px;padding:8px 12px;font-size:12px;font-weight:800;white-space:nowrap;cursor:pointer;">✅ 次へ ▷</button>
+      </div>
+    </div>
     <div id="hmcKeiyakuBody" style="padding:10px 12px;"></div>
+  </div>
+
+  <!-- Screen: ASTI入社ウィザード -->
+  <div class="screen" id="astiWizardScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="astiWizardFinish()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 終了</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">🧭 ASTI入社ウィザード</h2>
+    </div>
+    <div id="astiWizardBody" style="padding:12px;"></div>
   </div>
 
   <!-- Screen: 弁当注文 (役員: 当日の注文一覧＋承認/拒否) -->
@@ -6180,6 +6196,13 @@ select.sankyu-edit-input {
 
   <!-- Screen: 派遣書類作成 (労働契約書③ / 就業条件明示書③ など) -->
   <div class="screen" id="haisenDocScreen">
+    <div id="astiWizardDocBar" class="no-print" style="display:none;position:sticky;top:0;z-index:60;background:linear-gradient(135deg,#3949ab,#283593);color:#fff;padding:9px 12px;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 3px 10px rgba(0,0,0,.25);">
+      <span class="aw-bar-label" style="font-size:12px;font-weight:700;line-height:1.35;flex:1;min-width:0;"></span>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button onclick="astiWizardBackToList()" style="background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.55);border-radius:7px;padding:8px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;cursor:pointer;">📋 一覧</button>
+        <button onclick="astiWizardMarkDoneNext()" style="background:#fff;color:#283593;border:none;border-radius:7px;padding:8px 12px;font-size:12px;font-weight:800;white-space:nowrap;cursor:pointer;">✅ 次へ ▷</button>
+      </div>
+    </div>
     <div id="haisenDocBody" class="haisen-doc-body"></div>
     <div class="haisen-doc-actions no-print" id="haisenDocActions" style="display:none;flex-direction:column;gap:6px;">
       <div style="display:flex;gap:6px;align-items:center;justify-content:center;">
@@ -6301,6 +6324,10 @@ select.sankyu-edit-input {
           <span class="asi-subgroup-dot" style="background:#1565c0;"></span>ASTI 派遣社員
         </div>
         <div class="asi-grid asi-grid-asti" id="docGrpAstiGrid">
+          <button class="asi-card" onclick="startAstiWizardFromDetail()">
+            <span class="asi-card-icon" style="background:#e8eaf6;color:#3949ab;">🧭</span>
+            <span class="asi-card-label">入社<br>ウィザード</span>
+          </button>
           <button class="asi-card" onclick="openMaicarTsukinASTI()">
             <span class="asi-card-icon" style="background:#e3f2fd;color:#1565c0;">🚗</span>
             <span class="asi-card-label">マイカー通勤<br>申請書</span>
@@ -7424,7 +7451,7 @@ function switchScreen(screenId, skipHistory) {
   }
   var _mainContent = document.querySelector('.main-content');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', approveHubScreen: '承認', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', astiWizardScreen: 'ASTI入社ウィザード', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', approveHubScreen: '承認', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -36249,8 +36276,14 @@ async function saveNewEmployee() {
     showToast(nameVal + ' を登録しました', 'success');
     Object.keys(capturedDocs).forEach(k => delete capturedDocs[k]);
     resetSearch();
-    // 続けて派遣契約(hmc下書き)を作成するか (ASTI/ユーシンの新入社員)
-    if (confirm(nameVal + ' を登録しました。\n続けて派遣契約書（hmc下書き）を作成しますか？')) {
+    // 続けて入社書類を作成するか
+    if (/ASTI|asti/.test(bukaSelVal)) {
+      // ASTI新入社員 → 入社書類ウィザード (派遣契約書hmc + ASTI書類4種)
+      if (confirm(nameVal + ' を登録しました。\n続けて「ASTI入社書類ウィザード」を開始しますか？\n（派遣契約書hmc・マイカー通勤・教育確認表・作業者バーコード・雇用契約書）')) {
+        startAstiWizard(noVal, nameVal);
+        return;
+      }
+    } else if (confirm(nameVal + ' を登録しました。\n続けて派遣契約書（hmc下書き）を作成しますか？')) {
       openHmcKeiyaku(noVal);
       return;
     }
@@ -43347,8 +43380,145 @@ async function _hmcSubmitQueue() {
     var errs = (rj.value || []).filter(function(v) { return v.HasException; });
     if (errs.length) throw new Error('項目エラー: ' + errs.map(function(v) { return v.FieldName; }).join(','));
     showToast('契約作成を送信しました（PCがhmcに下書きを作成します）', 'success');
-    switchScreen('searchScreen');
+    if (_astiWizard && _astiWizard.active) { astiWizardMarkDoneNext(); } else { switchScreen('searchScreen'); }
   } catch (e) { hideSpinner(); showToast('送信失敗: ' + (e.message || e), 'error'); }
+}
+
+// ============================================================
+// ASTI入社ウィザード (新規社員登録 → 派遣契約書hmc + ASTI書類4種 を順送りで作成)
+// ============================================================
+var ASTI_WIZARD_STEPS = [
+  { key:'hmc',     icon:'📝', label:'派遣契約書（hmc下書き）',          screen:'hmcKeiyakuScreen', open:function(sn){ openHmcKeiyaku(sn); } },
+  { key:'maicar',  icon:'🚗', label:'マイカー通勤申請書',              screen:'haisenDocScreen',  open:function(){ openMaicarTsukinASTI(); } },
+  { key:'kyouiku', icon:'📋', label:'入社時教育確認表',                screen:'haisenDocScreen',  open:function(){ openNyushaKyouikuASTI(); } },
+  { key:'barcode', icon:'🆔', label:'作業者バーコード',                screen:'haisenDocScreen',  open:function(){ openSagyoushaBarcode(); } },
+  { key:'roudou',  icon:'📝', label:'新規雇用契約書兼就業条件通知書',  screen:'haisenDocScreen',  open:function(){ openHaisenDocScreen('roudouKeiyaku'); } }
+];
+var _astiWizard = { active:false, step:0, sn:'', name:'', status:[] };
+
+// 社員詳細の書類メニューから起動 (currentEmployee は読み込み済み)
+function startAstiWizardFromDetail(){
+  if (typeof closeActionSheet === 'function') closeActionSheet();
+  if (!currentEmployee) { showToast('社員を選択してください', 'error'); return; }
+  var sn = String(currentEmployee[F.syainNo] != null ? currentEmployee[F.syainNo] : '').replace(/\.0+$/, '');
+  startAstiWizard(sn, currentEmployee.Title || '');
+}
+
+// 社員番号でウィザード開始 (新規登録直後は currentEmployee 未設定なので読み込む)
+async function startAstiWizard(sn, name){
+  sn = String(sn || '').replace(/\.0+$/, '');
+  if (!sn) { showToast('社員番号が取得できません', 'error'); return; }
+  showSpinner();
+  try {
+    var curSn = currentEmployee ? String(currentEmployee[F.syainNo] != null ? currentEmployee[F.syainNo] : '').replace(/\.0+$/, '') : '';
+    if (curSn !== sn) {
+      var rows = await spGet(LIST_EMPLOYEES_GUID, '$filter=' + F.syainNo + ' eq ' + sn + '&$top=5&$orderby=Id desc');
+      if (!rows || !rows.length) throw new Error('社員番号 ' + sn + ' が見つかりません');
+      currentEmployee = rows.find(function(r){ return !r[F.hakenTaisha]; }) || rows[0];
+    }
+    _astiWizard = { active:true, step:0, sn:sn, name: name || currentEmployee.Title || '', status: ASTI_WIZARD_STEPS.map(function(){ return null; }) };
+    hideSpinner();
+    switchScreen('astiWizardScreen');
+    renderAstiWizard();
+  } catch (e) { hideSpinner(); showToast('ウィザード開始失敗: ' + (e.message || e), 'error'); }
+}
+
+function renderAstiWizard(){
+  var w = _astiWizard, body = document.getElementById('astiWizardBody');
+  if (!body) return;
+  var done = w.step >= ASTI_WIZARD_STEPS.length;
+  var nDone = w.status.filter(function(s){ return s === 'done'; }).length;
+  var nSkip = w.status.filter(function(s){ return s === 'skipped'; }).length;
+  var html = '<div style="background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border-radius:14px;padding:14px 16px;margin-bottom:14px;">'
+    + '<div style="font-size:12px;opacity:.85;font-weight:700;">🧭 ASTI 入社書類ウィザード</div>'
+    + '<div style="font-size:1.15em;font-weight:800;margin-top:3px;">' + escHtml(w.name) + ' <span style="font-weight:400;opacity:.8;font-size:.8em;">No.' + escHtml(w.sn) + '</span></div>'
+    + '<div style="font-size:11.5px;opacity:.85;margin-top:5px;line-height:1.5;">各書類を上から順に作成します。<br>「📄 作成する」で書類画面へ進み、確認したら「✅ 次へ」。不要な書類は「スキップ」してください。</div></div>';
+  html += '<div style="font-size:12px;color:#666;margin:0 4px 10px;font-weight:700;">進捗 ' + nDone + ' / ' + ASTI_WIZARD_STEPS.length + ' 作成済み</div>';
+  ASTI_WIZARD_STEPS.forEach(function(st, i){
+    var status = w.status[i];
+    var isCur = (i === w.step) && !done;
+    var stateColor = status === 'done' ? '#2e7d32' : (status === 'skipped' ? '#9e9e9e' : (isCur ? '#3949ab' : '#bbb'));
+    var badge = status === 'done' ? '✅ 作成済み' : (status === 'skipped' ? '⏭ スキップ' : (isCur ? '▶ 今ここ' : '・未着手'));
+    html += '<div style="border:' + (isCur ? '2px' : '1.5px') + ' solid ' + (isCur ? '#3949ab' : '#e0e0e8') + ';border-radius:12px;padding:12px;margin-bottom:10px;background:' + (isCur ? '#f5f7ff' : '#fff') + ';opacity:' + ((status || isCur) ? '1' : '0.7') + ';">'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<span style="font-size:1.5em;">' + st.icon + '</span>'
+      + '<div style="flex:1;min-width:0;"><div style="font-weight:800;color:#1f3864;font-size:.96em;line-height:1.3;">' + (i + 1) + '. ' + escHtml(st.label) + '</div>'
+      + '<div style="font-size:11.5px;color:' + stateColor + ';font-weight:700;margin-top:2px;">' + badge + '</div></div></div>';
+    if (isCur){
+      html += '<div style="display:flex;gap:8px;margin-top:10px;">'
+        + '<button onclick="astiWizardOpenCurrent()" style="flex:2;padding:12px;background:linear-gradient(135deg,#3949ab,#283593);color:#fff;border:none;border-radius:9px;font-size:13.5px;font-weight:800;cursor:pointer;">📄 この書類を作成する</button>'
+        + '<button onclick="astiWizardSkip()" style="flex:1;padding:12px;background:#fff;color:#666;border:1.5px solid #ccc;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;">スキップ ▷</button>'
+        + '</div>';
+    }
+    html += '</div>';
+  });
+  if (done){
+    html += '<div style="text-align:center;background:#e8f5e9;border:1.5px solid #66bb6a;border-radius:14px;padding:18px;margin-top:6px;">'
+      + '<div style="font-size:2em;">🎉</div><div style="font-weight:800;color:#2e7d32;font-size:1.05em;margin-top:4px;">入社書類ウィザード 完了</div>'
+      + '<div style="font-size:12px;color:#555;margin-top:6px;">作成 ' + nDone + ' 件 ／ スキップ ' + nSkip + ' 件</div>'
+      + '<button onclick="astiWizardFinish()" style="margin-top:12px;width:100%;padding:13px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;">✓ 完了してホームへ</button></div>';
+  } else {
+    html += '<button onclick="astiWizardFinish()" style="width:100%;padding:11px;background:#fff;color:#888;border:1.5px solid #ddd;border-radius:9px;font-size:12.5px;font-weight:700;margin-top:4px;cursor:pointer;">ウィザードを終了する</button>';
+  }
+  body.innerHTML = html;
+}
+
+// 現在ステップの書類を開く → 書類画面にウィザードバーを表示
+function astiWizardOpenCurrent(){
+  var st = ASTI_WIZARD_STEPS[_astiWizard.step];
+  if (!st) return;
+  _astiWizard.active = true;
+  if (st.key === 'hmc') { st.open(_astiWizard.sn); } else { st.open(); }
+  setTimeout(_astiWizardShowBar, 80);
+}
+
+function astiWizardSkip(){
+  if (_astiWizard.step < ASTI_WIZARD_STEPS.length) _astiWizard.status[_astiWizard.step] = 'skipped';
+  _astiWizard.step++;
+  renderAstiWizard();
+}
+
+// 書類画面の「✅ 次へ」: 現在ステップを作成済みにして次へ
+function astiWizardMarkDoneNext(){
+  if (_astiWizard.step < ASTI_WIZARD_STEPS.length) _astiWizard.status[_astiWizard.step] = 'done';
+  _astiWizard.step++;
+  _astiWizardReturnToList();
+}
+
+// 書類画面の「📋 一覧」: マークせずウィザード一覧へ戻る
+function astiWizardBackToList(){ _astiWizardReturnToList(); }
+
+function _astiWizardReturnToList(){
+  _astiWizardHideBars();
+  while (screenHistory.length && screenHistory[screenHistory.length - 1] === 'astiWizardScreen') screenHistory.pop();
+  switchScreen('astiWizardScreen', true);
+  renderAstiWizard();
+}
+
+function astiWizardFinish(){
+  _astiWizard.active = false;
+  _astiWizardHideBars();
+  screenHistory.length = 0;
+  resetSearch();
+  switchScreen('searchScreen', true);
+}
+
+// 現在ステップの対象画面にウィザードバーを表示
+function _astiWizardShowBar(){
+  var st = ASTI_WIZARD_STEPS[_astiWizard.step];
+  _astiWizardHideBars();
+  if (!st || !_astiWizard.active) return;
+  var txt = '🧭 入社ウィザード (' + (_astiWizard.step + 1) + '/' + ASTI_WIZARD_STEPS.length + ')：' + st.label + ' — 確認したら →';
+  var barId = (st.screen === 'hmcKeiyakuScreen') ? 'astiWizardHmcBar' : 'astiWizardDocBar';
+  var bar = document.getElementById(barId);
+  if (bar){
+    var lbl = bar.querySelector('.aw-bar-label'); if (lbl) lbl.textContent = txt;
+    bar.style.display = 'flex';
+  }
+}
+
+function _astiWizardHideBars(){
+  ['astiWizardDocBar','astiWizardHmcBar'].forEach(function(id){ var el = document.getElementById(id); if (el) el.style.display = 'none'; });
 }
 
 async function loadSougeiScreen() {
