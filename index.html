@@ -46528,6 +46528,8 @@ async function openVehicleFolderByNo1(numberStr) {
   var digits = m ? m[1] : '';
   if (!digits) { showToast('管理番号が取得できません', 'error'); return; }
 
+  _vfNavStack = []; _vfCurrentSubfolders = [];  // 前の車両のフォルダ参照をクリア (未ヒット時に古いURLを開かない)
+
   // フォルダーパネルを表示
   var panelId = 'vehicleFolderPanel';
   var existing = document.getElementById(panelId);
@@ -46546,7 +46548,7 @@ async function openVehicleFolderByNo1(numberStr) {
         '</div>' +
       '</div>' +
       '<div class="vfolder-header-right">' +
-        '<button class="vfolder-sp-btn" onclick="var url=VEHICLE_FOLDER_BASE+\'&search=\'+encodeURIComponent(\'' + digits + '\');window.open(url,\'_blank\');" title="SharePointで開く">↗</button>' +
+        '<button class="vfolder-sp-btn" onclick="openVehicleSpFolder(\'' + digits + '\')" title="SharePointで開く">↗</button>' +
         '<button class="vfolder-close-btn" onclick="document.getElementById(\'' + panelId + '\').remove();" title="閉じる">✕</button>' +
       '</div>' +
     '</div>' +
@@ -46620,6 +46622,18 @@ async function openVehicleFolderByNo1(numberStr) {
 var _vfNavStack = [];
 // 現在表示中のサブフォルダ配列（onclick から index でアクセス用）
 var _vfCurrentSubfolders = [];
+
+// ↗ 現在表示中の車両フォルダを SharePoint で直接開く (ヒット済みならそのフォルダURL、無ければ親を検索)
+function openVehicleSpFolder(digits) {
+  var u;
+  var top = (_vfNavStack && _vfNavStack.length) ? _vfNavStack[_vfNavStack.length - 1] : null;
+  if (top && top.srUrl) {
+    u = VEHICLE_FOLDER_BASE.split('?id=')[0] + '?id=' + encodeURIComponent(top.srUrl);
+  } else {
+    u = VEHICLE_FOLDER_BASE + '&search=' + encodeURIComponent(digits || '');
+  }
+  window.open(u, '_blank');
+}
 
 // 指定したServerRelativeUrlのフォルダの中身（ファイル+サブフォルダ）を並列取得
 async function loadVehicleFolderContents(token, srUrl) {
