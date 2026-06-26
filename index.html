@@ -40724,6 +40724,13 @@ async function openTaishaForm() {
       '</div>' +
       '<div class="taisha-body">' +
         '<div class="taisha-field">' +
+          '<label>退社区分</label>' +
+          '<select id="taisha_kubun" onchange="onTaishaKubunChange()">' +
+            '<option value="完全退社" selected>完全退社（退職・社保喪失・離職票あり）</option>' +
+            '<option value="移動退社">移動退社（別の派遣先へ・在籍継続）</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="taisha-field">' +
           '<label>退職理由</label>' +
           '<select id="taisha_riyuu">' +
             '<option value="">選択してください</option>' +
@@ -40734,29 +40741,29 @@ async function openTaishaForm() {
           '<label>派遣先退社日</label>' +
           '<input type="date" id="taisha_hakenDate" value="' + hakenTaishaVal + '">' +
         '</div>' +
-        '<div class="taisha-field">' +
+        '<div class="taisha-field" id="taishaField_yukyu">' +
           '<label>有給使用後退社日</label>' +
           '<input type="date" id="taisha_yukyuDate" value="' + yukyuTaishaVal + '">' +
         '</div>' +
-        '<div class="taisha-field">' +
+        '<div class="taisha-field" id="taishaField_shaho">' +
           '<label>社保喪失日</label>' +
           '<input type="date" id="taisha_shahoDate" value="' + shahoVal + '">' +
         '</div>' +
-        '<div class="taisha-field">' +
+        '<div class="taisha-field" id="taishaField_rishoku">' +
           '<label>離職票</label>' +
           '<select id="taisha_rishoku">' +
             '<option value="不要" selected>不要</option>' +
             '<option value="必要">必要</option>' +
           '</select>' +
         '</div>' +
-        '<div class="taisha-field">' +
+        '<div class="taisha-field" id="taishaField_watashi">' +
           '<label>離職票渡し方</label>' +
           '<select id="taisha_watashi">' +
             '<option value="">選択してください</option>' +
             buildOptions(rishokuWatashiChoices) +
           '</select>' +
         '</div>' +
-        '<div class="taisha-field">' +
+        '<div class="taisha-field" id="taishaField_jikai">' +
           '<label>次回の採用</label>' +
           '<select id="taisha_jikai">' +
             '<option value="">選択してください</option>' +
@@ -40780,6 +40787,15 @@ function closeTaishaForm() {
   if (el) el.remove();
 }
 
+// 退社区分: 移動退社では在籍継続のため 有給後退社日/社保喪失日/離職票/渡し方/次回採用 を隠す
+function onTaishaKubunChange() {
+  var el = document.getElementById('taisha_kubun');
+  var idou = el && el.value === '移動退社';
+  ['taishaField_yukyu','taishaField_shaho','taishaField_rishoku','taishaField_watashi','taishaField_jikai'].forEach(function(id){
+    var f = document.getElementById(id); if (f) f.style.display = idou ? 'none' : '';
+  });
+}
+
 async function submitTaishaForm() {
   const emp = currentEmployee;
   if (!emp) return;
@@ -40791,16 +40807,20 @@ async function submitTaishaForm() {
   const rishoku = document.getElementById('taisha_rishoku').value;
   const watashi = document.getElementById('taisha_watashi').value;
   const jikai = document.getElementById('taisha_jikai').value;
+  const kubun = document.getElementById('taisha_kubun') ? document.getElementById('taisha_kubun').value : '完全退社';
 
-  // Validation
-  if (!riyuu) { showToast('退職理由を選択してください', 'error'); return; }
+  // Validation (退社区分で分岐)
   if (!hakenDate) { showToast('派遣先退社日を入力してください', 'error'); return; }
-  if (!yukyuDate) { showToast('有給使用後退社日を入力してください', 'error'); return; }
-  if (yukyuDate < hakenDate) { showToast('有給使用後退社日は派遣先退社日以降にしてください', 'error'); return; }
-  if (!shahoDate) { showToast('社保喪失日を入力してください', 'error'); return; }
-  // 離職票渡し方は『離職票=必要』のときのみ必須 (不要のときは対象外)
-  if (rishoku === '必要' && !watashi) { showToast('離職票渡し方を選択してください', 'error'); return; }
-  if (!jikai) { showToast('次回の採用を選択してください', 'error'); return; }
+  if (kubun === '移動退社') {
+    // 移動退社: 在籍継続のため 派遣先退社日 のみ必須
+  } else {
+    if (!riyuu) { showToast('退職理由を選択してください', 'error'); return; }
+    if (!yukyuDate) { showToast('有給使用後退社日を入力してください', 'error'); return; }
+    if (yukyuDate < hakenDate) { showToast('有給使用後退社日は派遣先退社日以降にしてください', 'error'); return; }
+    if (!shahoDate) { showToast('社保喪失日を入力してください', 'error'); return; }
+    if (rishoku === '必要' && !watashi) { showToast('離職票渡し方を選択してください', 'error'); return; }
+    if (!jikai) { showToast('次回の採用を選択してください', 'error'); return; }
+  }
 
   // Confirm
   const overlay = document.createElement('div');
@@ -40812,13 +40832,17 @@ async function submitTaishaForm() {
     '<div class="confirm-title">📤 退社報告確認</div>' +
     '<div class="confirm-msg" style="text-align:left;">' +
     '<strong>' + escHtml(no + ' ' + name) + '</strong><br>' +
-    '退職理由: ' + escHtml(riyuu) + '<br>' +
+    '退社区分: ' + escHtml(kubun) + '<br>' +
+    (riyuu ? '退職理由: ' + escHtml(riyuu) + '<br>' : '') +
     '派遣先退社日: ' + escHtml(hakenDate) + '<br>' +
-    '有給後退社日: ' + escHtml(yukyuDate) + '<br>' +
-    (shahoDate ? '社保喪失日: ' + escHtml(shahoDate) + '<br>' : '') +
-    '離職票: ' + escHtml(rishoku || '-') + '<br>' +
-    '渡し方: ' + escHtml(watashi || '-') + '<br>' +
-    '次回採用: ' + escHtml(jikai || '-') +
+    (kubun === '移動退社'
+      ? '<span style="color:#7e57c2;font-weight:700;">→ 採用種別を「移動退社」に設定（有給後退社日はクリア・在籍継続）</span>'
+      : ('有給後退社日: ' + escHtml(yukyuDate) + '<br>' +
+         (shahoDate ? '社保喪失日: ' + escHtml(shahoDate) + '<br>' : '') +
+         '離職票: ' + escHtml(rishoku || '-') + '<br>' +
+         '渡し方: ' + escHtml(watashi || '-') + '<br>' +
+         '次回採用: ' + escHtml(jikai || '-') + '<br>' +
+         '<span style="color:#c62828;font-weight:700;">→ 採用種別を「退社」に設定</span>')) +
     '</div>' +
     '<div class="confirm-btns">' +
     '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
@@ -40829,11 +40853,11 @@ async function submitTaishaForm() {
 
   document.getElementById('taishaConfirmOk').onclick = async function() {
     overlay.remove();
-    await executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai);
+    await executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai, kubun);
   };
 }
 
-async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai) {
+async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai, kubun) {
   const emp = currentEmployee;
   if (!emp) return;
   const btn = document.getElementById('taishaSubmitBtn');
@@ -40853,16 +40877,23 @@ async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, risho
       body[internalName] = value;
     }
 
-    // Date fields → ISO format (use F constants for known fields)
+    // 派遣先退社日 + 退職理由 は共通
     body[F.hakenTaisha.replace(/^OData_/, '')] = hakenDate + 'T00:00:00Z';
-    body[F.yukyuTaisha.replace(/^OData_/, '')] = yukyuDate + 'T00:00:00Z';
-    if (shahoDate) setField('shahoSoushitsu', shahoDate + 'T00:00:00Z');
-
-    // Choice fields
     if (riyuu) setField('taisyokuRiyuu', riyuu);
-    if (rishoku) setField('rishokuhyou', rishoku);
-    if (watashi) setField('rishokuWatashi', watashi);
-    if (jikai) setField('jikaiSaiyou', jikai);
+
+    if (kubun === '移動退社') {
+      // 移動退社: 在籍継続 → 採用種別=移動退社、有給後退社日はクリア、社保喪失/離職票/次回採用は対象外
+      body[F.yukyuTaisha.replace(/^OData_/, '')] = null;
+      setField('zaiyokuSyubetu', '移動退社たいしゃいどう');
+    } else {
+      // 完全退社: 有給後退社日・社保喪失日・離職票・次回採用 + 採用種別=退社
+      body[F.yukyuTaisha.replace(/^OData_/, '')] = yukyuDate + 'T00:00:00Z';
+      if (shahoDate) setField('shahoSoushitsu', shahoDate + 'T00:00:00Z');
+      if (rishoku) setField('rishokuhyou', rishoku);
+      if (watashi) setField('rishokuWatashi', watashi);
+      if (jikai) setField('jikaiSaiyou', jikai);
+      setField('zaiyokuSyubetu', '退社 たいしゃ');
+    }
 
     body['__metadata'] = { type: LIST_ITEM_ENTITY };
     await spPatchEmployee(emp.Id, body);
