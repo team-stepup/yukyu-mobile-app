@@ -5583,6 +5583,13 @@ select.sankyu-edit-input {
 
     <div id="jobFormWrap" style="display:none;">
       <div style="font-size:14px;font-weight:700;color:var(--primary);margin-bottom:8px;" id="jobFormTitle">新規求人</div>
+      <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:10px;margin-bottom:10px;">
+        <div style="font-size:11px;font-weight:700;color:#3949ab;margin-bottom:6px;">📍 募集元（アプリ内メモ・ホームページには出ません）</div>
+        <label style="font-size:11px;color:#666;">派遣先</label>
+        <select id="jf_haken" onchange="_jobOnHakenChange()" style="width:100%;padding:9px;border:1px solid #cdd;border-radius:8px;margin:2px 0 8px;font-size:13px;box-sizing:border-box;background:#fff;"><option value="">（選択しない）</option></select>
+        <label style="font-size:11px;color:#666;">組織単位</label>
+        <select id="jf_soshiki" style="width:100%;padding:9px;border:1px solid #cdd;border-radius:8px;margin:2px 0 2px;font-size:13px;box-sizing:border-box;background:#fff;"><option value="">（選択しない）</option></select>
+      </div>
       <label style="font-size:11px;color:#666;">職種 *</label>
       <input id="jf_title" placeholder="例: 製造スタッフ（電子部品の検査）" style="width:100%;padding:9px;border:1px solid #cdd;border-radius:8px;margin:2px 0 8px;font-size:13px;box-sizing:border-box;">
       <label style="font-size:11px;color:#666;">勤務地</label>
@@ -31437,6 +31444,53 @@ async function submitLeaveApplication() {
 var _jobEditingId = null;
 function _jobEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 async function openJobsAdmin(){ switchScreen('jobsAdminScreen'); closeJobForm(); await loadJobsAdmin(); }
+var JOBS_LIST_GUID='3b062cf9-73a0-4539-b10c-fd3edcc0e8b3';  // 求人 List
+var _jobHakenMap=null;  // {派遣先会社名: [組織単位...]}  (派遣先情報040623から)
+// 派遣先情報(契約あり=登録全件)を読み 派遣先→組織単位 マップを作り jf_haken を埋める
+async function _ensureJobHakenOptions(){
+  if(!_jobHakenMap){
+    _jobHakenMap={};
+    try{
+      var token=await getToken();
+      var HK1="OData__x6d3e__x9063__x5148__x4f1a__x79", HK2="OData__x6d3e__x9063__x5148__x4f1a__x790", SO="OData__x7d44__x7e54__x5358__x4f4d_";
+      var url=SP_SITE_URL+"/_api/web/GetList('/sites/PowerApps/Lists/040623')/items?$select="+HK1+","+HK2+","+SO+"&$top=500";
+      var data=await (await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}})).json();
+      var rows=(data.d&&data.d.results)||[];
+      rows.forEach(function(r){
+        var hk=String(r[HK1]||r[HK2]||'').trim();
+        var so=String(r[SO]||'').trim();
+        if(!hk) return;
+        if(!_jobHakenMap[hk]) _jobHakenMap[hk]=[];
+        if(so && _jobHakenMap[hk].indexOf(so)<0) _jobHakenMap[hk].push(so);
+      });
+    }catch(e){ console.warn('派遣先情報ロード失敗',e); }
+  }
+  var sel=document.getElementById('jf_haken');
+  if(sel){
+    var keys=Object.keys(_jobHakenMap).sort(function(a,b){return String(a).localeCompare(String(b),'ja');});
+    sel.innerHTML='<option value="">（選択しない）</option>'+keys.map(function(k){return '<option value="'+_jobEsc(k)+'">'+_jobEsc(k)+'</option>';}).join('');
+  }
+}
+// 派遣先選択→組織単位を絞り込み
+function _jobOnHakenChange(){
+  var hk=document.getElementById('jf_haken').value;
+  var sel=document.getElementById('jf_soshiki');
+  if(!sel) return;
+  var units=(_jobHakenMap&&_jobHakenMap[hk])||[];
+  sel.innerHTML='<option value="">（選択しない）</option>'+units.map(function(u){return '<option value="'+_jobEsc(u)+'">'+_jobEsc(u)+'</option>';}).join('');
+}
+// 募集元(haken/soshiki)を求人Listへ直接保存。公開APIは返さないのでHPには出ない
+async function _patchJobHakenSoshiki(jobId,haken,soshiki){
+  var token=await getToken();
+  var dj=await (await fetch(SP_SITE_URL+'/_api/contextinfo',{method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}})).json();
+  var digest=(dj.d&&dj.d.GetContextWebInformation&&dj.d.GetContextWebInformation.FormDigestValue)||dj.FormDigestValue;
+  var body={formValues:[{FieldName:'haken',FieldValue:haken||''},{FieldName:'soshiki',FieldValue:soshiki||''}],bNewDocumentUpdate:false};
+  var resp=await fetch(SP_SITE_URL+"/_api/web/lists(guid'"+JOBS_LIST_GUID+"')/items("+jobId+")/ValidateUpdateListItem",{
+    method:'POST',headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=nometadata','Content-Type':'application/json;odata=nometadata','X-RequestDigest':digest},
+    body:JSON.stringify(body)});
+  if(!resp.ok){ var t=await resp.text(); throw new Error('募集元PATCH HTTP '+resp.status+' '+t.slice(0,120)); }
+}
+
 async function loadJobsAdmin(){
   var box=document.getElementById('jobsAdminList');
   box.innerHTML='<p style="text-align:center;color:#999;padding:20px;">読み込み中…</p>';
@@ -31446,6 +31500,11 @@ async function loadJobsAdmin(){
     if(!resp.ok) throw new Error('HTTP '+resp.status);
     var data=await resp.json();
     window._jobsCache=data.jobs||[];
+    try{
+      var brows=await spGet(JOBS_LIST_GUID,'$select=Id,haken,soshiki&$top=500');
+      var bm={}; (brows||[]).forEach(function(r){ bm[r.Id]={haken:r.haken||'',soshiki:r.soshiki||''}; });
+      window._jobsCache.forEach(function(j){ var m=bm[j.id]; if(m){ j.haken=m.haken; j.soshiki=m.soshiki; } });
+    }catch(e){ console.warn('募集元マージ失敗',e); }
     renderJobsAdminList(window._jobsCache);
   }catch(e){ box.innerHTML='<p style="text-align:center;color:#c00;padding:20px;">読み込み失敗: '+_jobEsc(e.message||e)+'</p>'; }
 }
@@ -31458,8 +31517,10 @@ function renderJobsAdminList(jobs){
     var statusBadge='<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;color:#fff;background:'+(pub?'#2e7d32':'#9e9e9e')+';">'+(pub?'公開中':'非公開')+'</span>';
     var tgt=j.target==='日本人向け';
     var tgtBadge='<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;color:#fff;background:'+(tgt?'#1565c0':'#2e9e5b')+';">'+(tgt?'日本人向け':'🌏 外国人歓迎')+'</span>';
+    var jsrc=(j.haken||j.soshiki)?'<div style="font-size:11px;color:#3949ab;margin-bottom:6px;">📍 募集元: '+_jobEsc(j.haken||'')+(j.soshiki?' / '+_jobEsc(j.soshiki):'')+'</div>':'';
     html+='<div style="background:#fff;border:1px solid #e3e8ef;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.05);">'
       +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;"><span style="font-weight:700;font-size:14px;color:#1a2a3a;flex:1;">'+_jobEsc(j.title)+'</span>'+statusBadge+'</div>'
+      +jsrc
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">'+tgtBadge
       +'<span style="font-size:11px;color:#667;">📍'+_jobEsc(j.location)+'</span><span style="font-size:11px;color:#667;">💴'+_jobEsc(j.wage)+'</span>'
       +(j.hasTranslation?'<span style="font-size:10px;color:#2e9e5b;">🌐訳あり</span>':'<span style="font-size:10px;color:#c80;">🌐訳なし</span>')+'</div>'
@@ -31487,6 +31548,11 @@ function openJobForm(id){
   document.getElementById('jf_remarks').value=j?j.remarks:'';
   _jobSetRadio('jobTarget',j?j.target:'外国人もOK');
   _jobSetRadio('jobStatus',j?j.status:'非公開');
+  _ensureJobHakenOptions().then(function(){
+    var hs=document.getElementById('jf_haken'); if(hs) hs.value=(j&&j.haken)||'';
+    _jobOnHakenChange();
+    var ss=document.getElementById('jf_soshiki'); if(ss) ss.value=(j&&j.soshiki)||'';
+  });
   var tw=document.getElementById('jobTransWrap'); tw.style.display='none'; tw.innerHTML='';
   document.getElementById('jobFormWrap').style.display='block';
   document.getElementById('jobsAdminList').style.display='none';
@@ -31549,6 +31615,11 @@ async function saveJob(){
     var resp=await fetch(FUNC_OCR_BASE+'/jobs/save',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(payload)});
     var data=await resp.json().catch(function(){return {};});
     if(!resp.ok||!data.ok) throw new Error(data.detail||data.error||('HTTP '+resp.status));
+    // 募集元(派遣先/組織単位)を求人Listへ直接保存 (アプリ内のみ・HP非表示)
+    try{
+      var _hk=document.getElementById('jf_haken').value, _so=document.getElementById('jf_soshiki').value;
+      if(data.id!=null) await _patchJobHakenSoshiki(data.id,_hk,_so);
+    }catch(e){ console.warn('募集元保存失敗',e); }
     closeJobForm(); await loadJobsAdmin();
   }catch(e){ alert('保存に失敗しました: '+(e.message||e)); }
   finally{ btn.disabled=false; btn.textContent=old; }
