@@ -5588,7 +5588,7 @@ select.sankyu-edit-input {
         <label style="font-size:11px;color:#666;">派遣先</label>
         <select id="jf_haken" onchange="_jobOnHakenChange()" style="width:100%;padding:9px;border:1px solid #cdd;border-radius:8px;margin:2px 0 8px;font-size:13px;box-sizing:border-box;background:#fff;"><option value="">（選択しない）</option></select>
         <label style="font-size:11px;color:#666;">組織単位</label>
-        <select id="jf_soshiki" style="width:100%;padding:9px;border:1px solid #cdd;border-radius:8px;margin:2px 0 2px;font-size:13px;box-sizing:border-box;background:#fff;"><option value="">（選択しない）</option></select>
+        <select id="jf_soshiki" onchange="_jobOnSoshikiChange()" style="width:100%;padding:9px;border:1px solid #cdd;border-radius:8px;margin:2px 0 2px;font-size:13px;box-sizing:border-box;background:#fff;"><option value="">（選択しない）</option></select>
       </div>
       <label style="font-size:11px;color:#666;">職種 *</label>
       <input id="jf_title" placeholder="例: 製造スタッフ（電子部品の検査）" style="width:100%;padding:9px;border:1px solid #cdd;border-radius:8px;margin:2px 0 8px;font-size:13px;box-sizing:border-box;">
@@ -31446,14 +31446,25 @@ function _jobEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){r
 async function openJobsAdmin(){ switchScreen('jobsAdminScreen'); closeJobForm(); await loadJobsAdmin(); }
 var JOBS_LIST_GUID='3b062cf9-73a0-4539-b10c-fd3edcc0e8b3';  // 求人 List
 var _jobHakenMap=null;  // {派遣先会社名: [組織単位...]}  (派遣先情報040623から)
+var _jobHakenData=null;  // {派遣先 + '\u0000' + 組織単位: {basho,jikan,naiyo}}  自動入力用
+// 住所→公開用エリア(都道府県+市郡+区まで。番地/建物は出さない)
+function _jobArea(addr){
+  if(!addr) return '';
+  var s=String(addr).replace(/[\s　]/g,'');
+  var m=s.match(/^([^0-9０-９]*?[都道府県])?([^0-9０-９]*?[市郡])([^0-9０-９]*?区)?/);
+  if(m && m[2]) return (m[1]||'')+m[2]+(m[3]||'');
+  return s.replace(/[0-9０-９].*$/,'');
+}
 // 派遣先情報(契約あり=登録全件)を読み 派遣先→組織単位 マップを作り jf_haken を埋める
 async function _ensureJobHakenOptions(){
   if(!_jobHakenMap){
-    _jobHakenMap={};
+    _jobHakenMap={}; _jobHakenData={};
     try{
       var token=await getToken();
       var HK1="OData__x6d3e__x9063__x5148__x4f1a__x79", HK2="OData__x6d3e__x9063__x5148__x4f1a__x790", SO="OData__x7d44__x7e54__x5358__x4f4d_";
-      var url=SP_SITE_URL+"/_api/web/GetList('/sites/PowerApps/Lists/040623')/items?$select="+HK1+","+HK2+","+SO+"&$top=500";
+      var BASHO="OData__x5c31__x696d__x5834__x6240__xff", JUSHO="OData__x6d3e__x9063__x5148__x000a__x4f", JIKAN="OData__x5c31__x696d__x6642__x9593__x24", JITSU="OData__x5b9f__x50cd__x6642__x9593__x24", NAIYO="OData__x696d__x52d9__x5185__x5bb9_";
+      var sels=[HK1,HK2,SO,BASHO,JUSHO,JIKAN,JITSU,NAIYO].join(",");
+      var url=SP_SITE_URL+"/_api/web/GetList('/sites/PowerApps/Lists/040623')/items?$select="+sels+"&$top=500";
       var data=await (await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}})).json();
       var rows=(data.d&&data.d.results)||[];
       rows.forEach(function(r){
@@ -31462,6 +31473,12 @@ async function _ensureJobHakenOptions(){
         if(!hk) return;
         if(!_jobHakenMap[hk]) _jobHakenMap[hk]=[];
         if(so && _jobHakenMap[hk].indexOf(so)<0) _jobHakenMap[hk].push(so);
+        // 自動入力用(組織単位ごと): 勤務地/勤務時間/仕事内容
+        var basho=_jobArea(String(r[BASHO]||r[JUSHO]||'').trim());
+        var jr=String(r[JIKAN]||'').trim(), ji=String(r[JITSU]||'').trim(), jikan='';
+        if(jr && jr!=='-'){ jikan=jr.replace(/：/g,':'); if(ji && ji!=='-') jikan+='（実働'+ji+'）'; }
+        var naiyo=String(r[NAIYO]||'').trim(); if(naiyo==='-') naiyo='';
+        if(so) _jobHakenData[hk+'\u0000'+so]={basho:basho, jikan:jikan, naiyo:naiyo};
       });
     }catch(e){ console.warn('派遣先情報ロード失敗',e); }
   }
@@ -31478,6 +31495,19 @@ function _jobOnHakenChange(){
   if(!sel) return;
   var units=(_jobHakenMap&&_jobHakenMap[hk])||[];
   sel.innerHTML='<option value="">（選択しない）</option>'+units.map(function(u){return '<option value="'+_jobEsc(u)+'">'+_jobEsc(u)+'</option>';}).join('');
+}
+
+// 組織単位選択→派遣先情報から 勤務地/勤務時間/仕事内容 を自動入力(絞れる部分だけ)
+function _jobOnSoshikiChange(){
+  var hk=document.getElementById('jf_haken').value;
+  var so=document.getElementById('jf_soshiki').value;
+  var d=_jobHakenData && _jobHakenData[hk+'\u0000'+so];
+  if(!d) return;
+  // 勤務地・勤務時間は選んだ組織単位の値で反映(派遣先情報由来・空でなければ上書き)
+  if(d.basho) document.getElementById('jf_location').value=d.basho;
+  if(d.jikan) document.getElementById('jf_hours').value=d.jikan;
+  // 仕事内容は空のときだけ(翻訳・編集を壊さない)
+  var desc=document.getElementById('jf_desc'); if(desc && !String(desc.value).trim() && d.naiyo) desc.value=d.naiyo;
 }
 // 募集元(haken/soshiki)を求人Listへ直接保存。公開APIは返さないのでHPには出ない
 async function _patchJobHakenSoshiki(jobId,haken,soshiki){
