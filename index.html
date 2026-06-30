@@ -48072,6 +48072,11 @@ function openCompanyInfoPopup() {
   html +=     '<button onclick="closeCompanyInfoPopup()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">×</button>';
   html +=   '</div>';
   html +=   '<div style="flex:1;overflow-y:auto;padding:12px;background:#fafafa;-webkit-overflow-scrolling:touch;">';
+  html +=   '<button onclick="openHakenKyokaCert()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:12px;border:1.5px solid #7b1fa2;border-radius:12px;background:linear-gradient(135deg,#f3e5f5,#e1bee7);cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent;">'
+    + '<span style="font-size:26px;line-height:1;">📜</span>'
+    + '<div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:800;color:#6a1b9a;">労働者派遣事業許可証</div>'
+    + '<div style="font-size:11px;color:#7b1fa2;margin-top:2px;">(派)22-300880 ／ 有効 2026/7/1〜2031/6/30 ・ タップで表示</div></div>'
+    + '<span style="font-size:20px;color:#7b1fa2;">›</span></button>';
   sections.forEach(function(sec) {
     html += '<div style="margin-bottom:12px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid #e0e0e0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">';
     html +=   '<div style="background:' + sec.color + ';color:#fff;padding:8px 12px;font-size:13px;font-weight:700;">' + escHtml(sec.title) + '</div>';
@@ -48098,6 +48103,97 @@ function openCompanyInfoPopup() {
 function closeCompanyInfoPopup() {
   var ov = document.getElementById('companyInfoOverlay');
   if (ov) ov.remove();
+}
+
+// ===== 労働者派遣事業許可証 (会社情報カードから) =====
+var HAKEN_CERT_IMG = 'haken-kyoka.png';
+
+function openHakenKyokaCert() {
+  var existing = document.getElementById('hakenCertOverlay'); if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'hakenCertOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:10001;display:flex;align-items:center;justify-content:center;padding:10px;';
+  var h = '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">';
+  h += '<div style="background:linear-gradient(135deg,#6a1b9a,#7b1fa2);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">';
+  h += '<span style="font-size:20px;">📜</span><div style="flex:1;font-size:15px;font-weight:800;">労働者派遣事業許可証</div>';
+  h += '<button onclick="closeHakenKyokaCert()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:30px;height:30px;border-radius:50%;font-size:18px;cursor:pointer;line-height:1;">×</button></div>';
+  h += '<div style="flex:1;overflow-y:auto;padding:12px;background:#f5f5f5;text-align:center;-webkit-overflow-scrolling:touch;">';
+  h += '<img src="' + HAKEN_CERT_IMG + '" alt="労働者派遣事業許可証" style="max-width:100%;border:1px solid #ddd;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.12);background:#fff;">';
+  h += '<div style="font-size:11px;color:#888;margin-top:8px;">許可番号 (派)22-300880 ／ 有効期間 2026年7月1日〜2031年6月30日</div>';
+  h += '</div>';
+  h += '<div style="flex-shrink:0;padding:12px;display:flex;gap:8px;border-top:1px solid #eee;background:#fff;">';
+  h += '<button onclick="printHakenKyokaCert()" style="flex:1;padding:13px;background:linear-gradient(135deg,#455a64,#263238);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;">🖨 印刷 / PDF保存</button>';
+  h += '<button id="hakenCertMailBtn" onclick="mailHakenKyokaCert(this)" style="flex:1;padding:13px;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;">📧 メール下書き</button>';
+  h += '</div></div>';
+  overlay.innerHTML = h;
+  overlay.addEventListener('click', function(e){ if (e.target === overlay) closeHakenKyokaCert(); });
+  document.body.appendChild(overlay);
+}
+function closeHakenKyokaCert(){ var o = document.getElementById('hakenCertOverlay'); if (o) o.remove(); }
+
+// 🖨 別タブで許可証を開いて印刷/PDF保存 (ブラウザの印刷ダイアログから『PDFに保存』可)
+function printHakenKyokaCert() {
+  var imgAbs = new URL(HAKEN_CERT_IMG, location.href).href;
+  var w = window.open('', '_blank');
+  if (!w) { showToast('ポップアップを許可してください（印刷）', 'error'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>労働者派遣事業許可証</title>' +
+    '<style>@page{margin:8mm;}html,body{margin:0;padding:0;}img{display:block;width:100%;height:auto;}</style></head>' +
+    '<body><img src="' + imgAbs + '" onload="setTimeout(function(){window.focus();window.print();},250);"></body></html>');
+  w.document.close();
+}
+
+// 📧 自分宛て(操作者)に『お客様への許可証更新のお知らせ』下書きをPDF添付で作成 → Outlookで開く
+async function mailHakenKyokaCert(btn) {
+  if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ 下書き作成中…'; }
+  try {
+    var selfEmail = (typeof getLoggedInEmail === 'function') ? getLoggedInEmail() : '';
+    if (!selfEmail) throw new Error('ログイン中のメールアドレスが取得できません');
+    var operatorFull = (typeof getLoggedInName === 'function') ? getLoggedInName() : '';
+    if (typeof loadEsignLibsIfNeeded === 'function') await loadEsignLibsIfNeeded();
+    if (btn) btn.textContent = '⏳ PDF生成中…';
+    // 許可証画像 → A4 1ページの PDF
+    var imgAbs = new URL(HAKEN_CERT_IMG, location.href).href;
+    var imgBytes = await (await fetch(imgAbs)).arrayBuffer();
+    var pdfDoc = await window.PDFLib.PDFDocument.create();
+    var img = await pdfDoc.embedPng(imgBytes);
+    var A4W = 595.28, A4H = 841.89, M = 28;
+    var page = pdfDoc.addPage([A4W, A4H]);
+    var scale = Math.min((A4W - M*2)/img.width, (A4H - M*2)/img.height);
+    var dw = img.width*scale, dh = img.height*scale;
+    page.drawImage(img, { x:(A4W-dw)/2, y:(A4H-dh)/2, width:dw, height:dh });
+    var pdfBytes = await pdfDoc.save();
+    var u8 = new Uint8Array(pdfBytes), bin = '', CHUNK = 0x8000;
+    for (var i=0;i<u8.length;i+=CHUNK) bin += String.fromCharCode.apply(null, u8.subarray(i,i+CHUNK));
+    var pdfB64 = btoa(bin);
+    var subject = '【ご案内】労働者派遣事業許可証 更新のお知らせ';
+    var body =
+      'お客様各位\n\n' +
+      '平素より格別のお引き立てを賜り、厚く御礼申し上げます。\n' +
+      '有限会社ステップ・アップでございます。\n\n' +
+      'このたび、弊社の労働者派遣事業許可証を更新いたしましたので、ご案内申し上げます。\n' +
+      '新しい許可証の写しを添付いたしますので、ご査収のほどよろしくお願い申し上げます。\n\n' +
+      '　許可番号　：（派）22-300880\n' +
+      '　有効期間　：2026年7月1日 〜 2031年6月30日\n\n' +
+      '今後とも変わらぬお引き立てを賜りますよう、よろしくお願い申し上げます。\n\n' +
+      '──────────────────\n' +
+      '有限会社ステップ・アップ\n' +
+      '〒438-0822 静岡県磐田市上本郷1006-7\n' +
+      'TEL：0538-36-6968\n';
+    if (btn) btn.textContent = '⏳ Outlook下書き作成中…';
+    var draft = await _createOutlookDraftWithAttachment({
+      toEmail: selfEmail, toName: operatorFull || undefined,
+      subject: subject, body: body,
+      attachment: { name: '労働者派遣事業許可証.pdf', contentType: 'application/pdf', contentB64: pdfB64 }
+    });
+    if (draft && draft.webLink) { try { window.open(draft.webLink, '_blank', 'noopener,noreferrer'); } catch (_) {} }
+    showToast('✓ 自分宛てに下書きを作成しました。内容を確認し、送信ボタンで送信してください', 'success');
+    if (btn) { btn.textContent = '✅ 下書きを開きました'; btn.style.background = 'linear-gradient(135deg,#43a047,#2e7d32)'; }
+    setTimeout(function(){ if (btn){ btn.textContent = btn.dataset.label || '📧 メール下書き'; btn.style.background = 'linear-gradient(135deg,#1565c0,#0d47a1)'; btn.disabled = false; } }, 3000);
+  } catch (e) {
+    console.error('mailHakenKyokaCert error:', e);
+    showToast('下書き作成失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label || '📧 メール下書き'; }
+  }
 }
 
 function copyCompanyInfoVal(btn) {
