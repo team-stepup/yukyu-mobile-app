@@ -30808,8 +30808,10 @@ async function saveYukyuEdit() {
     if (!newDate) { showToast('日付を入力してください', 'error'); btn.disabled = false; btn.textContent = '修正完了'; return; }
 
     // Map select value to SharePoint field values
+    // 丸1日は leaveTypeDetail(新列=取得日数時間) にも「1  日（定時）」を入れる。
+    // これを空にすると 月次スクリプト/SP計算列(金額有給・時間)が 0/エラーになる不具合が出る。
     let leaveType = '1日(定時)';
-    let leaveTypeDetail = '';
+    let leaveTypeDetail = '1  日（定時）';
     if (dayTypeSelect === '0.5日AM') { leaveType = '半日（午前）'; leaveTypeDetail = '午前'; }
     else if (dayTypeSelect === '0.5日PM') { leaveType = '半日（午後）'; leaveTypeDetail = '午後'; }
 
@@ -31362,7 +31364,8 @@ async function submitLeaveApplication() {
   const createdIds = []; // ロールバック用: POST成功した Item ID を保持
 
   // leaveTypeDetail を leaveType から導出（半日記録を確実に0.5日とカウントするため）
-  let leaveTypeDetail = '';
+  // 丸1日は新列(取得日数時間)にも「1  日（定時）」を入れる（空だと月次/計算列が0・エラーになる）
+  let leaveTypeDetail = '1  日（定時）';
   if (leaveType === '半日（午前）') leaveTypeDetail = '午前';
   else if (leaveType === '半日（午後）') leaveTypeDetail = '午後';
 
