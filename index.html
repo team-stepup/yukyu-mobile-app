@@ -7975,6 +7975,19 @@ function classifyExitEmp(emp, sameBangoRecs) {
   return 'retire';
 }
 
+// 移動退社(=社保・雇用の喪失届が不要。移動先で社保・雇用が継続)判定。
+// 退社レコード単体の採用種別では分からない(移動先の後続レコードで判定される)ため、
+// 同一社員番号の全レコードを渡して classifyExitEmp を再利用する。
+function _bangoNorm(v){ var s=String(v==null?'':v).trim(); if(/^\d+(\.0+)?$/.test(s)) s=String(parseInt(s,10)); return s; }
+function _isIdouTaisha(emp, allEmps){
+  try{
+    if(!emp || !F.syainNo || !allEmps || !allEmps.length) return false;
+    var bn=_bangoNorm(emp[F.syainNo]); if(!bn) return false;
+    var recs=allEmps.filter(function(e){ return _bangoNorm(e[F.syainNo])===bn; });
+    return classifyExitEmp(emp, recs)==='transfer-out';
+  }catch(_){ return false; }
+}
+
 // 同一社員番号の全レコード取得（ローカルキャッシュ優先 → API フィルタ）
 async function getSameBangoRecords(syainNo) {
   if (!syainNo) return [];
@@ -17960,7 +17973,7 @@ function computeSoumuBadgeCounts(allEmps, km, shahoInResult) {
         latest.setHours(0,0,0,0);
         if (latest <= today) {
           var sv = String(emp[odShaho] || '');
-          if (sv.indexOf('取得完了')>=0 && sv.indexOf('喪失')<0) res.shahoOut++;
+          if (sv.indexOf('取得完了')>=0 && sv.indexOf('喪失')<0 && !_isIdouTaisha(emp, allEmps)) res.shahoOut++;
         }
       }
     }
@@ -22233,7 +22246,7 @@ function renderSoumuDashboard() {
       if (!emp.Title) return;
       if (empZaisyoku(emp) !== '退社') return;
       var v = String(emp[odKoyou] || '');
-      if (v === '✓取得完了') count++;
+      if (v === '✓取得完了' && !_isIdouTaisha(emp, _soumuAllEmps)) count++;
     });
     return count;
   })();
@@ -22274,7 +22287,7 @@ function renderSoumuDashboard() {
       latest.setHours(0,0,0,0);
       if (latest > today) return;                   // 遅い方が未来 → カウント除外
       var v = String(emp[odShaho] || '');
-      if (v.indexOf('取得完了') >= 0 && v.indexOf('喪失') < 0) count++;
+      if (v.indexOf('取得完了') >= 0 && v.indexOf('喪失') < 0 && !_isIdouTaisha(emp, _soumuAllEmps)) count++;
     });
     return count;
   })();
@@ -23117,7 +23130,7 @@ function openKoyouSoushitsuDownloadList() {
     var zVal = odZ ? String(emp[odZ] || '') : (isResigned(emp) ? '退社' : '在職');
     if (zVal !== '退社') return false;
     var kv = String(emp[odKoyou] || '');
-    return kv === '✓取得完了'; // 取得済みのみ、申請中は除外
+    return kv === '✓取得完了' && !_isIdouTaisha(emp, _soumuAllEmps); // 取得済みのみ・移動退社除外
   });
   renderKoyouSoushitsuDownloadOverlay(filteredList);
 }
@@ -23621,7 +23634,7 @@ function openShahoSoushitsuDownloadList() {
     latest.setHours(0,0,0,0);
     if (latest > today) return false;
     var sv = String(emp[odShaho] || '');
-    return sv.indexOf('取得完了') >= 0 && sv.indexOf('喪失') < 0;
+    return sv.indexOf('取得完了') >= 0 && sv.indexOf('喪失') < 0 && !_isIdouTaisha(emp, _soumuAllEmps);
   });
   renderShahoSoushitsuDownloadOverlay(filteredList);
 }
