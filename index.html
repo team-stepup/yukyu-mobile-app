@@ -31560,9 +31560,9 @@ async function loadJobsAdmin(){
     var data=await resp.json();
     window._jobsCache=data.jobs||[];
     try{
-      var brows=await spGet(JOBS_LIST_GUID,'$select=Id,haken,soshiki,koukaibi&$top=500');
-      var bm={}; (brows||[]).forEach(function(r){ bm[r.Id]={haken:r.haken||'',soshiki:r.soshiki||'',koukaibi:r.koukaibi||''}; });
-      window._jobsCache.forEach(function(j){ var m=bm[j.id]; if(m){ j.haken=m.haken; j.soshiki=m.soshiki; j.koukaibi=m.koukaibi; } });
+      var brows=await spGet(JOBS_LIST_GUID,'$select=Id,haken,soshiki,koukaibi,indeedgenko&$top=500');
+      var bm={}; (brows||[]).forEach(function(r){ var ind=null; try{ ind=r.indeedgenko?JSON.parse(r.indeedgenko):null; }catch(e){} bm[r.Id]={haken:r.haken||'',soshiki:r.soshiki||'',koukaibi:r.koukaibi||'',indeed:ind}; });
+      window._jobsCache.forEach(function(j){ var m=bm[j.id]; if(m){ j.haken=m.haken; j.soshiki=m.soshiki; j.koukaibi=m.koukaibi; j.indeed=m.indeed; } });
     }catch(e){ console.warn('募集元マージ失敗',e); }
     renderJobsAdminList(window._jobsCache);
   }catch(e){ box.innerHTML='<p style="text-align:center;color:#c00;padding:20px;">読み込み失敗: '+_jobEsc(e.message||e)+'</p>'; }
@@ -31588,6 +31588,7 @@ function renderJobsAdminList(jobs){
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
       +'<button onclick="togglePublish('+j.id+',\''+(pub?'非公開':'公開')+'\')" style="flex:1;min-width:84px;padding:7px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:#fff;background:'+(pub?'#9e9e9e':'#2e7d32')+';">'+(pub?'非公開にする':'公開する')+'</button>'
       +'<button onclick="openJobForm('+j.id+')" style="flex:1;min-width:60px;padding:7px;border:1px solid #ccd;border-radius:8px;font-size:12px;background:#f7f9fc;cursor:pointer;">✏️ 編集</button>'
+      +'<button onclick="openIndeedCopy('+j.id+')" style="flex:1;min-width:76px;padding:7px;border:1px solid #bcd4f0;border-radius:8px;font-size:12px;background:#f0f6ff;color:#1565c0;font-weight:600;cursor:pointer;">📋 Indeed</button>'
       +'<button onclick="deleteJob('+j.id+')" style="padding:7px 10px;border:1px solid #f3c0c0;border-radius:8px;font-size:12px;background:#fff5f5;color:#c33;cursor:pointer;">🗑</button>'
       +'</div></div>';
   });
@@ -31693,6 +31694,7 @@ async function togglePublish(id,status){
     if(!resp.ok||!data.ok) throw new Error(data.detail||data.error||('HTTP '+resp.status));
     if(status==='公開'){ try{ await _patchJobKoukaibi(id,_todayJST()); }catch(e){ console.warn('公開日記録失敗',e); } }
     await loadJobsAdmin();
+    if(status==='公開'){ _genIndeedCopy(id,true); }  /* 公開したらIndeed用原稿をAI自動生成して表示 */
   }catch(e){ alert('公開切替に失敗: '+(e.message||e)); }
 }
 async function deleteJob(id){
@@ -31705,6 +31707,71 @@ async function deleteJob(id){
     if(!resp.ok||!data.ok) throw new Error(data.detail||data.error||('HTTP '+resp.status));
     await loadJobsAdmin();
   }catch(e){ alert('削除に失敗: '+(e.message||e)); }
+}
+
+/* ============================================================
+   Indeed用求人原稿 (公開時にAI自動生成・求人List indeedgenko列に保存)
+   ============================================================ */
+function closeIndeedModal(){ var m=document.getElementById('indeedModal'); if(m) m.remove(); }
+function _indeedModalShell(inner){
+  closeIndeedModal();
+  var wrap=document.createElement('div');
+  wrap.id='indeedModal';
+  wrap.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(10,20,40,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px;';
+  wrap.innerHTML='<div style="background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:86vh;overflow-y:auto;padding:18px 16px;box-shadow:0 12px 40px rgba(0,0,0,.3);">'+inner+'</div>';
+  wrap.addEventListener('click',function(e){ if(e.target===wrap) closeIndeedModal(); });
+  document.body.appendChild(wrap);
+}
+function _showIndeedLoading(){ _indeedModalShell('<div style="text-align:center;padding:26px 8px;"><div style="font-size:30px;">🤖</div><div style="font-weight:700;color:#1a2a3a;margin-top:8px;">Indeed用の求人原稿を生成中…</div><div style="font-size:12px;color:#889;margin-top:6px;">AIが原稿を書いています（10秒ほどお待ちください）</div></div>'); }
+function _renderIndeedModal(j,copy){
+  var facts='勤務地: '+(j.location||'')+'\n給与: '+(j.wage||'')+'\n勤務時間: '+(j.hours||'')+'\n休日: '+(j.off||'')+'\n雇用形態: 派遣社員';
+  var inner='<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+    +'<span style="font-size:15px;font-weight:800;color:#1a2a3a;flex:1;">📋 Indeed投稿用の原稿</span>'
+    +'<button onclick="closeIndeedModal()" style="border:none;background:#eef1f6;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;">✕</button></div>'
+    +'<div style="font-size:11px;color:#667;margin-bottom:10px;">「'+_jobEsc(j.title)+'」— employers.indeed.com の「求人を投稿」画面にコピペしてください。文面は自由に手直しOK。</div>'
+    +'<div style="font-size:11px;font-weight:700;color:#555;margin-bottom:3px;">求人タイトル</div>'
+    +'<textarea id="indeedCopyTitle" rows="2" style="width:100%;font-size:13px;padding:8px;border:1px solid #cdd;border-radius:8px;box-sizing:border-box;">'+_jobEsc(copy.title||'')+'</textarea>'
+    +'<button onclick="_copyIndeedField(\'indeedCopyTitle\',this)" style="margin:4px 0 10px;padding:6px 12px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:#fff;background:#1565c0;">📋 タイトルをコピー</button>'
+    +'<div style="font-size:11px;font-weight:700;color:#555;margin-bottom:3px;">基本情報（投稿画面の各欄に入力）</div>'
+    +'<textarea id="indeedCopyFacts" rows="5" readonly style="width:100%;font-size:12px;padding:8px;border:1px solid #e3e8ef;border-radius:8px;box-sizing:border-box;background:#f7f9fc;color:#456;">'+_jobEsc(facts)+'</textarea>'
+    +'<div style="font-size:11px;font-weight:700;color:#555;margin:8px 0 3px;">仕事内容（本文）</div>'
+    +'<textarea id="indeedCopyBody" rows="12" style="width:100%;font-size:12px;padding:8px;border:1px solid #cdd;border-radius:8px;box-sizing:border-box;line-height:1.6;">'+_jobEsc(copy.body||'')+'</textarea>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">'
+    +'<button onclick="_copyIndeedField(\'indeedCopyBody\',this)" style="flex:1;min-width:130px;padding:9px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;color:#fff;background:linear-gradient(135deg,#1565c0,#2b6cb0);">📋 本文をコピー</button>'
+    +'<button onclick="_genIndeedCopy('+j.id+',true)" style="padding:9px 12px;border:1px solid #ccd;border-radius:8px;font-size:12px;background:#f7f9fc;cursor:pointer;">🔄 作り直す</button>'
+    +'</div>'
+    +'<div style="font-size:10px;color:#a86;margin-top:8px;">⚠️ 国籍を限定する表現（日本人限定等）は法令違反のため追記しないでください。</div>';
+  _indeedModalShell(inner);
+}
+async function _copyIndeedField(id,btn){
+  var el=document.getElementById(id); if(!el) return;
+  try{ await navigator.clipboard.writeText(el.value); }
+  catch(e){ el.select(); try{ document.execCommand('copy'); }catch(e2){} }
+  var old=btn.textContent; btn.textContent='✅ コピーしました'; setTimeout(function(){ btn.textContent=old; },1400);
+}
+async function _genIndeedCopy(id,showModal){
+  var j=(window._jobsCache||[]).find(function(x){return x.id===id;});
+  if(!j){ if(showModal) alert('求人データが見つかりません'); return; }
+  if(showModal) _showIndeedLoading();
+  try{
+    var token=await getToken();
+    var payload={id:id,title:j.title,location:j.location,wage:j.wage,hours:j.hours,off:j.off,description:j.description,remarks:j.remarks,target:j.target};
+    var resp=await fetch(FUNC_OCR_BASE+'/jobs/indeed-copy',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    var data=await resp.json().catch(function(){return {};});
+    if(!resp.ok||!data.ok) throw new Error(data.detail||data.error||('HTTP '+resp.status));
+    j.indeed=data.copy;
+    if(showModal) _renderIndeedModal(j,data.copy);
+    return data.copy;
+  }catch(e){
+    if(showModal) _indeedModalShell('<div style="text-align:center;padding:20px;"><div style="color:#c00;font-weight:700;">Indeed原稿の生成に失敗しました</div><div style="font-size:12px;color:#889;margin-top:6px;">'+_jobEsc(e.message||e)+'</div><button onclick="closeIndeedModal()" style="margin-top:12px;padding:8px 18px;border:none;border-radius:8px;background:#eef1f6;cursor:pointer;">閉じる</button></div>');
+    else console.warn('Indeed原稿生成失敗',e);
+  }
+}
+function openIndeedCopy(id){
+  var j=(window._jobsCache||[]).find(function(x){return x.id===id;});
+  if(!j) return;
+  if(j.indeed&&j.indeed.title){ _renderIndeedModal(j,j.indeed); }
+  else{ _genIndeedCopy(id,true); }
 }
 
 // ============================================================
