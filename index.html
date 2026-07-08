@@ -6632,6 +6632,21 @@ function onVersionClick() {
   }
 }
 
+// 起動直後(まだ操作を始めていないタイミング)だけ新バージョンを自動適用する。
+// ・起動20秒以内のみ(作業中の強制リロード防止)
+// ・同じバージョンで2回は自動リロードしない(GitHub Pages反映遅延によるループ防止)
+// ・MSAL リダイレクト応答(#code=)の処理中はリロードしない
+const _appStartTs = Date.now();
+function shouldAutoApplyUpdate() {
+  if (!latestVersionData || !latestVersionData.version) return false;
+  if (Date.now() - _appStartTs > 20000) return false;
+  if (location.hash && location.hash.indexOf('code=') >= 0) return false;
+  try {
+    if (localStorage.getItem('yukyu_auto_updated_ver') === latestVersionData.version) return false;
+  } catch (e) {}
+  return true;
+}
+
 async function checkForUpdate() {
   try {
     const base = window.location.href.replace(/\/[^\/]*$/, '/');
@@ -6644,6 +6659,13 @@ async function checkForUpdate() {
       // No baked-in version (local dev) → first fetch becomes baseline
       initialVersion = data.version;
     } else if (hasRealUpdate()) {
+      // 起動直後なら赤い⟳を押させず自動でリロードして最新版へ切り替える
+      if (shouldAutoApplyUpdate()) {
+        try { localStorage.setItem('yukyu_auto_updated_ver', latestVersionData.version); } catch (e) {}
+        showToast('新しいバージョンに自動更新しています…', 'info');
+        setTimeout(headerUpdateClick, 600);
+        return;
+      }
       // Version changed since this HTML was built and the user hasn't dismissed it → show badge
       document.getElementById('updateBadge').style.display = 'flex';
     } else {
