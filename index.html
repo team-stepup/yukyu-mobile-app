@@ -18071,13 +18071,18 @@ async function loadHomeBadges() {
     _setSoumuBadge('soumuBadgeRishoku', _sc.rishokuhyou);
   } catch (e) { console.warn('Soumu badge compute error:', e); }
 
-  // 前払いバッジ（件数）
+  // 前払いバッジ（件数）— 全件完了（手数料入力済 = 一覧画面の「完了済」と同判定）なら緑
+  var mAllDone = mRecs.length > 0 && mRecs.every(function(r) { return r[MF.fee] && String(r[MF.fee]).trim(); });
   var mBadge = document.getElementById('maebariBadgeCount');
   if (mBadge) {
-    if (mRecs.length > 0) { mBadge.textContent = mRecs.length; mBadge.style.display = 'inline-block'; }
+    if (mRecs.length > 0) {
+      mBadge.textContent = mRecs.length;
+      mBadge.style.background = mAllDone ? '#2e7d32' : '#f57c00';
+      mBadge.style.display = 'inline-block';
+    }
     else { mBadge.style.display = 'none'; }
   }
-  // 前払いバッジ（合計金額 — MF.total を使用）
+  // 前払いバッジ（合計金額 — MF.total を使用）。全件完了済なら緑の「✓完了済」に切替
   var mTotalBadge = document.getElementById('maebariBadgeTotal');
   if (mTotalBadge) {
     if (mRecs.length > 0) {
@@ -18085,8 +18090,17 @@ async function loadHomeBadges() {
       mRecs.forEach(function(r) {
         totalAmt += parseFloat(r[MF.total]) || 0;
       });
-      if (totalAmt > 0) {
+      if (mAllDone) {
+        mTotalBadge.textContent = '✓完了済';
+        mTotalBadge.style.background = '#2e7d32';
+        mTotalBadge.style.borderColor = '#2e7d32';
+        mTotalBadge.style.color = '#fff';
+        mTotalBadge.style.display = 'block';
+      } else if (totalAmt > 0) {
         mTotalBadge.textContent = '¥' + Math.round(totalAmt).toLocaleString('ja-JP');
+        mTotalBadge.style.background = '#fff';
+        mTotalBadge.style.borderColor = '#f57c00';
+        mTotalBadge.style.color = '#e65100';
         mTotalBadge.style.display = 'block';
       } else { mTotalBadge.style.display = 'none'; }
     } else { mTotalBadge.style.display = 'none'; }
