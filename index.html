@@ -5369,7 +5369,7 @@ select.sankyu-edit-input {
 
   <!-- Screen 1: Employee Search -->
   <div class="screen" id="searchScreen">
-    <div class="quick-links">
+    <div class="quick-links" id="quickLinksGrid">
       <button class="quick-link-btn" onclick="switchScreen('maebariListScreen')" style="position:relative;">
         <span class="ql-icon">💰</span>
         <span class="ql-text">今週前払</span>
@@ -7589,6 +7589,8 @@ function resetSearch() {
   if (typeof updateHakenMultiBtnText === 'function') updateHakenMultiBtnText();
   document.getElementById('hakenSectionCard').style.display = '';
   document.getElementById('addEmpBtn').style.display = '';
+  const qlGrid = document.getElementById('quickLinksGrid');
+  if (qlGrid) qlGrid.style.display = '';
 }
 
 // ロゴクリックでホーム画面に戻る
@@ -7848,6 +7850,10 @@ async function searchEmployee() {
 
     document.getElementById('hakenSectionCard').style.display = 'none';
     document.getElementById('addEmpBtn').style.display = 'none';
+    // 検索結果表示中はクイックリンク12ボタンを隠して結果を見やすく (クリアで復活)
+    var _qlGrid = document.getElementById('quickLinksGrid');
+    if (_qlGrid) _qlGrid.style.display = 'none';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     // 在職中を上、退職済みを下にソート（同じグループ内は元の順序を維持）
     const sortedResults = results.slice().sort((a, b) => {
       const ar = isResigned(a) ? 1 : 0;
@@ -7860,7 +7866,7 @@ async function searchEmployee() {
       if (!employeeFieldsCache) await fetchEmployeeFields();
       if (employeeFieldsCache) _jikaiKeySearch = buildFieldKeyMap(employeeFieldsCache)['jikaiSaiyou'] || null;
     } catch (_) {}
-    container.innerHTML = sortedResults.map(emp => {
+    const _renderEmpCard = (emp) => {
       const nyushaRaw = emp[F.nyushaDate];
       const kisanRaw = emp[F.kisanDate];
       const resigned = isResigned(emp);
@@ -7929,7 +7935,58 @@ async function searchEmployee() {
           </div>
         </div>
       `;
-    }).join('');
+    };
+
+    // ── 同一人物グループ化 (氏名正規化 + 生年月日一致) ──
+    //   再入社等で同じ人のレコードが複数ヒットしたとき、1つの枠にまとめて見落としを防ぐ
+    const _bdFieldKey = 'OData__x751f__x5e74__x6708__x65e5_';
+    const _personKey = (emp) => {
+      let bd = '';
+      if (emp[_bdFieldKey]) {
+        const d = new Date(emp[_bdFieldKey]);
+        if (!isNaN(d.getTime())) bd = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+      }
+      // 生年月日未登録の場合は社員番号で区別 (別人の同姓同名を誤結合しないため)
+      return _canonName(emp.Title || '') + '|' + (bd || 'no:' + String(emp[F.syainNo] || ''));
+    };
+    const _groupMap = {};
+    const _groups = [];
+    sortedResults.forEach(emp => {
+      const k = _personKey(emp);
+      if (!_groupMap[k]) { _groupMap[k] = { emps: [], hasActive: false }; _groups.push(_groupMap[k]); }
+      _groupMap[k].emps.push(emp);
+      if (!isResigned(emp)) _groupMap[k].hasActive = true;
+    });
+    const _activeGroups = _groups.filter(g => g.hasActive);
+    const _retiredGroups = _groups.filter(g => !g.hasActive);
+    const _activeCnt = sortedResults.filter(e => !isResigned(e)).length;
+    const _retiredCnt = sortedResults.length - _activeCnt;
+    const _dupCnt = _groups.filter(g => g.emps.length > 1).length;
+
+    const _renderGroup = (g) => {
+      const inner = g.emps.map(_renderEmpCard).join('');
+      if (g.emps.length < 2) return inner;
+      return '<div style="border:2px solid #b39ddb;border-radius:16px;padding:8px 8px 0;margin-bottom:12px;background:rgba(126,87,194,0.05);">'
+        + '<div style="font-size:11.5px;font-weight:800;color:#5e35b1;margin:2px 4px 8px;">👤 同一人物のレコード ' + g.emps.length + '件（見落とし注意）</div>'
+        + inner + '</div>';
+    };
+
+    // 件数見出し
+    let _html = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 2px 10px;font-size:12.5px;font-weight:700;color:#555;">'
+      + '<span>🔎 検索結果 ' + sortedResults.length + '件</span>'
+      + (_activeCnt ? '<span style="color:#2e7d32;">在職 ' + _activeCnt + '</span>' : '')
+      + (_retiredCnt ? '<span style="color:#c62828;">退社 ' + _retiredCnt + '</span>' : '')
+      + (_dupCnt ? '<span style="background:linear-gradient(135deg,#ede7f6,#d1c4e9);color:#5e35b1;padding:2px 10px;border-radius:10px;">👤 同一人物 ' + _dupCnt + '組</span>' : '')
+      + '</div>';
+    _html += _activeGroups.map(_renderGroup).join('');
+    // 在職と退社の境目に区切り線
+    if (_activeGroups.length && _retiredGroups.length) {
+      _html += '<div style="display:flex;align-items:center;gap:8px;margin:14px 2px 10px;color:#c62828;font-size:11.5px;font-weight:800;">'
+        + '<span style="flex:1;height:1px;background:#f0b8b8;"></span>🚪 退社済み'
+        + '<span style="flex:1;height:1px;background:#f0b8b8;"></span></div>';
+    }
+    _html += _retiredGroups.map(_renderGroup).join('');
+    container.innerHTML = _html;
   } catch (e) {
     console.error('Search error:', e);
     showToast('検索エラー: ' + e.message, 'error');
