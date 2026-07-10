@@ -19791,7 +19791,8 @@ function renderHakensakiList(items, fieldMap, fieldTypes) {
     soshiki: findField('組織単位', '組織', '部署', '配属先', '部課'),
     start:   findField('派遣期間　始まり', '派遣期間 始まり', '派遣期間始まり', '派遣開始', '開始日', '契約開始'),
     end:     findField('派遣期間　終わり', '派遣期間 終わり', '派遣期間終わり', '派遣終了', '終了日', '契約終了'),
-    ninzu:   findField('派遣人数', '人数')
+    ninzu:   findField('派遣人数', '人数'),
+    archive: findField('アーカイブ')
   };
 
   // 日付型自動検出フォールバック
@@ -19851,13 +19852,20 @@ function _hakenItemStatus(item) {
   return { ninzu: ninzu, isValid: isValid, isExpiredContract: isExpiredContract, isNoContract: isNoContract, isSoonExpire: isSoonExpire, endDate: endDate, hasEnd: hasEnd };
 }
 
+// アーカイブ行判定 (Text列「アーカイブ」に値があれば真)
+function _hakenIsArchived(item) {
+  var F = _hakensakiFields;
+  return !!(F.archive && String(item[F.archive] || '').trim());
+}
+
 function buildHakensakiTabs() {
   var tabs = document.getElementById('hakensakiTabs');
   if (!tabs) return;
   var items = _hakensakiItems;
-  var cAll = items.length;
-  var cValid = 0, cExpired = 0, cNone = 0, cSoon = 0;
+  var cValid = 0, cExpired = 0, cNone = 0, cSoon = 0, cArch = 0, cAll = 0;
   items.forEach(function(item) {
+    if (_hakenIsArchived(item)) { cArch++; return; }  // アーカイブは通常タブの件数から除外
+    cAll++;
     var s = _hakenItemStatus(item);
     if (s.isValid) cValid++;
     if (s.isExpiredContract) cExpired++;
@@ -19872,6 +19880,9 @@ function buildHakensakiTabs() {
     { key: 'expired', label: '契約期限切れ',    count: cExpired, cls: ' haken-tab-danger' },
     { key: 'none',    label: '契約なし',      count: cNone,    cls: '' }
   ];
+  if (cArch > 0) {
+    tabDefs.push({ key: 'archived', label: '📦アーカイブ', count: cArch, cls: '' });
+  }
 
   var html = '<div class="haken-tab-grid">';
   tabDefs.forEach(function(t, idx) {
@@ -20680,12 +20691,20 @@ function drawHakensakiCards(filterKey) {
 
   // フィルター適用
   var filtered = items.filter(function(item) {
+    // アーカイブ: 専用タブのみで表示、他タブでは常に除外
+    var archived = _hakenIsArchived(item);
+    if (filterKey === 'archived') {
+      if (!archived) return false;
+    } else if (archived) {
+      return false;
+    }
     // 検索キーワード
     if (searchQ) {
       var cName = String(item[F.company] || item.Title || '').toLowerCase();
       var sName = F.soshiki ? String(item[F.soshiki] || '').toLowerCase() : '';
       if (cName.indexOf(searchQ) < 0 && sName.indexOf(searchQ) < 0) return false;
     }
+    if (filterKey === 'archived') return true;
     var s = _hakenItemStatus(item);
     switch (filterKey) {
       case 'valid':   return s.isValid;
