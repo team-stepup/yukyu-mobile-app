@@ -40816,10 +40816,13 @@ async function loadNyutaiScreen() {
           soumuHtmlT += soumuBadge('社保', sShahoT);
           soumuHtmlT += soumuBadge('離職票', sRisho);
           soumuHtmlT += soumuBadge('渡し方', sRishoW);
-          // 社保資格喪失日
+          // 社保資格喪失日 (総務-社保「未加入」の人は喪失自体が対象外)
           const sShahoSoushitsu = getSoumuVal(emp, 'shahoSoushitsu');
+          const _ssMikanyu = getSoumuVal(emp, 'soumuShaho').indexOf('未加入') >= 0;
           let shahoSoushitsuHtml = '';
-          if (sShahoSoushitsu) {
+          if (_ssMikanyu) {
+            shahoSoushitsuHtml = '<span style="display:inline-flex;align-items:center;gap:3px;background:#eceff1;color:#78909c;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;margin-right:4px;"><span style="font-size:9px;">🩺 社保喪失</span> <span>対象外</span></span>';
+          } else if (sShahoSoushitsu) {
             var _ssDate = new Date(sShahoSoushitsu);
             var _ssStr = isNaN(_ssDate.getTime()) ? sShahoSoushitsu : ((_ssDate.getMonth()+1) + '/' + _ssDate.getDate());
             shahoSoushitsuHtml = '<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#fce4ec,#f8bbd0);color:#ad1457;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:4px;box-shadow:0 1px 2px rgba(173,20,87,0.15);"><span style="font-size:9px;opacity:0.85;">🩺 社保喪失</span> <span>' + escHtml(_ssStr) + '</span></span>';
@@ -41131,6 +41134,8 @@ async function openTaishaForm() {
   const kyuryo = emp[keyMap['seikyu']] || '';
   const hakenTaishaVal = emp[F.hakenTaisha] ? emp[F.hakenTaisha].substring(0, 10) : today;
   const yukyuTaishaVal = emp[F.yukyuTaisha] ? emp[F.yukyuTaisha].substring(0, 10) : today;
+  // 総務-社保「未加入」なら社保喪失日は対象外 (入力欄を出さず保存もしない)
+  var shahoMikanyu = String(emp[keyMap['soumuShaho']] || '').indexOf('未加入') >= 0;
   // 社保喪失日デフォルト: 有給使用後退社日の翌日
   var shahoVal;
   if (emp[keyMap['shahoSoushitsu']]) {
@@ -41199,7 +41204,9 @@ async function openTaishaForm() {
         '</div>' +
         '<div class="taisha-field" id="taishaField_shaho">' +
           '<label>社保喪失日</label>' +
-          '<input type="date" id="taisha_shahoDate" value="' + shahoVal + '">' +
+          (shahoMikanyu
+            ? '<div style="padding:10px 12px;background:#eceff1;border-radius:10px;font-size:12px;color:#78909c;font-weight:600;">社保未加入のため対象外（保存されません）</div>'
+            : '<input type="date" id="taisha_shahoDate" value="' + shahoVal + '">') +
         '</div>' +
         '<div class="taisha-field" id="taishaField_rishoku">' +
           '<label>離職票</label>' +
@@ -41255,7 +41262,8 @@ async function submitTaishaForm() {
   const riyuu = document.getElementById('taisha_riyuu').value;
   const hakenDate = document.getElementById('taisha_hakenDate').value;
   const yukyuDate = document.getElementById('taisha_yukyuDate').value;
-  const shahoDate = document.getElementById('taisha_shahoDate').value;
+  const shahoEl = document.getElementById('taisha_shahoDate');
+  const shahoDate = shahoEl ? shahoEl.value : '';  // 社保未加入時は入力欄なし → 空
   const rishoku = document.getElementById('taisha_rishoku').value;
   const watashi = document.getElementById('taisha_watashi').value;
   const jikai = document.getElementById('taisha_jikai').value;
@@ -41269,7 +41277,7 @@ async function submitTaishaForm() {
     if (!riyuu) { showToast('退職理由を選択してください', 'error'); return; }
     if (!yukyuDate) { showToast('有給使用後退社日を入力してください', 'error'); return; }
     if (yukyuDate < hakenDate) { showToast('有給使用後退社日は派遣先退社日以降にしてください', 'error'); return; }
-    if (!shahoDate) { showToast('社保喪失日を入力してください', 'error'); return; }
+    if (shahoEl && !shahoDate) { showToast('社保喪失日を入力してください', 'error'); return; }
     if (rishoku === '必要' && !watashi) { showToast('離職票渡し方を選択してください', 'error'); return; }
     if (!jikai) { showToast('次回の採用を選択してください', 'error'); return; }
   }
@@ -41340,7 +41348,9 @@ async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, risho
     } else {
       // 完全退社: 有給後退社日・社保喪失日・離職票・次回採用 + 採用種別=退社
       body[F.yukyuTaisha.replace(/^OData_/, '')] = yukyuDate + 'T00:00:00Z';
+      // 社保未加入 (shahoDate 空) の場合は誤登録済みの喪失日もクリア
       if (shahoDate) setField('shahoSoushitsu', shahoDate + 'T00:00:00Z');
+      else setField('shahoSoushitsu', null);
       if (rishoku) setField('rishokuhyou', rishoku);
       if (watashi) setField('rishokuWatashi', watashi);
       if (jikai) setField('jikaiSaiyou', jikai);
