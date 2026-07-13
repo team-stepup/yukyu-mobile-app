@@ -4105,6 +4105,13 @@ select.sankyu-edit-input {
 .profile-status-chip.s-mail    { background: linear-gradient(135deg,#e1f5fe,#b3e5fc); color: #0277bd; border-color: #4fc3f7; font-size: 11px; padding: 4px 10px; }
 .profile-status-chip.s-post    { background: linear-gradient(135deg,#fff3e0,#ffe0b2); color: #ef6c00; border-color: #ffb74d; font-size: 11px; padding: 4px 10px; }
 .profile-status-chip.s-hand    { background: linear-gradient(135deg,#e0f2f1,#b2dfdb); color: #00796b; border-color: #4db6ac; font-size: 11px; padding: 4px 10px; }
+/* プロフィール 出勤率ストリップ (直近月サマリー・タップで月別テーブルへ) */
+.profile-shukkin-strip { display:flex; align-items:center; gap:9px; margin-top:6px; padding:6px 10px; background:linear-gradient(135deg,#f3f7f4,#e6f2ea); border:1px solid #c8e0d0; border-radius:10px; cursor:pointer; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+.profile-shukkin-strip::-webkit-scrollbar { display:none; }
+.profile-shukkin-strip .pss-lbl { font-size:10px; font-weight:800; color:#2e7d32; white-space:nowrap; flex-shrink:0; }
+.profile-shukkin-strip .pss-month { display:inline-flex; align-items:baseline; gap:3px; font-size:9px; color:#78909c; font-weight:700; white-space:nowrap; }
+.profile-shukkin-strip .pss-month b { font-size:12.5px; font-weight:800; }
+.profile-shukkin-strip .pss-arrow { margin-left:auto; color:#9e9e9e; font-size:11px; flex-shrink:0; padding-left:2px; }
 /* 役員専用セクション: 金バッジ & アコーディオン */
 .admin-gold-badge {
   display: inline-flex; align-items: center; gap: 3px;
@@ -8752,7 +8759,7 @@ async function loadLeaveDetails() {
       ${_romajiName ? '<div class="profile-romaji-name">' + escHtml(_romajiName) + '</div>' : ''}
       <div class="profile-class-row" id="profileClassRow">
         ${_buildProfBadges(_entryType, _exitType, _isFuture)}
-        ${tsukinValH ? '<span class="profile-badge" style="background:#f0f0ff;color:var(--primary);margin-left:4px;">' + tsukinIcon + ' ' + escHtml(tsukinValH) + '</span>' : '<span class="profile-badge" style="background:#ffebee;color:var(--danger);margin-left:4px;">通勤方法未登録</span>'}
+        ${tsukinValH ? '<span class="profile-badge" style="background:#f0f0ff;color:var(--primary);margin-left:4px;">' + tsukinIcon + ' ' + escHtml(String(tsukinValH).replace(/\s*[A-Za-z].*$/, '').trim() || tsukinValH) + '</span>' : '<span class="profile-badge" style="background:#ffebee;color:var(--danger);margin-left:4px;">通勤方法未登録</span>'}
       </div>
       <div class="profile-dates-row">
         ${_sameNyushaKisan
@@ -8763,6 +8770,7 @@ async function loadLeaveDetails() {
         ${_retRaw ? '<div class="profile-date-chip ' + (_isFuture ? 'chip-plan' : 'chip-retire') + '"><span class="pdc-lbl">' + (_isFuture ? '退社予定' : '退社日') + '</span><span class="pdc-val">' + escHtml(_retireStr) + '</span></div>' : ''}
       </div>
       <div id="profileStatusRow" class="profile-status-row" style="display:none;"></div>
+      <div id="profileShukkinStrip" class="profile-shukkin-strip" style="display:none;"></div>
       <div id="detailRetireReason" style="display:none;"></div>
       <!-- ⚡FAB から「社員ファイル/源泉/給料明細/賃金台帳/社保編集」をすべて呼び出し -->
       <div style="margin-top:8px;font-size:10px;color:#999;letter-spacing:0.5px;text-align:center;opacity:0.75;">右上の <span style="color:#ef6c00;font-weight:700;">⚡</span> から書類・手続きメニュー</div>
@@ -8870,6 +8878,34 @@ async function loadLeaveDetails() {
     } catch (e) { console.warn('soumu status chips failed:', e); }
   })();
 
+  // 📊 出勤率ストリップ (直近3か月+平均・タップで社員情報タブの月別テーブルへ)
+  (async function() {
+    try {
+      var strip = document.getElementById('profileShukkinStrip');
+      var empNo3 = emp[F.syainNo];
+      if (!strip || empNo3 === null || empNo3 === undefined || empNo3 === '') return;
+      var q3 = "$select=YM,RateIncl,RateExcl&$filter=EmpNo eq " + Number(empNo3) + "&$orderby=YM desc&$top=6";
+      var rows3 = await spGet(LIST_SHUKKIN_GUID, q3) || [];
+      if (!rows3.length) return;
+      function pcol(v) { if (v === null || v === undefined || v === '') return '#999'; if (v < 0.8) return '#c62828'; if (v < 0.9) return '#ef6c00'; return '#2e7d32'; }
+      function ppct(v) { return (Math.round(v * 1000) / 10).toFixed(1).replace(/\.0$/, '') + '%'; }
+      var sum3 = 0;
+      rows3.forEach(function(r) { sum3 += (r.RateIncl || 0); });
+      var avg3 = sum3 / rows3.length;
+      var h3 = '<span class="pss-lbl">📊 出勤率</span>';
+      rows3.slice(0, 3).forEach(function(r) {
+        var ym3 = String(r.YM).replace(/\..*$/, '');
+        var lbl3 = ym3.length === 6 ? (ym3.slice(2, 4) + '/' + ym3.slice(4, 6)) : ym3;
+        h3 += '<span class="pss-month">' + lbl3 + '<b style="color:' + pcol(r.RateIncl) + ';">' + ppct(r.RateIncl) + '</b></span>';
+      });
+      h3 += '<span class="pss-month">' + rows3.length + 'か月平均<b style="color:' + pcol(avg3) + ';">' + ppct(avg3) + '</b></span>';
+      h3 += '<span class="pss-arrow">▸</span>';
+      strip.innerHTML = h3;
+      strip.style.display = 'flex';
+      strip.onclick = jumpToShukkinAccordion;
+    } catch (e) { console.warn('shukkin strip failed:', e); }
+  })();
+
   // 産休育休チップ (List52 にレコードがあれば表示、クリックで詳細画面へ)
   (async function() {
     try {
@@ -8950,9 +8986,29 @@ async function loadLeaveDetails() {
         var _jikai = _jikaiKey ? emp[_jikaiKey] : '';
         var _rEl = document.getElementById('detailRetireReason');
         if (!_rEl) return;
+        // 👑 役員のみ: 雇用喪失届CSV をバナー見出し行に統合（別枠ボックスは廃止してスッキリ）
+        var _adminHtml = '';
+        if (typeof isAdminUser === 'function' && isAdminUser()) {
+          var _koyouSoshitsuKey = _km['soumuKoyouSoshitsu'] || 'OData__x7dcf__x52d9__x002d__x96c7__x75';
+          var _currentStatus = String(emp[_koyouSoshitsuKey] || '');
+          var _empName = String(emp.Title || '').replace(/'/g, "\\'");
+          if (_currentStatus === '✓完了') {
+            _adminHtml = '<span style="font-size:10px;color:#2e7d32;font-weight:700;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:999px;padding:3px 9px;white-space:nowrap;">✓ 喪失届CSV作成済</span>';
+          } else if (_currentStatus === '処理依頼') {
+            _adminHtml = '<span style="font-size:10px;color:#ef6c00;font-weight:700;background:#fff8e1;border:1px solid #ffe082;border-radius:999px;padding:3px 9px;white-space:nowrap;">⏳ CSV処理待ち</span>' +
+                         '<button onclick="cancelKoyouSoshitsuRequest(' + emp.Id + ')" style="font-size:10px;padding:3px 8px;border:1px solid #ddd;border-radius:999px;background:#fff;color:#777;cursor:pointer;white-space:nowrap;">取消</button>';
+          } else if (_currentStatus === 'エラー') {
+            _adminHtml = '<button onclick="requestKoyouSoshitsuCsv(' + emp.Id + ',\'' + _empName + '\')" style="font-size:10px;padding:4px 10px;border:none;border-radius:999px;background:linear-gradient(135deg,#ff9800,#f57c00);color:#fff;font-weight:700;cursor:pointer;white-space:nowrap;">⚠ 喪失届CSV再依頼</button>';
+          } else {
+            _adminHtml = '<button onclick="requestKoyouSoshitsuCsv(' + emp.Id + ',\'' + _empName + '\')" style="font-size:10px;padding:4px 10px;border:none;border-radius:999px;background:linear-gradient(135deg,#ff9800,#f57c00);color:#fff;font-weight:700;cursor:pointer;white-space:nowrap;">📋 喪失届CSV作成</button>';
+          }
+        }
         var _html = '';
         _html += '<div style="margin-top:8px;padding:10px 12px;background:linear-gradient(135deg,#ffebee,#fce4ec);border-left:4px solid #c62828;border-radius:8px;">';
-        _html += '<div style="font-size:11px;font-weight:700;color:#c62828;margin-bottom:3px;">📝 退社情報</div>';
+        _html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;">';
+        _html += '<span style="font-size:11px;font-weight:700;color:#c62828;margin-right:auto;">📝 退社情報</span>';
+        _html += _adminHtml;
+        _html += '</div>';
         _html += '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;">';
         _html += '<div><span style="color:#888;font-size:11px;">退職理由:</span> <span style="font-weight:700;color:#c62828;">' + (_riyuu ? escHtml(String(_riyuu)) : '未登録') + '</span></div>';
         if (_jikai) {
@@ -8962,28 +9018,6 @@ async function loadLeaveDetails() {
           _html += '<div style="width:100%;"><span style="color:#888;font-size:11px;">詳細:</span> <span style="color:#555;">' + escHtml(String(_detail)) + '</span></div>';
         }
         _html += '</div></div>';
-        // 👑 役員のみ: 雇用喪失届CSV 作成依頼ボタン
-        if (typeof isAdminUser === 'function' && isAdminUser()) {
-          var _koyouSoshitsuKey = _km['soumuKoyouSoshitsu'] || 'OData__x7dcf__x52d9__x002d__x96c7__x75';
-          var _currentStatus = String(emp[_koyouSoshitsuKey] || '');
-          var _empName = String(emp.Title || '').replace(/'/g, "\\'");
-          var _btn = '';
-          if (_currentStatus === '✓完了') {
-            _btn = '<div style="font-size:12px;color:#2e7d32;font-weight:700;">✓ 雇用喪失届CSV 作成済</div>';
-          } else if (_currentStatus === '処理依頼') {
-            _btn = '<div style="font-size:12px;color:#f57c00;font-weight:700;margin-bottom:6px;">⏳ 雇用喪失届CSV 処理待ち</div>';
-            _btn += '<button onclick="cancelKoyouSoshitsuRequest(' + emp.Id + ')" style="font-size:11px;padding:4px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#555;cursor:pointer;">依頼をキャンセル</button>';
-          } else if (_currentStatus === 'エラー') {
-            _btn = '<div style="font-size:12px;color:#c62828;font-weight:700;margin-bottom:6px;">⚠ 前回処理エラー</div>';
-            _btn += '<button onclick="requestKoyouSoshitsuCsv(' + emp.Id + ',\'' + _empName + '\')" style="font-size:12px;padding:6px 12px;border:none;border-radius:8px;background:linear-gradient(135deg,#ff9800,#f57c00);color:#fff;font-weight:700;cursor:pointer;">📋 雇用喪失届CSV 再依頼</button>';
-          } else {
-            _btn = '<button onclick="requestKoyouSoshitsuCsv(' + emp.Id + ',\'' + _empName + '\')" style="font-size:12px;padding:6px 12px;border:none;border-radius:8px;background:linear-gradient(135deg,#ff9800,#f57c00);color:#fff;font-weight:700;cursor:pointer;">📋 雇用喪失届CSV 作成依頼</button>';
-          }
-          _html += '<div style="margin-top:8px;padding:8px 12px;background:#fff8e1;border-radius:8px;border:1px dashed #ffb74d;">';
-          _html += '<div style="font-size:10px;font-weight:700;color:#e65100;margin-bottom:4px;">👑 役員操作</div>';
-          _html += _btn;
-          _html += '</div>';
-        }
         _rEl.innerHTML = _html;
         _rEl.style.display = 'block';
       } catch (_e) { console.log('retire reason render error:', _e); }
@@ -41323,6 +41357,22 @@ async function openTaishaForm() {
 function closeTaishaForm() {
   const el = document.getElementById('taishaOverlay');
   if (el) el.remove();
+}
+
+// ヘッダーの出勤率ストリップ → 社員情報タブの月別出勤率アコーディオンへジャンプ
+function jumpToShukkinAccordion() {
+  switchTopTab('profile');
+  var tries = 0;
+  var timer = setInterval(function() {
+    var acc = document.getElementById('acc_shukkin');
+    if (acc) {
+      clearInterval(timer);
+      acc.classList.add('open');
+      setTimeout(function() { acc.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150);
+    } else if (++tries > 40) {
+      clearInterval(timer);
+    }
+  }, 150);
 }
 
 // 退職理由: 自己都合を選んだ時のみ詳細記入欄を表示
