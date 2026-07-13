@@ -29543,6 +29543,22 @@ async function renderEmployeeShukkinRate(empNo) {
     function colorFor(v) { if (v === null || v === undefined || v === '') return '#999'; if (v < 0.8) return '#c62828'; if (v < 0.9) return '#ef6c00'; return '#2e7d32'; }
     function n0(v) { return (v === null || v === undefined || v === '') ? 0 : (Math.round(v * 10) / 10); }
     let h = '';
+    // 直近3か月/6か月/1年の平均カード (rows は YM降順・取得済みデータから計算)
+    h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0 10px;">';
+    [{ label: '直近3か月', n: 3 }, { label: '直近6か月', n: 6 }, { label: '直近1年', n: 12 }].forEach(function (w) {
+      const sub = rows.slice(0, w.n);
+      let si = 0, se = 0;
+      sub.forEach(function (r) { si += (r.RateIncl || 0); se += (r.RateExcl || 0); });
+      const ai = sub.length ? si / sub.length : null;
+      const ae = sub.length ? se / sub.length : null;
+      const lbl = (sub.length < w.n) ? w.label + '<span style="font-size:8px;">(' + sub.length + 'か月)</span>' : w.label;
+      h += '<div style="background:#f7faf8;border:1px solid #dfe9e2;border-radius:10px;padding:7px 4px;text-align:center;">';
+      h += '<div style="font-size:9.5px;color:#888;font-weight:700;">' + lbl + '</div>';
+      h += '<div style="font-size:15px;font-weight:800;color:' + colorFor(ai) + ';margin-top:1px;">' + pct(ai) + '</div>';
+      h += '<div style="font-size:10px;font-weight:700;color:' + colorFor(ae) + ';">派遣 ' + pct(ae) + '</div>';
+      h += '</div>';
+    });
+    h += '</div>';
     h += '<div style="font-size:10.5px;color:#888;padding:2px 2px 8px;line-height:1.5;">';
     h += '<b style="color:#2e7d32;">有給込</b>=(平日+休日+有給+休業)÷要出勤 ／ <b style="color:#1565c0;">派遣</b>=有給を欠勤扱い（休業は出勤扱い）。年月=勤怠月（支給月の前月）。<span style="color:#bbb;">元: 相殺表★出勤率</span>';
     h += '</div>';
