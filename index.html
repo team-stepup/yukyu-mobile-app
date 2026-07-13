@@ -17476,6 +17476,8 @@ const PROFILE_CATEGORIES = [
       { key: 'sex', label: '性別', group: 'profile' },
       { key: 'birthday', label: '生年月日', format: 'dateW', group: 'profile' },
       { key: '_calcAge', label: '年齢', format: 'calcAge', group: 'profile' },
+      // 日本語レベル: 外国籍(本(国)籍が日本以外)の社員のみ表示
+      { key: 'nihongoLevel', label: '日本語レベル（理解度）', showOnlyIfForeign: true, group: 'profile' },
       // ── 📞 連絡先 ──
       { key: 'keitai', label: '携帯電話', format: 'tel', group: 'contact' },
       { key: 'email', label: 'Eメール', format: 'email', group: 'contact' },
@@ -17783,6 +17785,7 @@ function buildFieldKeyMap(fieldsMeta) {
     rishokuWatashi: '離職票渡し方risyokuhyou watashikata',
     taisyokuRiyuu: '退職理由',
     taisyokuRiyuuDetail: '退職理由詳細',
+    nihongoLevel: '日本語レベル',
     jikaiSaiyou: '次回採用',  // 実フィールド名は「次回採用」(の ナシ)
     shahoKanyuubi: '加入日kanyuubi',
     shahoHuyou: '扶養huyou',
@@ -29250,6 +29253,12 @@ async function loadEmployeeProfile() {
         const huyouKey = keyMap['shahoHuyou'];
         const huyouVal = huyouKey ? String(emp[huyouKey] || '') : '';
         if (huyouVal.indexOf('あり') < 0) return;
+      }
+      // 外国籍のみ表示 (日本語レベル等): 本(国)籍が空 or 日本 なら非表示
+      if (field.showOnlyIfForeign) {
+        const natKey = keyMap['nationality'];
+        const natVal = natKey ? String(emp[natKey] || '').trim() : '';
+        if (!natVal || natVal.indexOf('日本') >= 0) return;
       }
       // Handle computed fields (prefixed with _calc)
       if (field.format === 'calcAge') {
