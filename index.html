@@ -37116,12 +37116,14 @@ async function populateHakenDropdown() {
     allEmps.forEach(emp => {
       const b = getBukaValue(emp);
       if (!b) return;
-      if (!_hakenEmpByBuka[b]) _hakenEmpByBuka[b] = { active: 0, retired: 0, total: 0, sankyuActive: 0, sankyuOwari: 0, jitsudou: 0 };
+      if (!_hakenEmpByBuka[b]) _hakenEmpByBuka[b] = { active: 0, retired: 0, total: 0, sankyuActive: 0, sankyuOwari: 0, shobyo: 0, jitsudou: 0 };
       _hakenEmpByBuka[b].total++;
       if (isResigned(emp)) {
         _hakenEmpByBuka[b].retired++;
       } else {
         _hakenEmpByBuka[b].active++;
+        // 採用種別「傷病手当在職中」: 在職だが実働から除外
+        if (String(emp[F.zaiyokuSyubetu] || '').indexOf('傷病') >= 0) _hakenEmpByBuka[b].shobyo++;
         // 産休育休判定 (active優先: アサトの様な両方持つ人は active 扱い)
         const sn = emp[F.syainNo];
         const snStr = (sn !== null && sn !== undefined) ? String(sn).trim() : '';
@@ -37131,10 +37133,10 @@ async function populateHakenDropdown() {
         }
       }
     });
-    // 実働数 = 在職 - 産休育休(active) - 休業終了
+    // 実働数 = 在職 - 産休育休(active) - 休業終了 - 傷病手当在職中
     Object.keys(_hakenEmpByBuka).forEach(b => {
       const c = _hakenEmpByBuka[b];
-      c.jitsudou = c.active - c.sankyuActive - c.sankyuOwari;
+      c.jitsudou = c.active - c.sankyuActive - c.sankyuOwari - (c.shobyo || 0);
     });
 
     const sorted = Object.keys(_hakenEmpByBuka).sort();
@@ -50715,9 +50717,11 @@ async function updateHakenSankyuCount() {
     var el2 = document.getElementById('hakenSankyuCount');
     if (el2) el2.textContent = String(activeCount);  // バッジは active のみ
 
-    // 実働者キャッシュ: active+休業終了 全員を除外
+    // 実働者キャッシュ: 産休育休(active+休業終了) と 傷病手当在職中 を除外
     window._hakenSankyuBangos = bangoAll;
+    var shobyoCount = 0;
     window._hakenWorkforceCache = (hakenEmployeesCache || []).filter(function(emp) {
+      if (String(emp[F.zaiyokuSyubetu] || '').indexOf('傷病') >= 0) { shobyoCount++; return false; }
       var bn = emp[F.syainNo];
       if (bn === null || bn === undefined || bn === '') return true;
       return !bangoAll[String(bn).trim()];
@@ -50727,14 +50731,13 @@ async function updateHakenSankyuCount() {
     // ヘッダー: 数字を大きく + 内訳をサブテキスト表示
     var headerEl = document.getElementById('hakenHeaderCount');
     if (headerEl) {
-      var subText = '';
-      if (allSankyuCount > 0) {
-        if (owariCount > 0) {
-          subText = '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(産休育休 ' + activeCount + '名・休業終了 ' + owariCount + '名 除く)</span>';
-        } else {
-          subText = '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(産休育休 ' + activeCount + '名を除く)</span>';
-        }
-      }
+      var subParts = [];
+      if (activeCount > 0) subParts.push('産休育休 ' + activeCount + '名');
+      if (owariCount > 0) subParts.push('休業終了 ' + owariCount + '名');
+      if (shobyoCount > 0) subParts.push('🤒傷病手当 ' + shobyoCount + '名');
+      var subText = subParts.length
+        ? '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(' + subParts.join('・') + ' 除く)</span>'
+        : '';
       headerEl.innerHTML = '社員数: <span style="font-size:22px;font-weight:800;color:var(--primary);">' + workforceCount + '</span>名 ' + subText;
     }
 
