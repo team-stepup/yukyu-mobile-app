@@ -50687,6 +50687,8 @@ function renderHakenList(hakensaki, employees) {
   let countSougei = 0, countOther = 0, countEmpty = 0;
   // Count by 有期/無期 雇用区分
   let countYuki = 0, countMuki = 0;
+  // 傷病手当在職中 (採用種別に「傷病」を含む)
+  let countShobyo = 0;
   employees.forEach(emp => {
     const t = getTsukinValue(emp);
     if (!t) countEmpty++;
@@ -50695,6 +50697,7 @@ function renderHakenList(hakensaki, employees) {
     const ym = getYukiMukiValue(emp);
     if (ym.indexOf('無') >= 0) countMuki++;
     else if (ym.indexOf('有') >= 0) countYuki++;
+    if (String(emp[F.zaiyokuSyubetu] || '').indexOf('傷病') >= 0) countShobyo++;
   });
 
   header.innerHTML = '<div style="font-size:16px;font-weight:700;color:var(--primary);">' + escHtml(hakensaki) + '</div>' +
@@ -50703,6 +50706,7 @@ function renderHakenList(hakensaki, employees) {
   filterDiv.innerHTML =
     '<button class="haken-filter-btn active" data-filter="all" onclick="applyHakenFilter(\'all\',this)">全員 (' + employees.length + ')</button>' +
     '<button class="haken-sankyu-btn" id="hakenSankyuBtn" onclick="openSankyuFromHaken()">🌸 産休育休 (<span id="hakenSankyuCount">…</span>)</button>' +
+    (countShobyo > 0 ? '<button class="haken-filter-btn" data-filter="shobyo" onclick="applyHakenFilter(\'shobyo\',this)" style="background:#fff8e1;border-color:#ffe082;color:#a06a00;">🤒 傷病手当中 (' + countShobyo + ')</button>' : '') +
     '<button class="haken-filter-btn" data-filter="sougei" onclick="applyHakenFilter(\'sougei\',this)">🚐 送迎 (' + countSougei + ')</button>' +
     '<button class="haken-filter-btn" data-filter="other" onclick="applyHakenFilter(\'other\',this)">🚗 送迎以外 (' + countOther + ')</button>' +
     '<button class="haken-filter-btn" data-filter="yuki" onclick="applyHakenFilter(\'yuki\',this)">📄 有期 (' + countYuki + ')</button>' +
@@ -50863,6 +50867,9 @@ function applyHakenFilter(filter, btn) {
     filtered = source.filter(emp => getYukiMukiValue(emp).indexOf('有') >= 0);
   } else if (filter === 'muki') {
     filtered = source.filter(emp => getYukiMukiValue(emp).indexOf('無') >= 0);
+  } else if (filter === 'shobyo') {
+    // 傷病手当在職中は実働(workforce)から除外されているため、全在職者キャッシュから抽出
+    filtered = (hakenEmployeesCache || []).filter(emp => String(emp[F.zaiyokuSyubetu] || '').indexOf('傷病') >= 0);
   }
   renderHakenTable(filtered, document.getElementById('hakenListBody'));
 }
