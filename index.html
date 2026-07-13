@@ -435,7 +435,8 @@ body {
 .taisha-field label { display:block; font-size:12px; font-weight:700; color:var(--text-light); margin-bottom:6px; }
 .taisha-field input[type="date"] { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px; font-size:15px; background:#fff; color:var(--text); }
 .taisha-field select { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px; font-size:15px; background:#fff; color:var(--text); appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='2' fill='none'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; }
-.taisha-field input:focus, .taisha-field select:focus { border-color:var(--primary); outline:none; box-shadow:0 0 0 3px rgba(98,100,167,0.15); }
+.taisha-field textarea { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px; font-size:15px; background:#fff; color:var(--text); font-family:inherit; resize:vertical; min-height:72px; }
+.taisha-field input:focus, .taisha-field select:focus, .taisha-field textarea:focus { border-color:var(--primary); outline:none; box-shadow:0 0 0 3px rgba(98,100,167,0.15); }
 .taisha-notice { background:#fff3e0; border:1px solid #ffe0b2; border-radius:10px; padding:12px 14px; margin:16px 0; font-size:13px; color:#e65100; display:flex; align-items:center; gap:8px; }
 .taisha-footer { position:sticky; bottom:0; background:#fff; border-top:1px solid var(--border); padding:12px 20px calc(12px + env(safe-area-inset-bottom)); }
 .taisha-submit-btn { width:100%; padding:14px; border:none; border-radius:12px; font-size:16px; font-weight:800; color:#fff; background:linear-gradient(135deg,#ff9800,#f57c00); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
@@ -8942,8 +8943,10 @@ async function loadLeaveDetails() {
         var _meta = await fetchEmployeeFields();
         var _km = buildFieldKeyMap(_meta);
         var _riyuuKey = _km['taisyokuRiyuu'];
+        var _detailKey = _km['taisyokuRiyuuDetail'];
         var _jikaiKey = _km['jikaiSaiyou'];
         var _riyuu = _riyuuKey ? emp[_riyuuKey] : '';
+        var _detail = _detailKey ? emp[_detailKey] : '';
         var _jikai = _jikaiKey ? emp[_jikaiKey] : '';
         var _rEl = document.getElementById('detailRetireReason');
         if (!_rEl) return;
@@ -8954,6 +8957,9 @@ async function loadLeaveDetails() {
         _html += '<div><span style="color:#888;font-size:11px;">退職理由:</span> <span style="font-weight:700;color:#c62828;">' + (_riyuu ? escHtml(String(_riyuu)) : '未登録') + '</span></div>';
         if (_jikai) {
           _html += '<div><span style="color:#888;font-size:11px;">次回の採用:</span> <span style="font-weight:700;color:#555;">' + escHtml(String(_jikai)) + '</span></div>';
+        }
+        if (_detail) {
+          _html += '<div style="width:100%;"><span style="color:#888;font-size:11px;">詳細:</span> <span style="color:#555;">' + escHtml(String(_detail)) + '</span></div>';
         }
         _html += '</div></div>';
         // 👑 役員のみ: 雇用喪失届CSV 作成依頼ボタン
@@ -17432,6 +17438,7 @@ const PROFILE_CATEGORIES = [
       { key: 'hakenTaisha', label: '派遣先退社日', format: 'date', group: 'taisha' },
       { key: 'yukyuTaisha', label: '有給使用後退社日', format: 'date', group: 'taisha' },
       { key: 'taisyokuRiyuu', label: '退職理由', showOnlyResigned: true, group: 'taisha' },
+      { key: 'taisyokuRiyuuDetail', label: '退職理由詳細', showOnlyResigned: true, group: 'taisha' },
       { key: 'jikaiSaiyou', label: '次回の採用', showOnlyResigned: true, group: 'taisha' },
     ]
   },
@@ -17718,6 +17725,7 @@ function buildFieldKeyMap(fieldsMeta) {
     rishokuhyou: '離職票risyokuhyou',
     rishokuWatashi: '離職票渡し方risyokuhyou watashikata',
     taisyokuRiyuu: '退職理由',
+    taisyokuRiyuuDetail: '退職理由詳細',
     jikaiSaiyou: '次回採用',  // 実フィールド名は「次回採用」(の ナシ)
     shahoKanyuubi: '加入日kanyuubi',
     shahoHuyou: '扶養huyou',
@@ -41212,6 +41220,9 @@ async function openTaishaForm() {
     shahoVal = today;
   }
 
+  // 退職理由詳細（自己都合時のみ表示・既存値があればプリフィル）
+  const riyuuDetailVal = emp[keyMap['taisyokuRiyuuDetail']] || '';
+
   // Additional info for header
   const kenpoShutoku = emp[keyMap['kenpoShutoku']] ? String(emp[keyMap['kenpoShutoku']]).substring(0, 10) : '';
   const zairyuKigenCard = emp[keyMap['zairyuKigenCard']] ? String(emp[keyMap['zairyuKigenCard']]).substring(0, 10) : '';
@@ -41253,10 +41264,14 @@ async function openTaishaForm() {
         '</div>' +
         '<div class="taisha-field">' +
           '<label>退職理由</label>' +
-          '<select id="taisha_riyuu">' +
+          '<select id="taisha_riyuu" onchange="onTaishaRiyuuChange()">' +
             '<option value="">選択してください</option>' +
             buildOptions(taisyokuRiyuuChoices) +
           '</select>' +
+        '</div>' +
+        '<div class="taisha-field" id="taishaField_riyuuDetail" style="display:none;">' +
+          '<label>退職理由の詳細（自己都合の内容）</label>' +
+          '<textarea id="taisha_riyuuDetail" rows="3" placeholder="例: 家庭の事情で帰国のため／体調不良のため 等、本人からの申し出内容">' + escHtml(String(riyuuDetailVal)) + '</textarea>' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>派遣先退社日</label>' +
@@ -41310,6 +41325,13 @@ function closeTaishaForm() {
   if (el) el.remove();
 }
 
+// 退職理由: 自己都合を選んだ時のみ詳細記入欄を表示
+function onTaishaRiyuuChange() {
+  var sel = document.getElementById('taisha_riyuu');
+  var f = document.getElementById('taishaField_riyuuDetail');
+  if (f) f.style.display = (sel && String(sel.value).indexOf('自己都合') >= 0) ? '' : 'none';
+}
+
 // 退社区分: 移動退社では在籍継続のため 有給後退社日/社保喪失日/離職票/渡し方/次回採用 を隠す
 function onTaishaKubunChange() {
   var el = document.getElementById('taisha_kubun');
@@ -41324,6 +41346,8 @@ async function submitTaishaForm() {
   if (!emp) return;
 
   const riyuu = document.getElementById('taisha_riyuu').value;
+  const riyuuDetailEl = document.getElementById('taisha_riyuuDetail');
+  const riyuuDetail = riyuuDetailEl ? riyuuDetailEl.value.trim() : '';
   const hakenDate = document.getElementById('taisha_hakenDate').value;
   const yukyuDate = document.getElementById('taisha_yukyuDate').value;
   const shahoEl = document.getElementById('taisha_shahoDate');
@@ -41339,6 +41363,7 @@ async function submitTaishaForm() {
     // 移動退社: 在籍継続のため 派遣先退社日 のみ必須
   } else {
     if (!riyuu) { showToast('退職理由を選択してください', 'error'); return; }
+    if (riyuu.indexOf('自己都合') >= 0 && !riyuuDetail) { showToast('自己都合の場合は退職理由の詳細を入力してください', 'error'); return; }
     if (!yukyuDate) { showToast('有給使用後退社日を入力してください', 'error'); return; }
     if (yukyuDate < hakenDate) { showToast('有給使用後退社日は派遣先退社日以降にしてください', 'error'); return; }
     if (shahoEl && !shahoDate) { showToast('社保喪失日を入力してください', 'error'); return; }
@@ -41358,6 +41383,7 @@ async function submitTaishaForm() {
     '<strong>' + escHtml(no + ' ' + name) + '</strong><br>' +
     '退社区分: ' + escHtml(kubun) + '<br>' +
     (riyuu ? '退職理由: ' + escHtml(riyuu) + '<br>' : '') +
+    (riyuu.indexOf('自己都合') >= 0 && riyuuDetail ? '詳細: ' + escHtml(riyuuDetail) + '<br>' : '') +
     '派遣先退社日: ' + escHtml(hakenDate) + '<br>' +
     (kubun === '移動退社'
       ? '<span style="color:#7e57c2;font-weight:700;">→ 採用種別を「移動退社」に設定（有給後退社日はクリア・在籍継続）</span>'
@@ -41377,11 +41403,11 @@ async function submitTaishaForm() {
 
   document.getElementById('taishaConfirmOk').onclick = async function() {
     overlay.remove();
-    await executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai, kubun);
+    await executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai, kubun, riyuuDetail);
   };
 }
 
-async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai, kubun) {
+async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, rishoku, watashi, jikai, kubun, riyuuDetail) {
   const emp = currentEmployee;
   if (!emp) return;
   const btn = document.getElementById('taishaSubmitBtn');
@@ -41403,7 +41429,11 @@ async function executeTaishaSubmit(riyuu, hakenDate, yukyuDate, shahoDate, risho
 
     // 派遣先退社日 + 退職理由 は共通
     body[F.hakenTaisha.replace(/^OData_/, '')] = hakenDate + 'T00:00:00Z';
-    if (riyuu) setField('taisyokuRiyuu', riyuu);
+    if (riyuu) {
+      setField('taisyokuRiyuu', riyuu);
+      // 自己都合なら詳細を保存、他の理由に変えた場合は古い詳細をクリア
+      setField('taisyokuRiyuuDetail', riyuu.indexOf('自己都合') >= 0 ? (riyuuDetail || '') : null);
+    }
 
     if (kubun === '移動退社') {
       // 移動退社: 在籍継続 → 採用種別=移動退社、有給後退社日はクリア、社保喪失/離職票/次回採用は対象外
