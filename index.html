@@ -3949,25 +3949,25 @@ select.sankyu-edit-input {
 /* スティッキーバー内の⚡アクションボタン (旧フローティングFABの代替) */
 .detail-sticky-bar .ssb-action {
   flex-shrink: 0;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+  height: 34px;
+  border-radius: 999px;
   border: 2px solid rgba(255,255,255,0.4);
   background: linear-gradient(135deg, #ff9800, #f57c00);
   color: #fff;
-  font-size: 18px;
+  font-size: 15px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   box-shadow: 0 2px 8px rgba(245,124,0,0.5);
   transition: transform 0.15s;
-  padding: 0;
+  padding: 0 11px;
   line-height: 1;
 }
+.detail-sticky-bar .ssb-action .ssb-action-lbl { font-size: 10px; font-weight: 800; letter-spacing: 0.5px; white-space: nowrap; }
 .detail-sticky-bar .ssb-action:active { transform: scale(0.92); }
 .detail-sticky-bar .ssb-action.open {
-  transform: rotate(45deg);
   background: linear-gradient(135deg, #78909c, #546e7a);
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
@@ -8772,8 +8772,7 @@ async function loadLeaveDetails() {
       <div id="profileStatusRow" class="profile-status-row" style="display:none;"></div>
       <div id="profileShukkinStrip" class="profile-shukkin-strip" style="display:none;"></div>
       <div id="detailRetireReason" style="display:none;"></div>
-      <!-- ⚡FAB から「社員ファイル/源泉/給料明細/賃金台帳/社保編集」をすべて呼び出し -->
-      <div style="margin-top:8px;font-size:10px;color:#999;letter-spacing:0.5px;text-align:center;opacity:0.75;">右上の <span style="color:#ef6c00;font-weight:700;">⚡</span> から書類・手続きメニュー</div>
+      <!-- 書類・手続きは右上スティッキーバーの「⚡メニュー」ボタンから (説明行は 2026-07-13 廃止) -->
     </div>
   `;
 
@@ -8800,7 +8799,7 @@ async function loadLeaveDetails() {
           (empNo2 ? '<span class="ssb-no">No.' + escHtml(empNo2) + '</span>' : '') +
         '</span>' +
       '</div>' +
-      '<button class="ssb-action" id="ssbActionBtn" onclick="toggleActionSheet()" title="手続きメニュー">⚡</button>';
+      '<button class="ssb-action" id="ssbActionBtn" onclick="toggleActionSheet()" title="書類・手続きメニュー">⚡<span class="ssb-action-lbl">メニュー</span></button>';
     // 旧実装の IntersectionObserver があれば切断（パフォーマンス影響を確実に消す）
     if (window._detailStickyObserver) {
       try { window._detailStickyObserver.disconnect(); } catch(e) {}
@@ -17498,23 +17497,6 @@ const PROFILE_CATEGORIES = [
     ]
   },
   {
-    id: 'emergency', label: '緊急連絡先', icon: '🆘',
-    fields: [
-      { key: 'emergencyName', label: '氏名' },
-      { key: 'emergencyRelation', label: '続柄' },
-      { key: 'emergencyTel', label: '連絡先', format: 'tel' },
-    ]
-  },
-  {
-    id: 'bank', label: '振込先（給与）', icon: '🏦',
-    fields: [
-      { key: 'bankName', label: '銀行' },
-      { key: 'bankBranch', label: '支店' },
-      { key: 'bankAccount', label: '口座番号' },
-      { key: 'bankMeigi', label: '氏名フリガナ', format: 'hankakuKana' },
-    ]
-  },
-  {
     id: 'residence', label: '在留・国籍', icon: '🌏',
     fields: [
       { key: 'tokki1', label: '氏名（ローマ字）' },
@@ -17656,6 +17638,24 @@ const PROFILE_CATEGORIES = [
       { key: 'syahoHuyou4Birthday',  label: '生年月日', format: 'dateW', group: 'h4' },
       { key: 'syahoHuyou4Kaisi',     label: '加入日',   format: 'date',  group: 'h4' },
       { key: 'syahoHuyou4Soushitsu', label: '喪失日',   format: 'date',  group: 'h4' },
+    ]
+  },
+  // 振込先・緊急連絡先は社会保険 扶養の下へ（2026-07-13 ユーザー依頼で並び替え）
+  {
+    id: 'bank', label: '振込先（給与）', icon: '🏦',
+    fields: [
+      { key: 'bankName', label: '銀行' },
+      { key: 'bankBranch', label: '支店' },
+      { key: 'bankAccount', label: '口座番号' },
+      { key: 'bankMeigi', label: '氏名フリガナ', format: 'hankakuKana' },
+    ]
+  },
+  {
+    id: 'emergency', label: '緊急連絡先', icon: '🆘',
+    fields: [
+      { key: 'emergencyName', label: '氏名' },
+      { key: 'emergencyRelation', label: '続柄' },
+      { key: 'emergencyTel', label: '連絡先', format: 'tel' },
     ]
   },
 ];
