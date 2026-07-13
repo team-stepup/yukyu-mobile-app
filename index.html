@@ -8894,7 +8894,8 @@ async function loadLeaveDetails() {
       var h3 = '<span class="pss-lbl">📊 出勤率</span>';
       rows3.slice(0, 3).forEach(function(r) {
         var ym3 = String(r.YM).replace(/\..*$/, '');
-        var lbl3 = ym3.length === 6 ? (ym3.slice(2, 4) + '/' + ym3.slice(4, 6)) : ym3;
+        var kym3 = shukkinKintaiYm(ym3);
+        var lbl3 = kym3 ? (String(kym3).slice(2, 4) + '/' + String(kym3).slice(4, 6)) : ym3;
         h3 += '<span class="pss-month">' + lbl3 + '<b style="color:' + pcol(r.RateIncl) + ';">' + ppct(r.RateIncl) + '</b></span>';
       });
       h3 += '<span class="pss-month">' + rows3.length + 'か月平均<b style="color:' + pcol(avg3) + ';">' + ppct(avg3) + '</b></span>';
@@ -29416,6 +29417,13 @@ async function loadEmployeeProfile() {
   }
 }
 
+// 出勤率の表示年月: List の YM は支給年月なので、勤怠月(支給月の前月)に変換して表示する
+function shukkinKintaiYm(ymNum) {
+  var n = parseInt(ymNum, 10);
+  if (!n || String(n).length !== 6) return null;
+  return (n % 100) === 1 ? n - 89 : n - 1;   // 202601 → 202512
+}
+
 // 月別出勤率テーブル: 出勤率List(LIST_SHUKKIN_GUID)を社員番号で絞って描画
 //   RateIncl = 有給・休業を出勤扱い (平日+休日+min(有給+休業,未出勤))/要出勤
 //   RateExcl = 有給を欠勤扱い(派遣向け)・休業は出勤扱い (平日+休日+min(休業,未出勤))/要出勤
@@ -29441,7 +29449,7 @@ async function renderEmployeeShukkinRate(empNo) {
     function n0(v) { return (v === null || v === undefined || v === '') ? 0 : (Math.round(v * 10) / 10); }
     let h = '';
     h += '<div style="font-size:10.5px;color:#888;padding:2px 2px 8px;line-height:1.5;">';
-    h += '<b style="color:#2e7d32;">有給込</b>=(平日+休日+有給+休業)÷要出勤 ／ <b style="color:#1565c0;">派遣</b>=有給を欠勤扱い（休業は出勤扱い）。<span style="color:#bbb;">元: 相殺表★出勤率</span>';
+    h += '<b style="color:#2e7d32;">有給込</b>=(平日+休日+有給+休業)÷要出勤 ／ <b style="color:#1565c0;">派遣</b>=有給を欠勤扱い（休業は出勤扱い）。年月=勤怠月（支給月の前月）。<span style="color:#bbb;">元: 相殺表★出勤率</span>';
     h += '</div>';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">';
     h += '<thead><tr style="background:#f5f5f7;color:#666;font-size:11px;">';
@@ -29452,7 +29460,8 @@ async function renderEmployeeShukkinRate(empNo) {
     h += '</tr></thead><tbody>';
     rows.forEach(function (r) {
       const ym = String(r.YM).replace(/\..*$/, '');
-      const ymLabel = ym.length === 6 ? (ym.slice(0, 4) + '/' + ym.slice(4, 6)) : ym;
+      const kym = shukkinKintaiYm(ym);
+      const ymLabel = kym ? (String(kym).slice(0, 4) + '/' + String(kym).slice(4, 6)) : ym;
       h += '<tr style="border-bottom:1px solid #f0f0f0;">';
       h += '<td style="padding:6px 4px;font-weight:600;">' + ymLabel + '</td>';
       h += '<td style="padding:6px 4px;text-align:right;font-weight:700;color:' + colorFor(r.RateIncl) + ';">' + pct(r.RateIncl) + '</td>';
