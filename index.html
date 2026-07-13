@@ -9891,6 +9891,32 @@ function extractHakenBango(emp) {
   return m ? m[1] : '';
 }
 
+// 派遣先レコード側から、社員「部課」と突合できる会社番号の候補を集める。
+// 通常は「番号」(例: 071-1) の先頭数字だが、レイズのように
+// 「番号」(106-1) と社員「部課」の会社コード (110:株式会社レイズ) が食い違う
+// レコードがあるため、「派遣先会社」フィールド (部課キー) の先頭数字も候補に含める。
+function hakensakiBangoCandidates(h) {
+  var out = [];
+  if (!h) return out;
+  var m1 = String(h[HF.bango] || '').trim().match(/^\d+/);
+  if (m1) out.push(m1[0]);
+  var m2 = String(h[HF.hakensaki_keiyaku] || '').trim().match(/^\d+/);
+  if (m2 && out.indexOf(m2[0]) < 0) out.push(m2[0]);
+  return out;
+}
+
+// 社員側の会社番号 bango と派遣先レコード it が一致するか。
+// 「番号」の先頭一致 (077 / 077-1 / 077（…） / 077(…)) に加え、
+// 「派遣先会社」(部課キー) の番号一致も許容する。
+function hakensakiRecordMatchesBango(it, bango) {
+  if (!it || !bango) return false;
+  var v = String(it[HF.bango] || '').trim();
+  if (v === bango || v.indexOf(bango + '-') === 0 ||
+      v.indexOf(bango + '（') === 0 || v.indexOf(bango + '(') === 0) return true;
+  var km = String(it[HF.hakensaki_keiyaku] || '').trim().match(/^(\d+)[\-:：－]/);
+  return !!(km && km[1] === bango);
+}
+
 // 派遣先リストから、現在の社員の派遣先レコードを取得。
 // 派遣先側「番号」は 077-1 / 077-2 / 002-1（ドアラッチ）などの枝番付き。
 // 社員側「部課」は 077:XXX で枝番なし。 → 先頭一致＋組織単位で絞り込む。
@@ -9916,14 +9942,8 @@ async function fetchHakensakiByEmp(emp) {
   var items = (data.d && data.d.results) || [];
 
   // 「番号」フィールドで先頭一致 (077, 077-1, 077-2, 077（…）, 077(…) などをカバー)
-  var candidates = items.filter(function(it) {
-    var v = String(it[HF.bango] || '').trim();
-    if (v === bango) return true;
-    if (v.indexOf(bango + '-') === 0) return true;
-    if (v.indexOf(bango + '（') === 0) return true;
-    if (v.indexOf(bango + '(') === 0) return true;
-    return false;
-  });
+  // ＋「派遣先会社」(部課キー) の番号一致も許容 (番号と部課の会社コードが食い違うレイズ等)
+  var candidates = items.filter(function(it) { return hakensakiRecordMatchesBango(it, bango); });
   if (candidates.length === 0) {
     throw new Error('派遣先番号「' + bango + '」が派遣先情報リストに見つかりません');
   }
@@ -15103,11 +15123,7 @@ async function openHakenKeiyakuPicker() {
     if (!resp.ok) throw new Error('派遣先データ取得失敗 ' + resp.status);
     var data = await resp.json();
     var items = (data.d && data.d.results) || [];
-    var rows = items.filter(function(it) {
-      var v = String(it[HF.bango] || '').trim();
-      return v === bango || v.indexOf(bango + '-') === 0 ||
-             v.indexOf(bango + '（') === 0 || v.indexOf(bango + '(') === 0;
-    });
+    var rows = items.filter(function(it) { return hakensakiRecordMatchesBango(it, bango); });
     if (!rows.length) { showToast('この派遣先の派遣契約(派遣先情報)が見つかりません', 'error'); return; }
     _hakenKeiyakuRows = rows;
     _showHakenKeiyakuPickerModal(rows);
@@ -15545,15 +15561,14 @@ var _hkAllEmpsCache = null;
 async function openHakenKanriboEmpPicker(h) {
   try {
     if (!h) { showToast('派遣契約データが見つかりません', 'error'); return; }
-    var bangoFull = String(h[HF.bango] || '').trim();
-    var bango = (bangoFull.match(/^\d+/) || [''])[0];
-    if (!bango) { showToast('派遣先番号が特定できません', 'error'); return; }
+    var bangos = hakensakiBangoCandidates(h);
+    if (!bangos.length) { showToast('派遣先番号が特定できません', 'error'); return; }
     showToast('社員データを取得中…', 'info');
     if (!_hkAllEmpsCache) {
       _hkAllEmpsCache = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
     }
     var soshiki = _hkClean(h[HF.soshiki] || '');
-    var emps = _hkAllEmpsCache.filter(function(e) { return extractHakenBango(e) === bango; });
+    var emps = _hkAllEmpsCache.filter(function(e) { return bangos.indexOf(extractHakenBango(e)) >= 0; });
     if (soshiki) {
       var byOrg = emps.filter(function(e) {
         var o = '';
@@ -15982,9 +15997,8 @@ async function openHakenIsshikiFlow(h) {
     ['hkIsshikiOverlay', 'isshikiLinkOverlay', 'hkKobetsuConfirmOverlay'].forEach(function(id) {
       var el = document.getElementById(id); if (el) el.remove();
     });
-    var bangoFull = String(h[HF.bango] || '').trim();
-    var bango = (bangoFull.match(/^\d+/) || [''])[0];
-    if (!bango) { showToast('派遣先番号が特定できません', 'error'); return; }
+    var bangos = hakensakiBangoCandidates(h);
+    if (!bangos.length) { showToast('派遣先番号が特定できません', 'error'); return; }
     showToast('社員データを取得中…', 'info');
     // 社員データは毎回フレッシュ取得 (前回の有期/無期・雇用期間 等の編集を反映)
     //   キャッシュがあっても 1 時間以上経過 or null なら再取得
@@ -15992,7 +16006,7 @@ async function openHakenIsshikiFlow(h) {
       _hkAllEmpsCache = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
     }
     var soshiki = _hkClean(h[HF.soshiki] || '');
-    var emps = _hkAllEmpsCache.filter(function(e) { return extractHakenBango(e) === bango; });
+    var emps = _hkAllEmpsCache.filter(function(e) { return bangos.indexOf(extractHakenBango(e)) >= 0; });
     if (soshiki) {
       var byOrg = emps.filter(function(e) {
         var o = '';
