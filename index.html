@@ -20914,17 +20914,24 @@ function drawHakensakiCards(filterKey) {
     window._hkGroupMeta[gIdx] = { bukaNum: _bukaNum, name: gName };
     html += '<div id="' + sectionId + '" style="background:#fff;border-radius:12px;margin-bottom:8px;border:' + cardBorder + ';overflow:hidden;' + cardStyle + '">';
 
-    // ヘッダー (クリックで展開)
-    html += '<div onclick="toggleHakenAcc(\'' + sectionId + '\')" style="background:' + headerBg + ';color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">';
+    // ヘッダー (クリックで展開) — 2段構成: 1段目=派遣先名フル表示 / 2段目=ファイル・件数・人数
+    // (1行に全部詰めるとスマホで派遣先名が「株式会社…」に潰れるため)
+    var _nmLen = String(gName).length;
+    var _nmSize = _nmLen > 22 ? '11.5px' : (_nmLen > 16 ? '12.5px' : '14px');
+    html += '<div onclick="toggleHakenAcc(\'' + sectionId + '\')" style="background:' + headerBg + ';color:#fff;padding:10px 14px 9px;cursor:pointer;user-select:none;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;">';
     html += '<span class="hk-acc-arrow" style="font-size:10px;transition:transform 0.2s;flex-shrink:0;">▶</span>';
-    html += '<div style="flex:1;min-width:0;font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(gName) + '</div>';
+    html += '<div style="flex:1;min-width:0;font-weight:700;font-size:' + _nmSize + ';line-height:1.3;word-break:break-word;">' + escHtml(gName) + '</div>';
+    html += '</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:18px;">';
     // 派遣先ファイルを開くボタン (アコーディオン開閉とは独立)
     html += '<button onclick="event.stopPropagation();openHakensakiFolder(' + gIdx + ')" title="派遣先ファイルを開く" style="flex-shrink:0;background:rgba(255,255,255,0.22);border:none;border-radius:7px;color:#fff;padding:4px 8px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:3px;-webkit-tap-highlight-color:transparent;">📁 ファイル</button>';
     // サマリー: 件数 + 合計人数
     html += '<div style="font-size:11px;opacity:0.8;">' + gItems.length + '件</div>';
     if (F.ninzu) {
-      html += '<div style="background:rgba(255,255,255,0.2);padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
+      html += '<div style="margin-left:auto;background:rgba(255,255,255,0.2);padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600;">' + totalNinzu + '名</div>';
     }
+    html += '</div>';
     html += '</div>';
 
     // 最終更新日でソート (新しい順) — 最近作成 / 更新した契約が上に来る
