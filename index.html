@@ -4056,6 +4056,7 @@ select.sankyu-edit-input {
 .profile-badge-v2.retire { background: linear-gradient(135deg,#fce4ec,#f48fb1); color:#880e4f; }
 .profile-badge-v2.transfer-out { background: linear-gradient(135deg,#fff3e0,#ffcc80); color:#bf360c; }
 .profile-badge-v2.active { background: linear-gradient(135deg,#e3f2fd,#90caf9); color:#0d47a1; }
+.profile-badge-v2.shobyo { background: linear-gradient(135deg,#fff8e1,#ffe082); color:#a06a00; }
 .profile-badge-v2.plan { background: linear-gradient(135deg,#fffde7,#fff59d); color:#f57f17; border:1px dashed #fbc02d; box-shadow:none; }
 .profile-badge-v2.plan-retire { background: linear-gradient(135deg,#fce4ec,#f8bbd0); color:#ad1457; border:1px dashed #ec407a; box-shadow:none; }
 
@@ -8723,6 +8724,9 @@ async function loadLeaveDetails() {
     let hb = '<span class="profile-badge-v2 ' + eb.cls + '"><span class="pb-ic">' + eb.ic + '</span>' + eb.label + '</span>';
     if (xb) {
       hb += '<span class="profile-badge-v2 ' + xb.cls + '"><span class="pb-ic">' + xb.ic + '</span>' + xb.label + '</span>';
+    } else if (String(emp[F.zaiyokuSyubetu] || '').indexOf('傷病') >= 0) {
+      // 採用種別「傷病手当在職中」: 在職だが傷病手当受給中
+      hb += '<span class="profile-badge-v2 shobyo"><span class="pb-ic">🤒</span>傷病在職中</span>';
     } else {
       hb += '<span class="profile-badge-v2 active"><span class="pb-ic">✓</span>在職中</span>';
     }
@@ -39616,15 +39620,19 @@ async function loadAdminDashData() {
   await loadHakenTantoMapFromSP();
   const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
   const byBuka = {};
-  let totalActive = 0, totalRetired = 0;
+  let totalActive = 0, totalRetired = 0, totalShobyo = 0;
   allEmps.forEach(emp => {
     const b = getBukaValue(emp);
     if (!b) return;
     if (!isHakensakiBuka(b)) return; // 本社等は派遣先分析対象外
-    if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0, sankyu: 0, sankyuOwari: 0, jitsudou: 0 };
+    if (!byBuka[b]) byBuka[b] = { active: 0, retired: 0, total: 0, sankyu: 0, sankyuOwari: 0, shobyo: 0, jitsudou: 0 };
     byBuka[b].total++;
     if (isResigned(emp)) { byBuka[b].retired++; totalRetired++; }
-    else { byBuka[b].active++; totalActive++; }
+    else {
+      byBuka[b].active++; totalActive++;
+      // 採用種別「傷病手当在職中」: 在職だが実働から除外
+      if (String(emp[F.zaiyokuSyubetu] || '').indexOf('傷病') >= 0) { byBuka[b].shobyo++; totalShobyo++; }
+    }
   });
   // 産休育休中(active)・休業終了(owari) の人数を派遣先別に付加
   const sankyuCounts = await _loadCurrentSankyuCounts(allEmps);
@@ -39634,12 +39642,12 @@ async function loadAdminDashData() {
   Object.keys(sankyuCounts.owariByBuka).forEach(b => {
     if (byBuka[b]) byBuka[b].sankyuOwari = sankyuCounts.owariByBuka[b];
   });
-  // 実働 = 在職 - 産休育休active - 休業終了
+  // 実働 = 在職 - 産休育休active - 休業終了 - 傷病手当在職中
   Object.keys(byBuka).forEach(b => {
     const c = byBuka[b];
-    c.jitsudou = c.active - (c.sankyu || 0) - (c.sankyuOwari || 0);
+    c.jitsudou = c.active - (c.sankyu || 0) - (c.sankyuOwari || 0) - (c.shobyo || 0);
   });
-  const totalJitsudou = totalActive - sankyuCounts.total - sankyuCounts.totalOwari;
+  const totalJitsudou = totalActive - sankyuCounts.total - sankyuCounts.totalOwari - totalShobyo;
 
   // 担当者別 集計 (派遣先 → 担当者 で集約)
   // hakens は {name, active, jitsudou} のオブジェクト配列に変更 (実働0を除外可能にするため)
@@ -39647,7 +39655,7 @@ async function loadAdminDashData() {
   Object.keys(byBuka).forEach(b => {
     const t = getHakenTanto(b);
     if (!byTanto[t]) byTanto[t] = {
-      active: 0, retired: 0, total: 0, sankyu: 0, sankyuOwari: 0, jitsudou: 0,
+      active: 0, retired: 0, total: 0, sankyu: 0, sankyuOwari: 0, shobyo: 0, jitsudou: 0,
       hakenCount: 0, hakens: []
     };
     byTanto[t].active += byBuka[b].active;
@@ -39655,6 +39663,7 @@ async function loadAdminDashData() {
     byTanto[t].total += byBuka[b].total;
     byTanto[t].sankyu += byBuka[b].sankyu || 0;
     byTanto[t].sankyuOwari += byBuka[b].sankyuOwari || 0;
+    byTanto[t].shobyo += byBuka[b].shobyo || 0;
     byTanto[t].jitsudou += byBuka[b].jitsudou || 0;
     // 派遣人数(実働)が0の派遣先は hakens 一覧と hakenCount から除外
     // (在職者がいても 産休育休/休業終了 だけの派遣先は実働0なので除外する)
@@ -39671,6 +39680,7 @@ async function loadAdminDashData() {
     totalRetired: totalRetired,
     totalSankyu: sankyuCounts.total,
     totalSankyuOwari: sankyuCounts.totalOwari,
+    totalShobyo: totalShobyo,
     totalJitsudou: totalJitsudou
   };
 }
@@ -39736,7 +39746,8 @@ function renderAdminDashboard() {
   const totalRetired = _adminDashCache.totalRetired;
   const totalSankyu = _adminDashCache.totalSankyu || 0;
   const totalSankyuOwari = _adminDashCache.totalSankyuOwari || 0;
-  const totalJitsudou = (typeof _adminDashCache.totalJitsudou === 'number') ? _adminDashCache.totalJitsudou : (totalActive - totalSankyu - totalSankyuOwari);
+  const totalShobyo = _adminDashCache.totalShobyo || 0;
+  const totalJitsudou = (typeof _adminDashCache.totalJitsudou === 'number') ? _adminDashCache.totalJitsudou : (totalActive - totalSankyu - totalSankyuOwari - totalShobyo);
 
   const entries = Object.keys(source).map(name => {
     const c = source[name];
@@ -39747,7 +39758,8 @@ function renderAdminDashboard() {
       total: c.total,
       sankyu: c.sankyu || 0,
       sankyuOwari: c.sankyuOwari || 0,
-      jitsudou: (typeof c.jitsudou === 'number') ? c.jitsudou : (c.active - (c.sankyu || 0) - (c.sankyuOwari || 0)),
+      shobyo: c.shobyo || 0,
+      jitsudou: (typeof c.jitsudou === 'number') ? c.jitsudou : (c.active - (c.sankyu || 0) - (c.sankyuOwari || 0) - (c.shobyo || 0)),
       hakenCount: c.hakenCount,
       hakens: c.hakens
     };
@@ -39769,6 +39781,9 @@ function renderAdminDashboard() {
     '<div><div style="font-size:10px;color:#888;">🌸 産休育休中</div><div style="font-size:22px;font-weight:800;color:#d81b60;">' + totalSankyu + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   if (totalSankyuOwari > 0) {
     summaryHtml += '<div><div style="font-size:10px;color:#888;">休業終了</div><div style="font-size:22px;font-weight:800;color:#7e57c2;">' + totalSankyuOwari + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+  }
+  if (totalShobyo > 0) {
+    summaryHtml += '<div><div style="font-size:10px;color:#888;">🤒 傷病手当中</div><div style="font-size:22px;font-weight:800;color:#a06a00;">' + totalShobyo + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   }
   if (includeRetired) {
     summaryHtml += '<div><div style="font-size:10px;color:#888;">退職者 合計</div><div style="font-size:22px;font-weight:800;color:#c62828;">' + totalRetired + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
@@ -39794,6 +39809,9 @@ function renderAdminDashboard() {
     const owariBadge = e.sankyuOwari > 0
       ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:4px;padding:1px 6px;background:#ede7f6;border:1px solid #d1c4e9;border-radius:8px;font-size:10px;font-weight:700;color:#7e57c2;">終 ' + e.sankyuOwari + '</span>'
       : '';
+    const shobyoBadge = e.shobyo > 0
+      ? '<span style="display:inline-flex;align-items:center;gap:2px;margin-left:4px;padding:1px 6px;background:#fff8e1;border:1px solid #ffe082;border-radius:8px;font-size:10px;font-weight:700;color:#a06a00;">🤒 ' + e.shobyo + '</span>'
+      : '';
     const nameEsc = escHtml(e.name);
     const nameArg = nameEsc.replace(/'/g, "\\'");
     // 担当別: 派遣先数バッジ + 派遣先一覧 (折り畳み)
@@ -39816,7 +39834,7 @@ function renderAdminDashboard() {
       : '<div onclick="openHakenListFromAdmin(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">';
     html += cardOpen +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
-      '<span style="font-size:14px;font-weight:700;color:var(--primary);display:inline-flex;align-items:center;flex-wrap:wrap;">' + (isTanto ? '👤 ' : '') + nameEsc + extraHeader + sankyuBadge + owariBadge + '</span>' +
+      '<span style="font-size:14px;font-weight:700;color:var(--primary);display:inline-flex;align-items:center;flex-wrap:wrap;">' + (isTanto ? '👤 ' : '') + nameEsc + extraHeader + sankyuBadge + owariBadge + shobyoBadge + '</span>' +
       '<span><span style="font-size:18px;font-weight:800;color:#2e7d32;">' + e.jitsudou + '</span><span style="font-size:11px;font-weight:500;color:#888;margin-left:2px;">名</span>' + retiredNote + '</span>' +
       '</div>' +
       '<div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden;">' +
