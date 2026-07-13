@@ -5828,7 +5828,7 @@ select.sankyu-edit-input {
   <!-- Screen: 派遣先 詳細 -->
   <div class="screen" id="hakensakiDetailScreen">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-      <button onclick="switchScreen('hakensakiListScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <button onclick="openHakensakiListScreen()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <div style="flex:1;"></div>
       <button onclick="openHakenKeiyakuFromHakensaki()" style="background:linear-gradient(135deg,#2e7d32,#66bb6a);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.25);">📋 派遣契約</button>
       <button class="admin-only" onclick="_promptHakensakiKakuninMode()" style="display:none;background:linear-gradient(135deg,#5e35b1,#7e57c2);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(94,53,177,0.25);" title="新規派遣先確認用に通知書・個別契約書・管理台帳の原本(空欄)を作成。役員専用">📑 確認用書類 <span style="font-size:9px;background:rgba(255,255,255,0.2);padding:1px 4px;border-radius:3px;margin-left:2px;">役員</span></button>
@@ -20188,6 +20188,47 @@ async function saveHakenPeriod() {
   }
 }
 
+// 派遣人数カードからの直接保存 (0名にすると「契約なし」扱いになり一覧の色も変わる)
+async function saveHakenNinzu() {
+  var item = _hakensakiItems[_hakensakiCurrentItemIdx];
+  if (!item) { showToast('派遣先データが見つかりません', 'error'); return; }
+  var F = _hakensakiFields;
+  if (!F.ninzu) { showToast('派遣人数フィールドが特定できません', 'error'); return; }
+  var el = document.getElementById('hakenNinzuInput');
+  var raw = el ? String(el.value).trim() : '';
+  var num = raw === '' ? null : Number(raw);
+  if (raw !== '' && (isNaN(num) || num < 0)) { showToast('派遣人数は0以上の数値で入力してください', 'error'); return; }
+  var btn = document.getElementById('hakenNinzuSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    var token = await getToken();
+    var entityType = await getListItemEntityType(LIST_HAKENSAKI_GUID);
+    var body = { __metadata: { type: entityType } };
+    body[F.ninzu] = num;
+    var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items(" + item.Id + ")";
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+        'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      var t = ''; try { t = await resp.text(); } catch (_) {}
+      throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 150));
+    }
+    item[F.ninzu] = num;
+    _hakensakiLoaded = false;  // 一覧は次回再読込
+    showToast('✓ 派遣人数を ' + (num === null ? '未設定' : num + '名') + ' に保存しました', 'success');
+    renderHakensakiDetail();
+  } catch (e) {
+    console.error('saveHakenNinzu error:', e);
+    showToast('保存失敗: ' + (e.message || String(e)), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾'; }
+  }
+}
+
 function renderHakensakiDetail() {
   var item = _hakensakiItems[_hakensakiCurrentItemIdx];
   if (!item) return;
@@ -20254,8 +20295,20 @@ function renderHakensakiDetail() {
     html += '</div>';
   }
   html += '<div style="background:#e8eaf6;color:#283593;padding:12px;border-radius:12px;text-align:center;">';
-  html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">派遣人数</div>';
-  html += '<div style="font-size:20px;font-weight:700;">' + ninzu + '<span style="font-size:12px;">名</span></div>';
+  if (F.ninzu) {
+    // 派遣人数はカード上で直接編集できる (0名にすると「契約なし」扱い)
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">派遣人数（編集できます）</div>';
+    html += '<div style="display:flex;align-items:center;justify-content:center;gap:5px;">';
+    html += '<input type="number" id="hakenNinzuInput" value="' + ninzu + '" min="0" inputmode="numeric" ' +
+      'style="width:58px;text-align:center;font-size:18px;font-weight:700;color:#283593;border:1.5px solid #c5cae9;border-radius:8px;padding:4px 2px;background:#fff;">';
+    html += '<span style="font-size:12px;">名</span>';
+    html += '<button onclick="saveHakenNinzu()" id="hakenNinzuSaveBtn" ' +
+      'style="background:#283593;color:#fff;border:none;border-radius:6px;padding:6px 9px;font-size:12px;font-weight:700;cursor:pointer;">💾</button>';
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px;">派遣人数</div>';
+    html += '<div style="font-size:20px;font-weight:700;">' + ninzu + '<span style="font-size:12px;">名</span></div>';
+  }
   html += '</div>';
   html += '</div>';
 
