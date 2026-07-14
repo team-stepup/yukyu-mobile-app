@@ -37215,10 +37215,10 @@ async function populateHakenDropdown() {
         }
       }
     });
-    // 実働数 = 在職 - 産休育休(active) - 休業終了 - 傷病手当在職中
+    // 実働数 = 在職 - 産休育休(active) - 傷病手当在職中 (休業終了は復帰済みとして実働に含める)
     Object.keys(_hakenEmpByBuka).forEach(b => {
       const c = _hakenEmpByBuka[b];
-      c.jitsudou = c.active - c.sankyuActive - c.sankyuOwari - (c.shobyo || 0);
+      c.jitsudou = c.active - c.sankyuActive - (c.shobyo || 0);
     });
 
     const sorted = Object.keys(_hakenEmpByBuka).sort();
@@ -39726,12 +39726,12 @@ async function loadAdminDashData() {
   Object.keys(sankyuCounts.owariByBuka).forEach(b => {
     if (byBuka[b]) byBuka[b].sankyuOwari = sankyuCounts.owariByBuka[b];
   });
-  // 実働 = 在職 - 産休育休active - 休業終了 - 傷病手当在職中
+  // 実働 = 在職 - 産休育休active - 傷病手当在職中 (休業終了は復帰済みとして実働に含める)
   Object.keys(byBuka).forEach(b => {
     const c = byBuka[b];
-    c.jitsudou = c.active - (c.sankyu || 0) - (c.sankyuOwari || 0) - (c.shobyo || 0);
+    c.jitsudou = c.active - (c.sankyu || 0) - (c.shobyo || 0);
   });
-  const totalJitsudou = totalActive - sankyuCounts.total - sankyuCounts.totalOwari - totalShobyo;
+  const totalJitsudou = totalActive - sankyuCounts.total - totalShobyo;
 
   // 担当者別 集計 (派遣先 → 担当者 で集約)
   // hakens は {name, active, jitsudou} のオブジェクト配列に変更 (実働0を除外可能にするため)
@@ -39831,7 +39831,7 @@ function renderAdminDashboard() {
   const totalSankyu = _adminDashCache.totalSankyu || 0;
   const totalSankyuOwari = _adminDashCache.totalSankyuOwari || 0;
   const totalShobyo = _adminDashCache.totalShobyo || 0;
-  const totalJitsudou = (typeof _adminDashCache.totalJitsudou === 'number') ? _adminDashCache.totalJitsudou : (totalActive - totalSankyu - totalSankyuOwari - totalShobyo);
+  const totalJitsudou = (typeof _adminDashCache.totalJitsudou === 'number') ? _adminDashCache.totalJitsudou : (totalActive - totalSankyu - totalShobyo);
 
   const entries = Object.keys(source).map(name => {
     const c = source[name];
@@ -39843,7 +39843,7 @@ function renderAdminDashboard() {
       sankyu: c.sankyu || 0,
       sankyuOwari: c.sankyuOwari || 0,
       shobyo: c.shobyo || 0,
-      jitsudou: (typeof c.jitsudou === 'number') ? c.jitsudou : (c.active - (c.sankyu || 0) - (c.sankyuOwari || 0) - (c.shobyo || 0)),
+      jitsudou: (typeof c.jitsudou === 'number') ? c.jitsudou : (c.active - (c.sankyu || 0) - (c.shobyo || 0)),
       hakenCount: c.hakenCount,
       hakens: c.hakens
     };
@@ -39864,7 +39864,7 @@ function renderAdminDashboard() {
     '<div><div style="font-size:10px;color:#888;">実働者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + totalJitsudou + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
     '<div><div style="font-size:10px;color:#888;">🌸 産休育休中</div><div style="font-size:22px;font-weight:800;color:#d81b60;">' + totalSankyu + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   if (totalSankyuOwari > 0) {
-    summaryHtml += '<div><div style="font-size:10px;color:#888;">休業終了</div><div style="font-size:22px;font-weight:800;color:#7e57c2;">' + totalSankyuOwari + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+    summaryHtml += '<div><div style="font-size:10px;color:#888;">休業終了 (実働に含む)</div><div style="font-size:22px;font-weight:800;color:#7e57c2;">' + totalSankyuOwari + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
   }
   if (totalShobyo > 0) {
     summaryHtml += '<div><div style="font-size:10px;color:#888;">🤒 傷病手当中</div><div style="font-size:22px;font-weight:800;color:#a06a00;">' + totalShobyo + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
