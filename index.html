@@ -36280,7 +36280,26 @@ async function _applyEmpOcrToSp() {
   }
 }
 
-function showAddEmployeeForm() {
+async function showAddEmployeeForm() {
+  // 新規社員登録は必ず最新バージョンで行う:
+  // 開く前に version.json を確認し、新しい版があれば自動で更新リロードしてから開き直してもらう。
+  // (入力開始前のタイミングなので、フォーム内容や撮影画像が消えることはない)
+  // ※「あとで」で保留中でも登録時だけは強制 / 同一バージョンへの二重リロードはしない(反映遅延ループ防止)
+  try {
+    await checkForUpdate();
+    if (latestVersionData && latestVersionData.version && initialVersion &&
+        latestVersionData.version !== initialVersion) {
+      var _regTgt = latestVersionData.version;
+      var _regDone = null;
+      try { _regDone = localStorage.getItem('yukyu_reg_updated_ver'); } catch (_) {}
+      if (_regDone !== _regTgt) {
+        try { localStorage.setItem('yukyu_reg_updated_ver', _regTgt); } catch (_) {}
+        showToast('⟳ 最新バージョンに更新してから登録を開始します… 更新後もう一度「新規社員登録」を押してください', 'info');
+        setTimeout(headerUpdateClick, 1200);
+        return;
+      }
+    }
+  } catch (_) {}
   // Reset captured docs
   Object.keys(capturedDocs).forEach(k => delete capturedDocs[k]);
   switchScreen('addEmployeeScreen');
