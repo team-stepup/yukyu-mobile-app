@@ -35279,10 +35279,24 @@ async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
       }
     }
 
-    showToast(totalFiles + '件の書類をアップロードしました', 'success');
+    // 保存の実証: フォルダの実ファイル数をSPに問い合わせて確認 (確認できて初めて成功扱い)
+    try {
+      const vTok = await getToken();
+      const vEp = encodeURIComponent(empFolder).replace(/%2F/g, '/');
+      const vr = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + vEp + "')/Files?$select=Name",
+        { headers: { 'Authorization': 'Bearer ' + vTok, 'Accept': 'application/json;odata=verbose' } });
+      if (!vr.ok) throw new Error('確認リクエスト失敗 ' + vr.status);
+      const vj = await vr.json();
+      const vn = (((vj.d || {}).results) || []).length;
+      if (vn < totalFiles) throw new Error('保存確認NG: フォルダ内 ' + vn + '件 / 期待 ' + totalFiles + '件');
+    } catch (ve) {
+      // 確認できない=成功扱いにしない (再試行しても overwrite=true なので二重保存にはならない)
+      throw new Error('書類の保存を確認できませんでした: ' + (ve.message || ve));
+    }
+    showToast(totalFiles + '件の書類を保存しました (フォルダ確認済み)', 'success');
   } catch (e) {
     console.error('Doc upload error:', e);
-    showToast('書類アップロードエラー: ' + e.message, 'error');
+    throw e;  // 呼び出し元で再試行ダイアログを出す (画像はここでは破棄しない)
   }
 }
 
@@ -37112,9 +37126,20 @@ async function saveNewEmployee() {
 
     // Upload captured documents to SharePoint
     //   (フォルダ作成時に 社員ファイルリンクも社員データへ自動保存される)
+    //   失敗時は画像を破棄せず、成功するまで再試行できる (書類消失の再発防止)
     if (Object.keys(capturedDocs).length > 0) {
       btn.textContent = '書類アップロード中...';
-      await uploadCapturedDocs(bukaSelVal, noVal, nameVal, createdId);
+      for (;;) {
+        try {
+          await uploadCapturedDocs(bukaSelVal, noVal, nameVal, createdId);
+          break;
+        } catch (upErr) {
+          var retryUp = window.confirm(
+            '⚠ 書類画像の保存に失敗しました。\n\n' + (upErr && upErr.message ? upErr.message : upErr) +
+            '\n\n[OK] = もう一度アップロードを試す (推奨)\n[キャンセル] = 書類なしで登録を終える (画像は保存されません!)');
+          if (!retryUp) break;
+        }
+      }
     }
 
     showToast(nameVal + ' を登録しました', 'success');
