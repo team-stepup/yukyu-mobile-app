@@ -50803,26 +50803,32 @@ async function updateHakenSankyuCount() {
     var el2 = document.getElementById('hakenSankyuCount');
     if (el2) el2.textContent = String(activeCount);  // バッジは active のみ
 
-    // 実働者キャッシュ: 産休育休(active+休業終了) と 傷病手当在職中 を除外
+    // 実働者キャッシュ: 産休育休中(active) と 傷病手当在職中 を除外
+    // 休業終了(owari)は復帰済みとして実働に含める(T-REX側も実働扱い・2026-07-14変更)
     window._hakenSankyuBangos = bangoAll;
+    var owariBangos = {};
+    Object.keys(bangoAll).forEach(function(bn) { if (!bangoActive[bn]) owariBangos[bn] = 1; });
+    window._hakenOwariBangos = owariBangos;
     var shobyoCount = 0;
     window._hakenWorkforceCache = (hakenEmployeesCache || []).filter(function(emp) {
       if (String(emp[F.zaiyokuSyubetu] || '').indexOf('傷病') >= 0) { shobyoCount++; return false; }
       var bn = emp[F.syainNo];
       if (bn === null || bn === undefined || bn === '') return true;
-      return !bangoAll[String(bn).trim()];
+      return !bangoActive[String(bn).trim()];
     });
     var workforceCount = window._hakenWorkforceCache.length;
 
     // ヘッダー: 数字を大きく + 内訳をサブテキスト表示
     var headerEl = document.getElementById('hakenHeaderCount');
     if (headerEl) {
-      var subParts = [];
-      if (activeCount > 0) subParts.push('産休育休 ' + activeCount + '名');
-      if (owariCount > 0) subParts.push('休業終了 ' + owariCount + '名');
-      if (shobyoCount > 0) subParts.push('🤒傷病手当 ' + shobyoCount + '名');
-      var subText = subParts.length
-        ? '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(' + subParts.join('・') + ' 除く)</span>'
+      var exParts = [];
+      if (activeCount > 0) exParts.push('産休育休 ' + activeCount + '名');
+      if (shobyoCount > 0) exParts.push('🤒傷病手当 ' + shobyoCount + '名');
+      var segs = [];
+      if (exParts.length) segs.push(exParts.join('・') + ' 除く');
+      if (owariCount > 0) segs.push('✓休業終了 ' + owariCount + '名 含む');
+      var subText = segs.length
+        ? '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(' + segs.join('・') + ')</span>'
         : '';
       headerEl.innerHTML = '社員数: <span style="font-size:22px;font-weight:800;color:var(--primary);">' + workforceCount + '</span>名 ' + subText;
     }
@@ -51810,9 +51816,13 @@ function renderHakenTable(employees, container) {
         : '<button type="button" onclick="event.stopPropagation();openHakenMaebariQuick(' + emp.Id + ')" style="background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">💴 申請</button>';
       maebariCell = '<td style="text-align:center;">' + maebariBtn + '</td>';
     }
+    // 休業終了(復帰済み)タグ
+    var owariTag = (window._hakenOwariBangos && sn && window._hakenOwariBangos[sn.trim()])
+      ? ' <span style="font-size:9px;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;border-radius:8px;padding:1px 5px;font-weight:700;white-space:nowrap;vertical-align:middle;">✓復帰</span>'
+      : '';
     html += '<tr onclick=\'selectEmployee(' + JSON.stringify(emp).replace(/'/g, "&#39;") + ')\' style="cursor:pointer;">' +
       '<td>' + (emp[F.syainNo] || '') + '</td>' +
-      '<td style="font-weight:600;">' + escHtml(emp.Title || '') + '</td>' +
+      '<td style="font-weight:600;">' + escHtml(emp.Title || '') + owariTag + '</td>' +
       '<td>' + col3Display + '</td>' +
       '<td>' + statusDisplay + '</td>' +
       maebariCell;
