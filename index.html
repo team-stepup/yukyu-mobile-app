@@ -34056,6 +34056,9 @@ function copyOcrText(docId) {
 // SharePoint Document Library Upload
 const SP_DOC_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
 const SP_DOC_LIB_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル';
+// 書類スキャンの控え(バックアップ)保存先。役員のみ閲覧(権限はSharePoint側で設定)。
+// マイナンバーは特定個人情報のため控えを作らない。
+const SP_DOC_BACKUP_PATH = '/sites/TeamStepup/Shared Documents/★書類スキャン控（役員のみ）★';
 
 async function ensureSpFolder(folderPath) {
   const token = await getToken();
@@ -35241,8 +35244,10 @@ async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
 
   try {
     // Create folder: 社員ファイル/部課/社員番号 氏名 (部課は実フォルダ名に解決)
-    const bukaFolder = SP_DOC_LIB_PATH + '/' + (await resolveBukaFolderName(bukaVal));
+    const bukaFolderName = await resolveBukaFolderName(bukaVal);
+    const bukaFolder = SP_DOC_LIB_PATH + '/' + bukaFolderName;
     const empFolder = bukaFolder + '/' + syainNo + ' ' + name;
+    const backupJobs = [];  // 控えフォルダへ複製する分 (マイナンバー除外)
 
     await ensureSpFolder(bukaFolder);
     await ensureSpFolder(empFolder);
@@ -35276,6 +35281,7 @@ async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
         const fileName = syainNo + ' ' + label + suffix + '.' + ext;
         await uploadFileToSp(empFolder, fileName, page.file);
         totalFiles++;
+        if (docId !== 'mynumber') backupJobs.push({ fileName: fileName, file: page.file });
       }
     }
 
@@ -35292,6 +35298,23 @@ async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
     } catch (ve) {
       // 確認できない=成功扱いにしない (再試行しても overwrite=true なので二重保存にはならない)
       throw new Error('書類の保存を確認できませんでした: ' + (ve.message || ve));
+    }
+    // ★控えバックアップ: 役員のみ閲覧フォルダへ複製 (マイナンバーは特定個人情報のため除外)
+    //   本保存は上で確認済みのため、控えの失敗は登録を止めず警告のみ
+    try {
+      if (backupJobs.length > 0) {
+        const bkBuka = SP_DOC_BACKUP_PATH + '/' + bukaFolderName;
+        const bkEmp = bkBuka + '/' + syainNo + ' ' + name;
+        await ensureSpFolder(SP_DOC_BACKUP_PATH);
+        await ensureSpFolder(bkBuka);
+        await ensureSpFolder(bkEmp);
+        for (const bj of backupJobs) {
+          await uploadFileToSp(bkEmp, bj.fileName, bj.file);
+        }
+      }
+    } catch (bkErr) {
+      console.warn('控えバックアップ失敗:', bkErr);
+      showToast('⚠ 控えフォルダへのバックアップに失敗しました (本保存は完了済み)', 'warn');
     }
     showToast(totalFiles + '件の書類を保存しました (フォルダ確認済み)', 'success');
   } catch (e) {
