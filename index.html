@@ -24425,7 +24425,8 @@ async function getEmpFolderPath(emp) {
 
   // 優先3: フォールバック構築（新規でフォルダ未作成のケース）
   if (!buka || !name) return null;
-  function sanitize(s) { return String(s).replace(/[:*?"<>|#%~&{}]/g, '-'); }
+  // 「:」は除去(既存フォルダ命名規約 例 114ASTI㈱浜松)、その他の禁止文字は「-」
+  function sanitize(s) { return String(s).replace(/[:：]/g, '').replace(/[*?"<>|#%~&{}]/g, '-'); }
   var fallback = SP_DOC_LIB_PATH + '/' + sanitize(buka) + '/' + syainNoStr + ' ' + sanitize(name);
   console.log('[社員フォルダ] フォールバック構築パス:', fallback);
   return fallback;
@@ -35210,13 +35211,37 @@ async function openSyainFileSmart(emp) {
   window.open(SP_DOC_SITE_URL + '/Shared%20Documents/Forms/AllItems.aspx?id=' + encodeURIComponent(path), '_blank', 'noopener');
 }
 
+// 部課の実フォルダ名を解決: 既存の部課フォルダを先頭数字で照合(命名ゆれ吸収)、
+// 無ければ SP で使えない文字を除去した規約名を返す。
+//   例 "071:三和電子サーキット㈱" → 既存 "071三和電子サーキット㈱" / 新規なら ":"除去
+//   ※「:」入りのままだと SharePoint がフォルダ作成を拒否し書類が保存されない
+async function resolveBukaFolderName(bukaVal) {
+  var conv = String(bukaVal || '').replace(/[:：]/g, '').replace(/[*?"<>|#%~&{}\/\\]/g, '-').trim();
+  try {
+    var token = await getToken();
+    var ep = encodeURIComponent(SP_DOC_LIB_PATH).replace(/%2F/g, '/');
+    var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + ep + "')/folders?$select=Name&$top=600",
+      { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (r.ok) {
+      var j = await r.json();
+      var folders = ((j.d || {}).results) || [];
+      var num = (String(bukaVal).match(/^\s*(\d+(?:[-－]\d+)?)/) || [])[1];
+      if (num) {
+        var hit = folders.find(function(f) { var m = f.Name.match(/^\s*(\d+(?:[-－]\d+)?)/); return m && m[1] === num; });
+        if (hit) return hit.Name;
+      }
+    }
+  } catch (_) {}
+  return conv;
+}
+
 async function uploadCapturedDocs(bukaVal, syainNo, name, empId) {
   const docIds = Object.keys(capturedDocs);
   if (docIds.length === 0) return;
 
   try {
-    // Create folder: 社員ファイル/部課/社員番号 氏名
-    const bukaFolder = SP_DOC_LIB_PATH + '/' + bukaVal;
+    // Create folder: 社員ファイル/部課/社員番号 氏名 (部課は実フォルダ名に解決)
+    const bukaFolder = SP_DOC_LIB_PATH + '/' + (await resolveBukaFolderName(bukaVal));
     const empFolder = bukaFolder + '/' + syainNo + ' ' + name;
 
     await ensureSpFolder(bukaFolder);
