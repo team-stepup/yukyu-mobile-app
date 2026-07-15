@@ -15416,6 +15416,9 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   if (ovr.ksYaku  != null) ksYaku  = ovr.ksYaku;
   if (ovr.ksName  != null) ksName  = ovr.ksName;
 
+  // 三和電子サーキットの契約書は「無期雇用派遣労働者に限定」(全員無期雇用のため)
+  var isSanwaKobetsu = String(hkName || '').indexOf('三和電子') >= 0;
+
   // 派遣料金 (通常勤務を基準に算出: 深夜 ×1.25 / 時間外・法定外休日 ×1.25 / 法定休日 ×1.35)
   var ryokinBase = (ovr.ryokin != null && ovr.ryokin !== '')
     ? (Number(ovr.ryokin) || 0) : (Number(h[HF.hakenRyokin]) || 0);
@@ -15484,7 +15487,9 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
           '<tr><td class="hd-inner-l">(部署)</td><td class="hd-inner-v" colspan="3">' + v(hkBuka) + '</td></tr>' +
         '</table></td></tr>' +
         '<tr><th>3　無期雇用派遣労働者<br>又は60歳以上の派遣労働者<br>に限定するか否かの別</th><td>' +
-          '☐ 無期雇用派遣労働者に限定　　☐ 60歳以上の派遣労働者に限定　　<span class="hd-circle">☑ 限定なし</span></td></tr>' +
+          (isSanwaKobetsu
+            ? '<span class="hd-circle">☑ 無期雇用派遣労働者に限定</span>　　☐ 60歳以上の派遣労働者に限定　　☐ 限定なし'
+            : '☐ 無期雇用派遣労働者に限定　　☐ 60歳以上の派遣労働者に限定　　<span class="hd-circle">☑ 限定なし</span>') + '</td></tr>' +
         '<tr><th>4　派遣人員</th><td>　　' + jinin + '　名</td></tr>' +
         '<tr><th>5　協定対象派遣労働者に<br>限定するか否かの別</th><td>協定対象派遣労働者に限定する</td></tr>' +
         '<tr><th>6　業務内容</th><td>' + v(gyoumu) + '</td></tr>' +
