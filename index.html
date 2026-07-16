@@ -27860,71 +27860,62 @@ function _sankyuListDateTitles() {
 //   DOM に依存せず、PATCH body を組み立てるために使う
 // ─────────────────────────────────────────
 function _sankyuComputeDates(yotei, birth) {
+  // 実List52のフィールド名(単一日付・延長7回目以降は全角数字)に直接対応した一括計算。
+  // 出産日が未入力なら出産予定日で「仮の日付」、出産日が入力されたら正式な日付で同じ項目を上書き。
+  // 各ルールはムラカミ サラ(70221)の前回実績(総務が実際に申請した日付)と一致検証済み。
   var plan = [];
-  if (!yotei && !birth) return plan;
   if (!_sankyuFieldsMeta) return plan;
-
-  var birthOrYotei = birth || yotei;
-
-  function pushPair(prefix, startDate, endDate) {
-    var pair = _sankyuFindPair(prefix);
-    if (pair.start && startDate) plan.push({ field: pair.start, date: startDate });
-    if (pair.end   && endDate)   plan.push({ field: pair.end,   date: endDate   });
-  }
-
-  // 1. 産前産後免除期間
-  if (yotei) {
-    var pair1 = _sankyuFindPair('産前産後免除期間');
-    if (pair1.start && yotei) plan.push({ field: pair1.start, date: _sankyuAddDays(yotei, -42) });
-    if (pair1.end && birthOrYotei) plan.push({ field: pair1.end, date: _sankyuAddDays(birthOrYotei, 56) });
-  }
-
-  // 出産日が未入力でも 出産予定日を基準に「仮の日付」を全項目へ計算する。
-  // 実際の出産日が入力されたら 同じ経路で正式な日付に再計算・上書きされる。
+  if (!yotei && !birth) return plan;
   var calcBase = birth || yotei;
-  if (!calcBase) return plan;
 
-  var ikukyuStart    = _sankyuAddDays(calcBase, 57);
-  var birthday1      = _sankyuAddYears(calcBase, 1);
-  var age1ReachPrev  = _sankyuAddDays(birthday1, -2);
-  var birthday1_5    = _sankyuAddMonths(calcBase, 18);
-  var age1_5ReachPrev = _sankyuAddDays(birthday1_5, -2);
+  function _normT(t) {
+    return String(t || '').replace(/[０-９]/g, function(ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); }).replace(/[\s\u3000]/g, '');
+  }
+  var byTitle = {};
+  Object.keys(_sankyuFieldsMeta).forEach(function(k) {
+    var f = _sankyuFieldsMeta[k];
+    if (f.type !== 'DateTime' || !f.title) return;
+    var key = _normT(f.title);
+    if (!byTitle[key]) byTitle[key] = f;
+  });
+  function add(title, date) {
+    var f = byTitle[_normT(title)];
+    if (f && date) plan.push({ field: f, date: date });
+  }
 
-  // 2. 育休開始社保免除
-  pushPair('育休開始社保免除', ikukyuStart, age1ReachPrev);
+  // 産前産後免除: 開始 = 予定日を含む42日前(=予定日-41) / 終了 = (出産日||予定日)+56
+  add('産前産後免除開始日', _sankyuAddDays(yotei || birth, -41));
+  add('産前産後免除終了日', _sankyuAddDays(calcBase, 56));
+  // 出産一時金申請 = 出産日(仮は予定日)+1ヶ月
+  add('出産一時金申請', _sankyuAddMonth(calcBase));
+  // 社保免除期間変更（出産後） = 出産日+1ヶ月の前日
+  add('社保免除期間変更（出産後）', _sankyuAddDays(_sankyuAddMonth(calcBase), -1));
+  // 出産手当金申請 = 産前産後免除終了の翌日 (= 出産日+57)
+  var ikukyuStart = _sankyuAddDays(calcBase, 57);
+  add('出産手当金申請', ikukyuStart);
+  // 育休開始社保免除 = 育休開始日 (= 出産日+57)
+  add('育休開始社保免除', ikukyuStart);
 
-  // 3. 育休 初回〜11回目
-  var chunkStart = ikukyuStart;
-  var chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
-  pushPair('育休初回申請', chunkStart, chunkEnd);
+  // 育休 初回〜11回目 = 1ヶ月チャンクの終了日
+  var chunkEnd = _sankyuAddDays(_sankyuAddMonth(ikukyuStart), -1);
+  add('育休初回申請', chunkEnd);
+  var chunkStart;
   for (var n = 2; n <= 11; n++) {
     chunkStart = _sankyuAddDays(chunkEnd, 1);
     chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
-    pushPair('育休' + n + '回目申請', chunkStart, chunkEnd);
+    add('育休' + n + '回目申請', chunkEnd);
   }
 
-  // 4. 1歳6ヶ月まで
-  pushPair('1歳6ヶ月', birthday1, age1_5ReachPrev);
+  // 社保免除期間変更 = 1歳誕生日 / 1歳6ヶ月誕生日
+  add('社保免除期間変更1歳6ヶ月まで', _sankyuAddYears(calcBase, 1));
+  add('社保免除期間変更 2歳まで', _sankyuAddMonths(calcBase, 18));
 
-  // 5. 延長申請 1〜12回目 (タイトル中の番号で検索)
-  for (var k = 1; k <= 12; k++) {
+  // 延長申請 1〜12回目 = 育休11回目の続き(1ヶ月チャンク終了日)。全角数字は_normTで吸収
+  for (var k2 = 1; k2 <= 12; k2++) {
     chunkStart = _sankyuAddDays(chunkEnd, 1);
     chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
-    var foundStart = null, foundEnd = null;
-    Object.keys(_sankyuFieldsMeta).forEach(function(ik) {
-      var f = _sankyuFieldsMeta[ik];
-      if (f.type !== 'DateTime' || !f.title) return;
-      if (f.title.indexOf('延長') < 0) return;
-      var hasNum = new RegExp('(?:^|[^0-9])' + k + '(?:[^0-9]|$)').test(f.title);
-      if (!hasNum) return;
-      var role = _sankyuTitleRole(f.title);
-      if (role === 'start' && !foundStart) foundStart = f;
-      else if (role === 'end' && !foundEnd) foundEnd = f;
-    });
-    if (foundStart) plan.push({ field: foundStart, date: chunkStart });
-    if (foundEnd)   plan.push({ field: foundEnd,   date: chunkEnd   });
+    add('延長申請' + k2 + '回目', chunkEnd);
   }
-
   return plan;
 }
 
@@ -27938,150 +27929,27 @@ function sankyuAutoFill() {
   // 出産予定日 / 出産日 を取得
   var fYotei = _sankyuFindFieldExact('出産予定日');
   var fBirth = _sankyuFindFieldExact('出産日');
-
   var yotei = fYotei ? _sankyuGetDateInput(fYotei.internalName) : null;
   var birth = fBirth ? _sankyuGetDateInput(fBirth.internalName) : null;
-
   if (!yotei && !birth) {
     showToast('出産予定日 か 出産日 を入力してください', 'warn');
     return;
   }
 
-  console.log('=== 産休育休 自動計算 ===');
-  console.log('出産予定日:', yotei);
-  console.log('出産日:', birth);
-  console.log('利用可能な DateTime フィールド:', _sankyuListDateTitles());
-
-  // 派生計算の基準日
-  var birthOrYotei = birth || yotei; // 出産日があればそちら、なければ予定日
+  // 実フィールド名ベースの一括計算(詳細画面のインライン保存と同一エンジン)
+  // 出産日なし=予定日で仮の日付 / 出産日あり=正式な日付で上書き
+  var plan = _sankyuComputeDates(yotei, birth);
   var changes = 0;
-  var skipped = [];
+  plan.forEach(function(p) {
+    _sankyuSetDateInput(p.field.internalName, p.date);
+    changes++;
+  });
 
-  // ─────────────────────────────────────────
-  // 1. 産前産後免除期間（社保）
-  //    開始 = 出産予定日 - 42日
-  //    終了 = 出産日 + 56日 (産後8週)
-  // ─────────────────────────────────────────
-  if (yotei || birth) {
-    var pair1 = _sankyuFindPair('産前産後免除期間');
-    if (pair1.start && yotei) {
-      _sankyuSetDateInput(pair1.start.internalName, _sankyuAddDays(yotei, -42));
-      changes++;
-    } else if (!pair1.start) {
-      skipped.push('産前産後免除期間 開始');
-    }
-    if (pair1.end && birthOrYotei) {
-      _sankyuSetDateInput(pair1.end.internalName, _sankyuAddDays(birthOrYotei, 56));
-      changes++;
-    } else if (!pair1.end) {
-      skipped.push('産前産後免除期間 終了');
-    }
-  }
-
-  // ─────────────────────────────────────────
-  // 出産日が必要な計算 (以下すべて 出産日 必須)
-  // ─────────────────────────────────────────
-  // 出産日が未入力でも 出産予定日を基準に「仮の日付」を全項目へ入力する。
-  // 実際の出産日を入力して再度「日付を自動入力」を押すと 正式な日付で上書きされる。
-  var calcBase = birth || yotei;
-
-  // 育休開始日 = (出産日 or 予定日) + 57日 (産後休業終了の翌日)
-  var ikukyuStart = _sankyuAddDays(calcBase, 57);
-  // 子の1歳誕生日
-  var birthday1 = _sankyuAddYears(calcBase, 1);
-  // 1歳に達する日 = 1歳誕生日の前日
-  var age1Reach = _sankyuAddDays(birthday1, -1);
-  // 1歳に達する日の前日 = 1歳誕生日の前々日
-  var age1ReachPrev = _sankyuAddDays(birthday1, -2);
-  // 子の1歳6ヶ月誕生日
-  var birthday1_5 = _sankyuAddMonths(calcBase, 18);
-  // 1歳6ヶ月に達する日の前日 = 前々日
-  var age1_5ReachPrev = _sankyuAddDays(birthday1_5, -2);
-  // 子の2歳誕生日
-  var birthday2 = _sankyuAddYears(calcBase, 2);
-  // 2歳に達する日の前日 = 前々日
-  var age2ReachPrev = _sankyuAddDays(birthday2, -2);
-
-  // ─────────────────────────────────────────
-  // 2. 育休開始社保免除
-  //    開始 = 出産日 + 57日
-  //    終了 = 1歳に達する日の前日 (= 1歳誕生日 - 2日)
-  // ─────────────────────────────────────────
-  var pair2 = _sankyuFindPair('育休開始社保免除');
-  if (pair2.start) { _sankyuSetDateInput(pair2.start.internalName, ikukyuStart); changes++; }
-  else skipped.push('育休開始社保免除 開始');
-  if (pair2.end)   { _sankyuSetDateInput(pair2.end.internalName,   age1ReachPrev); changes++; }
-  else skipped.push('育休開始社保免除 終了');
-
-  // ─────────────────────────────────────────
-  // 3. 育休 初回〜11回目申請 (1ヶ月チャンク)
-  //    1回目開始 = 育休開始日
-  //    n回目終了 = addMonth(開始) - 1日
-  //    (n+1)回目開始 = n回目終了 + 1日
-  // ─────────────────────────────────────────
-  var chunkStart = ikukyuStart;
-  var chunkEnd;
-  // 初回
-  var pair3a = _sankyuFindPair('育休初回申請');
-  chunkEnd = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
-  if (pair3a.start) { _sankyuSetDateInput(pair3a.start.internalName, chunkStart); changes++; }
-  if (pair3a.end)   { _sankyuSetDateInput(pair3a.end.internalName,   chunkEnd);   changes++; }
-  if (!pair3a.start) skipped.push('育休初回申請 開始');
-  if (!pair3a.end)   skipped.push('育休初回申請 終了');
-
-  // 2〜11回目
-  for (var n = 2; n <= 11; n++) {
-    chunkStart = _sankyuAddDays(chunkEnd, 1);
-    chunkEnd   = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
-    var pairN = _sankyuFindPair('育休' + n + '回目申請');
-    if (pairN.start) { _sankyuSetDateInput(pairN.start.internalName, chunkStart); changes++; }
-    if (pairN.end)   { _sankyuSetDateInput(pairN.end.internalName,   chunkEnd);   changes++; }
-    if (!pairN.start && !pairN.end) skipped.push('育休' + n + '回目申請');
-  }
-
-  // ─────────────────────────────────────────
-  // 4. 社保免除期間変更1歳6ヶ月まで
-  //    開始 = 子の1歳誕生日
-  //    終了 = 1歳6ヶ月に達する日の前日 (= 1歳6ヶ月誕生日 - 2日)
-  // ─────────────────────────────────────────
-  var pair4 = _sankyuFindPair('1歳6ヶ月');
-  if (pair4.start) { _sankyuSetDateInput(pair4.start.internalName, birthday1); changes++; }
-  else skipped.push('1歳6ヶ月まで 開始');
-  if (pair4.end)   { _sankyuSetDateInput(pair4.end.internalName,   age1_5ReachPrev); changes++; }
-  else skipped.push('1歳6ヶ月まで 終了');
-
-  // ─────────────────────────────────────────
-  // 5. 延長申請 1〜12回目 (育休11回目の続き、1ヶ月チャンク)
-  //    11回目終了 = chunkEnd (上のループ後)
-  // ─────────────────────────────────────────
-  for (var k = 1; k <= 12; k++) {
-    chunkStart = _sankyuAddDays(chunkEnd, 1);
-    chunkEnd   = _sankyuAddDays(_sankyuAddMonth(chunkStart), -1);
-    var pairE = _sankyuFindPair('延長申請' + (k < 10 ? '\\s*' + k : k)) || _sankyuFindPair('延長申請');
-    // 延長申請には番号が複数あるので、別途検索
-    var foundStart = null, foundEnd = null;
-    Object.keys(_sankyuFieldsMeta).forEach(function(ik) {
-      var f = _sankyuFieldsMeta[ik];
-      if (f.type !== 'DateTime' || !f.title) return;
-      if (f.title.indexOf('延長') < 0) return;
-      // タイトルに 数字 (k) が含まれているか
-      var hasNum = new RegExp('(?:^|[^0-9])' + k + '(?:[^0-9]|$)').test(f.title);
-      if (!hasNum) return;
-      if (/(開始|始|From|from|Start|start)/.test(f.title)) foundStart = f;
-      else if (/(終了|終|To|to|End|end)/.test(f.title)) foundEnd = f;
-    });
-    if (foundStart) { _sankyuSetDateInput(foundStart.internalName, chunkStart); changes++; }
-    if (foundEnd)   { _sankyuSetDateInput(foundEnd.internalName,   chunkEnd);   changes++; }
-    if (!foundStart && !foundEnd) skipped.push('延長申請 ' + k + '回目');
-  }
-
-  // 終了
   if (changes > 0) {
     showToast(birth ? ('✨ ' + changes + ' 項目を自動入力しました') : ('✨ ' + changes + ' 項目を仮日付（予定日ベース）で入力しました。出産日の入力で正式な日付に更新されます'), 'success');
   } else {
     showToast('該当する項目が見つかりませんでした', 'warn');
   }
-  if (skipped.length > 0) console.log('未検出フィールド:', skipped);
 }
 
 // 編集モード用: 入力フィールド HTML を生成
