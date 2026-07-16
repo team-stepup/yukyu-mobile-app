@@ -25521,6 +25521,9 @@ async function loadSankyuList() {
     ]);
     _sankyuFieldsMeta = results[0];
     _sankyuItems = results[1] || [];
+    if (!_soumuAllEmps || _soumuAllEmps.length === 0) {
+      try { _soumuAllEmps = (await spGetAll(LIST_EMPLOYEES_GUID, '$top=500')) || []; } catch (e) { console.warn('sankyu emp load failed', e); }
+    }
     renderSankyuList();
   } catch (e) {
     console.error('loadSankyuList error:', e);
@@ -25528,6 +25531,57 @@ async function loadSankyuList() {
   }
 }
 
+// ── 採用種別=出産育児期間在職 だが今回の産休育休がList52に未登録(有効レコード無し)の社員 = 「要登録」 ──
+//    2人目以降の妊娠(前回は休業終了)でも自動的にここに出る。
+function _sankyuNeedRegisterList() {
+  var out = [];
+  if (!_soumuAllEmps || !_sankyuItems || !F.zaiyokuSyubetu || !F.syainNo) return out;
+  var kStatus = sankyuKeyByTitle('状況', true) || sankyuKeyByTitle('状況');
+  var kBirth = sankyuKeyByTitle('出産日', true) || sankyuKeyByTitle('出産日');
+  var kYotei = sankyuKeyByTitle('出産予定日');
+  var kSyainNo = sankyuKeyByTitle('社員番号') || 'OData__x793e__x54e1__x756a__x53f7_';
+  var activeSet = {};   // 産前産後休業中/育児休業中(=有効)なList52レコードを持つ社員番号
+  _sankyuItems.forEach(function(it) {
+    var cat = sankyuItemCategory(it, kStatus, kBirth, kYotei);
+    if (cat === 'sango' || cat === 'ikuji') { var b = _bangoNorm(it[kSyainNo]); if (b) activeSet[b] = true; }
+  });
+  var seen = {};
+  _soumuAllEmps.forEach(function(e) {
+    if (String(e[F.zaiyokuSyubetu] || '').indexOf('出産育児') < 0) return;   // 採用種別=出産育児のみ
+    var b = _bangoNorm(e[F.syainNo]); if (!b || seen[b]) return; seen[b] = true;
+    if (activeSet[b]) return;                                                 // 既に有効な登録あり→除外
+    out.push(e);
+  });
+  return out;
+}
+function _sankyuNeedRegisterHtml() {
+  var qEl = document.getElementById('sankyuSearchInput');
+  if (qEl && String(qEl.value || '').trim()) return '';   // 検索中は非表示
+  if (_sankyuBangoFilter) return '';                      // 派遣先絞り込み中は非表示
+  var list = _sankyuNeedRegisterList();
+  if (!list.length) return '';
+  var cards = list.map(function(e) {
+    var no = _bangoNorm(e[F.syainNo]);
+    var name = escHtml(e.Title || '');
+    var haken = escHtml((typeof getBukaValue === 'function' ? getBukaValue(e) : '') || (typeof getHakensaki === 'function' ? getHakensaki(e) : '') || '');
+    return '<div style="display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #f8bbd0;border-radius:10px;padding:9px 11px;margin-bottom:6px;">' +
+      '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;color:#ad1457;">' + name + '</div>' +
+      '<div style="font-size:11px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + haken + '</div></div>' +
+      '<button onclick="_sankyuRegisterFor(' + no + ')" style="flex-shrink:0;background:linear-gradient(135deg,#ec407a,#d81b60);color:#fff;border:none;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 1px 4px rgba(216,27,96,0.35);">＋ 登録</button>' +
+      '</div>';
+  }).join('');
+  return '<div style="background:linear-gradient(135deg,#fff0f5,#fce4ec);border:1px solid #f48fb1;border-radius:12px;padding:11px 12px;margin-bottom:12px;box-shadow:0 1px 4px rgba(216,27,96,0.12);">' +
+    '<div style="font-size:13px;font-weight:800;color:#ad1457;margin-bottom:3px;">🔴 産休育休 未登録（要登録） ' + list.length + '名</div>' +
+    '<div style="font-size:10.5px;color:#c2708f;margin-bottom:9px;line-height:1.5;">採用種別が「出産育児期間在職」ですが、今回の産休育休がまだ登録されていません（2人目以降も同様）。「＋登録」→ 出産予定日を入れてください。</div>' +
+    cards + '</div>';
+}
+async function _sankyuRegisterFor(bango) {
+  try {
+    await openSankyuNew();
+    var e = (_soumuAllEmps || []).find(function(x) { return _bangoNorm(x[F.syainNo]) === String(bango); });
+    if (e && typeof _sankyuSelectEmployee === 'function') _sankyuSelectEmployee(e);
+  } catch (err) { console.error('sankyu register-for error', err); }
+}
 function renderSankyuList() {
   var body = document.getElementById('sankyuListBody');
   var countLabel = document.getElementById('sankyuCountLabel');
@@ -25709,7 +25763,7 @@ function renderSankyuList() {
 
     html += '</div>';
   });
-  body.innerHTML = html;
+  body.innerHTML = _sankyuNeedRegisterHtml() + html;
 }
 
 // 個人ごとの遅延項目を検出 (一覧画面用)
