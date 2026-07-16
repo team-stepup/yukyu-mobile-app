@@ -26040,7 +26040,7 @@ function _sankyuSelectEmpByIdx(idx) {
   _sankyuSelectEmployee(emp);
 }
 
-function _sankyuSelectEmployee(emp) {
+async function _sankyuSelectEmployee(emp) {
   _sankyuPickedEmp = emp;
   // 氏名・社員番号・派遣先 を item にセット
   var it = _sankyuCurrentItem || {};
@@ -26053,6 +26053,21 @@ function _sankyuSelectEmployee(emp) {
   if (kSyainNo) it[kSyainNo] = (no !== undefined && no !== null && no !== '') ? Number(no) : null;
   if (kShimei) it[kShimei] = name;
   if (kHakensaki) it[kHakensaki] = haken;
+  // 社員データから個人情報を自動反映 (新規登録の手入力を減らす。出産予定日/子関連は妊娠ごとに手入力)
+  try {
+    var meta = await fetchEmployeeFields();
+    var km = meta ? buildFieldKeyMap(meta) : {};
+    function ev(key){ var k = km[key]; var v = k ? emp[k] : undefined; return (v===undefined||v===null||v==='') ? '' : v; }
+    function setT(title, val){ if (val==='' || val==null) return; var fk = sankyuKeyByTitle(title, true) || sankyuKeyByTitle(title); if (fk) it[fk] = val; }
+    setT('住所', ev('address'));
+    setT('電話番号', ev('keitai'));
+    setT('性別（親）', ev('sex'));
+    setT('生年月日', ev('birthday'));
+    setT('被保険者氏名', ev('shahoNamae') || name);
+    setT('健康保険資格取得日', ev('kenpoShutoku'));
+    setT('雇用保険資格取得日', ev('koyouShutoku'));
+    setT('雇用保険番号', ev('koyouNo'));
+  } catch (e) { console.warn('産休育休 個人情報プリフィル失敗', e); }
   _sankyuCurrentItem = it;
   renderSankyuDetail(it);
   window.scrollTo(0, 0);
