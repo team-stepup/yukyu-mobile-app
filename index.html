@@ -26643,7 +26643,8 @@ async function quickSaveSankyuBasicDate(internalName, dateValue, title) {
     _soumuSankyuSummary = null;
 
     if (autoCount > 0) {
-      showToast('✨ ' + title + ' を保存し ' + autoCount + ' 項目を自動計算しました', 'success');
+      var kariNote = (isYotei && !baseBirth) ? '（仮・予定日ベース。出産日入力で正式に更新）' : '';
+      showToast('✨ ' + title + ' を保存し ' + autoCount + ' 項目を自動計算しました' + kariNote, 'success');
     } else {
       showToast(typed ? ('✓ ' + title + ' を保存しました') : (title + ' をクリアしました'), 'success');
     }
@@ -27878,13 +27879,15 @@ function _sankyuComputeDates(yotei, birth) {
     if (pair1.end && birthOrYotei) plan.push({ field: pair1.end, date: _sankyuAddDays(birthOrYotei, 56) });
   }
 
-  // 以下 出産日 必須
-  if (!birth) return plan;
+  // 出産日が未入力でも 出産予定日を基準に「仮の日付」を全項目へ計算する。
+  // 実際の出産日が入力されたら 同じ経路で正式な日付に再計算・上書きされる。
+  var calcBase = birth || yotei;
+  if (!calcBase) return plan;
 
-  var ikukyuStart    = _sankyuAddDays(birth, 57);
-  var birthday1      = _sankyuAddYears(birth, 1);
+  var ikukyuStart    = _sankyuAddDays(calcBase, 57);
+  var birthday1      = _sankyuAddYears(calcBase, 1);
   var age1ReachPrev  = _sankyuAddDays(birthday1, -2);
-  var birthday1_5    = _sankyuAddMonths(birth, 18);
+  var birthday1_5    = _sankyuAddMonths(calcBase, 18);
   var age1_5ReachPrev = _sankyuAddDays(birthday1_5, -2);
 
   // 2. 育休開始社保免除
@@ -27978,31 +27981,24 @@ function sankyuAutoFill() {
   // ─────────────────────────────────────────
   // 出産日が必要な計算 (以下すべて 出産日 必須)
   // ─────────────────────────────────────────
-  if (!birth) {
-    // 出産日未入力なら 産前産後 のみ自動入力で終了
-    if (changes > 0) {
-      showToast('出産予定日から ' + changes + ' 項目を自動入力しました', 'success');
-    } else {
-      showToast('該当フィールドが見つかりませんでした', 'warn');
-    }
-    if (skipped.length > 0) console.log('スキップ:', skipped);
-    return;
-  }
+  // 出産日が未入力でも 出産予定日を基準に「仮の日付」を全項目へ入力する。
+  // 実際の出産日を入力して再度「日付を自動入力」を押すと 正式な日付で上書きされる。
+  var calcBase = birth || yotei;
 
-  // 育休開始日 = 出産日 + 57日 (産後休業終了の翌日)
-  var ikukyuStart = _sankyuAddDays(birth, 57);
+  // 育休開始日 = (出産日 or 予定日) + 57日 (産後休業終了の翌日)
+  var ikukyuStart = _sankyuAddDays(calcBase, 57);
   // 子の1歳誕生日
-  var birthday1 = _sankyuAddYears(birth, 1);
+  var birthday1 = _sankyuAddYears(calcBase, 1);
   // 1歳に達する日 = 1歳誕生日の前日
   var age1Reach = _sankyuAddDays(birthday1, -1);
   // 1歳に達する日の前日 = 1歳誕生日の前々日
   var age1ReachPrev = _sankyuAddDays(birthday1, -2);
   // 子の1歳6ヶ月誕生日
-  var birthday1_5 = _sankyuAddMonths(birth, 18);
+  var birthday1_5 = _sankyuAddMonths(calcBase, 18);
   // 1歳6ヶ月に達する日の前日 = 前々日
   var age1_5ReachPrev = _sankyuAddDays(birthday1_5, -2);
   // 子の2歳誕生日
-  var birthday2 = _sankyuAddYears(birth, 2);
+  var birthday2 = _sankyuAddYears(calcBase, 2);
   // 2歳に達する日の前日 = 前々日
   var age2ReachPrev = _sankyuAddDays(birthday2, -2);
 
@@ -28081,7 +28077,7 @@ function sankyuAutoFill() {
 
   // 終了
   if (changes > 0) {
-    showToast('✨ ' + changes + ' 項目を自動入力しました', 'success');
+    showToast(birth ? ('✨ ' + changes + ' 項目を自動入力しました') : ('✨ ' + changes + ' 項目を仮日付（予定日ベース）で入力しました。出産日の入力で正式な日付に更新されます'), 'success');
   } else {
     showToast('該当する項目が見つかりませんでした', 'warn');
   }
@@ -28304,7 +28300,7 @@ function renderSankyuDetail(item) {
     html += '<div class="sankyu-autofill-bar">';
     html +=   '<div class="sankyu-autofill-text">';
     html +=     '<div class="sankyu-autofill-title">✨ 自動計算</div>';
-    html +=     '<div class="sankyu-autofill-sub">出産予定日 / 出産日 から各種期間を一括計算</div>';
+    html +=     '<div class="sankyu-autofill-sub">予定日=仮の日付を一括入力 / 出産日=正式な日付で上書き</div>';
     html +=   '</div>';
     html +=   '<button class="sankyu-autofill-btn" onclick="sankyuAutoFill()">日付を自動入力</button>';
     html += '</div>';
