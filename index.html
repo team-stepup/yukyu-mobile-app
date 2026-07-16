@@ -26323,6 +26323,32 @@ async function saveSankyuEdit() {
     });
 
     if (isNew) {
+      // ★ピッカー/プリフィルで _sankyuCurrentItem に入れた値を body へマージ★
+      // 氏名・社員番号・派遣先(Title)・状況などは classifySankyuField='hidden'(ヘッダー表示)で
+      // 入力欄が無く、入力欄だけを読む上のループでは body に入らない
+      // → 社員を選んでも「(氏名なし)」レコードが出来るバグの修正。入力欄の値が常に優先。
+      Object.keys(meta).forEach(function(iname2) {
+        var f2 = meta[iname2];
+        if (f2.readOnly) return;
+        if (['ID','Id','GUID','FileSystemObjectType','SyncClientId'].indexOf(f2.entityPropertyName) >= 0) return;
+        if (['ID','Id','GUID','FileSystemObjectType','SyncClientId'].indexOf(iname2) >= 0) return;
+        if (body[f2.dataKey] !== undefined) return;
+        var v = _sankyuCurrentItem ? _sankyuCurrentItem[f2.dataKey] : null;
+        if (v === null || v === undefined || v === '') return;
+        if (f2.type === 'DateTime') {
+          try { var dv2 = new Date(v); if (!isNaN(dv2)) { body[f2.dataKey] = dv2.toISOString(); changed++; } } catch(_) {}
+          return;
+        }
+        if (f2.type === 'Number' || f2.type === 'Currency') {
+          var nv2 = parseFloat(v);
+          if (!isNaN(nv2)) { body[f2.dataKey] = nv2; changed++; }
+          return;
+        }
+        if (f2.type === 'Boolean') { body[f2.dataKey] = !!v; changed++; return; }
+        body[f2.dataKey] = String(v);
+        changed++;
+      });
+
       if (changed === 0) {
         showToast('入力項目がありません', 'warn');
         if (btn) { btn.disabled = false; btn.textContent = originalBtnLabel; }
