@@ -43537,8 +43537,10 @@ async function fetchTenkenFields() {
   return _tenkenFields;
 }
 
-// ====== 送迎 乗車リスト (SP社員「送迎者」「送迎乗車順」を運転手別に表示・山下浩俊のみ) ======
+// ====== 送迎 乗車リスト (SP社員「送迎者」「送迎乗車順」を運転手別に表示・編集・山下浩俊のみ) ======
 function _jlEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+window._jlState = null;
 
 async function loadJoshaListScreen() {
   var box = document.getElementById('joshaListBody');
@@ -43568,11 +43570,8 @@ async function loadJoshaListScreen() {
       box.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;">社員リストに「送迎者」列が見つかりません。</div>';
       return;
     }
-    var riders = emps.filter(function(e) { return !isResigned(e) && e[fSougei] && String(e[fSougei]).trim(); });
-    if (!riders.length) {
-      box.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">乗車データがありません。</div>';
-      return;
-    }
+    var actives = emps.filter(function(e) { return !isResigned(e); });
+    var riders = actives.filter(function(e) { return e[fSougei] && String(e[fSougei]).trim(); });
     var byDriver = {};
     riders.forEach(function(e) {
       var d = String(e[fSougei]).trim();
@@ -43600,9 +43599,12 @@ async function loadJoshaListScreen() {
       byDriver[d].forEach(function(e) { var b = bucketOf(e); cnt[b] = (cnt[b] || 0) + 1; });
       driverBucket[d] = Object.keys(cnt).sort(function(a, b) { return cnt[b] - cnt[a]; })[0];
     });
+    window._jlState = { fSougei: fSougei, fJun: fJun, fBuka: fBuka, emps: actives, riders: riders, byDriver: byDriver, driverList: [] };
+    var st = window._jlState;
     var html = '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
       + '<div style="font-weight:800;color:var(--primary);font-size:1.05em;">🚖 朝の送迎 乗車リスト</div>'
-      + '<div style="font-size:12px;color:var(--text-light);margin-top:4px;">運転手 ' + Object.keys(byDriver).length + '名・乗車 ' + riders.length + '名（社員リスト「送迎者」「送迎乗車順」より）</div></div>';
+      + '<div style="font-size:12px;color:var(--text-light);margin-top:4px;">運転手 ' + Object.keys(byDriver).length + '名・乗車 ' + riders.length + '名。行をタップで修正、退社者は自動で消えます。</div>'
+      + '<button onclick="_jlOpenAdd(-1)" style="margin-top:10px;width:100%;background:#e8f0fe;color:#1565c0;border:1px dashed #90b4e8;border-radius:10px;padding:9px;font-weight:800;font-size:13px;cursor:pointer;">＋ 乗車者を追加</button></div>';
     BUCKETS.forEach(function(bk) {
       var drivers = Object.keys(byDriver).filter(function(d) { return driverBucket[d] === bk.key; });
       if (!drivers.length) return;
@@ -43610,6 +43612,8 @@ async function loadJoshaListScreen() {
       var total = drivers.reduce(function(s, d) { return s + byDriver[d].length; }, 0);
       html += '<div style="margin:14px 2px 8px;font-weight:800;color:' + bk.color + ';font-size:1em;">🏭 ' + _jlEsc(bk.key) + '（運転手' + drivers.length + '名・乗車' + total + '名）</div>';
       drivers.forEach(function(d) {
+        st.driverList.push(d);
+        var di = st.driverList.length - 1;
         var list = byDriver[d].slice().sort(function(a, b) {
           var ja = (fJun && a[fJun] != null && a[fJun] !== '') ? Number(a[fJun]) : 999;
           var jb = (fJun && b[fJun] != null && b[fJun] !== '') ? Number(b[fJun]) : 999;
@@ -43617,25 +43621,255 @@ async function loadJoshaListScreen() {
           return String(a.Title || '').localeCompare(String(b.Title || ''), 'ja');
         });
         html += '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:5px solid ' + bk.color + ';">'
-          + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+          + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">'
           + '<span style="font-size:1.1em;">🚐</span>'
           + '<span style="font-weight:800;font-size:1.02em;">' + _jlEsc(d) + '</span>'
+          + '<button onclick="_jlRenameDriver(' + di + ')" title="運転手名を変更" style="background:none;border:none;font-size:14px;cursor:pointer;padding:2px 4px;color:#90a4ae;">✎</button>'
           + '<span style="margin-left:auto;background:' + bk.bg + ';color:' + bk.color + ';font-size:11px;font-weight:800;padding:2px 10px;border-radius:10px;">' + list.length + '名</span></div>';
         list.forEach(function(e) {
           var junRaw = (fJun && e[fJun] != null && e[fJun] !== '') ? Math.round(Number(e[fJun])) : null;
           var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
-          html += '<div style="display:flex;align-items:center;gap:10px;padding:6px 2px;border-top:1px solid #f0f2f7;">'
+          html += '<div onclick="_jlOpenEdit(' + e.Id + ')" style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-top:1px solid #f0f2f7;cursor:pointer;">'
             + '<span style="width:24px;height:24px;border-radius:50%;background:' + (junRaw ? bk.color : '#cfd8dc') + ';color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' + (junRaw || '—') + '</span>'
             + '<span style="font-weight:600;">' + _jlEsc(e.Title || '') + '</span>'
-            + '<span style="margin-left:auto;font-size:11px;color:var(--text-light);">No.' + _jlEsc(no) + '</span></div>';
+            + '<span style="margin-left:auto;font-size:11px;color:var(--text-light);">No.' + _jlEsc(no) + '</span>'
+            + '<span style="font-size:13px;color:#b0bec5;">✎</span></div>';
         });
+        html += '<button onclick="_jlOpenAdd(' + di + ')" style="margin-top:8px;width:100%;background:#f7f9fc;color:#607d8b;border:1px dashed #cfd8dc;border-radius:8px;padding:6px;font-size:12px;font-weight:700;cursor:pointer;">＋ この車に追加</button>';
         html += '</div>';
       });
     });
+    if (!riders.length) {
+      html += '<div style="text-align:center;padding:20px;color:var(--text-light);">乗車データがありません。上の「＋ 乗車者を追加」から登録できます。</div>';
+    }
+    html += '<div id="jlSheet" style="display:none;"></div>';
     box.innerHTML = html;
   } catch (e) {
     console.warn('[joshaList] load error', e);
     box.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;">読み込みに失敗しました。</div>';
+  }
+}
+
+// --- 乗車リスト 編集（SP社員Listの送迎者/送迎乗車順を直接更新） ---
+async function _jlUpdate(itemId, fields) {
+  var st = window._jlState;
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+  var body = { __metadata: { type: entityType } };
+  if ('sougei' in fields) body[st.fSougei.replace(/^OData_/, '')] = fields.sougei;
+  if ('jun' in fields && st.fJun) body[st.fJun.replace(/^OData_/, '')] = fields.jun;
+  var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    var t = ''; try { t = await resp.text(); } catch (_) {}
+    throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 150));
+  }
+}
+
+function _jlCloseSheet() {
+  var s = document.getElementById('jlSheet');
+  if (s) { s.style.display = 'none'; s.innerHTML = ''; }
+}
+
+function _jlSheetShow(inner) {
+  var s = document.getElementById('jlSheet');
+  if (!s) return;
+  s.innerHTML = '<div onclick="_jlCloseSheet()" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:999;background:rgba(0,0,0,.35);"></div>'
+    + '<div style="position:fixed;left:0;right:0;bottom:0;z-index:1000;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.25);padding:16px 16px 26px;max-height:75vh;overflow-y:auto;">' + inner + '</div>';
+  s.style.display = 'block';
+}
+
+function _jlDriverSelectHtml(selVal) {
+  var st = window._jlState;
+  var seen = {};
+  var opts = st.driverList.filter(function(d) { if (seen[d]) return false; seen[d] = 1; return true; })
+    .map(function(d) { return '<option' + (d === selVal ? ' selected' : '') + '>' + _jlEsc(d) + '</option>'; }).join('');
+  var isOther = selVal && st.driverList.indexOf(selVal) < 0;
+  return '<select id="jlDriverSel" onchange="_jlDriverSelChange()" style="width:100%;padding:10px;border:1px solid #cfd8dc;border-radius:10px;font-size:14px;background:#fff;">'
+    + opts + '<option value="__other__"' + (isOther ? ' selected' : '') + '>✏️ その他（手入力）</option></select>'
+    + '<input id="jlDriverOther" value="' + (isOther ? _jlEsc(selVal) : '') + '" placeholder="運転手名を入力" style="display:' + (isOther ? 'block' : 'none') + ';width:100%;margin-top:6px;padding:10px;border:1px solid #cfd8dc;border-radius:10px;font-size:14px;">';
+}
+
+function _jlDriverSelChange() {
+  var sel = document.getElementById('jlDriverSel');
+  var other = document.getElementById('jlDriverOther');
+  if (sel && other) other.style.display = sel.value === '__other__' ? 'block' : 'none';
+}
+
+function _jlGetDriverVal() {
+  var sel = document.getElementById('jlDriverSel');
+  if (!sel) return '';
+  if (sel.value === '__other__') {
+    var other = document.getElementById('jlDriverOther');
+    return other ? String(other.value).trim() : '';
+  }
+  return String(sel.value).trim();
+}
+
+function _jlOpenEdit(itemId) {
+  var st = window._jlState;
+  if (!st) return;
+  var e = st.riders.find(function(x) { return x.Id === itemId; });
+  if (!e) return;
+  var cur = String(e[st.fSougei] || '').trim();
+  var jun = (st.fJun && e[st.fJun] != null && e[st.fJun] !== '') ? Math.round(Number(e[st.fJun])) : '';
+  var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
+  _jlSheetShow(
+    '<div style="font-weight:800;font-size:1.05em;margin-bottom:2px;">' + _jlEsc(e.Title || '') + '</div>'
+    + '<div style="font-size:11px;color:var(--text-light);margin-bottom:12px;">No.' + _jlEsc(no) + '</div>'
+    + '<div style="font-size:12px;font-weight:700;color:#546e7a;margin-bottom:4px;">🚐 運転手</div>' + _jlDriverSelectHtml(cur)
+    + '<div style="font-size:12px;font-weight:700;color:#546e7a;margin:12px 0 4px;">🔢 乗車順</div>'
+    + '<input id="jlJun" type="number" min="1" max="99" value="' + jun + '" style="width:100px;padding:10px;border:1px solid #cfd8dc;border-radius:10px;font-size:14px;">'
+    + '<div style="display:flex;gap:8px;margin-top:16px;">'
+    + '<button onclick="_jlSaveEdit(' + itemId + ')" style="flex:2;background:var(--primary);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:800;font-size:14px;cursor:pointer;">💾 保存</button>'
+    + '<button onclick="_jlRemove(' + itemId + ')" style="flex:1;background:#fdecea;color:#c62828;border:none;border-radius:10px;padding:12px;font-weight:800;font-size:13px;cursor:pointer;">送迎から外す</button></div>'
+    + '<button onclick="_jlCloseSheet()" style="width:100%;margin-top:8px;background:none;border:none;color:var(--text-light);font-size:13px;padding:8px;cursor:pointer;">閉じる</button>'
+  );
+}
+
+async function _jlSaveEdit(itemId) {
+  var driver = _jlGetDriverVal();
+  if (!driver) { showToast('運転手を選択または入力してください', 'error'); return; }
+  var junEl = document.getElementById('jlJun');
+  var jun = junEl && junEl.value !== '' ? parseInt(junEl.value, 10) : null;
+  try {
+    await _jlUpdate(itemId, { sougei: driver, jun: (jun && jun > 0) ? jun : null });
+    _jlCloseSheet();
+    showToast('✓ 保存しました', 'success');
+    loadJoshaListScreen();
+  } catch (e) {
+    console.warn('[joshaList] save error', e);
+    showToast('保存エラー: ' + (e.message || e), 'error');
+  }
+}
+
+async function _jlRemove(itemId) {
+  var st = window._jlState;
+  var e = st && st.riders.find(function(x) { return x.Id === itemId; });
+  if (!e) return;
+  if (!confirm((e.Title || '') + ' さんを送迎リストから外しますか？\n（社員データの「送迎者」「送迎乗車順」をクリアします）')) return;
+  try {
+    await _jlUpdate(itemId, { sougei: null, jun: null });
+    _jlCloseSheet();
+    showToast('✓ 外しました', 'success');
+    loadJoshaListScreen();
+  } catch (e2) {
+    console.warn('[joshaList] remove error', e2);
+    showToast('エラー: ' + (e2.message || e2), 'error');
+  }
+}
+
+function _jlOpenAdd(driverIdx) {
+  var st = window._jlState;
+  if (!st) return;
+  window._jlAddSel = null;
+  var preset = driverIdx >= 0 ? st.driverList[driverIdx] : (st.driverList[0] || '');
+  _jlSheetShow(
+    '<div style="font-weight:800;font-size:1.05em;margin-bottom:12px;">＋ 乗車者を追加</div>'
+    + '<div style="font-size:12px;font-weight:700;color:#546e7a;margin-bottom:4px;">👤 社員をさがす（氏名・社員番号）</div>'
+    + '<input id="jlAddQ" oninput="_jlAddSearch()" placeholder="例: タカミ / 70008" style="width:100%;padding:10px;border:1px solid #cfd8dc;border-radius:10px;font-size:14px;">'
+    + '<div id="jlAddCands" style="max-height:180px;overflow-y:auto;margin-top:6px;"></div>'
+    + '<div id="jlAddSelBox" style="display:none;margin-top:8px;background:#e8f5e9;border-radius:10px;padding:8px 12px;font-weight:700;color:#2e7d32;"></div>'
+    + '<div style="font-size:12px;font-weight:700;color:#546e7a;margin:12px 0 4px;">🚐 運転手</div>' + _jlDriverSelectHtml(preset)
+    + '<div style="font-size:12px;font-weight:700;color:#546e7a;margin:12px 0 4px;">🔢 乗車順（空欄可）</div>'
+    + '<input id="jlJun" type="number" min="1" max="99" style="width:100px;padding:10px;border:1px solid #cfd8dc;border-radius:10px;font-size:14px;">'
+    + '<button onclick="_jlSaveAdd()" style="width:100%;margin-top:16px;background:var(--primary);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:800;font-size:14px;cursor:pointer;">💾 追加する</button>'
+    + '<button onclick="_jlCloseSheet()" style="width:100%;margin-top:8px;background:none;border:none;color:var(--text-light);font-size:13px;padding:8px;cursor:pointer;">閉じる</button>'
+  );
+}
+
+function _jlAddSearch() {
+  var st = window._jlState;
+  var q = String((document.getElementById('jlAddQ') || {}).value || '').trim();
+  var box = document.getElementById('jlAddCands');
+  if (!box) return;
+  if (!q) { box.innerHTML = ''; return; }
+  var riderIds = {};
+  st.riders.forEach(function(r) { riderIds[r.Id] = 1; });
+  var hits = st.emps.filter(function(e) {
+    if (riderIds[e.Id]) return false;
+    var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
+    return (String(e.Title || '').indexOf(q) >= 0) || (no && no.indexOf(q) >= 0);
+  }).slice(0, 15);
+  box.innerHTML = hits.map(function(e) {
+    var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
+    var buka = st.fBuka ? stripBukaPrefix(e[st.fBuka]) : '';
+    return '<div onclick="_jlPickEmp(' + e.Id + ')" style="padding:8px 10px;border-bottom:1px solid #f0f2f7;cursor:pointer;">'
+      + '<span style="font-weight:700;">' + _jlEsc(e.Title || '') + '</span>'
+      + '<span style="font-size:11px;color:var(--text-light);margin-left:8px;">No.' + _jlEsc(no) + '・' + _jlEsc(buka) + '</span></div>';
+  }).join('') || '<div style="padding:10px;color:var(--text-light);font-size:12px;">該当なし（既に乗車リストにいる人は表示されません）</div>';
+}
+
+function _jlPickEmp(empId) {
+  var st = window._jlState;
+  var e = st.emps.find(function(x) { return x.Id === empId; });
+  if (!e) return;
+  window._jlAddSel = empId;
+  var selBox = document.getElementById('jlAddSelBox');
+  var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
+  if (selBox) { selBox.style.display = 'block'; selBox.innerHTML = '✓ ' + _jlEsc(e.Title || '') + '（No.' + _jlEsc(no) + '）'; }
+  var cands = document.getElementById('jlAddCands');
+  if (cands) cands.innerHTML = '';
+  var q = document.getElementById('jlAddQ');
+  if (q) q.value = '';
+}
+
+async function _jlSaveAdd() {
+  var st = window._jlState;
+  if (!window._jlAddSel) { showToast('社員を選択してください', 'error'); return; }
+  var driver = _jlGetDriverVal();
+  if (!driver) { showToast('運転手を選択または入力してください', 'error'); return; }
+  var junEl = document.getElementById('jlJun');
+  var jun = junEl && junEl.value !== '' ? parseInt(junEl.value, 10) : null;
+  if (jun == null) {
+    // 空欄なら その運転手の最大+1 を自動採番
+    var maxJun = 0;
+    (st.byDriver[driver] || []).forEach(function(e) {
+      var j = (st.fJun && e[st.fJun] != null && e[st.fJun] !== '') ? Number(e[st.fJun]) : 0;
+      if (j > maxJun) maxJun = j;
+    });
+    jun = maxJun + 1;
+  }
+  try {
+    await _jlUpdate(window._jlAddSel, { sougei: driver, jun: jun });
+    _jlCloseSheet();
+    showToast('✓ 追加しました', 'success');
+    loadJoshaListScreen();
+  } catch (e) {
+    console.warn('[joshaList] add error', e);
+    showToast('追加エラー: ' + (e.message || e), 'error');
+  }
+}
+
+async function _jlRenameDriver(driverIdx) {
+  var st = window._jlState;
+  var old = st && st.driverList[driverIdx];
+  if (!old) return;
+  var nn = prompt('新しい運転手名（この運転手の乗車者 ' + (st.byDriver[old] || []).length + '名 全員に反映されます）', old);
+  if (!nn) return;
+  nn = String(nn).trim();
+  if (!nn || nn === old) return;
+  var list = st.byDriver[old] || [];
+  try {
+    showToast('運転手名を変更中...', 'info');
+    for (var i = 0; i < list.length; i++) {
+      await _jlUpdate(list[i].Id, { sougei: nn });
+      await new Promise(function(r) { setTimeout(r, 300); });
+    }
+    showToast('✓ ' + list.length + '名を「' + nn + '」に変更しました', 'success');
+    loadJoshaListScreen();
+  } catch (e) {
+    console.warn('[joshaList] rename error', e);
+    showToast('変更エラー（途中まで反映の可能性あり）: ' + (e.message || e), 'error');
+    loadJoshaListScreen();
   }
 }
 
