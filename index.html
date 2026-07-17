@@ -5417,6 +5417,7 @@ select.sankyu-edit-input {
         <span id="yukyuBadgeCount" class="ql-badge" style="background:#1565c0;display:none;"></span>
         <span id="yukyuBadgeMinus" class="ql-badge" style="background:#c62828;display:none;top:4px;left:4px;right:auto;"></span>
         <span id="yukyuBadgeBelow5" class="ql-badge" style="background:#7c3aed;display:none;bottom:4px;left:4px;top:auto;right:auto;"></span>
+        <span id="yukyuBadgeAvg" class="ql-badge" title="1稼働日あたり平均取得数" style="background:#00897b;display:none;bottom:4px;right:4px;top:auto;white-space:nowrap;padding:0 5px;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('nyutaiScreen')" style="position:relative;">
         <span class="ql-icon">🚪</span>
@@ -18267,6 +18268,22 @@ async function loadHomeBadges() {
     if (yRecs.length > 0) { yBadge.textContent = yRecs.length; yBadge.style.display = 'inline-block'; }
     else { yBadge.style.display = 'none'; }
   }
+
+  // 有給 1稼働日あたり平均バッジ（右上の件数 ÷ ステップアップカレンダーの今日までの稼働日数）
+  try {
+    var _yAvgComp = await fetchCompanyHolidays().catch(function() { return new Set(); });
+    var _yWdCount = 0;
+    for (var _ywd = 1; _ywd <= today.getDate(); _ywd++) {
+      if (_isWorkday(today.getFullYear(), today.getMonth() + 1, _ywd, _yAvgComp)) _yWdCount++;
+    }
+    var yAvgBadge = document.getElementById('yukyuBadgeAvg');
+    if (yAvgBadge) {
+      if (yRecs.length > 0 && _yWdCount > 0) {
+        yAvgBadge.textContent = (yRecs.length / _yWdCount).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '/日';
+        yAvgBadge.style.display = 'inline-block';
+      } else { yAvgBadge.style.display = 'none'; }
+    }
+  } catch (e) { console.warn('[yukyuAvg] badge calc error', e); }
 
   // 有給残マイナス者バッジ（過剰使用者数）
   try {
