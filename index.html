@@ -18269,15 +18269,18 @@ async function loadHomeBadges() {
     else { yBadge.style.display = 'none'; }
   }
 
-  // 有給 1稼働日あたり平均バッジ（右上の件数 ÷ ステップアップカレンダーの今日までの稼働日数）
+  // 有給 1稼働日あたり平均バッジ（右上の件数 ÷ ステップアップカレンダーの今日までの稼働日数）※山下浩俊のみ表示
   try {
-    var _yAvgComp = await fetchCompanyHolidays().catch(function() { return new Set(); });
-    var _yWdCount = 0;
-    for (var _ywd = 1; _ywd <= today.getDate(); _ywd++) {
-      if (_isWorkday(today.getFullYear(), today.getMonth() + 1, _ywd, _yAvgComp)) _yWdCount++;
-    }
     var yAvgBadge = document.getElementById('yukyuBadgeAvg');
-    if (yAvgBadge) {
+    var _yAvgVisible = (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) || getLoggedInEmail() === 'h.yamashita@team-stepup.com';
+    if (yAvgBadge && !_yAvgVisible) {
+      yAvgBadge.style.display = 'none';
+    } else if (yAvgBadge) {
+      var _yAvgComp = await fetchCompanyHolidays().catch(function() { return new Set(); });
+      var _yWdCount = 0;
+      for (var _ywd = 1; _ywd <= today.getDate(); _ywd++) {
+        if (_isWorkday(today.getFullYear(), today.getMonth() + 1, _ywd, _yAvgComp)) _yWdCount++;
+      }
       if (yRecs.length > 0 && _yWdCount > 0) {
         yAvgBadge.textContent = (yRecs.length / _yWdCount).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '/日';
         yAvgBadge.style.display = 'inline-block';
