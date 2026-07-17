@@ -43537,10 +43537,37 @@ async function fetchTenkenFields() {
   return _tenkenFields;
 }
 
-// ====== 送迎 乗車リスト (SP社員「送迎者」「送迎乗車順」を運転手別に表示・編集・山下浩俊のみ) ======
+// ====== 送迎 乗車リスト (SP社員「送迎者」「送迎乗車順」・派遣先別・朝リスト/帰り段取り・山下浩俊のみ) ======
 function _jlEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
 window._jlState = null;
+window._jlView = null;   // null=派遣先選択 / {mode:'am'|'pm', bucket:JL_BUCKETSのindex(-1=すべて)}
+window._jlKaeri = null;  // 帰り段取りの編集状態（localStorageに日付+派遣先で保存）
+
+// 派遣先と終業時間の選択肢（先頭=定時=デフォルト）
+var JL_BUCKETS = [
+  { key: 'ASTI浜松', color: '#1565c0', bg: '#e3f0fd' },
+  { key: 'ユーシン', color: '#e65100', bg: '#fff3e0' },
+  { key: 'ASTI都田', color: '#2e7d32', bg: '#e8f5e9' },
+  { key: 'ASTI掛川', color: '#6a1b9a', bg: '#f3e5f5' },
+  { key: 'その他', color: '#546e7a', bg: '#eceff1' }
+];
+var JL_TIMES = {
+  'ASTI浜松': ['17:00', '18:00', '19:00', '20:00', '21:00'],
+  'ASTI都田': ['17:00', '18:00', '19:00', '20:00', '21:00'],
+  'ASTI掛川': ['17:00', '18:00', '19:00', '20:00', '21:00'],
+  'ユーシン': ['17:40', '19:45'],
+  'その他': ['17:00', '18:00', '19:00', '20:00', '21:00']
+};
+
+function _jlBucketOfStr(b) {
+  b = String(b || '');
+  if (b.indexOf('ﾕｰｼﾝ') >= 0 || b.indexOf('ユーシン') >= 0) return 'ユーシン';
+  if (b.indexOf('都田') >= 0) return 'ASTI都田';
+  if (b.indexOf('掛川') >= 0) return 'ASTI掛川';
+  if (b.indexOf('浜松') >= 0) return 'ASTI浜松';
+  return 'その他';
+}
 
 async function loadJoshaListScreen() {
   var box = document.getElementById('joshaListBody');
@@ -43577,77 +43604,133 @@ async function loadJoshaListScreen() {
       var d = String(e[fSougei]).trim();
       (byDriver[d] = byDriver[d] || []).push(e);
     });
-    function bucketOf(e) {
-      var b = String((fBuka && e[fBuka]) || '');
-      if (b.indexOf('ﾕｰｼﾝ') >= 0 || b.indexOf('ユーシン') >= 0) return 'ユーシン';
-      if (b.indexOf('都田') >= 0) return 'ASTI都田';
-      if (b.indexOf('掛川') >= 0) return 'ASTI掛川';
-      if (b.indexOf('浜松') >= 0) return 'ASTI浜松';
-      return 'その他';
-    }
-    var BUCKETS = [
-      { key: 'ASTI浜松', color: '#1565c0', bg: '#e3f0fd' },
-      { key: 'ユーシン', color: '#e65100', bg: '#fff3e0' },
-      { key: 'ASTI都田', color: '#2e7d32', bg: '#e8f5e9' },
-      { key: 'ASTI掛川', color: '#6a1b9a', bg: '#f3e5f5' },
-      { key: 'その他', color: '#546e7a', bg: '#eceff1' }
-    ];
     // 運転手の派遣先 = 乗車者の部課の最多
     var driverBucket = {};
     Object.keys(byDriver).forEach(function(d) {
       var cnt = {};
-      byDriver[d].forEach(function(e) { var b = bucketOf(e); cnt[b] = (cnt[b] || 0) + 1; });
+      byDriver[d].forEach(function(e) { var b = _jlBucketOfStr(fBuka ? e[fBuka] : ''); cnt[b] = (cnt[b] || 0) + 1; });
       driverBucket[d] = Object.keys(cnt).sort(function(a, b) { return cnt[b] - cnt[a]; })[0];
     });
-    window._jlState = { fSougei: fSougei, fJun: fJun, fBuka: fBuka, emps: actives, riders: riders, byDriver: byDriver, driverList: [] };
-    var st = window._jlState;
-    var html = '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
-      + '<div style="font-weight:800;color:var(--primary);font-size:1.05em;">🚖 朝の送迎 乗車リスト</div>'
-      + '<div style="font-size:12px;color:var(--text-light);margin-top:4px;">運転手 ' + Object.keys(byDriver).length + '名・乗車 ' + riders.length + '名。行をタップで修正、退社者は自動で消えます。</div>'
-      + '<button onclick="_jlOpenAdd(-1)" style="margin-top:10px;width:100%;background:#e8f0fe;color:#1565c0;border:1px dashed #90b4e8;border-radius:10px;padding:9px;font-weight:800;font-size:13px;cursor:pointer;">＋ 乗車者を追加</button></div>';
-    BUCKETS.forEach(function(bk) {
-      var drivers = Object.keys(byDriver).filter(function(d) { return driverBucket[d] === bk.key; });
-      if (!drivers.length) return;
-      drivers.sort(function(a, b) { return byDriver[b].length - byDriver[a].length; });
-      var total = drivers.reduce(function(s, d) { return s + byDriver[d].length; }, 0);
-      html += '<div style="margin:14px 2px 8px;font-weight:800;color:' + bk.color + ';font-size:1em;">🏭 ' + _jlEsc(bk.key) + '（運転手' + drivers.length + '名・乗車' + total + '名）</div>';
-      drivers.forEach(function(d) {
-        st.driverList.push(d);
-        var di = st.driverList.length - 1;
-        var list = byDriver[d].slice().sort(function(a, b) {
-          var ja = (fJun && a[fJun] != null && a[fJun] !== '') ? Number(a[fJun]) : 999;
-          var jb = (fJun && b[fJun] != null && b[fJun] !== '') ? Number(b[fJun]) : 999;
-          if (ja !== jb) return ja - jb;
-          return String(a.Title || '').localeCompare(String(b.Title || ''), 'ja');
-        });
-        html += '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:5px solid ' + bk.color + ';">'
-          + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">'
-          + '<span style="font-size:1.1em;">🚐</span>'
-          + '<span style="font-weight:800;font-size:1.02em;">' + _jlEsc(d) + '</span>'
-          + '<button onclick="_jlRenameDriver(' + di + ')" title="運転手名を変更" style="background:none;border:none;font-size:14px;cursor:pointer;padding:2px 4px;color:#90a4ae;">✎</button>'
-          + '<span style="margin-left:auto;background:' + bk.bg + ';color:' + bk.color + ';font-size:11px;font-weight:800;padding:2px 10px;border-radius:10px;">' + list.length + '名</span></div>';
-        list.forEach(function(e) {
-          var junRaw = (fJun && e[fJun] != null && e[fJun] !== '') ? Math.round(Number(e[fJun])) : null;
-          var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
-          html += '<div onclick="_jlOpenEdit(' + e.Id + ')" style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-top:1px solid #f0f2f7;cursor:pointer;">'
-            + '<span style="width:24px;height:24px;border-radius:50%;background:' + (junRaw ? bk.color : '#cfd8dc') + ';color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' + (junRaw || '—') + '</span>'
-            + '<span style="font-weight:600;">' + _jlEsc(e.Title || '') + '</span>'
-            + '<span style="margin-left:auto;font-size:11px;color:var(--text-light);">No.' + _jlEsc(no) + '</span>'
-            + '<span style="font-size:13px;color:#b0bec5;">✎</span></div>';
-        });
-        html += '<button onclick="_jlOpenAdd(' + di + ')" style="margin-top:8px;width:100%;background:#f7f9fc;color:#607d8b;border:1px dashed #cfd8dc;border-radius:8px;padding:6px;font-size:12px;font-weight:700;cursor:pointer;">＋ この車に追加</button>';
-        html += '</div>';
-      });
+    // 運転手一覧（派遣先順→人数順で固定・編集シートのindex参照用）
+    var driverList = [];
+    JL_BUCKETS.forEach(function(bk) {
+      Object.keys(byDriver).filter(function(d) { return driverBucket[d] === bk.key; })
+        .sort(function(a, b) { return byDriver[b].length - byDriver[a].length; })
+        .forEach(function(d) { driverList.push(d); });
     });
-    if (!riders.length) {
-      html += '<div style="text-align:center;padding:20px;color:var(--text-light);">乗車データがありません。上の「＋ 乗車者を追加」から登録できます。</div>';
-    }
-    html += '<div id="jlSheet" style="display:none;"></div>';
-    box.innerHTML = html;
+    // 運転手情報: 専属(部課094:本社)か派遣先勤務か。SP社員をTitle完全一致で照合
+    var driverInfo = {};
+    Object.keys(byDriver).forEach(function(d) {
+      var emp = actives.find(function(x) { return String(x.Title || '').trim() === d; });
+      if (emp) {
+        var bukaRaw = String((fBuka && emp[fBuka]) || '');
+        var senzoku = /^094/.test(bukaRaw) || bukaRaw.indexOf('本社') >= 0;
+        driverInfo[d] = { senzoku: senzoku, bucket: senzoku ? null : _jlBucketOfStr(bukaRaw), empId: emp.Id };
+      } else {
+        driverInfo[d] = { senzoku: true, bucket: null, empId: null }; // 社員List未登録=制約なし扱い
+      }
+    });
+    window._jlState = { fSougei: fSougei, fJun: fJun, fBuka: fBuka, emps: actives, riders: riders, byDriver: byDriver, driverBucket: driverBucket, driverList: driverList, driverInfo: driverInfo };
+    _jlRender();
   } catch (e) {
     console.warn('[joshaList] load error', e);
     box.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;">読み込みに失敗しました。</div>';
   }
+}
+
+function _jlRender() {
+  var box = document.getElementById('joshaListBody');
+  if (!box || !window._jlState) return;
+  var v = window._jlView;
+  var html;
+  if (!v) html = _jlRenderHome();
+  else if (v.mode === 'am') html = _jlRenderMorning(v.bucket);
+  else html = _jlRenderKaeri(v.bucket);
+  html += '<div id="jlSheet" style="display:none;"></div>';
+  box.innerHTML = html;
+}
+
+function _jlGo(mode, bIdx) {
+  window._jlView = mode ? { mode: mode, bucket: bIdx } : null;
+  if (mode !== 'pm') window._jlKaeri = null;
+  _jlRender();
+}
+
+// --- レベル0: 派遣先選択 ---
+function _jlRenderHome() {
+  var st = window._jlState;
+  var html = '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
+    + '<div style="font-weight:800;color:var(--primary);font-size:1.05em;">🚖 送迎 乗車リスト</div>'
+    + '<div style="font-size:12px;color:var(--text-light);margin-top:4px;">運転手 ' + Object.keys(st.byDriver).length + '名・乗車 ' + st.riders.length + '名。派遣先を選んでください。</div></div>';
+  JL_BUCKETS.forEach(function(bk, bi) {
+    var drivers = st.driverList.filter(function(d) { return st.driverBucket[d] === bk.key; });
+    if (!drivers.length) return;
+    var total = drivers.reduce(function(s, d) { return s + st.byDriver[d].length; }, 0);
+    html += '<div style="background:#fff;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:5px solid ' + bk.color + ';">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      + '<span style="font-weight:800;font-size:1.08em;color:' + bk.color + ';">🏭 ' + _jlEsc(bk.key) + '</span>'
+      + '<span style="margin-left:auto;background:' + bk.bg + ';color:' + bk.color + ';font-size:11px;font-weight:800;padding:2px 10px;border-radius:10px;">運転手' + drivers.length + '・乗車' + total + '名</span></div>'
+      + '<div style="display:flex;gap:8px;margin-top:10px;">'
+      + '<button onclick="_jlGo(\'am\',' + bi + ')" style="flex:1;background:' + bk.bg + ';color:' + bk.color + ';border:none;border-radius:10px;padding:10px;font-weight:800;font-size:13px;cursor:pointer;">🌅 朝の乗車リスト</button>'
+      + '<button onclick="_jlGo(\'pm\',' + bi + ')" style="flex:1;background:#37474f;color:#fff;border:none;border-radius:10px;padding:10px;font-weight:800;font-size:13px;cursor:pointer;">🌇 帰りの段取り</button></div></div>';
+  });
+  html += '<button onclick="_jlGo(\'am\',-1)" style="width:100%;background:none;border:1px solid #cfd8dc;border-radius:10px;padding:9px;font-size:12px;font-weight:700;color:#607d8b;cursor:pointer;">📋 すべての派遣先をまとめて表示</button>';
+  if (!st.riders.length) {
+    html += '<div style="text-align:center;padding:20px;color:var(--text-light);">乗車データがありません。</div>'
+      + '<button onclick="_jlOpenAdd(-1)" style="width:100%;margin-top:8px;background:#e8f0fe;color:#1565c0;border:1px dashed #90b4e8;border-radius:10px;padding:9px;font-weight:800;font-size:13px;cursor:pointer;">＋ 乗車者を追加</button>';
+  }
+  return html;
+}
+
+// --- 朝の乗車リスト（bIdx=-1で全派遣先） ---
+function _jlRenderMorning(bIdx) {
+  var st = window._jlState;
+  var bkSel = bIdx >= 0 ? JL_BUCKETS[bIdx] : null;
+  var html = '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
+    + '<div style="display:flex;align-items:center;gap:8px;">'
+    + '<button onclick="_jlGo(null)" style="background:none;border:1px solid #ddd;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">← 派遣先</button>'
+    + '<span style="font-weight:800;color:var(--primary);font-size:1.02em;">🌅 ' + _jlEsc(bkSel ? bkSel.key : 'すべて') + ' 朝の乗車リスト</span></div>'
+    + '<div style="font-size:11px;color:var(--text-light);margin-top:4px;">行をタップで修正。退社者は自動で消えます。</div>'
+    + '<button onclick="_jlOpenAdd(-1)" style="margin-top:10px;width:100%;background:#e8f0fe;color:#1565c0;border:1px dashed #90b4e8;border-radius:10px;padding:9px;font-weight:800;font-size:13px;cursor:pointer;">＋ 乗車者を追加</button></div>';
+  JL_BUCKETS.forEach(function(bk, bi) {
+    if (bIdx >= 0 && bi !== bIdx) return;
+    var drivers = st.driverList.filter(function(d) { return st.driverBucket[d] === bk.key; });
+    if (!drivers.length) return;
+    var total = drivers.reduce(function(s, d) { return s + st.byDriver[d].length; }, 0);
+    if (bIdx < 0) html += '<div style="margin:14px 2px 8px;font-weight:800;color:' + bk.color + ';font-size:1em;">🏭 ' + _jlEsc(bk.key) + '（運転手' + drivers.length + '名・乗車' + total + '名）</div>';
+    drivers.forEach(function(d) {
+      var di = st.driverList.indexOf(d);
+      var list = _jlSortedRiders(d);
+      html += '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:5px solid ' + bk.color + ';">'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">'
+        + '<span style="font-size:1.1em;">🚐</span>'
+        + '<span style="font-weight:800;font-size:1.02em;">' + _jlEsc(d) + '</span>'
+        + '<button onclick="_jlRenameDriver(' + di + ')" title="運転手名を変更" style="background:none;border:none;font-size:14px;cursor:pointer;padding:2px 4px;color:#90a4ae;">✎</button>'
+        + '<span style="margin-left:auto;background:' + bk.bg + ';color:' + bk.color + ';font-size:11px;font-weight:800;padding:2px 10px;border-radius:10px;">' + list.length + '名</span></div>';
+      list.forEach(function(e) {
+        var junRaw = (st.fJun && e[st.fJun] != null && e[st.fJun] !== '') ? Math.round(Number(e[st.fJun])) : null;
+        var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
+        html += '<div onclick="_jlOpenEdit(' + e.Id + ')" style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-top:1px solid #f0f2f7;cursor:pointer;">'
+          + '<span style="width:24px;height:24px;border-radius:50%;background:' + (junRaw ? bk.color : '#cfd8dc') + ';color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' + (junRaw || '—') + '</span>'
+          + '<span style="font-weight:600;">' + _jlEsc(e.Title || '') + '</span>'
+          + '<span style="margin-left:auto;font-size:11px;color:var(--text-light);">No.' + _jlEsc(no) + '</span>'
+          + '<span style="font-size:13px;color:#b0bec5;">✎</span></div>';
+      });
+      html += '<button onclick="_jlOpenAdd(' + di + ')" style="margin-top:8px;width:100%;background:#f7f9fc;color:#607d8b;border:1px dashed #cfd8dc;border-radius:8px;padding:6px;font-size:12px;font-weight:700;cursor:pointer;">＋ この車に追加</button>';
+      html += '</div>';
+    });
+  });
+  return html;
+}
+
+function _jlSortedRiders(driver) {
+  var st = window._jlState;
+  return (st.byDriver[driver] || []).slice().sort(function(a, b) {
+    var ja = (st.fJun && a[st.fJun] != null && a[st.fJun] !== '') ? Number(a[st.fJun]) : 999;
+    var jb = (st.fJun && b[st.fJun] != null && b[st.fJun] !== '') ? Number(b[st.fJun]) : 999;
+    if (ja !== jb) return ja - jb;
+    return String(a.Title || '').localeCompare(String(b.Title || ''), 'ja');
+  });
 }
 
 // --- 乗車リスト 編集（SP社員Listの送迎者/送迎乗車順を直接更新） ---
@@ -43871,6 +43954,184 @@ async function _jlRenameDriver(driverIdx) {
     showToast('変更エラー（途中まで反映の可能性あり）: ' + (e.message || e), 'error');
     loadJoshaListScreen();
   }
+}
+
+// --- 帰りの段取り（朝の割当ベース・終業時間は人ごと選択・日付+派遣先ごとに端末保存） ---
+function _jlToday() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function _jlKaeriInit(bIdx) {
+  var bucket = JL_BUCKETS[bIdx].key;
+  var date = _jlToday();
+  var key = 'jlKaeri_' + date + '_' + bucket;
+  if (window._jlKaeri && window._jlKaeri.key === key) return window._jlKaeri;
+  var data = null;
+  try { data = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { data = null; }
+  if (!data || !data.entries) data = { entries: {}, driverTime: {} };
+  window._jlKaeri = { key: key, date: date, bucket: bucket, bIdx: bIdx, data: data, view: 'edit' };
+  return window._jlKaeri;
+}
+
+function _jlKaeriSave() {
+  var k = window._jlKaeri;
+  if (k) { try { localStorage.setItem(k.key, JSON.stringify(k.data)); } catch (_) {} }
+}
+
+function _jlKaeriEntry(id, teiji) {
+  var k = window._jlKaeri;
+  if (!k.data.entries[id]) k.data.entries[id] = { t: teiji, ab: false };
+  return k.data.entries[id];
+}
+
+function _jlTimeSel(times, cur, attrs) {
+  return '<select ' + attrs + ' onclick="event.stopPropagation()" style="padding:6px 8px;border:1px solid #cfd8dc;border-radius:8px;font-size:13px;font-weight:700;background:#fff;">'
+    + times.map(function(t) { return '<option' + (t === cur ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select>';
+}
+
+function _jlDrvOwnTimes(d, bkKey) {
+  var st = window._jlState;
+  var info = st.driverInfo[d] || {};
+  return JL_TIMES[info.bucket || bkKey] || JL_TIMES[bkKey];
+}
+
+function _jlDrvOwnTime(d, bkKey) {
+  var st = window._jlState;
+  var k = window._jlKaeri;
+  var info = st.driverInfo[d] || { senzoku: true };
+  if (info.senzoku) return null; // 専属=時間制約なし
+  return (k.data.driverTime[d]) || _jlDrvOwnTimes(d, bkKey)[0];
+}
+
+function _jlRenderKaeri(bIdx) {
+  var st = window._jlState;
+  var k = _jlKaeriInit(bIdx);
+  var bk = JL_BUCKETS[bIdx];
+  var times = JL_TIMES[bk.key];
+  var teiji = times[0];
+  var drivers = st.driverList.filter(function(d) { return st.driverBucket[d] === bk.key; });
+  var html = '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
+    + '<div style="display:flex;align-items:center;gap:8px;">'
+    + '<button onclick="_jlGo(null)" style="background:none;border:1px solid #ddd;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">← 派遣先</button>'
+    + '<span style="font-weight:800;color:#37474f;font-size:1.02em;">🌇 ' + _jlEsc(bk.key) + ' 帰りの段取り</span>'
+    + '<span style="margin-left:auto;font-size:11px;color:var(--text-light);">' + k.date + '</span></div>';
+  if (k.view === 'edit') {
+    html += '<div style="font-size:11px;color:var(--text-light);margin-top:6px;">初期値=定時 ' + teiji + '。名前タップ=欠勤⇄復帰、時間は▼で変更。入力は自動保存。T-REX出勤の自動反映は準備中。</div>'
+      + '<div style="display:flex;gap:8px;margin-top:10px;">'
+      + '<button onclick="_jlKaeriView(\'sum\')" style="flex:2;background:#37474f;color:#fff;border:none;border-radius:10px;padding:10px;font-weight:800;font-size:13px;cursor:pointer;">📋 帰り便まとめを見る</button>'
+      + '<button onclick="_jlKaeriReset()" style="flex:1;background:#f7f9fc;color:#607d8b;border:1px solid #cfd8dc;border-radius:10px;padding:10px;font-weight:700;font-size:12px;cursor:pointer;">🔄 リセット</button></div></div>';
+    drivers.forEach(function(d) {
+      var di = st.driverList.indexOf(d);
+      var info = st.driverInfo[d] || { senzoku: true };
+      var list = _jlSortedRiders(d);
+      var abCnt = 0;
+      list.forEach(function(e) { if (_jlKaeriEntry(e.Id, teiji).ab) abCnt++; });
+      html += '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:5px solid ' + bk.color + ';">'
+        + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">'
+        + '<span style="font-size:1.1em;">🚐</span>'
+        + '<span style="font-weight:800;font-size:1.02em;">' + _jlEsc(d) + '</span>';
+      if (info.senzoku) {
+        html += '<span style="background:#e8f5e9;color:#2e7d32;font-size:10px;font-weight:800;padding:2px 8px;border-radius:8px;">専属運転手</span>';
+      } else {
+        html += '<span style="background:#fff8e1;color:#b26a00;font-size:10px;font-weight:800;padding:2px 8px;border-radius:8px;">' + _jlEsc(info.bucket || bk.key) + '勤務</span>'
+          + '<span style="font-size:11px;color:var(--text-light);">本人の終業:</span>'
+          + _jlTimeSel(_jlDrvOwnTimes(d, bk.key), _jlDrvOwnTime(d, bk.key), 'onchange="_jlKaeriDrvTime(' + di + ',this.value)"');
+      }
+      html += '<span style="margin-left:auto;background:' + bk.bg + ';color:' + bk.color + ';font-size:11px;font-weight:800;padding:2px 10px;border-radius:10px;">乗車' + (list.length - abCnt) + (abCnt ? '・欠' + abCnt : '') + '</span></div>';
+      list.forEach(function(e) {
+        var ent = _jlKaeriEntry(e.Id, teiji);
+        var junRaw = (st.fJun && e[st.fJun] != null && e[st.fJun] !== '') ? Math.round(Number(e[st.fJun])) : null;
+        html += '<div onclick="_jlKaeriAb(' + e.Id + ')" style="display:flex;align-items:center;gap:10px;padding:6px 2px;border-top:1px solid #f0f2f7;cursor:pointer;' + (ent.ab ? 'opacity:.45;' : '') + '">'
+          + '<span style="width:24px;height:24px;border-radius:50%;background:' + (ent.ab ? '#cfd8dc' : bk.color) + ';color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' + (junRaw || '—') + '</span>'
+          + '<span style="font-weight:600;' + (ent.ab ? 'text-decoration:line-through;color:#90a4ae;' : '') + '">' + _jlEsc(e.Title || '') + '</span>'
+          + '<span style="margin-left:auto;">' + (ent.ab
+            ? '<span style="font-size:11px;font-weight:800;color:#c62828;">欠勤</span>'
+            : _jlTimeSel(times, ent.t, 'onchange="_jlKaeriTime(' + e.Id + ',this.value)"')) + '</span></div>';
+      });
+      html += '</div>';
+    });
+    _jlKaeriSave();
+  } else {
+    // まとめ: 時間→運転手→乗車者。運転手の終業より早い便は警告
+    html += '<div style="display:flex;gap:8px;margin-top:10px;">'
+      + '<button onclick="_jlKaeriView(\'edit\')" style="flex:1;background:#f7f9fc;color:#37474f;border:1px solid #cfd8dc;border-radius:10px;padding:10px;font-weight:800;font-size:13px;cursor:pointer;">✏️ 入力に戻る</button></div></div>';
+    var byTime = {};
+    var absents = [];
+    drivers.forEach(function(d) {
+      _jlSortedRiders(d).forEach(function(e) {
+        var ent = _jlKaeriEntry(e.Id, teiji);
+        if (ent.ab) { absents.push(e.Title || ''); return; }
+        (byTime[ent.t] = byTime[ent.t] || {});
+        (byTime[ent.t][d] = byTime[ent.t][d] || []).push(e);
+      });
+    });
+    var timeKeys = Object.keys(byTime).sort();
+    if (!timeKeys.length) html += '<div style="text-align:center;padding:20px;color:var(--text-light);">対象者がいません。</div>';
+    timeKeys.forEach(function(t) {
+      var isTeiji = t === teiji;
+      var col = isTeiji ? '#1a44aa' : '#b35400';
+      var bgc = isTeiji ? '#eef4ff' : '#fff4e5';
+      var n = 0;
+      Object.keys(byTime[t]).forEach(function(d) { n += byTime[t][d].length; });
+      html += '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
+        + '<div style="background:' + bgc + ';color:' + col + ';border-radius:8px;padding:6px 10px;font-weight:800;margin-bottom:8px;">🕔 ' + _jlEsc(t) + (isTeiji ? '（定時）' : '（残業）') + '　' + n + '名</div>';
+      Object.keys(byTime[t]).forEach(function(d) {
+        var drvT = _jlDrvOwnTime(d, bk.key);
+        var warn = drvT && t < drvT;
+        html += '<div style="padding:6px 2px;border-top:1px solid #f0f2f7;">'
+          + '<div style="font-weight:800;font-size:13px;">🚐 ' + _jlEsc(d)
+          + (drvT ? '<span style="font-size:10px;color:' + (warn ? '#c62828' : '#78909c') + ';font-weight:700;margin-left:6px;">本人終業 ' + _jlEsc(drvT) + (warn ? ' ⚠この便より遅い' : '') + '</span>' : '')
+          + '</div>'
+          + '<div style="font-size:13px;color:#37474f;margin-top:3px;line-height:1.8;">' + byTime[t][d].map(function(e) {
+            var j = (st.fJun && e[st.fJun] != null && e[st.fJun] !== '') ? Math.round(Number(e[st.fJun])) : null;
+            return '<span style="white-space:nowrap;margin-right:10px;">' + (j ? '<b style="color:' + col + ';">' + j + '.</b>' : '') + _jlEsc(e.Title || '') + '</span>';
+          }).join('') + '</div></div>';
+      });
+      html += '</div>';
+    });
+    if (absents.length) {
+      html += '<div style="background:#fff;border-radius:14px;padding:10px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);font-size:12px;color:#90a4ae;">🚫 欠勤（送迎なし）: ' + absents.map(_jlEsc).join('、') + '</div>';
+    }
+  }
+  return html;
+}
+
+function _jlKaeriTime(id, val) {
+  var k = window._jlKaeri;
+  if (!k || !k.data.entries[id]) return;
+  k.data.entries[id].t = val;
+  _jlKaeriSave();
+}
+
+function _jlKaeriAb(id) {
+  var k = window._jlKaeri;
+  if (!k || !k.data.entries[id]) return;
+  k.data.entries[id].ab = !k.data.entries[id].ab;
+  _jlKaeriSave();
+  _jlRender();
+}
+
+function _jlKaeriDrvTime(di, val) {
+  var st = window._jlState;
+  var k = window._jlKaeri;
+  var d = st.driverList[di];
+  if (!k || !d) return;
+  k.data.driverTime[d] = val;
+  _jlKaeriSave();
+}
+
+function _jlKaeriView(v) {
+  if (window._jlKaeri) { window._jlKaeri.view = v; _jlRender(); }
+}
+
+function _jlKaeriReset() {
+  var k = window._jlKaeri;
+  if (!k) return;
+  if (!confirm('本日の入力（時間・欠勤）をリセットして全員定時に戻しますか？')) return;
+  k.data = { entries: {}, driverTime: {} };
+  _jlKaeriSave();
+  _jlRender();
 }
 
 // ====== 送迎連絡 v2 (派遣先→名簿→人ごとに車両割当→車両別まとめ→人単位配信) ======
