@@ -5434,6 +5434,10 @@ select.sankyu-edit-input {
         <span class="ql-icon">🚐</span>
         <span class="ql-text">送迎連絡</span>
       </button>
+      <button id="joshaListBtn" class="quick-link-btn" onclick="switchScreen('joshaListScreen')" style="position:relative;display:none;">
+        <span class="ql-icon">🚖</span>
+        <span class="ql-text">乗車リスト</span>
+      </button>
       <button class="quick-link-btn sougei-allowed" onclick="switchScreen('renrakuScreen')" style="position:relative;display:none;">
         <span class="ql-icon">📣</span>
         <span class="ql-text">連絡事項</span>
@@ -6079,6 +6083,11 @@ select.sankyu-edit-input {
     <div id="sougeiHakenList"></div>
     <div id="sougeiRoster" style="display:none;"></div>
     <div id="sougeiConfirm" style="display:none;"></div>
+  </div>
+
+  <!-- Screen: 送迎乗車リスト (SP社員「送迎者」「送迎乗車順」を運転手別に表示・山下浩俊のみ) -->
+  <div class="screen" id="joshaListScreen">
+    <div id="joshaListBody" style="padding:10px 12px;"></div>
   </div>
 
   <!-- Screen: 連絡事項 (派遣先/組織→名前選択→件名・本文→ポータルへ配信) -->
@@ -7566,7 +7575,7 @@ function switchScreen(screenId, skipHistory) {
   }
   var _mainContent = document.querySelector('.main-content');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', astiWizardScreen: 'ASTI入社ウィザード', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', approveHubScreen: '承認', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', astiWizardScreen: 'ASTI入社ウィザード', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', joshaListScreen: '送迎乗車リスト', approveHubScreen: '承認', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -7602,6 +7611,7 @@ function switchScreen(screenId, skipHistory) {
   if (screenId === 'yukyuListScreen') initYukyuListDate();
   if (screenId === 'nyutaiScreen') loadNyutaiScreen();
   if (screenId === 'sougeiScreen') loadSougeiScreen();
+  if (screenId === 'joshaListScreen') loadJoshaListScreen();
   if (screenId === 'renrakuScreen') loadRenrakuScreen();
   if (screenId === 'bentoScreen') loadBentoScreen();
   if (screenId === 'vehicleListScreen') loadVehicleList();
@@ -18160,6 +18170,8 @@ async function loadHomeBadges() {
   try { refreshMaebariApproverUI(); updateMaebariApprovalBadge(); } catch(e) { console.warn('approver UI error:', e); }
   // 弁当注文 承認待ちバッジ (役員のみ)
   try { updateBentoAdminBadge(); } catch(e) { console.warn('bento badge error:', e); }
+  // 乗車リストボタン (山下浩俊のみ表示)
+  try { var _jlBtn = document.getElementById('joshaListBtn'); if (_jlBtn) _jlBtn.style.display = (getLoggedInEmail() === 'h.yamashita@team-stepup.com') ? '' : 'none'; } catch(e) {}
   var today = new Date();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
@@ -43523,6 +43535,108 @@ async function fetchTenkenFields() {
   _tenkenFields = data.d.results || [];
   console.log('Tenken fields:', _tenkenFields.map(function(f){ return f.Title + '→' + f.EntityPropertyName + '(' + f.TypeAsString + ')'; }));
   return _tenkenFields;
+}
+
+// ====== 送迎 乗車リスト (SP社員「送迎者」「送迎乗車順」を運転手別に表示・山下浩俊のみ) ======
+function _jlEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+async function loadJoshaListScreen() {
+  var box = document.getElementById('joshaListBody');
+  if (!box) return;
+  if (getLoggedInEmail() !== 'h.yamashita@team-stepup.com') {
+    box.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">この画面は利用できません。</div>';
+    return;
+  }
+  box.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">読み込み中...</div>';
+  try {
+    var results = await Promise.all([
+      spGetAll(LIST_EMPLOYEES_GUID, '$top=500'),
+      fetchEmployeeFields()
+    ]);
+    var emps = results[0] || [];
+    var meta = results[1] || {};
+    // 送迎者/送迎乗車順/部課のODataキーをタイトルから解決（ハードコードしない）
+    var fSougei = null, fJun = null, fBuka = null;
+    Object.keys(meta).forEach(function(k) {
+      var t = meta[k] && meta[k].title;
+      var odataKey = (k === 'Title' || k === 'Id') ? k : (k.indexOf('_') === 0 ? 'OData_' + k : k);
+      if (t === '送迎者' && !fSougei) fSougei = odataKey;
+      if (t === '送迎乗車順' && !fJun) fJun = odataKey;
+      if (t === '部課' && !fBuka) fBuka = odataKey;
+    });
+    if (!fSougei) {
+      box.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;">社員リストに「送迎者」列が見つかりません。</div>';
+      return;
+    }
+    var riders = emps.filter(function(e) { return !isResigned(e) && e[fSougei] && String(e[fSougei]).trim(); });
+    if (!riders.length) {
+      box.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">乗車データがありません。</div>';
+      return;
+    }
+    var byDriver = {};
+    riders.forEach(function(e) {
+      var d = String(e[fSougei]).trim();
+      (byDriver[d] = byDriver[d] || []).push(e);
+    });
+    function bucketOf(e) {
+      var b = String((fBuka && e[fBuka]) || '');
+      if (b.indexOf('ﾕｰｼﾝ') >= 0 || b.indexOf('ユーシン') >= 0) return 'ユーシン';
+      if (b.indexOf('都田') >= 0) return 'ASTI都田';
+      if (b.indexOf('掛川') >= 0) return 'ASTI掛川';
+      if (b.indexOf('浜松') >= 0) return 'ASTI浜松';
+      return 'その他';
+    }
+    var BUCKETS = [
+      { key: 'ASTI浜松', color: '#1565c0', bg: '#e3f0fd' },
+      { key: 'ユーシン', color: '#e65100', bg: '#fff3e0' },
+      { key: 'ASTI都田', color: '#2e7d32', bg: '#e8f5e9' },
+      { key: 'ASTI掛川', color: '#6a1b9a', bg: '#f3e5f5' },
+      { key: 'その他', color: '#546e7a', bg: '#eceff1' }
+    ];
+    // 運転手の派遣先 = 乗車者の部課の最多
+    var driverBucket = {};
+    Object.keys(byDriver).forEach(function(d) {
+      var cnt = {};
+      byDriver[d].forEach(function(e) { var b = bucketOf(e); cnt[b] = (cnt[b] || 0) + 1; });
+      driverBucket[d] = Object.keys(cnt).sort(function(a, b) { return cnt[b] - cnt[a]; })[0];
+    });
+    var html = '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);">'
+      + '<div style="font-weight:800;color:var(--primary);font-size:1.05em;">🚖 朝の送迎 乗車リスト</div>'
+      + '<div style="font-size:12px;color:var(--text-light);margin-top:4px;">運転手 ' + Object.keys(byDriver).length + '名・乗車 ' + riders.length + '名（社員リスト「送迎者」「送迎乗車順」より）</div></div>';
+    BUCKETS.forEach(function(bk) {
+      var drivers = Object.keys(byDriver).filter(function(d) { return driverBucket[d] === bk.key; });
+      if (!drivers.length) return;
+      drivers.sort(function(a, b) { return byDriver[b].length - byDriver[a].length; });
+      var total = drivers.reduce(function(s, d) { return s + byDriver[d].length; }, 0);
+      html += '<div style="margin:14px 2px 8px;font-weight:800;color:' + bk.color + ';font-size:1em;">🏭 ' + _jlEsc(bk.key) + '（運転手' + drivers.length + '名・乗車' + total + '名）</div>';
+      drivers.forEach(function(d) {
+        var list = byDriver[d].slice().sort(function(a, b) {
+          var ja = (fJun && a[fJun] != null && a[fJun] !== '') ? Number(a[fJun]) : 999;
+          var jb = (fJun && b[fJun] != null && b[fJun] !== '') ? Number(b[fJun]) : 999;
+          if (ja !== jb) return ja - jb;
+          return String(a.Title || '').localeCompare(String(b.Title || ''), 'ja');
+        });
+        html += '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);border-left:5px solid ' + bk.color + ';">'
+          + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+          + '<span style="font-size:1.1em;">🚐</span>'
+          + '<span style="font-weight:800;font-size:1.02em;">' + _jlEsc(d) + '</span>'
+          + '<span style="margin-left:auto;background:' + bk.bg + ';color:' + bk.color + ';font-size:11px;font-weight:800;padding:2px 10px;border-radius:10px;">' + list.length + '名</span></div>';
+        list.forEach(function(e) {
+          var junRaw = (fJun && e[fJun] != null && e[fJun] !== '') ? Math.round(Number(e[fJun])) : null;
+          var no = e[F.syainNo] != null ? String(e[F.syainNo]).replace(/\.0$/, '') : '';
+          html += '<div style="display:flex;align-items:center;gap:10px;padding:6px 2px;border-top:1px solid #f0f2f7;">'
+            + '<span style="width:24px;height:24px;border-radius:50%;background:' + (junRaw ? bk.color : '#cfd8dc') + ';color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' + (junRaw || '—') + '</span>'
+            + '<span style="font-weight:600;">' + _jlEsc(e.Title || '') + '</span>'
+            + '<span style="margin-left:auto;font-size:11px;color:var(--text-light);">No.' + _jlEsc(no) + '</span></div>';
+        });
+        html += '</div>';
+      });
+    });
+    box.innerHTML = html;
+  } catch (e) {
+    console.warn('[joshaList] load error', e);
+    box.innerHTML = '<div style="text-align:center;padding:30px;color:#c62828;">読み込みに失敗しました。</div>';
+  }
 }
 
 // ====== 送迎連絡 v2 (派遣先→名簿→人ごとに車両割当→車両別まとめ→人単位配信) ======
