@@ -21520,7 +21520,11 @@ async function fetchSoumuShahoInCount() {
     var hakenKey = findF('派遣先会社名', '派遣先', 'Hakensaki', '会社名');
     var bangoKey = findF('社員番号', '社番', '番号', 'SyainNo', '社員No');
     var nameKey  = findF('氏名', '社員名', '名前') || 'Title';
-    _soumuShahoInFields = { kanyuubi: kanyuuKey, hakensaki: hakenKey, bango: bangoKey, name: nameKey };
+    // 扶養追加は「扶養者1名につき1レコード」なので、扶養者名・続柄が無いと同じ人が重複しているように見える
+    _soumuShahoInFields = { kanyuubi: kanyuuKey, hakensaki: hakenKey, bango: bangoKey, name: nameKey,
+                            kubun: kubunKey,
+                            fuyouName: findF('扶養者氏名'),
+                            tsuzuki: findF('加入する続柄', '加入続柄') };
     // アイテム取得 (ページネーション対応で全件)
     var allItems = [];
     var pageUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=1000";
@@ -23710,10 +23714,32 @@ function renderShahoKanyuuDownloadOverlay(items) {
   }
 
   var itemsHtml = '';
+  var _shahoDlDisplayCount = 0;   // 画面に出る行数 (扶養をまとめた後の人数)
   if (items.length === 0) {
     itemsHtml = '<div style="text-align:center;padding:30px;color:var(--text-light);">該当者なし</div>';
   } else {
+    // 扶養行だけ、同じ社員番号が何件あるか先に数える (扶養者1名につき1レコード = 重複ではない)
+    function _isFuyouRow(it) {
+      var kb = SF.kubun ? String(it[SF.kubun] || '').trim() : '';
+      var fn = SF.fuyouName ? String(it[SF.fuyouName] || '').trim() : '';
+      return (kb.indexOf('扶養') >= 0) || !!fn;
+    }
+    function kubunColor(k) {
+      if (k === '扶養追加') return '#7e57c2';
+      if (k === '氏名変更') return '#0288d1';
+      if (k === 'その他')   return '#757575';
+      return '#c62828';   // 新規加入 / 空欄
+    }
+    // 扶養は社員ごとに1行へまとめる (扶養者が複数でも社員は1人)
+    var honninEntries = [], fuyouGroups = {}, fuyouOrder = [];
     items.forEach(function(item, i) {
+      if (!_isFuyouRow(item)) { honninEntries.push({ i: i, item: item }); return; }
+      var b = String(SF.bango ? (item[SF.bango] || '') : '') || ('_row' + i);
+      if (!fuyouGroups[b]) { fuyouGroups[b] = { first: i, items: [] }; fuyouOrder.push(b); }
+      fuyouGroups[b].items.push(item);
+    });
+    // fuList を渡すと扶養者を列挙する。i は _koyouDlList のインデックス(先頭レコード)
+    function _row(item, i, fuList) {
       var bango = SF.bango ? (item[SF.bango] || '') : '';
       var name  = (SF.name && item[SF.name]) || item.Title || '';
       var kStr  = SF.kanyuubi ? fmtD(item[SF.kanyuubi]) : '';
@@ -23728,36 +23754,75 @@ function renderShahoKanyuuDownloadOverlay(items) {
       }
       var haken = '';
       if (emp && typeof getHakensaki === 'function') haken = getHakensaki(emp) || '';
-      itemsHtml += '<label class="koyou-dl-row" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;background:#fff;">';
-      itemsHtml +=   '<input type="checkbox" class="koyou-dl-chk" data-emp-idx="' + i + '" checked style="transform:scale(1.3);flex-shrink:0;">';
-      itemsHtml +=   '<div style="flex:1;min-width:0;">';
-      itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(name) + '</div>';
-      itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(bango)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
-      if (kStr) itemsHtml += '<div style="font-size:11px;color:#2e7d32;margin-top:1px;">加入日: ' + escHtml(kStr) + '</div>';
-      itemsHtml +=   '</div>';
-      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openExcelPreviewFromSoumuList(' + i + ')" title="Excel項目を確認" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#26a69a,#00796b);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(0,121,107,0.3);cursor:pointer;">📊</button>';
-      itemsHtml += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
-      if (folderUrl) {
-        itemsHtml += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
-      } else {
-        itemsHtml += '<span style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:#f0f0f0;color:#bbb;font-size:14px;flex-shrink:0;" title="社員フォルダ未設定">—</span>';
+      var kubun = SF.kubun ? String(item[SF.kubun] || '').trim() : '';
+      var row = '';
+      row += '<label class="koyou-dl-row" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;background:#fff;">';
+      row +=   '<input type="checkbox" class="koyou-dl-chk" data-emp-idx="' + i + '" checked style="transform:scale(1.3);flex-shrink:0;">';
+      row +=   '<div style="flex:1;min-width:0;">';
+      row +=     '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+      row +=       '<span style="font-weight:700;font-size:14px;">' + escHtml(name) + '</span>';
+      if (kubun) row += '<span style="background:' + kubunColor(kubun) + ';color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;">' + escHtml(kubun) + '</span>';
+      if (fuList && fuList.length > 1) row += '<span style="background:#fff3e0;color:#e65100;border:1px solid #ffb74d;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;">扶養' + fuList.length + '名</span>';
+      row +=     '</div>';
+      row +=     '<div style="font-size:11px;color:var(--text-light);margin-top:1px;">No.' + escHtml(String(bango)) + (haken ? ' / ' + escHtml(haken) : '') + '</div>';
+      if (kStr) row += '<div style="font-size:11px;color:#2e7d32;margin-top:1px;">加入日: ' + escHtml(kStr) + '</div>';
+      if (fuList && fuList.length) {
+        row += '<div style="margin-top:4px;padding:5px 8px;background:#f3e5f5;border-left:3px solid #7e57c2;border-radius:4px;font-size:12px;color:#4a148c;line-height:1.5;">';
+        fuList.forEach(function(f, n) {
+          row += (n ? '<div style="height:3px;"></div>' : '') +
+                 '<div style="font-weight:700;">👪 ' + (f.tsuzuki ? escHtml(f.tsuzuki) + '：' : '') + escHtml(f.name) + '</div>';
+        });
+        row += '</div>';
       }
-      itemsHtml += '</label>';
+      row +=   '</div>';
+      row += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openExcelPreviewFromSoumuList(' + i + ')" title="Excel項目を確認" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#26a69a,#00796b);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(0,121,107,0.3);cursor:pointer;">📊</button>';
+      row += '<button type="button" onclick="event.preventDefault();event.stopPropagation();openEmpDetailFromSoumuList(' + i + ')" title="社員詳細を開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7e57c2,#5e35b1);color:#fff;border:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(94,53,177,0.3);cursor:pointer;">👤</button>';
+      if (folderUrl) {
+        row += '<a href="' + escHtml(folderUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="社員フォルダを開く" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffa726,#f57c00);color:#fff;text-decoration:none;font-size:18px;flex-shrink:0;box-shadow:0 2px 4px rgba(245,124,0,0.3);">📂</a>';
+      } else {
+        row += '<span style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:#f0f0f0;color:#bbb;font-size:14px;flex-shrink:0;" title="社員フォルダ未設定">—</span>';
+      }
+      row += '</label>';
+      return row;
+    }
+    var honninRows = '', fuyouRows = '';
+    honninEntries.forEach(function(e) { honninRows += _row(e.item, e.i, null); });
+    fuyouOrder.forEach(function(b) {
+      var g = fuyouGroups[b];
+      var fuList = g.items.map(function(it) {
+        return { tsuzuki: SF.tsuzuki ? String(it[SF.tsuzuki] || '').trim() : '',
+                 name:    SF.fuyouName ? String(it[SF.fuyouName] || '').trim() : '' };
+      }).filter(function(f) { return f.name; });
+      fuyouRows += _row(g.items[0], g.first, fuList);
     });
+    var honninN = honninEntries.length, fuyouN = fuyouOrder.length;
+    _shahoDlDisplayCount = honninN + fuyouN;
+    // 本人の加入 / 扶養の追加 を見出しで分ける (扶養だけしか無いように見えるのを防ぐ)
+    function _secHead(icon, label, n, color) {
+      return '<div style="padding:7px 12px;background:' + color + ';color:#fff;font-size:12px;font-weight:800;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;">' +
+               '<span style="font-size:14px;">' + icon + '</span><span>' + label + '</span>' +
+               '<span style="margin-left:auto;background:rgba(255,255,255,0.25);padding:1px 9px;border-radius:10px;font-size:11px;">' + n + '件</span>' +
+             '</div>';
+    }
+    function _secEmpty(msg) {
+      return '<div style="padding:12px;text-align:center;color:#aaa;font-size:11px;background:#fafafa;border-bottom:1px solid #f0f0f0;">' + msg + '</div>';
+    }
+    itemsHtml  = _secHead('🧑', '本人の加入', honninN, '#c62828') + (honninN ? honninRows : _secEmpty('本人の加入申請はありません'));
+    itemsHtml += _secHead('👪', '扶養の追加', fuyouN, '#7e57c2') + (fuyouN ? fuyouRows : _secEmpty('扶養の追加申請はありません'));
   }
 
   ov.innerHTML =
     '<div style="background:#fff;border-radius:14px;max-width:92vw;width:520px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.3);">' +
       '<div style="padding:14px 16px;background:linear-gradient(135deg,#e53935,#b71c1c);color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
         '<div style="font-size:22px;">🏥</div>' +
-        '<div style="flex:1;font-size:15px;font-weight:800;letter-spacing:0.5px;">社会保険 加入 (' + items.length + '名)</div>' +
+        '<div style="flex:1;font-size:15px;font-weight:800;letter-spacing:0.5px;">社会保険 加入 (' + _shahoDlDisplayCount + '名)</div>' +
         '<button onclick="document.getElementById(\'soumuListOverlay\').remove()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;">×</button>' +
       '</div>' +
       (items.length > 0 ? (
         '<div style="padding:8px 14px;background:#f5f5f5;display:flex;gap:8px;align-items:center;border-bottom:1px solid #e0e0e0;flex-shrink:0;">' +
           '<button onclick="koyouDlToggleAll(true)" style="padding:5px 12px;background:#c62828;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">全選択</button>' +
           '<button onclick="koyouDlToggleAll(false)" style="padding:5px 12px;background:#757575;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">選択解除</button>' +
-          '<span id="koyouDlCount" style="margin-left:auto;font-size:11px;color:#555;font-weight:700;">' + items.length + '/' + items.length + ' 名選択中</span>' +
+          '<span id="koyouDlCount" style="margin-left:auto;font-size:11px;color:#555;font-weight:700;">' + _shahoDlDisplayCount + '/' + _shahoDlDisplayCount + ' 名選択中</span>' +
         '</div>'
       ) : '') +
       '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + itemsHtml + '</div>' +
