@@ -38301,7 +38301,7 @@ function _sougeiApproverName() {
   } catch (e) { return getLoggedInEmail() || ''; }
 }
 async function _sougeiFetchByStatus(status, top) {
-  const select = ['Id', SG.shainNo, SG.name, SG.date, SG.dest, SG.cat, SG.slot, SG.memo, SG.status, SG.approvedBy, SG.approvedAt].join(',');
+  const select = ['Id', SG.shainNo, SG.name, SG.date, SG.dest, SG.cat, SG.slot, SG.memo, SG.status, SG.approvedBy, SG.approvedAt, 'Created'].join(',');
   const q = "$filter=" + encodeURIComponent(SG.status + " eq '" + status + "'")
     + "&$select=" + encodeURIComponent(select) + "&$orderby=Id desc&$top=" + (top || 2000);
   const rows = await spGetAll(LIST_SOUGEI_KIROKU_GUID, q);
@@ -38312,17 +38312,26 @@ async function _sougeiFetchByStatus(status, top) {
     if (my !== null && my.indexOf(dest) < 0) return;
     const sn = it[SG.shainNo];
     const snInt = parseInt(sn, 10);
+    const dateStr = _sougeiJstDate(it[SG.date]);
+    const createdStr = _sougeiJstDate(it.Created);
+    // 遡り入力 = 入力日(Created)が送迎日より2日以上あと (承認時の要注意マーク)
+    let backdated = false;
+    if (dateStr && createdStr) {
+      const diffDays = (new Date(createdStr + 'T00:00:00') - new Date(dateStr + 'T00:00:00')) / 86400000;
+      backdated = diffDays >= 2;
+    }
     out.push({
       id: it.Id,
       shainNo: (sn == null || sn === '') ? '' : String(isNaN(snInt) ? sn : snInt),
       name: String(it[SG.name] || ''),
-      date: _sougeiJstDate(it[SG.date]),
+      date: dateStr,
       dest: dest,
       cat: String(it[SG.cat] || ''),
       slot: String(it[SG.slot] || ''),
       memo: String(it[SG.memo] || ''),
       approvedBy: String(it[SG.approvedBy] || ''),
-      approvedAt: String(it[SG.approvedAt] || '')
+      approvedAt: String(it[SG.approvedAt] || ''),
+      backdated: backdated
     });
   });
   return out;
@@ -38374,7 +38383,8 @@ async function loadSougeiPending() {
 }
 
 function _sougeiRecLabel(r) {
-  return (SOUGEI_APPROVE_CAT_ICON[r.cat] || '') + ' ' + _esc(r.dest) + '　' + _esc(r.cat) + (r.slot ? ' ' + _esc(r.slot) : '');
+  return (SOUGEI_APPROVE_CAT_ICON[r.cat] || '') + ' ' + _esc(r.dest) + '　' + _esc(r.cat) + (r.slot ? ' ' + _esc(r.slot) : '')
+    + (r.backdated ? ' <span style="background:#fff3cd;color:#8a6d1a;border:1px solid #e8d48a;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:700;white-space:nowrap;">⏰ 遡り入力</span>' : '');
 }
 function renderSougeiPending(rows) {
   const listEl = document.getElementById('sougeiPendingList');
