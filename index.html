@@ -42201,15 +42201,26 @@ async function openShahoForm() {
     _shahoFormList9Items = list9History.items || [];
     var fmap = list9History.map || {};
 
-    // 「加入済み」判定: kenpoShutoku or List9に「本人加入」済み or 申請区分=新規加入 のレコード有
-    var isEnrolled = false;
-    if (kenpoShutokuVal) isEnrolled = true;
+    // 「加入済み」判定は 社員Listの「総務-社保」を最優先で見る。
+    //   健保：資格取得日は一度加入すると喪失後も残る履歴項目なので、現在の加入状態には使えない
+    //   (総務-社保=未加入 なのに健保取得日が入っている社員が実際に18名いる)
+    //   → 「✓取得完了」のみ加入済。→取得申請中/未加入/喪失/移動/20時間未満/なし 等はすべて未加入扱い。
+    //   総務-社保が空欄のときだけ、従来どおり健保取得日・List9履歴にフォールバックする。
     var honninOdKey = fmap.honninKanyuu ? (fmap.honninKanyuu.InternalName.indexOf('_')===0 ? 'OData_' + fmap.honninKanyuu.InternalName : fmap.honninKanyuu.InternalName) : null;
     var kubunOdKey  = fmap.shinseiKubun  ? (fmap.shinseiKubun.InternalName.indexOf('_')===0 ? 'OData_' + fmap.shinseiKubun.InternalName : fmap.shinseiKubun.InternalName) : null;
-    _shahoFormList9Items.forEach(function(it) {
-      if (honninOdKey && it[honninOdKey]) isEnrolled = true;
-      if (kubunOdKey && String(it[kubunOdKey] || '') === '新規加入') isEnrolled = true;
-    });
+    var soumuShahoVal = String((keyMap['soumuShaho'] ? emp[keyMap['soumuShaho']] : '') || '').trim();
+    var isEnrolled = false;
+    // 「移動」は移動前の社保状態を引き継ぐ運用なので、それ自体は判定材料にせず空欄と同じ扱いにする
+    if (soumuShahoVal && soumuShahoVal !== '移動') {
+      isEnrolled = (soumuShahoVal.indexOf('取得完了') >= 0);   // '✓取得完了' のみ
+    } else {
+      if (kenpoShutokuVal) isEnrolled = true;
+      _shahoFormList9Items.forEach(function(it) {
+        if (honninOdKey && it[honninOdKey]) isEnrolled = true;
+        if (kubunOdKey && String(it[kubunOdKey] || '') === '新規加入') isEnrolled = true;
+      });
+    }
+    console.log('[社保申請] 加入済判定:', isEnrolled, '/ 総務-社保=', soumuShahoVal || '(空欄→健保取得日で判定)', '/ 健保取得日=', kenpoShutokuVal);
 
     // 扶養追加履歴 (喪失候補)
     var fuyouHistory = _shahoFormList9Items.filter(function(it) {
@@ -42412,7 +42423,9 @@ async function openShahoForm() {
             '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
             '<span>部課: ' + escHtml(buka) + '</span>' +
             '<span>入社日: ' + escHtml(nyushaDate) + '</span>' +
+            // 判定根拠が分かるよう「総務-社保」の値も出す
             (isEnrolled ? '<span style="color:#2e7d32;font-weight:700;">✓ 加入済</span>' : '<span>加入予定日: ' + escHtml(kanyuYoteiStr) + '</span>') +
+            '<span style="font-size:11px;color:#666;">総務-社保: ' + escHtml(soumuShahoVal || '(空欄)') + '</span>' +
           '</div>' +
         '</div>' +
         '<div class="taisha-body">' +
