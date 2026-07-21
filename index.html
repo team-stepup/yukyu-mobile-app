@@ -21524,7 +21524,18 @@ async function fetchSoumuShahoInCount() {
     _soumuShahoInFields = { kanyuubi: kanyuuKey, hakensaki: hakenKey, bango: bangoKey, name: nameKey,
                             kubun: kubunKey,
                             fuyouName: findF('扶養者氏名'),
-                            tsuzuki: findF('加入する続柄', '加入続柄') };
+                            tsuzuki: findF('加入する続柄', '加入続柄'),
+                            // 被扶養者(異動)届 Excel 用
+                            fuyouFurigana: findF('扶養者フリガナ'),
+                            fuyouBirthday: findF('扶養者生年月日'),
+                            tsuzukiChoice: findF('加入続柄'),
+                            shokugyo:      findF('職業'),
+                            shugyo:        findF('就業状況'),
+                            nenshu:        findF('年間収入'),
+                            riyuu:         findF('加入する理由', '加入理由'),
+                            fuyouZairyu:   findF('扶養者在留カード'),
+                            fuyouMyNumber: findF('扶養者マイナンバー'),
+                            bikou:         findF('備考') };
     // アイテム取得 (ページネーション対応で全件)
     var allItems = [];
     var pageUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')/items?$top=1000";
@@ -22304,6 +22315,8 @@ function buildShahoList9FieldMap(meta) {
   take('huyouSoushitsuRiyuu',['喪失事由', '喪失理由']);
   take('kanyuuRiyuu',    ['加入理由', '加入事由']);
   take('shugyo',         ['就業状況']);
+  take('shokugyo',       ['職業']);
+  take('nenshuu',        ['年間収入']);
   return map;
 }
 
@@ -23715,6 +23728,8 @@ function renderShahoKanyuuDownloadOverlay(items) {
 
   var itemsHtml = '';
   var _shahoDlDisplayCount = 0;   // 画面に出る行数 (扶養をまとめた後の人数)
+  var _shahoHonninN = 0, _shahoFuyouN = 0;
+  var _shahoFuyouIdxMap = {};     // 扶養行の先頭index → その社員の全扶養レコードindex[]
   if (items.length === 0) {
     itemsHtml = '<div style="text-align:center;padding:30px;color:var(--text-light);">該当者なし</div>';
   } else {
@@ -23735,8 +23750,9 @@ function renderShahoKanyuuDownloadOverlay(items) {
     items.forEach(function(item, i) {
       if (!_isFuyouRow(item)) { honninEntries.push({ i: i, item: item }); return; }
       var b = String(SF.bango ? (item[SF.bango] || '') : '') || ('_row' + i);
-      if (!fuyouGroups[b]) { fuyouGroups[b] = { first: i, items: [] }; fuyouOrder.push(b); }
+      if (!fuyouGroups[b]) { fuyouGroups[b] = { first: i, items: [], idxs: [] }; fuyouOrder.push(b); }
       fuyouGroups[b].items.push(item);
+      fuyouGroups[b].idxs.push(i);   // 扶養Excelは扶養者ごとに1行必要なので全レコードを保持
     });
     // fuList を渡すと扶養者を列挙する。i は _koyouDlList のインデックス(先頭レコード)
     function _row(item, i, fuList) {
@@ -23800,6 +23816,9 @@ function renderShahoKanyuuDownloadOverlay(items) {
     });
     var honninN = honninEntries.length, fuyouN = fuyouOrder.length;
     _shahoDlDisplayCount = honninN + fuyouN;
+    _shahoHonninN = honninN; _shahoFuyouN = fuyouN;
+    // 扶養行のチェックボックスは先頭レコードのindexを持つ → 全レコードのindexへ展開できるようにする
+    fuyouOrder.forEach(function(b) { _shahoFuyouIdxMap[fuyouGroups[b].first] = fuyouGroups[b].idxs; });
     // 本人の加入 / 扶養の追加 を見出しで分ける (扶養だけしか無いように見えるのを防ぐ)
     function _secHead(icon, label, n, color) {
       return '<div style="padding:7px 12px;background:' + color + ';color:#fff;font-size:12px;font-weight:800;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;">' +
@@ -23830,15 +23849,20 @@ function renderShahoKanyuuDownloadOverlay(items) {
       ) : '') +
       '<div style="overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">' + itemsHtml + '</div>' +
       (items.length > 0 ? (
+        // 届書の様式が違うので、本人(資格取得届)と扶養(被扶養者異動届)でボタンを分ける
         '<div style="padding:10px 14px;background:#f5f5f5;border-top:1px solid #e0e0e0;flex-shrink:0;">' +
-          '<button onclick="downloadShahoKanyuuExcel()" style="width:100%;padding:11px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(46,125,50,0.3);">📊 選択中の社員をExcelでダウンロード</button>' +
-          '<div style="font-size:10px;color:#777;margin-top:6px;text-align:center;line-height:1.5;">届書作成プログラム(健康保険・厚生年金 資格取得届)手入力補助用 (.xlsx)<br>C2でウィンドウ枠固定・列幅自動調整・ゼブラストライプ</div>' +
+          '<button onclick="downloadShahoKanyuuExcel()"' + (_shahoHonninN ? '' : ' disabled') +
+            ' style="width:100%;padding:11px;background:' + (_shahoHonninN ? 'linear-gradient(135deg,#e53935,#b71c1c)' : '#ccc') + ';color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:' + (_shahoHonninN ? 'pointer' : 'not-allowed') + ';box-shadow:0 2px 8px rgba(183,28,28,0.25);">🧑 本人分をExcel（資格取得届）' + (_shahoHonninN ? '' : ' — 対象なし') + '</button>' +
+          '<button onclick="downloadShahoFuyouExcel()"' + (_shahoFuyouN ? '' : ' disabled') +
+            ' style="width:100%;margin-top:8px;padding:11px;background:' + (_shahoFuyouN ? 'linear-gradient(135deg,#7e57c2,#4527a0)' : '#ccc') + ';color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:' + (_shahoFuyouN ? 'pointer' : 'not-allowed') + ';box-shadow:0 2px 8px rgba(69,39,160,0.25);">👪 扶養分をExcel（被扶養者異動届）' + (_shahoFuyouN ? '' : ' — 対象なし') + '</button>' +
+          '<div style="font-size:10px;color:#777;margin-top:7px;text-align:center;line-height:1.5;">届書作成プログラム 手入力補助用 (.xlsx)<br>扶養分は扶養者1名につき1行で出力します</div>' +
         '</div>'
       ) : '') +
     '</div>';
   document.body.appendChild(ov);
   window._koyouDlList = items;
   window._koyouDlMode = 'shaho-kanyuu';
+  window._shahoFuyouGroups = _shahoFuyouIdxMap;
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
     cb.addEventListener('change', koyouDlUpdateCount);
   });
@@ -23846,14 +23870,17 @@ function renderShahoKanyuuDownloadOverlay(items) {
 
 async function downloadShahoKanyuuExcel() {
   var items = window._koyouDlList || [];
+  var fuyouMap = window._shahoFuyouGroups || {};
   var selected = [];
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
     if (cb.checked) {
       var idx = parseInt(cb.getAttribute('data-emp-idx'));
-      if (!isNaN(idx) && items[idx]) selected.push(items[idx]);
+      if (isNaN(idx) || !items[idx]) return;
+      if (fuyouMap[idx]) return;   // 扶養行は「被扶養者異動届」側で出すのでここでは除外
+      selected.push(items[idx]);
     }
   });
-  if (selected.length === 0) { showToast('1名以上選択してください', 'error'); return; }
+  if (selected.length === 0) { showToast('本人の加入で選択中の社員がありません', 'error'); return; }
   try {
     showToast('Excel生成中...', 'info');
     await _loadXlsxLib();
@@ -24003,6 +24030,169 @@ async function downloadShahoKanyuuExcel() {
   try {
     XLSX.writeFile(wb, fname);
     showToast(selected.length + '名分のExcelをダウンロードしました', 'success');
+  } catch (e) {
+    console.error('XLSX write error:', e);
+    showToast('Excel書き出しエラー: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// 被扶養者(異動)届 手入力補助用 Excel (扶養追加分・扶養者1名につき1行)
+// ============================================================
+async function downloadShahoFuyouExcel() {
+  var items = window._koyouDlList || [];
+  var fuyouMap = window._shahoFuyouGroups || {};
+  // 画面は社員ごとに1行だが、届書は扶養者ごとに1行必要なのでグループを展開する
+  var selected = [];
+  document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
+    if (!cb.checked) return;
+    var idx = parseInt(cb.getAttribute('data-emp-idx'));
+    if (isNaN(idx)) return;
+    var idxs = fuyouMap[idx];
+    if (!idxs) return;               // 本人行はここでは対象外
+    idxs.forEach(function(k) { if (items[k]) selected.push(items[k]); });
+  });
+  if (selected.length === 0) { showToast('扶養の追加で選択中の社員がありません', 'error'); return; }
+  try {
+    showToast('Excel生成中...', 'info');
+    await _loadXlsxLib();
+  } catch (e) {
+    showToast('Excelライブラリの読み込み失敗 (ネット接続を確認)', 'error');
+    return;
+  }
+  var empMap = {};
+  if (_soumuAllEmps && typeof F !== 'undefined' && F.syainNo) {
+    _soumuAllEmps.forEach(function(e) {
+      var n = e[F.syainNo];
+      if (n !== null && n !== undefined) empMap[String(n)] = e;
+    });
+  }
+  var km = _soumuKeyMap || {};
+  var SF = _soumuShahoInFields || {};
+  function get(emp, k) { if (!emp) return ''; var key = km[k]; return (key && emp[key] !== null && emp[key] !== undefined) ? emp[key] : ''; }
+  function val(item, k) { var key = SF[k]; return (key && item[key] !== null && item[key] !== undefined) ? item[key] : ''; }
+  function fmtDate(v) { if (!v) return ''; var d = new Date(v); if (isNaN(d.getTime())) return String(v); return d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0'); }
+  function toWareki(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+    var gengo, gy;
+    if (y > 2019 || (y === 2019 && (m > 5 || (m === 5 && day >= 1)))) { gengo = '令和'; gy = y - 2018; }
+    else if (y > 1989 || (y === 1989 && (m > 1 || (m === 1 && day >= 8)))) { gengo = '平成'; gy = y - 1988; }
+    else if (y > 1926 || (y === 1926 && (m > 12 || (m === 12 && day >= 25)))) { gengo = '昭和'; gy = y - 1925; }
+    else { gengo = '大正'; gy = y - 1911; }
+    return gengo + (gy === 1 ? '元' : gy) + '年' + m + '月' + day + '日';
+  }
+  // 続柄から同居/別居を読み取る (選択肢に「親（同居）」「親（別居）」がある)
+  function doukyo(t) {
+    var s = String(t || '');
+    if (s.indexOf('同居') >= 0) return '同居';
+    if (s.indexOf('別居') >= 0) return '別居';
+    return '';
+  }
+
+  var headers = [
+    '社員番号','被保険者氏名','被保険者 生年月日（和暦）','個人番号（社員フォルダ）',
+    '被扶養者 氏名','被扶養者 フリガナ','続柄','被扶養者 生年月日（和暦）','性別',
+    '被扶養者になった日','理由','職業','就業状況','年間収入','同居・別居',
+    '在留カード','マイナンバー','備考'
+  ];
+  var folderUrls = [];
+  var rows = [headers];
+  selected.forEach(function(item) {
+    var bango = val(item, 'bango');
+    var empName = val(item, 'name') || item.Title || '';
+    var emp = empMap[String(bango)] || null;
+    var folderUrl = '';
+    if (emp) {
+      for (var _k in emp) {
+        var _v = emp[_k];
+        if (_v && typeof _v === 'object' && _v.Url) { folderUrl = _v.Url; break; }
+      }
+    }
+    folderUrls.push(folderUrl);
+    var tsuzuki = String(val(item, 'tsuzuki') || val(item, 'tsuzukiChoice') || '');
+    var nenshu = val(item, 'nenshu');
+    rows.push([
+      String(bango || ''),                               // 1 社員番号
+      String(empName || ''),                             // 2 被保険者氏名
+      toWareki(get(emp, 'birthday')),                    // 3 被保険者 生年月日(和暦)
+      folderUrl ? '📂 社員フォルダ' : '',                // 4 個人番号(社員フォルダへリンク)
+      String(val(item, 'fuyouName') || ''),              // 5 被扶養者 氏名
+      String(val(item, 'fuyouFurigana') || ''),          // 6 被扶養者 フリガナ
+      tsuzuki,                                           // 7 続柄
+      toWareki(val(item, 'fuyouBirthday')),              // 8 被扶養者 生年月日(和暦)
+      '',                                                // 9 性別 (データ無し・手入力)
+      fmtDate(val(item, 'kanyuubi')),                    // 10 被扶養者になった日(=加入日)
+      String(val(item, 'riyuu') || ''),                  // 11 理由
+      String(val(item, 'shokugyo') || ''),               // 12 職業
+      String(val(item, 'shugyo') || ''),                 // 13 就業状況
+      (nenshu === '' || nenshu === null) ? '' : String(nenshu),  // 14 年間収入
+      doukyo(tsuzuki),                                   // 15 同居・別居
+      String(val(item, 'fuyouZairyu') || ''),            // 16 在留カード(有無)
+      String(val(item, 'fuyouMyNumber') || ''),          // 17 マイナンバー(有無)
+      String(val(item, 'bikou') || '')                   // 18 備考
+    ]);
+  });
+
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = headers.map(function(h, i) {
+    var maxLen = 0;
+    rows.forEach(function(row) {
+      var s = String(row[i] == null ? '' : row[i]);
+      var len = 0;
+      for (var ci = 0; ci < s.length; ci++) { len += (s.charCodeAt(ci) > 255 ? 2 : 1); }
+      if (len > maxLen) maxLen = len;
+    });
+    return { wch: Math.min(Math.max(maxLen + 2, 8), 42) };
+  });
+  ws['!views'] = [{ state: 'frozen', xSplit: 2, ySplit: 1, topLeftCell: 'C2', activePane: 'bottomRight' }];
+  ws['!freeze'] = { xSplit: 2, ySplit: 1 };
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  var headerStyle = {
+    fill: { patternType: 'solid', fgColor: { rgb: '5E35B1' } },
+    font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 11 },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: { top:{style:'thin',color:{rgb:'4527A0'}}, bottom:{style:'thin',color:{rgb:'4527A0'}}, left:{style:'thin',color:{rgb:'4527A0'}}, right:{style:'thin',color:{rgb:'4527A0'}} }
+  };
+  for (var c = range.s.c; c <= range.e.c; c++) {
+    var ha = XLSX.utils.encode_cell({ r: 0, c: c });
+    if (ws[ha]) ws[ha].s = headerStyle;
+  }
+  for (var r = 1; r <= range.e.r; r++) {
+    var bg = (r % 2 === 1) ? 'FFFFFF' : 'F3E5F5';   // 奇数=白, 偶数=薄紫
+    var rowStyle = {
+      fill: { patternType: 'solid', fgColor: { rgb: bg } },
+      font: { sz: 11 },
+      alignment: { horizontal: 'left', vertical: 'center', wrapText: false },
+      border: { top:{style:'thin',color:{rgb:'E0E0E0'}}, bottom:{style:'thin',color:{rgb:'E0E0E0'}}, left:{style:'thin',color:{rgb:'E0E0E0'}}, right:{style:'thin',color:{rgb:'E0E0E0'}} }
+    };
+    for (var c2 = range.s.c; c2 <= range.e.c; c2++) {
+      var cellAddr = XLSX.utils.encode_cell({ r: r, c: c2 });
+      if (!ws[cellAddr]) ws[cellAddr] = { v: '', t: 's' };
+      var cellStyle = Object.assign({}, rowStyle);
+      if (c2 <= 1 || c2 === 4) cellStyle = Object.assign({}, cellStyle, { font: { sz: 11, bold: true } });
+      if (c2 === 3) {   // 個人番号列にハイパーリンク
+        var fu = folderUrls[r - 1];
+        if (fu) {
+          ws[cellAddr].l = { Target: fu, Tooltip: '社員フォルダを開く' };
+          cellStyle = Object.assign({}, cellStyle, { font: { sz: 11, color: { rgb: '1565C0' }, underline: true } });
+        }
+      }
+      ws[cellAddr].s = cellStyle;
+    }
+  }
+  ws['!rows'] = [{ hpt: 30 }];
+  for (var ri = 1; ri <= range.e.r; ri++) ws['!rows'].push({ hpt: 20 });
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '被扶養者異動届');
+  var today = new Date();
+  var ymd = today.getFullYear() + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
+  var fname = '被扶養者異動届_' + ymd + '_扶養' + selected.length + '名.xlsx';
+  try {
+    XLSX.writeFile(wb, fname);
+    showToast('扶養者' + selected.length + '名分のExcelをダウンロードしました', 'success');
   } catch (e) {
     console.error('XLSX write error:', e);
     showToast('Excel書き出しエラー: ' + e.message, 'error');
@@ -42524,8 +42714,41 @@ function addShahoAddFuyouRow() {
         '<option value="あり">あり</option>' +
         '<option value="なし">なし</option>' +
       '</select>' +
+      // 職業: 被扶養者(異動)届に必要。「扶養の範囲内で就労」を選んだときだけ年間収入を出す
+      '<select class="shahoAddFu-shokugyo" onchange="onShahoAddFuShokugyoChange(this)" style="grid-column:1/3;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '<option value="">職業を選択</option>' +
+        '<option value="未就学児">未就学児</option>' +
+        '<option value="小学生">小学生</option>' +
+        '<option value="中学生">中学生</option>' +
+        '<option value="高校生">高校生</option>' +
+        '<option value="大学生">大学生</option>' +
+        '<option value="無職">無職</option>' +
+        '<option value="扶養の範囲内で就労">扶養の範囲内で就労</option>' +
+      '</select>' +
+      '<input type="number" class="shahoAddFu-nenshuu" placeholder="年間収入（円）" min="0" step="1000" ' +
+        'style="display:none;grid-column:1/3;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;">' +
     '</div>';
   list.appendChild(row);
+}
+
+// 扶養者行の職業セレクト → 「扶養の範囲内で就労」のときだけ年間収入欄を表示
+function onShahoAddFuShokugyoChange(sel) {
+  var row = sel.closest('.dattai-fuyou-row');
+  if (!row) return;
+  var inp = row.querySelector('.shahoAddFu-nenshuu');
+  if (!inp) return;
+  var show = (sel.value === '扶養の範囲内で就労');
+  inp.style.display = show ? '' : 'none';
+  if (!show) inp.value = '';
+}
+
+// 職業 → List9 の「就業状況」(学生/無職/アルバイト) へ変換
+function shahoShokugyoToShugyo(shokugyo) {
+  var s = String(shokugyo || '');
+  if (s === '小学生' || s === '中学生' || s === '高校生' || s === '大学生') return '学生';
+  if (s === '無職') return '無職';
+  if (s === '扶養の範囲内で就労') return 'アルバイト';
+  return '';   // 未就学児・未選択は該当なし
 }
 
 function closeShahoForm() {
@@ -42792,7 +43015,10 @@ async function submitShahoAddFuyou() {
     var bd   = (r.querySelector('.shahoAddFu-birthday')|| {}).value || '';
     var zr   = (r.querySelector('.shahoAddFu-zairyu')  || {}).value || '';
     var my   = (r.querySelector('.shahoAddFu-mynumber')|| {}).value || '';
-    if (nm || fu || tz) fuyouList.push({ name: nm, furigana: fu, tsuzuki: tz, birthday: bd, zairyu: zr, mynumber: my });
+    var sk   = (r.querySelector('.shahoAddFu-shokugyo')|| {}).value || '';
+    var ns   = (r.querySelector('.shahoAddFu-nenshuu') || {}).value || '';
+    if (nm || fu || tz) fuyouList.push({ name: nm, furigana: fu, tsuzuki: tz, birthday: bd, zairyu: zr, mynumber: my,
+                                         shokugyo: sk, nenshuu: ns });
   });
   if (fuyouList.length === 0) { showToast('扶養者情報を入力してください', 'error'); return; }
 
@@ -42804,6 +43030,8 @@ async function submitShahoAddFuyou() {
     listHtml += '<div style="padding:6px 0;border-bottom:1px dashed #ddd;"><strong>' + (i+1) + '. ' + escHtml(f.name || '(氏名未入力)') + '</strong>' +
       (f.tsuzuki ? ' [' + escHtml(f.tsuzuki) + ']' : '') +
       (f.birthday ? ' ' + escHtml(f.birthday) : '') +
+      (f.shokugyo ? '<br><span style="font-size:12px;color:#555;">職業: ' + escHtml(f.shokugyo) +
+        (f.nenshuu ? '（年収 ' + Number(f.nenshuu).toLocaleString('ja-JP') + ' 円）' : '') + '</span>' : '') +
       '</div>';
   });
   var ov = document.createElement('div');
@@ -42848,6 +43076,14 @@ async function submitShahoAddFuyou() {
         if (f.birthday) putShahoField(body, fmap, 'huyouBirthday', f.birthday + 'T00:00:00Z');
         if (f.zairyu) putShahoField(body, fmap, 'huyouZairyu', f.zairyu);
         if (f.mynumber) putShahoField(body, fmap, 'huyouMyNumber', f.mynumber);
+        if (f.shokugyo) {
+          putShahoField(body, fmap, 'shokugyo', f.shokugyo);
+          var shugyoVal = shahoShokugyoToShugyo(f.shokugyo);
+          if (shugyoVal) putShahoField(body, fmap, 'shugyo', shugyoVal);
+        }
+        if (f.nenshuu !== '' && f.nenshuu != null && !isNaN(Number(f.nenshuu))) {
+          putShahoField(body, fmap, 'nenshuu', Number(f.nenshuu));
+        }
         try {
           await createShahoList9Record(body);
           successCount++;
