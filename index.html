@@ -5410,6 +5410,7 @@ select.sankyu-edit-input {
         <span class="ql-text">承認</span>
         <span id="maebariApprovalBadge" class="ql-badge" title="前払い 承認待ち" style="background:#e91e63;display:none;top:3px;right:3px;font-size:9px;padding:0 5px;border-radius:8px;"></span>
         <span id="approveBentoBadge" class="ql-badge" title="弁当 承認待ち" style="background:#e65100;display:none;top:23px;right:3px;font-size:9px;padding:0 5px;border-radius:8px;"></span>
+        <span id="approveSougeiBadge" class="ql-badge" title="送迎記録 承認待ち" style="background:#04724a;display:none;bottom:3px;right:3px;top:auto;font-size:9px;padding:0 5px;border-radius:8px;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
@@ -6218,7 +6219,23 @@ select.sankyu-edit-input {
     <div id="maebariApprovedList" style="padding:8px 12px;display:none;"></div>
   </div>
 
-  <!-- Screen: 承認ハブ (前払い / 弁当 を分けて表示) -->
+  <!-- Screen: 送迎記録 承認 (employee-portal 運転手の実績を担当者が日次承認) -->
+  <div class="screen" id="sougeiApprovalScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('approveHubScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">🚌 送迎記録 承認</h2>
+      <button class="refresh-btn" onclick="reloadSougeiCurrentTab()" style="margin-left:auto;">&#x21bb; 更新</button>
+    </div>
+    <div class="approve-tabs">
+      <button id="sougeiTabPending" class="approve-tab active" onclick="switchSougeiTab('pending')">承認待ち <span id="sougeiTabPendingBadge" class="tab-badge zero" style="background:#04724a;">0</span></button>
+      <button id="sougeiTabApproved" class="approve-tab" onclick="switchSougeiTab('approved')">承認済み</button>
+    </div>
+    <div style="padding:8px 12px 0;font-size:11.5px;color:var(--text-light);">運転手がポータルで記録した送迎実績です。内容を確認して承認してください（承認後は運転手本人は取り消せません）。間違いは「取消」で無効にできます。</div>
+    <div id="sougeiPendingList" style="padding:8px 12px;"></div>
+    <div id="sougeiApprovedList" style="padding:8px 12px;display:none;"></div>
+  </div>
+
+  <!-- Screen: 承認ハブ (前払い / 弁当 / 送迎記録 を分けて表示) -->
   <div class="screen" id="approveHubScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
@@ -6235,6 +6252,12 @@ select.sankyu-edit-input {
         <span style="font-size:30px;">🍱</span>
         <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#e65100;">弁当 承認</span>
         <span id="hubBentoCount" style="min-width:54px;text-align:center;background:#fff3e0;color:#e65100;border-radius:20px;padding:6px 12px;font-size:14px;font-weight:800;">0件</span>
+        <span style="font-size:20px;color:#bbb;">›</span>
+      </button>
+      <button id="hubSougeiBtn" onclick="openSougeiApprovalScreen()" style="display:none;align-items:center;gap:12px;width:100%;background:#fff;border:1.5px solid #8fd6c0;border-radius:14px;padding:18px 16px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <span style="font-size:30px;">🚌</span>
+        <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#04604a;">送迎記録 承認</span>
+        <span id="hubSougeiCount" style="min-width:54px;text-align:center;background:#e6f6f1;color:#04604a;border-radius:20px;padding:6px 12px;font-size:14px;font-weight:800;">0件</span>
         <span style="font-size:20px;color:#bbb;">›</span>
       </button>
       <div style="font-size:11px;color:var(--text-light);text-align:center;margin-top:4px;">各ボタンを開くと申請の詳細・承認/却下ができます</div>
@@ -6534,6 +6557,22 @@ const MAEBARI_TANTO_BY_EMAIL = {
   'm.mori@team-stepup.com': '森まこと',
   'kaori.j@team-stepup.com': '城かおり'
 };
+
+// 送迎記録 (employee-portal 運転手の1タップ実績) — 担当者の日次承認用
+const LIST_SOUGEI_KIROKU_GUID = 'ec0a16dc-6bba-49cf-a901-d5b3907553ca';
+// 送迎先→承認担当者 (派遣先→担当者の会社ルーティングと同じ)。役員(ADMIN_USERS)は全件。
+const SOUGEI_TANTO_BY_EMAIL = {
+  'm.yoshiura@team-stepup.com': ['ASTI浜松'],
+  'm.mori@team-stepup.com': ['ユーシン'],
+  'y.mori@team-stepup.com': ['ASTI掛川']
+};
+// 送迎記録 List (PowerAppsサイト・ASCII列名なので OData_ プレフィックスなし)
+const SG = {
+  shainNo: 'ShainNo', name: 'DriverName', date: 'RecordDate', dest: 'Destination',
+  cat: 'Category', slot: 'TimeSlot', memo: 'Memo', status: 'Status',
+  approvedBy: 'ApprovedBy', approvedAt: 'ApprovedAt'
+};
+const SOUGEI_APPROVE_CAT_ICON = { '行き': '🌅', '帰り': '🌇', '遅刻': '⏰', '早退': '🏃', '病院対応': '🏥', 'その他（休業）': '📋' };
 
 // 前払い申請 field names (新規 List) — POST 時は OData_ プレフィックスを外す
 const MS = {
@@ -6861,6 +6900,7 @@ async function clearCacheAndReload(reloadUrl) {
 function refreshApprovalBadges() {
   try { if (typeof updateMaebariApprovalBadge === 'function') updateMaebariApprovalBadge(); } catch (e) {}
   try { if (typeof updateBentoAdminBadge === 'function') updateBentoAdminBadge(); } catch (e) {}
+  try { if (typeof updateSougeiApprovalBadge === 'function') updateSougeiApprovalBadge(); } catch (e) {}
 }
 
 // Check when user returns to the app (tab switch, phone unlock)
@@ -37682,18 +37722,23 @@ function openApproveHub() {
     showToast('承認権限がありません', 'error'); return;
   }
   switchScreen('approveHubScreen');
+  var sgBtn = document.getElementById('hubSougeiBtn');
+  if (sgBtn) sgBtn.style.display = (typeof isSougeiApprover === 'function' && isSougeiApprover()) ? 'flex' : 'none';
   function paint() {
-    var m = window._pendMaebari || 0, b = window._pendBento || 0;
+    var m = window._pendMaebari || 0, b = window._pendBento || 0, s = window._pendSougei || 0;
     var em = document.getElementById('hubMaebariCount');
     if (em) { em.textContent = m + '件'; em.style.opacity = m > 0 ? '1' : '0.45'; }
     var eb = document.getElementById('hubBentoCount');
     if (eb) { eb.textContent = b + '件'; eb.style.opacity = b > 0 ? '1' : '0.45'; }
+    var es = document.getElementById('hubSougeiCount');
+    if (es) { es.textContent = s + '件'; es.style.opacity = s > 0 ? '1' : '0.45'; }
   }
   paint();
   // 最新件数を取得して再描画
   Promise.allSettled([
     (typeof isMaebariApprover === 'function' && isMaebariApprover()) ? updateMaebariApprovalBadge() : Promise.resolve(),
-    (typeof canUseBento === 'function' && canUseBento()) ? updateBentoAdminBadge() : Promise.resolve()
+    (typeof canUseBento === 'function' && canUseBento()) ? updateBentoAdminBadge() : Promise.resolve(),
+    (typeof isSougeiApprover === 'function' && isSougeiApprover()) ? updateSougeiApprovalBadge() : Promise.resolve()
   ]).then(paint);
 }
 
@@ -38208,15 +38253,315 @@ async function updateMaebariApprovalBadge() {
   } catch (e) { /* silent */ }
 }
 
-// アプリアイコン(PWA)バッジ = 前払い承認待ち + 弁当承認待ち の合計
+// アプリアイコン(PWA)バッジ = 前払い + 弁当 + 送迎記録 承認待ち の合計
 function _updateApproveAppBadge() {
   try {
-    var total = (window._pendMaebari || 0) + (window._pendBento || 0) + (window._pendSankyu || 0);
+    var total = (window._pendMaebari || 0) + (window._pendBento || 0) + (window._pendSankyu || 0) + (window._pendSougei || 0);
     if (navigator.setAppBadge) {
       if (total > 0) navigator.setAppBadge(total);
       else if (navigator.clearAppBadge) navigator.clearAppBadge();
     }
   } catch (e) { /* badging未対応端末は無視 */ }
+}
+
+// ============================================================
+// 送迎記録 承認 (employee-portal 運転手の実績を 担当者/役員 が日次承認)
+// 承認フロー: 運転手が記録(active) → 担当者が承認(approved) / 取消(cancelled)
+// 月次集計 (sougei_monthly_report.py) は approved のみ支払い対象。
+// ============================================================
+function isSougeiApprover() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    const email = getLoggedInEmail();
+    if (!email) return false;
+    return ADMIN_USERS.indexOf(email) >= 0 || (email in SOUGEI_TANTO_BY_EMAIL);
+  } catch (e) { return false; }
+}
+// 自分が承認できる送迎先。役員→null(全件)、担当者→配列、対象外→[]
+function _mySougeiDests() {
+  const email = getLoggedInEmail();
+  if (ADMIN_USERS.indexOf(email) >= 0) return null;
+  return SOUGEI_TANTO_BY_EMAIL[email] || [];
+}
+// SP の RecordDate(UTC) → JST 'YYYY-MM-DD' (バックエンドの +9h 変換と同じ)
+function _sougeiJstDate(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function _sougeiTodayStr() {
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
+}
+function _sougeiApproverName() {
+  try {
+    const acct = (typeof msalInstance !== 'undefined' && msalInstance) ? msalInstance.getAllAccounts()[0] : null;
+    return (acct && (acct.name || acct.username)) || getLoggedInEmail() || '';
+  } catch (e) { return getLoggedInEmail() || ''; }
+}
+async function _sougeiFetchByStatus(status, top) {
+  const select = ['Id', SG.shainNo, SG.name, SG.date, SG.dest, SG.cat, SG.slot, SG.memo, SG.status, SG.approvedBy, SG.approvedAt].join(',');
+  const q = "$filter=" + encodeURIComponent(SG.status + " eq '" + status + "'")
+    + "&$select=" + encodeURIComponent(select) + "&$orderby=Id desc&$top=" + (top || 2000);
+  const rows = await spGetAll(LIST_SOUGEI_KIROKU_GUID, q);
+  const my = _mySougeiDests();
+  const out = [];
+  rows.forEach(it => {
+    const dest = String(it[SG.dest] || '');
+    if (my !== null && my.indexOf(dest) < 0) return;
+    const sn = it[SG.shainNo];
+    const snInt = parseInt(sn, 10);
+    out.push({
+      id: it.Id,
+      shainNo: (sn == null || sn === '') ? '' : String(isNaN(snInt) ? sn : snInt),
+      name: String(it[SG.name] || ''),
+      date: _sougeiJstDate(it[SG.date]),
+      dest: dest,
+      cat: String(it[SG.cat] || ''),
+      slot: String(it[SG.slot] || ''),
+      memo: String(it[SG.memo] || ''),
+      approvedBy: String(it[SG.approvedBy] || ''),
+      approvedAt: String(it[SG.approvedAt] || '')
+    });
+  });
+  return out;
+}
+
+async function openSougeiApprovalScreen() {
+  if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return; }
+  switchScreen('sougeiApprovalScreen');
+  switchSougeiTab('pending');
+  await loadSougeiPending();
+}
+var _sougeiAprTab = 'pending';
+function switchSougeiTab(tab) {
+  _sougeiAprTab = tab;
+  var tp = document.getElementById('sougeiTabPending'), ta = document.getElementById('sougeiTabApproved');
+  if (tp) tp.classList.toggle('active', tab === 'pending');
+  if (ta) ta.classList.toggle('active', tab === 'approved');
+  var pl = document.getElementById('sougeiPendingList'), al = document.getElementById('sougeiApprovedList');
+  if (pl) pl.style.display = (tab === 'pending') ? '' : 'none';
+  if (al) al.style.display = (tab === 'approved') ? '' : 'none';
+  if (tab === 'approved') loadSougeiApproved();
+}
+function reloadSougeiCurrentTab() {
+  if (_sougeiAprTab === 'approved') loadSougeiApproved(); else loadSougeiPending();
+}
+function _setSougeiTabBadge() {
+  var b = document.getElementById('sougeiTabPendingBadge');
+  if (!b) return;
+  var n = window._pendSougei || 0;
+  b.textContent = n;
+  b.classList.toggle('zero', n === 0);
+}
+
+async function loadSougeiPending() {
+  const listEl = document.getElementById('sougeiPendingList');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#666;">読み込み中...</div>';
+  try {
+    const today = _sougeiTodayStr();
+    const rows = (await _sougeiFetchByStatus('active')).filter(r => r.date && r.date <= today);
+    window._pendSougei = rows.length;
+    _setSougeiTabBadge();
+    renderSougeiPending(rows);
+    _updateApproveAppBadge();
+  } catch (e) {
+    console.error('loadSougeiPending error:', e);
+    listEl.innerHTML = '<div style="background:#ffebee;color:#c62828;padding:14px;border-radius:8px;">読み込みエラー: ' + _esc(e.message) + '</div>';
+  }
+}
+
+function _sougeiRecLabel(r) {
+  return (SOUGEI_APPROVE_CAT_ICON[r.cat] || '') + ' ' + _esc(r.dest) + '　' + _esc(r.cat) + (r.slot ? ' ' + _esc(r.slot) : '');
+}
+function renderSougeiPending(rows) {
+  const listEl = document.getElementById('sougeiPendingList');
+  if (!rows || rows.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">承認待ちの送迎記録はありません</div>';
+    return;
+  }
+  // 日付ごとにグループ (新しい日付が上)
+  const byDate = {};
+  rows.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
+  const dates = Object.keys(byDate).sort().reverse();
+  const wk = ['日', '月', '火', '水', '木', '金', '土'];
+  let html = '';
+  dates.forEach(d => {
+    const recs = byDate[d];
+    const dt = new Date(d + 'T00:00:00');
+    const dLabel = (d && d.length >= 10) ? (Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) + ' (' + wk[dt.getDay()] + ')') : _esc(d);
+    html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:10px 12px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.05);">'
+      + '<div style="font-weight:800;color:#04604a;margin-bottom:6px;">📅 ' + dLabel + '　<span style="font-weight:700;color:#888;font-size:12px;">' + recs.length + '件</span></div>';
+    recs.forEach(r => {
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #f0f0f0;">'
+        + '<input type="checkbox" class="sg-apr-chk" value="' + r.id + '" onchange="updateSougeiBulkBar()" style="width:18px;height:18px;flex-shrink:0;">'
+        + '<div style="flex:1;min-width:0;">'
+        + '<div style="font-size:14px;font-weight:700;color:#333;">' + _sougeiRecLabel(r) + '</div>'
+        + '<div style="font-size:12px;color:#777;">No.' + _esc(r.shainNo) + ' ' + _esc(r.name) + (r.memo ? '　📝' + _esc(r.memo) : '') + '</div>'
+        + '</div>'
+        + '<button onclick="approveSougeiRecord(' + r.id + ')" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;">承認</button>'
+        + '<button onclick="rejectSougeiRecord(' + r.id + ')" style="background:#fde8e8;color:#c0392b;border:none;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;">取消</button>'
+        + '</div>';
+    });
+    html += '</div>';
+  });
+  const bar = '<div id="sougeiBulkBar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #eee;padding:8px 4px;display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="sougeiSelectAll" onchange="toggleSougeiSelectAll(this.checked)" style="width:18px;height:18px;"> 全選択</label>'
+    + '<span id="sougeiBulkCount" style="font-size:12px;color:#888;">選択 0件</span>'
+    + '<button id="sougeiBulkBtn" onclick="bulkApproveSougei()" disabled style="margin-left:auto;background:#9e9e9e;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:800;cursor:not-allowed;">✅ まとめて承認</button>'
+    + '</div>';
+  listEl.innerHTML = bar + html;
+}
+function updateSougeiBulkBar() {
+  const all = Array.prototype.slice.call(document.querySelectorAll('#sougeiPendingList .sg-apr-chk'));
+  const checked = all.filter(c => c.checked);
+  const lbl = document.getElementById('sougeiBulkCount');
+  if (lbl) lbl.textContent = '選択 ' + checked.length + '件';
+  const btn = document.getElementById('sougeiBulkBtn');
+  if (btn) { btn.disabled = (checked.length === 0); btn.style.background = checked.length ? 'linear-gradient(135deg,#43a047,#2e7d32)' : '#9e9e9e'; btn.style.cursor = checked.length ? 'pointer' : 'not-allowed'; }
+  const allc = document.getElementById('sougeiSelectAll');
+  if (allc) allc.checked = (all.length > 0 && checked.length === all.length);
+}
+function toggleSougeiSelectAll(on) {
+  document.querySelectorAll('#sougeiPendingList .sg-apr-chk').forEach(c => { c.checked = on; });
+  updateSougeiBulkBar();
+}
+
+async function _sougeiPatch(recId, body) {
+  const token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  const entity = await getListItemEntityType(LIST_SOUGEI_KIROKU_GUID);
+  const patchBody = Object.assign({ '__metadata': { type: entity } }, body);
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_SOUGEI_KIROKU_GUID + "')/items(" + recId + ")";
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'MERGE',
+    },
+    body: JSON.stringify(patchBody),
+  });
+  if (!resp.ok) {
+    const errTxt = await resp.text();
+    throw new Error('更新失敗 ' + resp.status + ' ' + errTxt.substring(0, 200));
+  }
+}
+
+async function approveSougeiRecord(recId, bulk) {
+  if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return false; }
+  try {
+    const body = {};
+    body[SG.status] = 'approved';
+    body[SG.approvedBy] = _sougeiApproverName();
+    body[SG.approvedAt] = new Date().toISOString();
+    await _sougeiPatch(recId, body);
+    if (!bulk) { showToast('承認しました', 'success'); loadSougeiPending(); }
+    return true;
+  } catch (e) {
+    console.error('approveSougeiRecord error:', e);
+    if (bulk) throw e;                       // 一括時は呼び出し側で件数集計
+    showToast('承認エラー: ' + e.message, 'error');
+    return false;
+  }
+}
+async function bulkApproveSougei() {
+  if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return; }
+  const checked = Array.prototype.slice.call(document.querySelectorAll('#sougeiPendingList .sg-apr-chk:checked'));
+  if (!checked.length) return;
+  const ids = checked.map(c => c.value);
+  if (!confirm('選択した ' + ids.length + '件の送迎記録を承認します。よろしいですか？\n承認した記録が月次集計 (支払い) の対象になります。')) return;
+  const btn = document.getElementById('sougeiBulkBtn');
+  let ok = 0, fail = 0;
+  for (let i = 0; i < ids.length; i++) {
+    if (btn) { btn.disabled = true; btn.style.cursor = 'wait'; btn.textContent = '承認中… ' + (i + 1) + '/' + ids.length; }
+    try { await approveSougeiRecord(ids[i], true); ok++; }
+    catch (e) { console.error('bulk sougei fail id=' + ids[i], e); fail++; }
+    await new Promise(r => setTimeout(r, 200));   // SPスロットリング回避(順次)
+  }
+  showToast('一括承認: 成功 ' + ok + '件' + (fail ? ' / 失敗 ' + fail + '件' : ''), fail ? 'error' : 'success');
+  loadSougeiPending();
+}
+async function rejectSougeiRecord(recId) {
+  if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return; }
+  const reason = prompt('この送迎記録を取消 (無効に) します。理由を入力してください (必須):');
+  if (reason === null) return;
+  if (!String(reason).trim()) { showToast('理由を入力してください', 'error'); return; }
+  try {
+    const body = {};
+    body[SG.status] = 'cancelled';
+    body[SG.approvedBy] = _sougeiApproverName();
+    body[SG.approvedAt] = new Date().toISOString();
+    body[SG.memo] = '【担当者取消】' + String(reason).trim();
+    await _sougeiPatch(recId, body);
+    showToast('取消しました', 'success');
+    loadSougeiPending();
+  } catch (e) {
+    console.error('rejectSougeiRecord error:', e);
+    showToast('取消エラー: ' + e.message, 'error');
+  }
+}
+
+async function loadSougeiApproved() {
+  const listEl = document.getElementById('sougeiApprovedList');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#666;">読み込み中...</div>';
+  try {
+    // 直近45日分の承認済みを表示 (それ以前は月次Excelで確認)
+    const cut = new Date(); cut.setDate(cut.getDate() - 45);
+    const cutStr = cut.getFullYear() + '-' + String(cut.getMonth() + 1).padStart(2, '0') + '-' + String(cut.getDate()).padStart(2, '0');
+    const rows = (await _sougeiFetchByStatus('approved', 2000)).filter(r => r.date >= cutStr);
+    if (!rows.length) {
+      listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">直近45日の承認済み記録はありません</div>';
+      return;
+    }
+    const byDate = {};
+    rows.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
+    const dates = Object.keys(byDate).sort().reverse();
+    const wk = ['日', '月', '火', '水', '木', '金', '土'];
+    let html = '<div style="font-size:11.5px;color:#888;margin-bottom:6px;">直近45日分 ' + rows.length + '件</div>';
+    dates.forEach(d => {
+      const recs = byDate[d];
+      const dt = new Date(d + 'T00:00:00');
+      const dLabel = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) + ' (' + wk[dt.getDay()] + ')';
+      html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:10px 12px;margin-bottom:10px;">'
+        + '<div style="font-weight:800;color:#04604a;margin-bottom:4px;">📅 ' + dLabel + '　<span style="font-weight:700;color:#888;font-size:12px;">' + recs.length + '件</span></div>';
+      recs.forEach(r => {
+        const at = r.approvedAt ? new Date(r.approvedAt) : null;
+        const atStr = (at && !isNaN(at.getTime())) ? ((at.getMonth() + 1) + '/' + at.getDate() + ' ' + String(at.getHours()).padStart(2, '0') + ':' + String(at.getMinutes()).padStart(2, '0')) : '';
+        html += '<div style="padding:6px 0;border-top:1px solid #f0f0f0;">'
+          + '<div style="font-size:13.5px;font-weight:700;color:#333;">' + _sougeiRecLabel(r) + ' <span style="background:#e6f6ec;color:#1b7a3d;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:700;">✓ 承認済</span></div>'
+          + '<div style="font-size:11.5px;color:#888;">No.' + _esc(r.shainNo) + ' ' + _esc(r.name) + '　承認: ' + _esc(r.approvedBy) + (atStr ? ' (' + atStr + ')' : '') + '</div>'
+          + '</div>';
+      });
+      html += '</div>';
+    });
+    listEl.innerHTML = html;
+  } catch (e) {
+    console.error('loadSougeiApproved error:', e);
+    listEl.innerHTML = '<div style="background:#ffebee;color:#c62828;padding:14px;border-radius:8px;">読み込みエラー: ' + _esc(e.message) + '</div>';
+  }
+}
+
+async function updateSougeiApprovalBadge() {
+  if (!isSougeiApprover()) return;
+  try {
+    const today = _sougeiTodayStr();
+    const rows = (await _sougeiFetchByStatus('active', 2000)).filter(r => r.date && r.date <= today);
+    const count = rows.length;
+    window._pendSougei = count;
+    const badge = document.getElementById('approveSougeiBadge');
+    if (badge) {
+      if (count > 0) { badge.textContent = '送迎' + count; badge.style.display = ''; }
+      else badge.style.display = 'none';
+    }
+    _setSougeiTabBadge();
+    _updateApproveAppBadge();
+  } catch (e) { /* silent */ }
 }
 
 // ===== 👑 雇用保険資格喪失届CSV 作成依頼 (役員のみ) =====
