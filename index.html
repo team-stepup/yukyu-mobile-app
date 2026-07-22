@@ -5439,9 +5439,14 @@ select.sankyu-edit-input {
         <span class="ql-icon">🚖</span>
         <span class="ql-text">乗車リスト</span>
       </button>
-      <button class="quick-link-btn sougei-allowed" onclick="switchScreen('renrakuScreen')" style="position:relative;display:none;">
+      <!-- 連絡事項ボタンは非表示 (2026-07-22 給油申請に置換。画面・送信コードは温存、class="quick-link-btn sougei-allowed" に戻せば再表示可) -->
+      <button class="quick-link-btn" onclick="switchScreen('renrakuScreen')" style="position:relative;display:none;">
         <span class="ql-icon">📣</span>
         <span class="ql-text">連絡事項</span>
+      </button>
+      <button class="quick-link-btn sougei-allowed" onclick="openKyuyuScreen()" style="position:relative;display:none;">
+        <span class="ql-icon">⛽</span>
+        <span class="ql-text">給油申請</span>
       </button>
       <!-- 弁当注文ボタンは廃止: 弁当の承認は「承認」ハブ(✅)→「弁当 承認」に統合 (重複のため削除 2026-06-22) -->
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
@@ -6099,6 +6104,15 @@ select.sankyu-edit-input {
       <button onclick="openRenrakuHistory()" style="margin-left:auto;background:#ede7f6;color:#5e35b1;border:1px solid #d1c4e9;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;">📋 送信履歴</button>
     </div>
     <div id="renrakuBody" style="padding:10px 12px;"></div>
+  </div>
+
+  <!-- Screen: ⛽給油申請 (従業員ポータルの運転手用フォームを役員/担当者向けに移植。Functions yukyu/kyuyu-* 経由) -->
+  <div class="screen" id="kyuyuScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">⛽ 給油申請</h2>
+    </div>
+    <div id="kyuyuBody" style="padding:10px 12px;"></div>
   </div>
 
   <!-- Screen: 派遣契約 hmc下書き作成 (新規社員登録の後に表示) -->
@@ -45239,6 +45253,206 @@ async function updateBentoAdminBadge(){
     if (b2) { if (n > 0) { b2.textContent = '弁当' + n; b2.style.display = ''; } else b2.style.display = 'none'; }
     if (typeof _updateApproveAppBadge === 'function') _updateApproveAppBadge();
   } catch (e) { /* silent */ }
+}
+
+// ===== ⛽ 給油申請 (従業員ポータルの運転手用フォームを役員/担当者向けに移植) =====
+// バックエンドは employee-portal Functions の yukyu/kyuyu-* (SPトークン認証・許可リスト制)。
+// List54書込・給油間距離/燃費/間隔の計算・Teams「送迎関係」通知・浩俊Push は運転手版と同一処理。
+var _kyuyuSt = { receipts: [], odoUrl: null };
+
+function _kyuyuEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function _kyuyuApi(method, path, body) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var opt = { method: method, headers: { 'Authorization': 'Bearer ' + token } };
+  if (body) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  var resp = await fetch(FUNC_OCR_BASE + path, opt);
+  var data = null;
+  try { data = await resp.json(); } catch (e) { /* no body */ }
+  if (!resp.ok) { var err = new Error('HTTP ' + resp.status); err.status = resp.status; err.data = data; throw err; }
+  return data || {};
+}
+
+async function openKyuyuScreen() {
+  switchScreen('kyuyuScreen');
+  _kyuyuSt = { receipts: [], odoUrl: null };
+  var host = document.getElementById('kyuyuBody');
+  host.innerHTML = '<div style="text-align:center;color:#888;padding:40px 0;">読み込み中...</div>';
+  var data;
+  try {
+    data = await _kyuyuApi('GET', '/yukyu/kyuyu-status');
+  } catch (e) {
+    host.innerHTML = '<div style="background:#ffebee;color:#c62828;border-radius:10px;padding:14px;font-size:13.5px;">読み込みに失敗しました。通信環境を確認して開き直してください。</div>';
+    return;
+  }
+  var card = 'background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:12px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,0.05);';
+  var inputCss = 'width:100%;padding:11px;border:1px solid #cdd5df;border-radius:8px;font-size:15px;box-sizing:border-box;margin-top:4px;';
+  var labelCss = 'display:block;font-weight:600;font-size:12.5px;color:#555;margin-top:10px;';
+  var headCss = 'margin:0 0 6px;font-size:14px;color:var(--primary);';
+  var vehOpts = '<option value="">選択してください</option>' + (data.vehicles || []).map(function(v) {
+    return '<option value="' + _kyuyuEsc(v) + '">' + _kyuyuEsc(v) + '</option>';
+  }).join('');
+  var purposeRows = (data.purposes || []).map(function(p) {
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px;"><input type="checkbox" class="kyuyu-purpose-cb" value="' + _kyuyuEsc(p) + '" style="width:20px;height:20px;"' + (p === 'ガソリン給油' ? ' checked' : '') + '>' + _kyuyuEsc(p) + '</label>';
+  }).join('');
+  var payOpts = (data.payTypes || []).map(function(p) {
+    return '<option value="' + _kyuyuEsc(p) + '"' + (p === '会社カード' ? ' selected' : '') + '>' + _kyuyuEsc(p) + '</option>';
+  }).join('');
+  host.innerHTML = ''
+    + '<div style="background:#e3f2fd;color:#1565c0;border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:12px;">📌 レシートとメーターを撮影すると、金額・給油量・走行距離が自動で入ります。申請者: <b>' + _kyuyuEsc(getLoggedInName() || getLoggedInEmail()) + '</b></div>'
+    + '<div id="kyuyuFormError" style="display:none;background:#ffebee;color:#c62828;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;"></div>'
+    + '<div style="' + card + '"><h3 style="' + headCss + '">① 車両</h3><select id="kyuyuVehicleSel" style="' + inputCss + '">' + vehOpts + '</select></div>'
+    + '<div style="' + card + '"><h3 style="' + headCss + '">② 給油レシート</h3>'
+    +   '<div style="font-size:11.5px;color:#888;margin-bottom:6px;">給油・オイル交換・洗車で別々のレシートが出る場合、最大3枚撮影できます（金額は自動で合計）。</div>'
+    +   '<input type="file" accept="image/*" capture="environment" id="kyuyuReceiptInput" onchange="onKyuyuAppReceipt(event)" style="display:none;">'
+    +   '<button type="button" id="kyuyuReceiptBtn" onclick="document.getElementById(\'kyuyuReceiptInput\').click()" style="width:100%;padding:12px;border:1.5px dashed #90a4ae;border-radius:10px;background:#f7f9fb;font-size:14px;font-weight:700;cursor:pointer;">📷 撮影する</button>'
+    +   '<div id="kyuyuReceiptPreview" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;"></div></div>'
+    + '<div style="' + card + '"><h3 style="' + headCss + '">③ 走行距離メーター（任意）</h3>'
+    +   '<input type="file" accept="image/*" capture="environment" id="kyuyuOdoInput" onchange="onKyuyuAppOdo(event)" style="display:none;">'
+    +   '<button type="button" onclick="document.getElementById(\'kyuyuOdoInput\').click()" style="width:100%;padding:12px;border:1.5px dashed #90a4ae;border-radius:10px;background:#f7f9fb;font-size:14px;font-weight:700;cursor:pointer;">📷 撮影する</button>'
+    +   '<div id="kyuyuOdoPreview" style="margin-top:10px;"></div></div>'
+    + '<div style="' + card + '"><h3 style="' + headCss + '">④ 内容（自動入力・修正できます）</h3>'
+    +   '<label style="' + labelCss + '">給油量 (ℓ)</label><input type="number" inputmode="decimal" step="0.01" id="kyuyuLiters" style="' + inputCss + '">'
+    +   '<label style="' + labelCss + '">金額 (円)</label><input type="number" inputmode="numeric" id="kyuyuAmount" style="' + inputCss + '">'
+    +   '<label style="' + labelCss + '">現在の走行距離 (km)</label><input type="number" inputmode="numeric" id="kyuyuOdoValue" style="' + inputCss + '"></div>'
+    + '<div style="' + card + '"><h3 style="' + headCss + '">⑤ 利用目的</h3><div style="font-size:11.5px;color:#1f6fb2;margin-bottom:4px;">✔ 複数選択できます（給油＋オイル交換＋洗車など）</div>' + purposeRows + '</div>'
+    + '<div style="' + card + '"><h3 style="' + headCss + '">⑥ 支払い方法</h3><select id="kyuyuPayType" style="' + inputCss + '">' + payOpts + '</select></div>'
+    + '<button id="kyuyuSubmitBtn" onclick="submitKyuyuApp()" style="width:100%;padding:14px;border:none;border-radius:12px;background:linear-gradient(135deg,#f57c00,#e65100);color:#fff;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 3px 10px rgba(230,81,0,0.3);">⛽ この内容で申請する</button>';
+}
+
+function _kyuyuErr2(msg) {
+  var e = document.getElementById('kyuyuFormError');
+  if (!e) return;
+  e.textContent = msg;
+  e.style.display = msg ? '' : 'none';
+  if (msg) window.scrollTo(0, 0);
+}
+
+function _kyuyuRecalcAmount2() {
+  var total = _kyuyuSt.receipts.reduce(function(s, r) { return s + (r.amount || 0); }, 0);
+  var el = document.getElementById('kyuyuAmount');
+  if (el) el.value = total ? Math.round(total) : '';
+}
+
+function _kyuyuRenderReceipts2() {
+  var wrap = document.getElementById('kyuyuReceiptPreview');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  _kyuyuSt.receipts.forEach(function(r, i) {
+    var d = document.createElement('div');
+    d.style.cssText = 'position:relative;display:inline-block;';
+    var img = document.createElement('img');
+    img.src = r.url;
+    img.style.cssText = 'width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #ccc;';
+    d.appendChild(img);
+    var x = document.createElement('span');
+    x.textContent = '✕';
+    x.style.cssText = 'position:absolute;top:-7px;right:-7px;background:#f85149;color:#fff;border-radius:50%;width:22px;height:22px;line-height:22px;text-align:center;font-size:13px;cursor:pointer;';
+    x.onclick = function() { _kyuyuSt.receipts.splice(i, 1); _kyuyuRenderReceipts2(); _kyuyuRecalcAmount2(); };
+    d.appendChild(x);
+    wrap.appendChild(d);
+  });
+  var btn = document.getElementById('kyuyuReceiptBtn');
+  if (btn) {
+    var n = _kyuyuSt.receipts.length;
+    btn.style.display = (n >= 3) ? 'none' : '';
+    btn.textContent = (n === 0) ? '📷 撮影する' : ('➕ レシートを追加（オイル交換・洗車など） (' + n + '/3)');
+    if (n >= 1 && n < 3) { btn.style.background = '#fff3e0'; btn.style.borderColor = '#ff9800'; btn.style.color = '#e65100'; }
+    else { btn.style.background = '#f7f9fb'; btn.style.borderColor = '#90a4ae'; btn.style.color = ''; }
+  }
+}
+
+function onKyuyuAppReceipt(event) {
+  var file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file || !file.type || file.type.indexOf('image/') !== 0) return;
+  if (_kyuyuSt.receipts.length >= 3) return;
+  var reader = new FileReader();
+  reader.onload = async function(ev) {
+    var dataUrl = ev.target.result;
+    var rec = { url: dataUrl, amount: 0 };
+    _kyuyuSt.receipts.push(rec);
+    _kyuyuRenderReceipts2();
+    try {
+      var data = await _kyuyuApi('POST', '/yukyu/kyuyu-ocr', { image: dataUrl, kind: 'receipt' });
+      var ocr = data.ocr || {};
+      if (ocr.amountJpy != null && ocr.amountJpy !== '') rec.amount = parseFloat(String(ocr.amountJpy).replace(/[^\d.]/g, '')) || 0;
+      _kyuyuRecalcAmount2();
+      var litEl = document.getElementById('kyuyuLiters');
+      if (ocr.liters != null && ocr.liters !== '' && litEl && !litEl.value) litEl.value = ocr.liters;
+      if (Array.isArray(ocr.purposeHints)) {
+        ocr.purposeHints.forEach(function(h) {
+          var cb = Array.prototype.slice.call(document.querySelectorAll('.kyuyu-purpose-cb')).find(function(c) { return c.value === h; });
+          if (cb) cb.checked = true;
+        });
+      }
+      // 支払い方法は会社カード固定デフォルト(OCRで上書きしない)
+    } catch (e) {
+      showToast('自動で読み取れませんでした。手で入力してください。', 'warning');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function onKyuyuAppOdo(event) {
+  var file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file || !file.type || file.type.indexOf('image/') !== 0) return;
+  var reader = new FileReader();
+  reader.onload = async function(ev) {
+    var dataUrl = ev.target.result;
+    _kyuyuSt.odoUrl = dataUrl;
+    var pv = document.getElementById('kyuyuOdoPreview');
+    if (pv) pv.innerHTML = '<img src="' + dataUrl + '" style="width:120px;border-radius:8px;border:1px solid #ccc;">';
+    try {
+      var data = await _kyuyuApi('POST', '/yukyu/kyuyu-ocr', { image: dataUrl, kind: 'odometer' });
+      var ocr = data.ocr || {};
+      var el = document.getElementById('kyuyuOdoValue');
+      if (ocr.odometer != null && ocr.odometer !== '' && el) el.value = ocr.odometer;
+    } catch (e) {
+      showToast('自動で読み取れませんでした。手で入力してください。', 'warning');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function submitKyuyuApp() {
+  _kyuyuErr2('');
+  var vehicle = (document.getElementById('kyuyuVehicleSel') || {}).value || '';
+  if (!vehicle) { _kyuyuErr2('車両を選択してください。'); return; }
+  if (!_kyuyuSt.receipts.length) { _kyuyuErr2('レシートを撮影してください。'); return; }
+  var purposes = Array.prototype.slice.call(document.querySelectorAll('.kyuyu-purpose-cb'))
+    .filter(function(c) { return c.checked; }).map(function(c) { return c.value; });
+  var btn = document.getElementById('kyuyuSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = '送信中...';
+  try {
+    await _kyuyuApi('POST', '/yukyu/kyuyu-apply', {
+      name: getLoggedInName() || getLoggedInEmail(),
+      vehicle: vehicle,
+      amount: (document.getElementById('kyuyuAmount') || {}).value || '',
+      liters: (document.getElementById('kyuyuLiters') || {}).value || '',
+      odometer: (document.getElementById('kyuyuOdoValue') || {}).value || '',
+      payType: (document.getElementById('kyuyuPayType') || {}).value || '',
+      purposes: purposes,
+      receiptImages: _kyuyuSt.receipts.map(function(r) { return r.url; }),
+      odometerImage: _kyuyuSt.odoUrl,
+    });
+    showToast('⛽ 給油申請を送信しました。Teams「送迎関係」に通知が届きます。', 'success');
+    switchScreen('searchScreen');
+  } catch (e) {
+    if (e.status === 429) {
+      var sec = (e.data && e.data.retryAfterSeconds) || 60;
+      _kyuyuErr2('送信が集中しています。' + sec + '秒後にもう一度お試しください。');
+    } else {
+      _kyuyuErr2('送信に失敗しました。もう一度お試しください。');
+    }
+    btn.disabled = false;
+    btn.textContent = '⛽ この内容で申請する';
+  }
 }
 
 // ===== 📣 連絡事項: 派遣社員ポータルへ通知＋お知らせ =====
