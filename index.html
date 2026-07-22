@@ -5415,7 +5415,7 @@ select.sankyu-edit-input {
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
         <span class="ql-text">有給確認</span>
-        <span id="yukyuBadgeCount" class="ql-badge" style="background:#1565c0;display:none;"></span>
+        <span id="yukyuBadgeCount" class="ql-badge" title="今月の有給取得日数(半日=0.5)" style="background:#1565c0;display:none;"></span>
         <span id="yukyuBadgeMinus" class="ql-badge" style="background:#c62828;display:none;top:4px;left:4px;right:auto;"></span>
         <span id="yukyuBadgeBelow5" class="ql-badge" style="background:#7c3aed;display:none;bottom:4px;left:4px;top:auto;right:auto;"></span>
         <span id="yukyuBadgeAvg" class="ql-badge" title="今月の有給日数(半日=0.5) ÷ 稼働日数(土日+会社休日除外・祝日は稼働日)" style="background:#00897b;display:none;bottom:4px;right:4px;top:auto;white-space:nowrap;padding:0 5px;"></span>
@@ -18332,11 +18332,15 @@ async function loadHomeBadges() {
     else { nBadgeOut.style.display = 'none'; }
   }
 
-  // 有給確認バッジ
+  // 有給確認バッジ (今月の取得日数・半日=0.5換算。件数→日数に変更 2026-07-22)
+  var yDaysTotal = 0;
+  yRecs.forEach(function(r) { yDaysTotal += getRecordDays(r); });
   var yBadge = document.getElementById('yukyuBadgeCount');
   if (yBadge) {
-    if (yRecs.length > 0) { yBadge.textContent = yRecs.length; yBadge.style.display = 'inline-block'; }
-    else { yBadge.style.display = 'none'; }
+    if (yDaysTotal > 0) {
+      yBadge.textContent = (yDaysTotal % 1 === 0) ? String(yDaysTotal) : yDaysTotal.toFixed(1);
+      yBadge.style.display = 'inline-block';
+    } else { yBadge.style.display = 'none'; }
   }
 
   // 有給 1稼働日あたり平均バッジ（今月の有給日数(半日=0.5) ÷ 今日までの稼働日数）※山下浩俊のみ表示
@@ -18356,8 +18360,7 @@ async function loadHomeBadges() {
         if (_yAvgComp.has(_whKey(today.getFullYear(), today.getMonth() + 1, _ywd))) continue;
         _yWdCount++;
       }
-      var _yDays = 0;
-      yRecs.forEach(function(r) { _yDays += getRecordDays(r); });
+      var _yDays = yDaysTotal;
       if (_yDays > 0 && _yWdCount > 0) {
         yAvgBadge.textContent = (_yDays / _yWdCount).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '/日';
         yAvgBadge.style.display = 'inline-block';
