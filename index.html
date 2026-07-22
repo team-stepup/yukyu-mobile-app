@@ -21528,6 +21528,7 @@ async function fetchSoumuShahoInCount() {
                             // 被扶養者(異動)届 Excel 用
                             fuyouFurigana: findF('扶養者フリガナ'),
                             fuyouBirthday: findF('扶養者生年月日'),
+                            fuyouSeibetsu: findF('扶養者性別'),
                             tsuzukiChoice: findF('加入続柄'),
                             shokugyo:      findF('職業'),
                             shugyo:        findF('就業状況'),
@@ -22317,6 +22318,7 @@ function buildShahoList9FieldMap(meta) {
   take('shugyo',         ['就業状況']);
   take('shokugyo',       ['職業']);
   take('nenshuu',        ['年間収入']);
+  take('seibetsu',       ['扶養者性別', '性別']);
   return map;
 }
 
@@ -24123,7 +24125,7 @@ async function downloadShahoFuyouExcel() {
       String(val(item, 'fuyouFurigana') || ''),          // 6 被扶養者 フリガナ
       tsuzuki,                                           // 7 続柄
       toWareki(val(item, 'fuyouBirthday')),              // 8 被扶養者 生年月日(和暦)
-      '',                                                // 9 性別 (データ無し・手入力)
+      String(val(item, 'fuyouSeibetsu') || ''),          // 9 性別 (2026-07-22 列新設)
       fmtDate(val(item, 'kanyuubi')),                    // 10 被扶養者になった日(=加入日)
       String(val(item, 'riyuu') || ''),                  // 11 理由
       String(val(item, 'shokugyo') || ''),               // 12 職業
@@ -42714,6 +42716,12 @@ function addShahoAddFuyouRow() {
         '<option value="あり">あり</option>' +
         '<option value="なし">なし</option>' +
       '</select>' +
+      // 性別: 被扶養者(異動)届に必要
+      '<select class="shahoAddFu-seibetsu" style="grid-column:1/3;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '<option value="">性別を選択</option>' +
+        '<option value="男">男</option>' +
+        '<option value="女">女</option>' +
+      '</select>' +
       // 職業: 被扶養者(異動)届に必要。「扶養の範囲内で就労」を選んだときだけ年間収入を出す
       '<select class="shahoAddFu-shokugyo" onchange="onShahoAddFuShokugyoChange(this)" style="grid-column:1/3;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;">' +
         '<option value="">職業を選択</option>' +
@@ -43017,8 +43025,9 @@ async function submitShahoAddFuyou() {
     var my   = (r.querySelector('.shahoAddFu-mynumber')|| {}).value || '';
     var sk   = (r.querySelector('.shahoAddFu-shokugyo')|| {}).value || '';
     var ns   = (r.querySelector('.shahoAddFu-nenshuu') || {}).value || '';
+    var sb   = (r.querySelector('.shahoAddFu-seibetsu')|| {}).value || '';
     if (nm || fu || tz) fuyouList.push({ name: nm, furigana: fu, tsuzuki: tz, birthday: bd, zairyu: zr, mynumber: my,
-                                         shokugyo: sk, nenshuu: ns });
+                                         shokugyo: sk, nenshuu: ns, seibetsu: sb });
   });
   if (fuyouList.length === 0) { showToast('扶養者情報を入力してください', 'error'); return; }
 
@@ -43029,6 +43038,7 @@ async function submitShahoAddFuyou() {
   fuyouList.forEach(function(f, i) {
     listHtml += '<div style="padding:6px 0;border-bottom:1px dashed #ddd;"><strong>' + (i+1) + '. ' + escHtml(f.name || '(氏名未入力)') + '</strong>' +
       (f.tsuzuki ? ' [' + escHtml(f.tsuzuki) + ']' : '') +
+      (f.seibetsu ? ' ' + escHtml(f.seibetsu) : '') +
       (f.birthday ? ' ' + escHtml(f.birthday) : '') +
       (f.shokugyo ? '<br><span style="font-size:12px;color:#555;">職業: ' + escHtml(f.shokugyo) +
         (f.nenshuu ? '（年収 ' + Number(f.nenshuu).toLocaleString('ja-JP') + ' 円）' : '') + '</span>' : '') +
@@ -43076,6 +43086,7 @@ async function submitShahoAddFuyou() {
         if (f.birthday) putShahoField(body, fmap, 'huyouBirthday', f.birthday + 'T00:00:00Z');
         if (f.zairyu) putShahoField(body, fmap, 'huyouZairyu', f.zairyu);
         if (f.mynumber) putShahoField(body, fmap, 'huyouMyNumber', f.mynumber);
+        if (f.seibetsu) putShahoField(body, fmap, 'seibetsu', f.seibetsu);
         if (f.shokugyo) {
           putShahoField(body, fmap, 'shokugyo', f.shokugyo);
           var shugyoVal = shahoShokugyoToShugyo(f.shokugyo);
