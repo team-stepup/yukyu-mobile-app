@@ -8249,9 +8249,13 @@ function grantYM(grantDate) {
 function calculateGrants(kisanDateStr, retireDateStr, emp) {
   if (!kisanDateStr) return [];
   const kisanDate = new Date(kisanDateStr);
+  // 起算日はSP上で時刻成分を持つことがある(例 08:00Z=JST17時)。そのままだと付与日も17時扱いになり、
+  // ①当日開始の付与が夕方まで未生成 ②JST0時保存の取得日が前期に算入され残-1 が起きる → JST日付に正規化
+  kisanDate.setHours(0, 0, 0, 0);
   const today = new Date();
-  // 退社日がある場合、その日以降の付与は生成しない
+  // 退社日がある場合、その日以降の付与は生成しない (時刻成分の影響を受けないよう当日末まで許容)
   const cutoffDate = retireDateStr ? new Date(retireDateStr) : today;
+  cutoffDate.setHours(23, 59, 59, 999);
   const grants = [];
 
   for (let i = 0; i < 30; i++) {
