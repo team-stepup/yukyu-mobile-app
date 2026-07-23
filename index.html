@@ -17046,6 +17046,17 @@ async function saveIsshikiPdfs() {
   var saved = [];
   for (var i = 0; i < groups.length; i++) {
     var g = groups[i];
+    // 保存先 = 社員ファイル直下の既存 派遣先別フォルダ (例: 188-アポロ電気株式会社)。
+    //   社員フォルダ (社員ファイル/{部課}/{番号 氏名}) の親として特定 (命名ゆれ吸収は getEmpFolderPath 任せ)
+    var hkFolderPath = null;
+    try {
+      var refEmp = (g.motoByEmp && g.motoByEmp[0] && g.motoByEmp[0].emp) || null;
+      if (refEmp) {
+        var ef = await getEmpFolderPath(refEmp);
+        if (ef) hkFolderPath = ef.substring(0, ef.lastIndexOf('/'));
+      }
+    } catch (fe) { console.warn('派遣先フォルダ特定失敗 (従来フォルダへ保存):', fe); }
+    var saveOpts = { folder: hkFolderPath, count: (g.motoByEmp || []).length, multiRate: groups.length > 1 };
     // 個別契約書
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.kobetsu + '</div>';
     await new Promise(function(r) { setTimeout(r, 350); });
@@ -17053,7 +17064,7 @@ async function saveIsshikiPdfs() {
     var z1 = _captureAndResetZoom();
     var p1 = await generateHaisenDocAsPdf();
     _restoreZoom(z1);
-    saved.push(await _saveIsshikiPdf(g.hg, p1, g.denshi ? '個別契約書(電子契約用)' : '個別契約書'));
+    saved.push(await _saveIsshikiPdf(g.hg, p1, g.denshi ? '個別契約書(電子契約用)' : '個別契約書', saveOpts));
     // 通知書・派遣先管理台帳 (派遣元台帳は含めない=社員フォルダへ別保存)
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.rest + '</div>';
     await new Promise(function(r) { setTimeout(r, 350); });
@@ -17061,7 +17072,7 @@ async function saveIsshikiPdfs() {
     var z2 = _captureAndResetZoom();
     var p2 = await generateHaisenDocAsPdf();
     _restoreZoom(z2);
-    saved.push(await _saveIsshikiPdf(g.hg, p2, '通知書・派遣先管理台帳'));
+    saved.push(await _saveIsshikiPdf(g.hg, p2, '通知書・派遣先管理台帳', saveOpts));
   }
   // 全ページを再表示
   var allHtml = '';
@@ -17103,29 +17114,38 @@ function _showIsshikiPrintModal() {
   document.body.appendChild(ov);
 }
 
-async function _saveIsshikiPdf(h, pdfBlob, suffix) {
-  function isoD(v) {
-    if (!v) return '';
-    var d = new Date(v); if (isNaN(d)) return '';
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
+async function _saveIsshikiPdf(h, pdfBlob, suffix, opts) {
+  opts = opts || {};
   var hkName = _hkClean(h[HF.hakensaki_name] || h[HF.hakensaki_keiyaku] || '') || '不明';
   var safeHk = hkName.replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
-  var ps = isoD(h[HF.haken_period_start]), pe = isoD(h[HF.haken_period_end]);
-  var kikan = (ps || pe) ? (ps + '〜' + pe) : '派遣期間未設定';
-  // ファイル名 = 組織名_請求単価_派遣期間
-  var soshikiNm = _hkClean(h[HF.soshiki] || '').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '組織単位未設定';
-  var ryokinRaw = (h[HF.hakenRyokin] != null && h[HF.hakenRyokin] !== '') ? String(h[HF.hakenRyokin]).replace(/[^\d]/g, '') : '';
-  var ryokinNm = ryokinRaw ? (ryokinRaw + '円') : '単価未設定';
-  var fileName = soshikiNm + '_' + ryokinNm + '_' + kikan + (suffix ? '_' + suffix : '') + '.pdf';
-  var parent = SP_DOC_LIB_PATH + '/派遣契約書、派遣元・先台帳';
-  var hkFolder = parent + '/' + safeHk;
-  try { await ensureSpFolder(parent); } catch (e1) { console.warn('一式 親フォルダ warn:', e1); }
-  try { await ensureSpFolder(hkFolder); } catch (e2) { console.warn('一式 派遣先フォルダ warn:', e2); }
+  // ファイル名 = 期間満了日_組織名(略)_人数_書類名 (例: 2026.9.30_北棟製造部_1名_個別契約書(電子契約用).pdf)
+  var peNm = '';
+  var peV = h[HF.haken_period_end];
+  if (peV) { var pd = new Date(peV); if (!isNaN(pd)) peNm = pd.getFullYear() + '.' + (pd.getMonth() + 1) + '.' + pd.getDate(); }
+  var orgNm = _hkClean(h[HF.soshiki] || h[HF.syuugyou_busho] || '').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim();
+  if (orgNm.length > 14) orgNm = orgNm.substring(0, 14);
+  var parts = [peNm || '期間未設定', orgNm || '組織未設定'];
+  if (opts.count) parts.push(opts.count + '名');
+  // 単価違いで同じ組織のPDFが複数できる場合のみ単価を入れて上書き衝突を回避
+  if (opts.multiRate) {
+    var ryokinRaw = (h[HF.hakenRyokin] != null && h[HF.hakenRyokin] !== '') ? String(h[HF.hakenRyokin]).replace(/[^\d]/g, '') : '';
+    if (ryokinRaw) parts.push(ryokinRaw + '円');
+  }
+  if (suffix) parts.push(suffix);
+  var fileName = parts.join('_') + '.pdf';
+  // 保存先: 社員ファイル直下の派遣先別フォルダ (opts.folder)。特定できない時は従来フォルダへフォールバック
+  var hkFolder = opts.folder || '';
+  if (!hkFolder) {
+    var parent = SP_DOC_LIB_PATH + '/派遣契約書、派遣元・先台帳';
+    hkFolder = parent + '/' + safeHk;
+    try { await ensureSpFolder(parent); } catch (e1) { console.warn('一式 親フォルダ warn:', e1); }
+    try { await ensureSpFolder(hkFolder); } catch (e2) { console.warn('一式 派遣先フォルダ warn:', e2); }
+  }
   var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
   var res = await uploadFileToSp(hkFolder, fileName, file);
   var srv = (res && res.d && res.d.ServerRelativeUrl) || (hkFolder + '/' + fileName);
-  return { name: safeHk + '/' + fileName, url: 'https://teamstepupcom774.sharepoint.com' + encodeURI(srv) };
+  var dispFolder = hkFolder.substring(hkFolder.lastIndexOf('/') + 1) || safeHk;
+  return { name: dispFolder + '/' + fileName, url: 'https://teamstepupcom774.sharepoint.com' + encodeURI(srv) };
 }
 
 // ============================================================
