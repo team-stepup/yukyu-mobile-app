@@ -17004,17 +17004,20 @@ async function _submitHakenIsshiki() {
         sakuseiDate: sakuseiDate, returnHtml: true, denshi: isshikiDenshi
       });
       // ② 通知書 + 各人(派遣先台帳)。派遣元台帳は moto に分離 (SP保存先が違うため)
-      var restPages = renderHakenTsuuchisho(hg, gEmps, { shahoMap: gShaho, sakuseiDate: sakuseiDate, returnHtml: true });
+      //    電子契約時は「個別契約書+通知書」「派遣先台帳」の2ファイルにするため tsuuchi/saki を分けて保持
+      var tsuuchiPages = renderHakenTsuuchisho(hg, gEmps, { shahoMap: gShaho, sakuseiDate: sakuseiDate, returnHtml: true });
+      var sakiPages = '';
       var motoPages = '';
       var motoByEmp = [];   // 社員ごとの派遣元管理台帳 (社員ファイルへの個別PDF保存用)
       gEmps.forEach(function(emp, j) {
         var motoHtml = renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
-        restPages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
+        sakiPages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
         motoPages += motoHtml;
         motoByEmp.push({ emp: emp, html: motoHtml });
       });
-      isshikiGroups.push({ hg: hg, kobetsu: kobetsuPages, rest: restPages, moto: motoPages,
-        motoByEmp: motoByEmp, denshi: isshikiDenshi });
+      var restPages = tsuuchiPages + sakiPages;
+      isshikiGroups.push({ hg: hg, kobetsu: kobetsuPages, rest: restPages, tsuuchi: tsuuchiPages,
+        saki: sakiPages, moto: motoPages, motoByEmp: motoByEmp, denshi: isshikiDenshi });
       allPagesHtml += kobetsuPages + restPages + motoPages;
     }
     // ここでは SharePoint 保存しない（「印刷 / PDF保存」押下時に保存）
@@ -17058,14 +17061,23 @@ async function saveIsshikiPdfs() {
     } catch (fe) { console.warn('派遣先フォルダ特定失敗 (従来フォルダへ保存):', fe); }
     var saveOpts = { folder: hkFolderPath, count: (g.motoByEmp || []).length, multiRate: groups.length > 1 };
     if (g.denshi) {
-      // 電子契約: 個別契約書+通知書+派遣先管理台帳 を1つのPDFに結合 (そのままGMOサインへ回せる)
-      document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.kobetsu + g.rest + '</div>';
-      await new Promise(function(r) { setTimeout(r, 350); });
-      showToast('SharePoint保存中… 契約書類一式・結合PDF (' + (i + 1) + '/' + groups.length + ')', 'info');
-      var zd = _captureAndResetZoom();
-      var pd1 = await generateHaisenDocAsPdf();
-      _restoreZoom(zd);
-      saved.push(await _saveIsshikiPdf(g.hg, pd1, '個別契約書・通知書・台帳(電子契約用)', saveOpts));
+      // 電子契約: 「個別契約書+通知書」「派遣先管理台帳」の2ファイルで保存
+      //   → GMOサインの1送信に2文書添付すれば、先方は帳票ごとにDLでき各文書に電子署名が付く
+      var denshiDocs = [
+        { html: g.kobetsu + (g.tsuuchi || ''), suffix: '個別契約書・通知書(電子契約用)', label: '個別契約書・通知書' },
+        { html: g.saki, suffix: '派遣先管理台帳', label: '派遣先管理台帳' }
+      ];
+      for (var di = 0; di < denshiDocs.length; di++) {
+        var dd = denshiDocs[di];
+        if (!dd.html) continue;
+        document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + dd.html + '</div>';
+        await new Promise(function(r) { setTimeout(r, 350); });
+        showToast('SharePoint保存中… ' + dd.label + ' (' + (i + 1) + '/' + groups.length + ')', 'info');
+        var zd = _captureAndResetZoom();
+        var pdd = await generateHaisenDocAsPdf();
+        _restoreZoom(zd);
+        saved.push(await _saveIsshikiPdf(g.hg, pdd, dd.suffix, saveOpts));
+      }
     } else {
     // 個別契約書
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.kobetsu + '</div>';
