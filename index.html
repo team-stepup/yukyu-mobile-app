@@ -15411,6 +15411,12 @@ function showHakenKobetsuConfirmModal(h) {
           '<label style="display:block;cursor:pointer;">' +
             '<input type="radio" name="hkc_mode" value="each"> 1名ずつ作成（人数分の枚数／各 派遣人員1名）</label>' +
         '</div>' +
+        '<div style="margin-top:8px;background:#ede7f6;border-radius:6px;padding:8px 10px;">' +
+          '<label style="display:block;cursor:pointer;font-weight:700;color:#5e35b1;">' +
+            '<input type="checkbox" id="hkc_denshi"> ⚡ 電子契約用（GMOサイン）で作成</label>' +
+          '<div style="color:#888;font-size:10px;margin:3px 0 6px;">記名欄に両社を印字／締め文言を電磁的記録版に変更／㊞なし／1部のみ</div>' +
+          _hkcLbl('派遣先 代表者名（記名欄に印字・空欄可）') + _hkcInp('hkc_hkDaihyou', '', '例: 代表取締役 ○○ ○○') +
+        '</div>' +
       '</div>' +
       '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
         '<button onclick="document.getElementById(\'hkKobetsuConfirmOverlay\').remove()" ' +
@@ -15431,16 +15437,18 @@ function _submitHakenKobetsuConfirm() {
   var otEl = document.querySelector('input[name="hkc_ot"]:checked');
   var noOvertime = !!(otEl && otEl.value === 'no');
   var count = Math.max(1, parseInt(val('hkc_ninzu'), 10) || 1);
+  var denshiEl = document.getElementById('hkc_denshi');
+  var denshi = !!(denshiEl && denshiEl.checked);
   var overrides = {
     hkName: val('hkc_hkName'), soshiki: val('hkc_soshiki'), ryokin: val('hkc_ryokin'),
     hsBusho: val('hkc_hsBusho'), hsYaku: val('hkc_hsYaku'), hsName: val('hkc_hsName'),
     ksBusho: val('hkc_ksBusho'), ksYaku: val('hkc_ksYaku'), ksName: val('hkc_ksName'),
-    tani: val('hkc_tani')
+    tani: val('hkc_tani'), hkDaihyou: val('hkc_hkDaihyou')
   };
   var ov = document.getElementById('hkKobetsuConfirmOverlay'); if (ov) ov.remove();
   renderHakenKobetsuKeiyakusho(h, {
     overrides: overrides, count: count, perPerson: perPerson,
-    noOvertime: noOvertime, sakuseiDate: val('hkc_date')
+    noOvertime: noOvertime, sakuseiDate: val('hkc_date'), denshi: denshi
   });
 }
 
@@ -15484,6 +15492,9 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   if (ovr.ksBusho != null) ksBusho = ovr.ksBusho;
   if (ovr.ksYaku  != null) ksYaku  = ovr.ksYaku;
   if (ovr.ksName  != null) ksName  = ovr.ksName;
+  // 電子契約(GMOサイン)モード: 記名欄に両社印字・締め文言を電磁的記録版・㊞非表示・1部のみ
+  var denshi = !!opt.denshi;
+  var hkDaihyou = (ovr.hkDaihyou != null) ? String(ovr.hkDaihyou) : '';
 
   // 三和電子サーキットの契約書は「無期雇用派遣労働者に限定」(全員無期雇用のため)
   var isSanwaKobetsu = String(hkName || '').indexOf('三和電子') >= 0;
@@ -15634,20 +15645,23 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
             escHtml(T_KUJOU) + '</div></td></tr>' +
         '<tr><th>23　紹介予定派遣に関する事項</th><td>☐ 該当あり　　<span class="hd-circle">☑ 該当なし</span></td></tr>' +
       '</table>' +
-      '<div style="font-size:8.5pt;margin:8px 0 4px;">※本契約成立の証とするため、本書を2通作成し派遣先・派遣元記名捺印の上、各自1通を保持するものとする。</div>' +
+      '<div style="font-size:8.5pt;margin:8px 0 4px;">' + (denshi
+        ? '※本契約成立の証とするため、本書の電磁的記録を作成し、派遣先・派遣元が電子署名を施した上、各自その電磁的記録を保管するものとする。'
+        : '※本契約成立の証とするため、本書を2通作成し派遣先・派遣元記名捺印の上、各自1通を保持するものとする。') + '</div>' +
       '<table class="hd-main" style="margin-top:4px;">' +
         '<tr><th style="width:12%;">派遣先</th><td class="hd-cell-no-pad"><table class="hd-inner hd-thin">' +
           '<tr><td class="hd-inner-l" style="height:40px;vertical-align:middle;">(所在地)</td>' +
-            '<td class="hd-inner-v" style="height:40px;border:none;"></td></tr>' +
+            '<td class="hd-inner-v" style="height:40px;border:none;vertical-align:middle;">' + (denshi ? escHtml(hakenJusho) : '') + '</td></tr>' +
           '<tr><td class="hd-inner-l" style="height:40px;vertical-align:middle;">(事業所名)</td>' +
-            '<td class="hd-inner-v" style="height:40px;border:none;vertical-align:middle;"><span class="hd-inkan">㊞</span></td></tr>' +
+            '<td class="hd-inner-v" style="height:40px;border:none;vertical-align:middle;">' + (denshi ? escHtml(hkName) : '') +
+            (denshi ? '' : '<span class="hd-inkan">㊞</span>') + '</td></tr>' +
           '<tr><td class="hd-inner-l" style="height:40px;vertical-align:middle;">(代表者名)</td>' +
-            '<td class="hd-inner-v" style="height:40px;border:none;"></td></tr>' +
+            '<td class="hd-inner-v" style="height:40px;border:none;vertical-align:middle;">' + (denshi ? escHtml(hkDaihyou) : '') + '</td></tr>' +
         '</table></td></tr>' +
         '<tr><th style="width:12%;">派遣元</th><td class="hd-cell-no-pad"><table class="hd-inner hd-thin">' +
           '<tr><td class="hd-inner-l">(所在地)</td><td class="hd-inner-v" style="border:none;">' + escHtml(HAKEN_GEN_FIXED.jusho) + '</td></tr>' +
           '<tr><td class="hd-inner-l">(事業所名)</td><td class="hd-inner-v" style="border:none;">' + escHtml(HAKEN_GEN_FIXED.name) +
-            '<span class="hd-inkan">㊞</span></td></tr>' +
+            (denshi ? '' : '<span class="hd-inkan">㊞</span>') + '</td></tr>' +
           '<tr><td class="hd-inner-l">(代表者名)</td><td class="hd-inner-v" style="border:none;">' + escHtml(HAKEN_GEN_FIXED.daihyou) + '</td></tr>' +
           '<tr><td class="hd-inner-l">(許可番号)</td><td class="hd-inner-v" style="border:none;">' + escHtml(HAKEN_GEN_FIXED.kyoka) + '</td></tr>' +
         '</table></td></tr>' +
@@ -15659,8 +15673,10 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   var count = Math.max(1, parseInt(opt.count, 10) || 1);
   var perPerson = !!opt.perPerson;
   // 個別契約書は派遣先・派遣元で2部必要 → 同じものを2部出力 (保管用ラベルは印字しない)
+  // 電子契約モードは双方が同一の電磁的記録を保管するため1部のみ
   function twoCopies(jinin, baseLabel) {
-    return buildOnePage(jinin, baseLabel) + buildOnePage(jinin, baseLabel);
+    var one = buildOnePage(jinin, baseLabel);
+    return denshi ? one : one + one;
   }
   var pagesHtml = '';
   if (perPerson) {
