@@ -10931,8 +10931,24 @@ async function _openHaisenPdfForIOS(pagesHtml, fileName) {
 
 // アプリ側から window.print() を呼ばずに済む。
 async function openHaisenDocInNewWindow() {
-  // 派遣契約書類一式: 印刷選択モーダル (個別契約書/その他を別タブで印刷)
+  // 派遣契約書類一式: まずSharePointへPDF保存し、その後 印刷選択モーダルを表示
+  //   派遣先フォルダ = 個別契約書 + 通知書・派遣先管理台帳 / 社員フォルダ = 派遣元管理台帳(各人別)
   if (window._isshikiGroups && window._isshikiGroups.length) {
+    try {
+      if (!window._isshikiSaved) await saveIsshikiPdfs();
+    } catch (se) {
+      console.error('一式 SharePoint保存エラー:', se);
+      showToast('SharePoint保存に失敗: ' + (se.message || se), 'error');
+    }
+    if (!window._motoKanriboSaved) {
+      window._motoKanriboSaved = true;
+      try { await _saveMotoKanriboToEmpFolders(); }
+      catch (me) {
+        window._motoKanriboSaved = false;
+        console.error('派遣元台帳 個別保存エラー:', me);
+        showToast('派遣元管理台帳の社員ファイル保存に失敗: ' + (me.message || me), 'error');
+      }
+    }
     _showIsshikiPrintModal();
     return;
   }
@@ -11047,7 +11063,8 @@ function _printIsshikiKobetsu() {
 // 一式: 通知書・台帳の印刷タブ (片面印刷用)
 function _printIsshikiRest() {
   var groups = window._isshikiGroups || [];
-  var html = ''; groups.forEach(function(g) { html += g.rest; });
+  // 紙印刷には派遣元管理台帳(g.moto)も含める (SP保存では派遣先フォルダから分離済み)
+  var html = ''; groups.forEach(function(g) { html += g.rest + (g.moto || ''); });
   if (!html) { showToast('通知書・台帳が見つかりません', 'error'); return; }
   // 同時に 派遣元管理台帳 を各社員の社員ファイルへ個別PDF保存 (非同期・印刷を妨げない)
   if (!window._motoKanriboSaved) {
@@ -11109,7 +11126,7 @@ async function _saveMotoKanriboToEmpFolders() {
   }
   // 元の全ページ表示に戻す
   var allHtml = '';
-  groups.forEach(function(g) { allHtml += g.kobetsu + g.rest; });
+  groups.forEach(function(g) { allHtml += g.kobetsu + g.rest + (g.moto || ''); });
   body.innerHTML = '<div class="haisen-doc-wrapper">' + allHtml + '</div>';
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
   if (savedNames.length) {
@@ -16986,17 +17003,19 @@ async function _submitHakenIsshiki() {
         count: gEmps.length, perPerson: false, noOvertime: noOvertime,
         sakuseiDate: sakuseiDate, returnHtml: true, denshi: isshikiDenshi
       });
-      // ② 通知書 + 各人(派遣先台帳・派遣元台帳)
+      // ② 通知書 + 各人(派遣先台帳)。派遣元台帳は moto に分離 (SP保存先が違うため)
       var restPages = renderHakenTsuuchisho(hg, gEmps, { shahoMap: gShaho, sakuseiDate: sakuseiDate, returnHtml: true });
+      var motoPages = '';
       var motoByEmp = [];   // 社員ごとの派遣元管理台帳 (社員ファイルへの個別PDF保存用)
       gEmps.forEach(function(emp, j) {
         var motoHtml = renderHakenMotoKanribo(hg, emp, true, gShaho[j], sakuseiDate);
         restPages += renderHakenSakiKanribo(hg, emp, true, gShaho[j], sakuseiDate);
-        restPages += motoHtml;
+        motoPages += motoHtml;
         motoByEmp.push({ emp: emp, html: motoHtml });
       });
-      isshikiGroups.push({ hg: hg, kobetsu: kobetsuPages, rest: restPages, motoByEmp: motoByEmp });
-      allPagesHtml += kobetsuPages + restPages;
+      isshikiGroups.push({ hg: hg, kobetsu: kobetsuPages, rest: restPages, moto: motoPages,
+        motoByEmp: motoByEmp, denshi: isshikiDenshi });
+      allPagesHtml += kobetsuPages + restPages + motoPages;
     }
     // ここでは SharePoint 保存しない（「印刷 / PDF保存」押下時に保存）
     window._isshikiGroups = isshikiGroups;
@@ -17034,19 +17053,19 @@ async function saveIsshikiPdfs() {
     var z1 = _captureAndResetZoom();
     var p1 = await generateHaisenDocAsPdf();
     _restoreZoom(z1);
-    saved.push(await _saveIsshikiPdf(g.hg, p1, '個別契約書'));
-    // 台帳・通知書
+    saved.push(await _saveIsshikiPdf(g.hg, p1, g.denshi ? '個別契約書(電子契約用)' : '個別契約書'));
+    // 通知書・派遣先管理台帳 (派遣元台帳は含めない=社員フォルダへ別保存)
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.rest + '</div>';
     await new Promise(function(r) { setTimeout(r, 350); });
-    showToast('SharePoint保存中… 台帳・通知書 (' + (i + 1) + '/' + groups.length + ')', 'info');
+    showToast('SharePoint保存中… 通知書・派遣先管理台帳 (' + (i + 1) + '/' + groups.length + ')', 'info');
     var z2 = _captureAndResetZoom();
     var p2 = await generateHaisenDocAsPdf();
     _restoreZoom(z2);
-    saved.push(await _saveIsshikiPdf(g.hg, p2, '台帳・通知書'));
+    saved.push(await _saveIsshikiPdf(g.hg, p2, '通知書・派遣先管理台帳'));
   }
   // 全ページを再表示
   var allHtml = '';
-  groups.forEach(function(g) { allHtml += g.kobetsu + g.rest; });
+  groups.forEach(function(g) { allHtml += g.kobetsu + g.rest + (g.moto || ''); });
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allHtml + '</div>';
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
   window._isshikiSaved = true;
@@ -17068,7 +17087,8 @@ function _showIsshikiPrintModal() {
           'style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
       '</div>' +
       '<div style="padding:16px 18px;">' +
-        '<div style="font-size:11.5px;color:#888;margin-bottom:12px;">改ページがきれいな状態で印刷・PDF保存できます。</div>' +
+        '<div style="font-size:11.5px;color:#2e7d32;font-weight:600;margin-bottom:6px;">📁 SharePointへの保存は完了しています（派遣先フォルダ＋社員ファイル）</div>' +
+        '<div style="font-size:11.5px;color:#888;margin-bottom:12px;">紙が必要な場合は以下から印刷できます（電子契約の場合は印刷不要）。</div>' +
         '<button onclick="_printIsshikiKobetsu()" ' +
           'style="display:block;width:100%;background:linear-gradient(135deg,#6a1b9a,#4a148c);color:#fff;border:none;' +
           'border-radius:8px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px;">' +
