@@ -17057,6 +17057,16 @@ async function saveIsshikiPdfs() {
       }
     } catch (fe) { console.warn('派遣先フォルダ特定失敗 (従来フォルダへ保存):', fe); }
     var saveOpts = { folder: hkFolderPath, count: (g.motoByEmp || []).length, multiRate: groups.length > 1 };
+    if (g.denshi) {
+      // 電子契約: 個別契約書+通知書+派遣先管理台帳 を1つのPDFに結合 (そのままGMOサインへ回せる)
+      document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.kobetsu + g.rest + '</div>';
+      await new Promise(function(r) { setTimeout(r, 350); });
+      showToast('SharePoint保存中… 契約書類一式・結合PDF (' + (i + 1) + '/' + groups.length + ')', 'info');
+      var zd = _captureAndResetZoom();
+      var pd1 = await generateHaisenDocAsPdf();
+      _restoreZoom(zd);
+      saved.push(await _saveIsshikiPdf(g.hg, pd1, '個別契約書・通知書・台帳(電子契約用)', saveOpts));
+    } else {
     // 個別契約書
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.kobetsu + '</div>';
     await new Promise(function(r) { setTimeout(r, 350); });
@@ -17064,7 +17074,7 @@ async function saveIsshikiPdfs() {
     var z1 = _captureAndResetZoom();
     var p1 = await generateHaisenDocAsPdf();
     _restoreZoom(z1);
-    saved.push(await _saveIsshikiPdf(g.hg, p1, g.denshi ? '個別契約書(電子契約用)' : '個別契約書', saveOpts));
+    saved.push(await _saveIsshikiPdf(g.hg, p1, '個別契約書', saveOpts));
     // 通知書・派遣先管理台帳 (派遣元台帳は含めない=社員フォルダへ別保存)
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + g.rest + '</div>';
     await new Promise(function(r) { setTimeout(r, 350); });
@@ -17073,6 +17083,7 @@ async function saveIsshikiPdfs() {
     var p2 = await generateHaisenDocAsPdf();
     _restoreZoom(z2);
     saved.push(await _saveIsshikiPdf(g.hg, p2, '通知書・派遣先管理台帳', saveOpts));
+    }
   }
   // 全ページを再表示
   var allHtml = '';
