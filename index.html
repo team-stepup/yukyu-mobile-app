@@ -17091,6 +17091,7 @@ async function saveIsshikiPdfs() {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allHtml + '</div>';
   if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
   window._isshikiSaved = true;
+  window._isshikiSavedFiles = saved;   // 印刷モーダルの「保存したPDFを開く」リンク用
   return saved;
 }
 
@@ -17110,6 +17111,16 @@ function _showIsshikiPrintModal() {
       '</div>' +
       '<div style="padding:16px 18px;">' +
         '<div style="font-size:11.5px;color:#2e7d32;font-weight:600;margin-bottom:6px;">📁 SharePointへの保存は完了しています（派遣先フォルダ＋社員ファイル）</div>' +
+        (function() {
+          var files = window._isshikiSavedFiles || [];
+          var links = '';
+          files.forEach(function(f) {
+            if (f && f.url) links += '<a href="' + f.url + '" target="_blank" rel="noopener" ' +
+              'style="display:block;font-size:12px;color:#1565c0;font-weight:600;margin-bottom:5px;word-break:break-all;text-decoration:none;">📄 ' + escHtml(f.name) + '</a>';
+          });
+          return links ? ('<div style="background:#e8f5e9;border-radius:6px;padding:8px 10px;margin-bottom:10px;">' +
+            '<div style="font-weight:700;font-size:11px;color:#2e7d32;margin-bottom:5px;">保存したPDF（タップで開く → そのままGMOサインへ）</div>' + links + '</div>') : '';
+        })() +
         '<div style="font-size:11.5px;color:#888;margin-bottom:12px;">紙が必要な場合は以下から印刷できます（電子契約の場合は印刷不要）。</div>' +
         '<button onclick="_printIsshikiKobetsu()" ' +
           'style="display:block;width:100%;background:linear-gradient(135deg,#6a1b9a,#4a148c);color:#fff;border:none;' +
