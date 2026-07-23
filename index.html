@@ -13155,12 +13155,13 @@ function getEmpSeikyu(emp) {
 // 新規雇用契約書 / 更新書類一括作成 が社員データを書き換える直前の値を記録し、
 // undoKoyouChanges() でまとめて元に戻せるようにする。
 var KOYOU_UNDO_KEY = '_koyouUndoSnapshot';
-function _recordKoyouUndo(label, items) {
-  // items: [{empId, empNo, name, orig:{ODataキー: 元の値, ...}}]
-  if (!items || !items.length) return;
+function _recordKoyouUndo(label, items, hakenItems) {
+  // items: [{empId, empNo, name, orig:{ODataキー: 元の値, ...}}] 社員データ復元用
+  // hakenItems: [{id, name, orig:{ODataキー: 元の値, ...}}] 派遣先情報List 復元用 (省略可)
+  if ((!items || !items.length) && (!hakenItems || !hakenItems.length)) return;
   try {
     localStorage.setItem(KOYOU_UNDO_KEY, JSON.stringify({
-      ts: new Date().toISOString(), label: label, items: items
+      ts: new Date().toISOString(), label: label, items: items || [], hakenItems: hakenItems || []
     }));
   } catch (e) { console.warn('undo snapshot 保存失敗:', e); }
 }
@@ -13173,19 +13174,24 @@ function _getKoyouUndo() {
 // 直前の 給与/通勤費/雇用期間 変更を元に戻す
 async function undoKoyouChanges(btnEl) {
   var snap = _getKoyouUndo();
-  if (!snap || !snap.items || !snap.items.length) {
+  var hkItems = (snap && snap.hakenItems) || [];
+  if (!snap || ((!snap.items || !snap.items.length) && !hkItems.length)) {
     if (typeof showToast === 'function') showToast('元に戻せる変更がありません', 'info');
     return;
   }
   var when = '';
   try { when = new Date(snap.ts).toLocaleString('ja-JP'); } catch (_) {}
-  if (!confirm('「' + snap.label + '」の変更を元に戻します。\n対象: ' + snap.items.length + '名\n実行日時: ' + when + '\n\nよろしいですか？')) return;
+  var targetDesc = [];
+  if (snap.items && snap.items.length) targetDesc.push('社員 ' + snap.items.length + '名');
+  if (hkItems.length) targetDesc.push('派遣先情報 ' + hkItems.length + '件');
+  if (!confirm('「' + snap.label + '」の変更を元に戻します。\n対象: ' + targetDesc.join(' / ') + '\n実行日時: ' + when + '\n\nよろしいですか？')) return;
   if (btnEl) btnEl.disabled = true;
   try {
     var token = await getToken();
     if (!token) throw new Error('認証エラー');
-    var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
     var ok = 0, ng = [];
+    if (snap.items && snap.items.length) {
+    var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
     for (var i = 0; i < snap.items.length; i++) {
       var it = snap.items[i];
       var body = { __metadata: { type: entityType } };
@@ -13216,9 +13222,45 @@ async function undoKoyouChanges(btnEl) {
       } catch (e) { ng.push((it.name || it.empNo || '?') + ': ' + (e.message || e)); }
       await new Promise(function(r){ setTimeout(r, 200); });
     }
+    }
+    // 派遣先情報List の復元 (一式作成・派遣期間編集の書き換え分)
+    var hkOk = 0;
+    if (hkItems.length) {
+      var hkEntity = await getListItemEntityType(LIST_HAKENSAKI_GUID);
+      for (var hj = 0; hj < hkItems.length; hj++) {
+        var hi = hkItems[hj];
+        var hb = { __metadata: { type: hkEntity } };
+        Object.keys(hi.orig || {}).forEach(function(odk){ hb[odk] = hi.orig[odk]; });
+        try {
+          var hu = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_HAKENSAKI_GUID + "')/items(" + hi.id + ")";
+          var hr = await fetch(hu, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+              'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE'
+            },
+            body: JSON.stringify(hb)
+          });
+          if (!hr.ok) throw new Error('HTTP ' + hr.status);
+          // ローカルキャッシュにも反映
+          try {
+            if (typeof _hakensakiItems !== 'undefined' && Array.isArray(_hakensakiItems)) {
+              var chk = _hakensakiItems.find(function(x){ return x && x.Id === hi.id; });
+              if (chk) Object.keys(hi.orig).forEach(function(odk){ chk[odk] = hi.orig[odk]; });
+            }
+            if (typeof _hakensakiByBuka !== 'undefined') _hakensakiByBuka = null;
+          } catch (_) {}
+          hkOk++;
+        } catch (e2) { ng.push('派遣先' + (hi.name || hi.id) + ': ' + (e2.message || e2)); }
+        await new Promise(function(r){ setTimeout(r, 200); });
+      }
+    }
     localStorage.removeItem(KOYOU_UNDO_KEY);
+    var doneDesc = [];
+    if (ok) doneDesc.push('社員 ' + ok + '名');
+    if (hkOk) doneDesc.push('派遣先情報 ' + hkOk + '件');
     if (typeof showToast === 'function')
-      showToast('↩ 元に戻しました: ' + ok + '名' + (ng.length ? ' / 失敗 ' + ng.length : ''), ng.length ? 'error' : 'success');
+      showToast('↩ 元に戻しました: ' + (doneDesc.join(' / ') || '0件') + (ng.length ? ' / 失敗 ' + ng.length : ''), ng.length ? 'error' : 'success');
     if (ng.length) console.warn('undo 失敗:', ng);
     if (btnEl) { btnEl.disabled = false; btnEl.style.display = 'none'; }
     // 派遣先一覧表示中なら再描画
@@ -16874,7 +16916,17 @@ async function _submitHakenIsshiki() {
             var ht = ''; try { ht = await hresp.text(); } catch (_) {}
             throw new Error('HTTP ' + hresp.status + ' ' + ht.substring(0, 150));
           }
+          // 変更前の値をスナップショット (アプリ内「元に戻す」用。雇用期間undoと同枠に保存)
+          var hkOrig = {};
+          Object.keys(hbody).forEach(function(k) {
+            if (k !== '__metadata') hkOrig[k] = (ctx.h[k] === undefined ? null : ctx.h[k]);
+          });
           Object.keys(hbody).forEach(function(k) { if (k !== '__metadata') ctx.h[k] = hbody[k]; });
+          if (typeof _recordKoyouUndo === 'function') {
+            _recordKoyouUndo('派遣契約書類一式',
+              (typeof undoItems !== 'undefined' && undoItems) ? undoItems : [],
+              [{ id: ctx.h.Id, name: String(ctx.h[HF.bango] || ctx.h[HF.hakensaki_name] || ''), orig: hkOrig }]);
+          }
         } catch (he) {
           console.warn('派遣先情報 保存失敗:', he);
           showToast('派遣先情報の保存に失敗: ' + (he.message || he), 'error');
@@ -20302,8 +20354,17 @@ async function saveHakenPeriod() {
       var t = ''; try { t = await resp.text(); } catch (_) {}
       throw new Error('HTTP ' + resp.status + ' ' + t.substring(0, 150));
     }
+    // 変更前の値をスナップショット (アプリ内「元に戻す」用)
+    var perOrig = {};
+    if (F.start) perOrig[F.start] = (item[F.start] === undefined ? null : item[F.start]);
+    if (F.end) perOrig[F.end] = (item[F.end] === undefined ? null : item[F.end]);
     if (F.start) item[F.start] = body[F.start];
     if (F.end) item[F.end] = body[F.end];
+    if (typeof _recordKoyouUndo === 'function') {
+      _recordKoyouUndo('派遣期間の編集: ' + String(item[HF.bango] || ''), [],
+        [{ id: item.Id, name: String(item[HF.bango] || ''), orig: perOrig }]);
+      if (typeof refreshUndoButtons === 'function') refreshUndoButtons();
+    }
     showToast('✓ 派遣期間を保存しました', 'success');
     renderHakensakiDetail();
   } catch (e) {
