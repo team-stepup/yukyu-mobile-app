@@ -45561,6 +45561,45 @@ async function openKyuyuScreen() {
     + '<div style="' + card + '"><h3 style="' + headCss + '">⑤ 利用目的</h3><div style="font-size:11.5px;color:#1f6fb2;margin-bottom:4px;">✔ 複数選択できます（給油＋オイル交換＋洗車など）</div>' + purposeRows + '</div>'
     + '<div style="' + card + '"><h3 style="' + headCss + '">⑥ 支払い方法</h3><select id="kyuyuPayType" style="' + inputCss + '">' + payOpts + '</select></div>'
     + '<button id="kyuyuSubmitBtn" onclick="submitKyuyuApp()" style="width:100%;padding:14px;border:none;border-radius:12px;background:linear-gradient(135deg,#f57c00,#e65100);color:#fff;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 3px 10px rgba(230,81,0,0.3);">⛽ この内容で申請する</button>';
+  // 担当者版は社員番号を持たないため、ログイン名で車両管理List(Driver)を照合して既定車両を自動選択
+  _kyuyuAutoSelectVehicleByName(data.vehicles || []);
+}
+
+// ⛽ 給油: SP車両(車両管理List)からログイン中の担当者の担当車を抽出し、車両プルダウンを自動選択する。
+//   担当者版は社員番号を持たない → Driver名(=ログイン表示名)で照合。現用車(Usage=使用)を優先。
+//   プルダウン文字列は「{ナンバー} {車名}」形式なので、先頭トークン(ナンバー)完全一致で選択肢を特定する。
+async function _kyuyuAutoSelectVehicleByName(vehicles) {
+  try {
+    var sel = document.getElementById('kyuyuVehicleSel');
+    if (!sel || sel.value) return;                       // 既に選択済みなら触らない
+    var myName = (getLoggedInName() || '').replace(/\s+/g, '');
+    if (!myName || !(vehicles && vehicles.length)) return;
+    var token = await getToken();
+    var listApi = SP_SITE_URL + "/_api/web/GetList('/sites/PowerApps/Lists/List')";
+    var resp = await fetch(listApi + "/items?$top=500", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) return;
+    var items = ((await resp.json()).d.results) || [];
+    var fields = await fetchVehicleFields();
+    var fp = function(sub){ var h = fields.find(function(f){ return f.Title && f.Title.indexOf(sub) >= 0; }); return h ? h.EntityPropertyName : null; };
+    var fNum = fp('ナンバー') || fp('Number');            // OData__x004e_O2 (4桁一連番号) 例「6441」
+    var fUsage = fp('Usage') || fp('使用');
+    var fDriver = (function(){ var e = fields.find(function(f){ return f.Title === 'Driver'; }); return e ? e.EntityPropertyName : (fp('ドライバー') || fp('運転') || 'Driver'); })();
+    if (!fNum || !fDriver) return;
+    var mine = items.filter(function(it){
+      var dv = String(it[fDriver] || '').replace(/\s+/g, '');
+      return dv && (dv === myName || dv.indexOf(myName) >= 0 || myName.indexOf(dv) >= 0);
+    });
+    if (!mine.length) return;
+    mine.sort(function(a, b){                             // Usage=使用 を先頭に
+      var au = (fUsage && String(a[fUsage] || '') === '使用') ? 0 : 1;
+      var bu = (fUsage && String(b[fUsage] || '') === '使用') ? 0 : 1;
+      return au - bu;
+    });
+    var no = String(mine[0][fNum] || '').trim().replace(/\.0$/, '');
+    if (!no) return;
+    var match = vehicles.find(function(v){ return String(v).trim().split(/\s+/)[0] === no; });
+    if (match) { sel.value = match; }
+  } catch (e) { console.warn('給油: 担当車両の自動選択に失敗', e); }
 }
 
 function _kyuyuErr2(msg) {
