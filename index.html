@@ -8133,6 +8133,26 @@ function classifyExitEmp(emp, sameBangoRecs) {
   if (!yd && !hd) return null; // 退社情報なし
   // ① 採用種別が「移動」を含むなら 移動退社確定 (yd 設定済みでも適用)
   if (syubetuKindGlobal(emp[F.zaiyokuSyubetu]) === 'transfer-in') return 'transfer-out';
+  // ①-b 完全退社(採用種別=退社・有給後退社日あり)で登録されていても、退社日の直後(≤14日)に
+  //     同一社員番号の次の入社レコードがあれば「移動退社の誤登録」とみなす。
+  //     健保・雇用は継続するため喪失届は不要。真の再雇用は通常もっと後なので 14日ガードで誤判定を防ぐ。
+  //     (例: 50758 ワタナベ = ペットフード→ユーシン→天龍 と翌日移動を完全退社で登録していたケース)
+  if (sameBangoRecs && sameBangoRecs.length > 0) {
+    const _exitRaw = (yd && hd) ? (new Date(yd) > new Date(hd) ? yd : hd) : (yd || hd);
+    if (_exitRaw) {
+      const _exitDate = new Date(_exitRaw);
+      const _IMM_GAP_MS = 14 * 24 * 3600 * 1000;
+      const _immFollow = sameBangoRecs.some(e => {
+        if (e.Id === emp.Id) return false;
+        if (!e[F.nyushaDate]) return false;
+        const _nd = new Date(e[F.nyushaDate]);
+        if (_nd <= _exitDate) return false;
+        if (syubetuKindGlobal(e[F.zaiyokuSyubetu]) === 'rejoin') return false; // 再雇用は移動ではない
+        return (_nd - _exitDate) <= _IMM_GAP_MS;
+      });
+      if (_immFollow) return 'transfer-out';
+    }
+  }
   if (yd) return 'retire';
   // yd なし、hd あり → 移動退社の可能性
   // ② 同一社員番号の後続レコード判定 (従来ロジック)
@@ -41723,13 +41743,30 @@ async function loadNyutaiScreen() {
       // 例: 70494 フェルナンデス アンネ (zaiyokuSyubetu="移動退社..." & yd 設定済み)
       if (syubetuKind(emp[F.zaiyokuSyubetu]) === 'transfer-in') return 'transfer-out';
       const yd = emp[F.yukyuTaisha];
-      if (yd) return 'retire'; // 有給退社日あり = 完全退社
       const hd = emp[F.hakenTaisha];
+      const sn = emp[F.syainNo];
+      const group = sn ? (empsBySyainNo[String(sn)] || []) : [];
+      // ①-b 完全退社登録でも、退社日直後(≤14日)に同一社員番号の次の入社レコードがあれば移動退社とみなす
+      //     (classifyExitEmp と同じ誤登録救済。健保・雇用は継続 → 喪失届不要)
+      if (group.length > 0) {
+        const _exitRaw = (yd && hd) ? (new Date(yd) > new Date(hd) ? yd : hd) : (yd || hd);
+        if (_exitRaw) {
+          const _exitDate = new Date(_exitRaw);
+          const _immFollow = group.some(e => {
+            if (e.Id === emp.Id) return false;
+            if (!e[F.nyushaDate]) return false;
+            const _nd = new Date(e[F.nyushaDate]);
+            if (_nd <= _exitDate) return false;
+            if (syubetuKind(e[F.zaiyokuSyubetu]) === 'rejoin') return false;
+            return (_nd - _exitDate) <= 14 * 24 * 3600 * 1000;
+          });
+          if (_immFollow) return 'transfer-out';
+        }
+      }
+      if (yd) return 'retire'; // 有給退社日あり = 完全退社
       if (!hd) return 'retire';
       // ② 同一社員番号の後続レコードから判定
-      const sn = emp[F.syainNo];
       if (!sn) return 'retire';
-      const group = empsBySyainNo[String(sn)] || [];
       const hdDate = new Date(hd);
       const hasTransferKind = group.some(e => {
         if (e.Id === emp.Id) return false;
