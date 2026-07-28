@@ -9479,6 +9479,76 @@ async function saveYukyuSkipChange(emp, ym, doSkip) {
 }
 
 // ============================================================
+// 従業員ポータル PIN リセット
+// ============================================================
+// PIN はポータル側でハッシュ保存 (中身は誰にも見えない)。忘れた場合は
+// 総務がこの列をクリア → 本人がポータル初回ログイン(3要素)から再設定する運用。
+const PORTAL_PIN_ODATA_KEY = 'OData__x30dd__x30fc__x30bf__x30eb_PIN';
+
+function confirmResetPortalPin() {
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員が選択されていません', 'error'); return; }
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '99999';
+  ov.innerHTML = '<div class="confirm-box" style="max-width:360px;">' +
+    '<div class="confirm-title" style="color:#e65100;">🔄 ポータルPINをリセットしますか？</div>' +
+    '<div class="confirm-msg"><strong>' + escHtml(String(emp.Title || '')) + '</strong> さんのポータルログインPINを消去します。<br><br>' +
+      'リセット後、本人はポータルの初回ログイン（社員番号・生年月日・電話下4桁）からPINを設定し直します。<br><br>' +
+      '<span style="color:#c62828;font-weight:700;">本人からの依頼であることを確認してから実行してください。</span></div>' +
+    '<div class="confirm-btns">' +
+      '<button class="btn-cancel" id="ppCancel">キャンセル</button>' +
+      '<button class="btn-ok" id="ppOk">リセットする</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('ppCancel').onclick = function() { ov.remove(); };
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.getElementById('ppOk').onclick = async function() {
+    var btn = this;
+    btn.disabled = true; btn.textContent = '処理中...';
+    try {
+      await resetPortalPin(emp);
+      ov.remove();
+      showToast('PINをリセットしました。本人に初回ログインからやり直してもらってください', 'success');
+      try { loadEmployeeProfile(); } catch (e) {}
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'リセットする';
+      showToast('リセット失敗: ' + (e.message || e), 'error');
+    }
+  };
+}
+
+async function resetPortalPin(emp) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー（再ログインしてください）');
+  var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
+  var body = { __metadata: { type: entityType } };
+  body[PORTAL_PIN_ODATA_KEY.replace(/^OData_/, '')] = null;
+  var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + emp.Id + ")";
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'MERGE'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    var errText = '';
+    try { errText = await resp.text(); } catch (_) {}
+    if (resp.status === 400 && errText.indexOf('does not exist') >= 0) {
+      throw new Error('SharePoint に「ポータルPIN」フィールドが見つかりません');
+    }
+    throw new Error('SP更新失敗(' + resp.status + ')');
+  }
+  emp[PORTAL_PIN_ODATA_KEY] = null;
+  return true;
+}
+
+// ============================================================
 // 派遣書類作成（労働契約書③、就業条件明示書③ ほか）
 // ============================================================
 // 派遣先情報リスト (派遣先情報040623, GUID 2a2ab839-...) のフィールド (OData_プレフィックス付きキー)。
@@ -30051,6 +30121,26 @@ async function loadEmployeeProfile() {
   html +=   '<div class="accordion-body"><div id="shukkinRateBody">';
   html +=     '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:14px 8px;">読み込み中...</div>';
   html +=   '</div></div>';
+  html += '</div>';
+
+  // 📱 従業員ポータル PIN (本人が忘れた時に総務がリセット → 初回設定やり直し)
+  const _ppVal = emp[PORTAL_PIN_ODATA_KEY];
+  const _pinSet = !!(_ppVal && String(_ppVal).trim());
+  html += '<div class="accordion-section" id="acc_portalpin">';
+  html +=   '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+  html +=     '<span class="acc-icon">📱</span>';
+  html +=     '<span>ポータルPIN</span>';
+  html +=     '<span style="margin-left:6px;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;' + (_pinSet ? 'background:#e8f5e9;color:#2e7d32;">設定済み' : 'background:#f5f5f5;color:#999;">未設定') + '</span>';
+  html +=     '<span class="acc-arrow" style="margin-left:auto;">&#9654;</span>';
+  html +=   '</div>';
+  html +=   '<div class="accordion-body">';
+  if (_pinSet) {
+    html += '<div style="font-size:12px;color:var(--text-light);line-height:1.6;margin-bottom:10px;">PINは暗号化保存のため中身は確認できません。本人が忘れた場合はリセットしてください。リセット後、本人はポータルの初回ログイン（社員番号・生年月日・電話下4桁）からPINを設定し直します。</div>';
+    html += '<button onclick="confirmResetPortalPin()" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;">🔄 PINをリセット</button>';
+  } else {
+    html += '<div style="font-size:12px;color:var(--text-light);">まだPINが設定されていません（ポータル初回ログイン未実施）。</div>';
+  }
+  html +=   '</div>';
   html += '</div>';
 
   // 📝 更新履歴 (役員のみ表示) - placeholder
