@@ -8757,9 +8757,16 @@ async function loadLeaveDetails() {
   processedGrants.forEach((g, i) => {
     const nextG = processedGrants[i + 1];
     const pEndFilter = nextG ? nextG.grantDate : new Date(9999,0,1);
+    // 取得記録の帰属境界: 次の付与が未生成でも理論上の次回付与日(付与日+12ヶ月)で区切る
+    // (次期に属する取得日を当期の使用に算入して残がマイナスになるのを防ぐ)
+    let recEndFilter = pEndFilter;
+    if (!nextG) {
+      recEndFilter = new Date(g.grantDate);
+      recEndFilter.setMonth(recEndFilter.getMonth() + 12);
+    }
     const pRecords = leaveRecords.filter(r => {
       const d = new Date(r[F.leaveDate]);
-      return d >= g.grantDate && d < pEndFilter;
+      return d >= g.grantDate && d < recEndFilter;
     });
     let pUsed = 0;
     pRecords.forEach(r => { pUsed += getRecordDays(r); });
@@ -9218,13 +9225,17 @@ async function loadLeaveDetails() {
       }
 
       // Filter records within this grant PERIOD (grant date ~ next grant date)
-      const periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
+      // 次の付与が未生成でも periodEnd+1日(理論上の次回付与日)で区切る(次期の取得日を当期に算入しない)
+      const periodEndFilter = new Date(periodEnd.getTime() + 86400000);
       const grantRecords = leaveRecords.filter(r => {
         const d = new Date(r[F.leaveDate]);
         return d >= gStart && d < periodEndFilter;
       }).sort((a,b) => new Date(b[F.leaveDate]) - new Date(a[F.leaveDate]));
       let actualUsedDays = 0;
       grantRecords.forEach(r => { actualUsedDays += getRecordDays(r); });
+      // 次回付与期間(カード未生成)に属する取得 — 次回付与から消化される
+      const nextPeriodRecords = !nextGrant ? leaveRecords.filter(r => new Date(r[F.leaveDate]) >= periodEndFilter)
+        .sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate])) : [];
 
       // 取得日を「古い順」で番号(①②...)と累計日数を計算してマップ化
       // (表示は既存の新しい順だが、各行に古い順での通算番号と累計を出すため)
@@ -9336,6 +9347,19 @@ async function loadLeaveDetails() {
             }).join('')}
           </div>
         ` : `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px;">取得なし</div>`}
+
+        ${nextPeriodRecords.length > 0 ? `
+          <div style="background:#e3f2fd;border-radius:8px;padding:8px 10px;font-size:12px;color:#1565c0;margin-top:8px;">
+            <div style="font-weight:600;">📅 次回付与期間（${formatDateShort(periodEndFilter)}～）の取得 ${nextPeriodRecords.length}件</div>
+            <div style="font-size:11px;color:#5c7ca6;margin-top:2px;">次回付与日になったら次回分として表示・消化されます（当期の使用には含みません）</div>
+            ${nextPeriodRecords.map(r => `
+              <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid #d5e6f7;margin-top:5px;font-size:13px;">
+                <span style="font-weight:500;">${formatDate(r[F.leaveDate])}</span>
+                <span style="background:#fff;color:#1565c0;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${getRecordTypeLabel(r)}</span>
+                <button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
+                  style="margin-left:auto;background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;flex-shrink:0;">&times;</button>
+              </div>`).join('')}
+          </div>` : ''}
 
         ${!resigned ? `<div style="text-align:right;margin-top:10px;">
           <button onclick="confirmToggleYukyuSkip('${grantYM(g.grantDate)}', ${g.skipped ? 'false' : 'true'}, '${formatDateShort(g.grantDate)}', ${g.skipped ? (g.originalGrantedDays || 0) : g.grantedDays})"
@@ -32803,7 +32827,7 @@ function copyDetailToClipboard(lang) {
       nd.setMonth(nd.getMonth() + 12);
       periodEnd = new Date(nd.getTime() - 86400000);
     }
-    const periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
+    const periodEndFilter = new Date(periodEnd.getTime() + 86400000);
 
     // この期間の取得レコード（古い順）
     const periodRecords = records.filter(r => {
@@ -32949,7 +32973,7 @@ function renderYukyuKanribo(emp, grants, records) {
       var nd = new Date(g.grantDate); nd.setMonth(nd.getMonth() + 12);
       periodEnd = new Date(nd.getTime() - 86400000);
     }
-    var periodEndFilter = nextGrant ? nextGrant.grantDate : new Date(9999,0,1);
+    var periodEndFilter = new Date(periodEnd.getTime() + 86400000);
     var periodRecords = records.filter(function(r){
       var d = new Date(r[F.leaveDate]);
       return d >= g.grantDate && d < periodEndFilter;
