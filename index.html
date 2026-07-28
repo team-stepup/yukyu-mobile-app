@@ -8549,6 +8549,11 @@ function calcLeaveOverdraftList(allEmps, allLeaveRecords) {
     if (!grants || grants.length === 0) continue;
 
     var sortedGrants = grants.slice().sort(function(a, b) { return a.grantDate - b.grantDate; });
+    // 次回付与(未生成)期間に属する取得は当期の過剰使用に数えない
+    // (最終付与の理論上の次回付与日 = 付与日+12ヶ月 以降のレコードは次回付与から消化される)
+    var _lastG = sortedGrants[sortedGrants.length - 1];
+    var _nextGrantDate = new Date(_lastG.grantDate);
+    _nextGrantDate.setMonth(_nextGrantDate.getMonth() + 12);
     var empKey = String(emp[F.syainNo] || '').trim();
     var myRecs = (recByEmp[empKey] || []).slice().sort(function(a, b) {
       return new Date(a[F.leaveDate]) - new Date(b[F.leaveDate]);
@@ -8560,6 +8565,7 @@ function calcLeaveOverdraftList(allEmps, allLeaveRecords) {
     for (var ri = 0; ri < myRecs.length; ri++) {
       var rec = myRecs[ri];
       var d = new Date(rec[F.leaveDate]);
+      if (d >= _nextGrantDate) continue;
       var toConsume = getRecordDays(rec);
       for (var gi = 0; gi < sortedGrants.length && toConsume > 0; gi++) {
         var grant = sortedGrants[gi];
@@ -9318,6 +9324,19 @@ async function loadLeaveDetails() {
           </div>
         `).join('') : ''}
 
+        ${nextPeriodRecords.length > 0 ? `
+          <div style="background:#e3f2fd;border-radius:8px;padding:8px 10px;font-size:12px;color:#1565c0;margin-bottom:8px;">
+            <div style="font-weight:600;">📅 次回付与期間（${formatDateShort(periodEndFilter)}～）の取得 ${nextPeriodRecords.length}件</div>
+            <div style="font-size:11px;color:#5c7ca6;margin-top:2px;">次回付与日になったら次回分として表示・消化されます（当期の使用には含みません）</div>
+            ${nextPeriodRecords.map(r => `
+              <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid #d5e6f7;margin-top:5px;font-size:13px;">
+                <span style="font-weight:500;">${formatDate(r[F.leaveDate])}</span>
+                <span style="background:#fff;color:#1565c0;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${getRecordTypeLabel(r)}</span>
+                <button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
+                  style="margin-left:auto;background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;flex-shrink:0;">&times;</button>
+              </div>`).join('')}
+          </div>` : ''}
+
         ${grantRecords.length > 0 ? `
           <div style="font-size:12px;font-weight:600;color:var(--text-light);margin-bottom:6px;">
             取得履歴 ${grantRecords.length}件（合計 ${actualUsedDays}日消化）
@@ -9347,19 +9366,6 @@ async function loadLeaveDetails() {
             }).join('')}
           </div>
         ` : `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px;">取得なし</div>`}
-
-        ${nextPeriodRecords.length > 0 ? `
-          <div style="background:#e3f2fd;border-radius:8px;padding:8px 10px;font-size:12px;color:#1565c0;margin-top:8px;">
-            <div style="font-weight:600;">📅 次回付与期間（${formatDateShort(periodEndFilter)}～）の取得 ${nextPeriodRecords.length}件</div>
-            <div style="font-size:11px;color:#5c7ca6;margin-top:2px;">次回付与日になったら次回分として表示・消化されます（当期の使用には含みません）</div>
-            ${nextPeriodRecords.map(r => `
-              <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid #d5e6f7;margin-top:5px;font-size:13px;">
-                <span style="font-weight:500;">${formatDate(r[F.leaveDate])}</span>
-                <span style="background:#fff;color:#1565c0;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${getRecordTypeLabel(r)}</span>
-                <button onclick="deleteLeaveRecord(${r.Id},'${formatDate(r[F.leaveDate])}')"
-                  style="margin-left:auto;background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;flex-shrink:0;">&times;</button>
-              </div>`).join('')}
-          </div>` : ''}
 
         ${!resigned ? `<div style="text-align:right;margin-top:10px;">
           <button onclick="confirmToggleYukyuSkip('${grantYM(g.grantDate)}', ${g.skipped ? 'false' : 'true'}, '${formatDateShort(g.grantDate)}', ${g.skipped ? (g.originalGrantedDays || 0) : g.grantedDays})"
