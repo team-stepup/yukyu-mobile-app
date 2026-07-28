@@ -5794,8 +5794,27 @@ select.sankyu-edit-input {
       <button type="button" onclick="refreshAdminDashboard()" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;">⟳ 更新</button>
       <button type="button" onclick="showHakenTantoDebug()" style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;" title="担当者マップのデバッグ情報">🔍</button>
     </div>
+    <!-- 担当別ビュー専用ツール (Excel / 地図) -->
+    <div id="adminDashTantoTools" style="display:none;gap:6px;margin-bottom:10px;">
+      <button type="button" onclick="downloadTantoHakenExcel(null)" style="flex:1;font-size:12px;font-weight:700;padding:9px 10px;border:none;border-radius:9px;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:#fff;cursor:pointer;box-shadow:0 2px 6px rgba(27,94,32,0.25);">📥 Excel ダウンロード</button>
+      <button type="button" onclick="openHakenMap(null)" style="flex:1;font-size:12px;font-weight:700;padding:9px 10px;border:none;border-radius:9px;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;cursor:pointer;box-shadow:0 2px 6px rgba(13,71,161,0.25);">🗺️ 地図で見る</button>
+    </div>
     <div id="adminDashSummary" style="padding:12px 14px;margin-bottom:10px;background:linear-gradient(135deg,#fff9e6,#fff3d4);border-radius:12px;border:1px solid #f0c040;"></div>
     <div id="adminDashBody"></div>
+  </div>
+
+  <!-- Screen: 担当者 詳細 (担当別 在職者分析 のドリルダウン) -->
+  <div class="screen" id="tantoDetailScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('adminDashScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 id="tantoDetailTitle" style="font-size:16px;font-weight:700;color:var(--primary);margin:0;flex:1;">👤 担当者 詳細</h2>
+    </div>
+    <div id="tantoDetailSummary" style="padding:12px 14px;margin-bottom:10px;background:linear-gradient(135deg,#ede7f6,#e8eaf6);border-radius:12px;border:1px solid #c5cae9;"></div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <button type="button" onclick="downloadTantoHakenExcel(_tantoDetailName)" style="flex:1;font-size:12px;font-weight:700;padding:9px 10px;border:none;border-radius:9px;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:#fff;cursor:pointer;box-shadow:0 2px 6px rgba(27,94,32,0.25);">📥 Excel ダウンロード</button>
+      <button type="button" onclick="openHakenMap(_tantoDetailName)" style="flex:1;font-size:12px;font-weight:700;padding:9px 10px;border:none;border-radius:9px;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;cursor:pointer;box-shadow:0 2px 6px rgba(13,71,161,0.25);">🗺️ 地図で見る</button>
+    </div>
+    <div id="tantoDetailBody"></div>
   </div>
 
   <!-- Screen: 社保・雇用保険 未加入者 リスト (役員専用) -->
@@ -40642,6 +40661,8 @@ async function loadAdminDashData() {
   await resolveBukaKey();
   // 派遣先リストから「派遣元責任者」を取得して担当者マップを構築
   await loadHakenTantoMapFromSP();
+  // 派遣先リストから 住所・組織単位・契約情報 のインデックスを構築 (Excel/地図用)
+  await loadHakensakiInfoIndex();
   const allEmps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
   const byBuka = {};
   let totalActive = 0, totalRetired = 0, totalShobyo = 0;
@@ -40731,6 +40752,9 @@ function setAdminDashView(view) {
   if (titleEl) {
     titleEl.textContent = (view === 'tanto') ? '👤 担当別 在職者分析' : '📊 派遣先別 在職者分析';
   }
+  // 担当別ビューのときだけ Excel / 地図 ツールバーを出す
+  const toolsEl = document.getElementById('adminDashTantoTools');
+  if (toolsEl) toolsEl.style.display = (view === 'tanto') ? 'flex' : 'none';
   renderAdminDashboard();
 }
 
@@ -40851,10 +40875,12 @@ function renderAdminDashboard() {
             return escHtml(h.name) + '<span style="color:#2e7d32;font-weight:700;margin-left:3px;">(' + (h.jitsudou || 0) + ')</span>';
           }).join(' / ') + '</div>';
       }
+      // 「タップで詳細」ガイド
+      hakenList += '<div style="margin-top:6px;text-align:right;font-size:10px;font-weight:700;color:#5e35b1;">タップで詳細 (住所 / Excel / 地図) ▸</div>';
     }
-    // クリック挙動: 派遣先別 → 派遣先社員一覧 / 担当別 → 静的表示 (派遣先リストを下に展開)
+    // クリック挙動: 派遣先別 → 派遣先社員一覧 / 担当別 → 担当者詳細 (ドリルダウン)
     const cardOpen = isTanto
-      ? '<div style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;">'
+      ? '<div onclick="openTantoDetail(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">'
       : '<div onclick="openHakenListFromAdmin(\'' + nameArg + '\')" style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;cursor:pointer;">';
     html += cardOpen +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;">' +
@@ -40878,6 +40904,643 @@ async function openHakenListFromAdmin(buka) {
   document.getElementById('hakenIncludeRetired').checked = incRetired;
   if (typeof updateHakenMultiBtnText === 'function') updateHakenMultiBtnText();
   await openHakenList();
+}
+
+// ============================================================
+// 担当別 在職者分析 — ドリルダウン / Excel / 地図
+//   1. openTantoDetail(担当者名)  … 担当者カードをタップ → 派遣先一覧 (住所 + 実働人数)
+//   2. downloadTantoHakenExcel()  … 担当者×派遣先 の Excel (サマリー + 明細)
+//   3. openHakenMap()             … 地図 (地理院タイル + Leaflet) にピン表示・選択フィルタ
+// ============================================================
+
+// --- 派遣先情報インデックス (buka → 住所 / 組織単位 / 契約) ---
+// 部課値 (例 "114:ASTI㈱浜松") をキーに、派遣先リスト(040623)の行を引けるようにする。
+// 完全一致 → 番号前方一致 → 正規化社名一致 の 3 段で解決する。
+var _hakenInfoByBuka = null;      // 完全一致マップ
+var _hakenInfoByNum = null;       // "114" → info
+var _hakenInfoByNormName = null;  // 正規化社名 → info
+
+async function loadHakensakiInfoIndex(force) {
+  if (_hakenInfoByBuka && !force) return _hakenInfoByBuka;
+  _hakenInfoByBuka = {}; _hakenInfoByNum = {}; _hakenInfoByNormName = {};
+  try {
+    var token = await getToken();
+    if (!token) return _hakenInfoByBuka;
+    var url = SP_SITE_URL + "/_api/web/GetList('" + HAKENSAKI_LIST_PATH + "')/items?$top=500";
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!resp.ok) { console.warn('[hakenInfo] HTTP ' + resp.status); return _hakenInfoByBuka; }
+    var data = await resp.json();
+    var items = (data.d && data.d.results) || [];
+    items.forEach(function(it) {
+      var buka    = String(it[HF.hakensaki_keiyaku] || '').trim();  // "077:ASTI㈱掛川"
+      var company = String(it[HF.hakensaki_name] || '').trim();     // "ASTI株式会社 掛川工場"
+      var soshiki = String(it[HF.soshiki] || '').trim();            // "掛川工場"
+      var kinmu   = String(it[HF.kinmu_jusho] || '').trim();        // 就業場所(所在地)
+      var honsha  = String(it[HF.haken_jusho] || '').trim();        // 派遣先住所(本社)
+      var tel     = String(it[HF.haken_tel] || '').trim();
+      var pEnd    = it[HF.haken_period_end] || null;
+      if (!buka && !company) return;
+      var info = {
+        buka: buka, company: company, soshiki: soshiki,
+        // 実際に通う場所を優先 (就業場所) → なければ本社住所
+        address: kinmu || honsha, kinmu: kinmu, honsha: honsha,
+        tel: tel, periodEnd: pEnd
+      };
+      // 住所を持つ行を優先して登録 (同一 buka で複数契約行があるため)
+      function reg(map, key) {
+        if (!key) return;
+        var cur = map[key];
+        if (!cur || (!cur.address && info.address)) map[key] = info;
+      }
+      reg(_hakenInfoByBuka, buka);
+      var num = (buka.match(/^(\d+(?:[-－]\d+)?)/) || [])[1];
+      if (num) reg(_hakenInfoByNum, String(num).replace(/－/g, '-'));
+      if (company) reg(_hakenInfoByNormName, _normalizeHakenName(company));
+      if (buka)    reg(_hakenInfoByNormName, _normalizeHakenName(buka));
+    });
+    console.log('[hakenInfo] indexed ' + Object.keys(_hakenInfoByBuka).length + ' buka keys from ' + items.length + ' rows');
+  } catch (e) {
+    console.warn('loadHakensakiInfoIndex error:', e);
+  }
+  return _hakenInfoByBuka;
+}
+
+// 部課値 → 派遣先情報 (見つからなければ空オブジェクト)
+function getHakenInfo(buka) {
+  var b = String(buka || '').trim();
+  if (!b || !_hakenInfoByBuka) return {};
+  if (_hakenInfoByBuka[b]) return _hakenInfoByBuka[b];
+  var num = (b.match(/^(\d+(?:[-－]\d+)?)/) || [])[1];
+  if (num) {
+    var nk = String(num).replace(/－/g, '-');
+    if (_hakenInfoByNum[nk]) return _hakenInfoByNum[nk];
+    // "002-1" は "002" にもぶら下がる可能性があるので親番号でも試す
+    var parent = nk.split('-')[0];
+    if (_hakenInfoByNum[parent]) return _hakenInfoByNum[parent];
+  }
+  var nn = _normalizeHakenName(b);
+  if (nn && _hakenInfoByNormName[nn]) return _hakenInfoByNormName[nn];
+  // 正規化名の部分一致 (最長一致)
+  if (nn) {
+    var keys = Object.keys(_hakenInfoByNormName), best = null, bestLen = 0;
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (!k) continue;
+      if (nn.indexOf(k) >= 0 || k.indexOf(nn) >= 0) {
+        var len = Math.min(nn.length, k.length);
+        if (len > bestLen) { bestLen = len; best = _hakenInfoByNormName[k]; }
+      }
+    }
+    if (best) return best;
+  }
+  return {};
+}
+
+// 担当者(省略時は全員)の 派遣先明細行を組み立てる
+//   1 行 = 1 派遣先(部課)。実働 0 の派遣先も含める (産休のみの拠点も検討材料になるため)
+function buildTantoHakenRows(tantoFilter) {
+  if (!_adminDashCache) return [];
+  var byBuka = _adminDashCache.byBuka || {};
+  var rows = [];
+  Object.keys(byBuka).forEach(function(buka) {
+    var c = byBuka[buka];
+    if (!c) return;
+    // 在職者ゼロ (退職者のみ) の派遣先は割り振り検討の対象外
+    if ((c.active || 0) <= 0) return;
+    var tanto = getHakenTanto(buka);
+    if (tantoFilter && tanto !== tantoFilter) return;
+    var info = getHakenInfo(buka);
+    rows.push({
+      tanto: tanto,
+      buka: buka,
+      no: (String(buka).match(/^(\d+(?:[-－]\d+)?)/) || [])[1] || '',
+      name: stripBukaPrefix(buka),
+      company: info.company || '',
+      soshiki: info.soshiki || '',
+      address: info.address || '',
+      kinmu: info.kinmu || '',
+      honsha: info.honsha || '',
+      tel: info.tel || '',
+      periodEnd: info.periodEnd || null,
+      jitsudou: c.jitsudou || 0,
+      active: c.active || 0,
+      retired: c.retired || 0,
+      sankyu: c.sankyu || 0,
+      sankyuOwari: c.sankyuOwari || 0,
+      shobyo: c.shobyo || 0
+    });
+  });
+  rows.sort(function(a, b) {
+    if (a.tanto !== b.tanto) return String(a.tanto).localeCompare(String(b.tanto), 'ja');
+    return (b.jitsudou - a.jitsudou) || String(a.name).localeCompare(String(b.name), 'ja');
+  });
+  return rows;
+}
+
+// ------------------------------------------------------------
+// 1. 担当者 詳細 (ドリルダウン)
+// ------------------------------------------------------------
+var _tantoDetailName = null;
+
+function openTantoDetail(tanto) {
+  if (!tanto) return;
+  _tantoDetailName = tanto;
+  switchScreen('tantoDetailScreen');
+  renderTantoDetail();
+}
+
+function renderTantoDetail() {
+  var tanto = _tantoDetailName;
+  var titleEl = document.getElementById('tantoDetailTitle');
+  var sumEl = document.getElementById('tantoDetailSummary');
+  var bodyEl = document.getElementById('tantoDetailBody');
+  if (!bodyEl) return;
+  if (titleEl) titleEl.textContent = '👤 ' + tanto;
+
+  var rows = buildTantoHakenRows(tanto);
+  var tot = rows.reduce(function(a, r) {
+    a.jitsudou += r.jitsudou; a.active += r.active; a.sankyu += r.sankyu;
+    a.sankyuOwari += r.sankyuOwari; a.shobyo += r.shobyo;
+    if (r.jitsudou > 0) a.hakenCount++;
+    return a;
+  }, { jitsudou: 0, active: 0, sankyu: 0, sankyuOwari: 0, shobyo: 0, hakenCount: 0 });
+
+  if (sumEl) {
+    var s = '<div style="display:flex;gap:18px;flex-wrap:wrap;">' +
+      '<div><div style="font-size:10px;color:#888;">担当 派遣先</div><div style="font-size:22px;font-weight:800;color:#1565c0;">' + tot.hakenCount + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">件</span></div></div>' +
+      '<div><div style="font-size:10px;color:#888;">実働者 合計</div><div style="font-size:22px;font-weight:800;color:#2e7d32;">' + tot.jitsudou + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>' +
+      '<div><div style="font-size:10px;color:#888;">在職 合計</div><div style="font-size:22px;font-weight:800;color:var(--primary);">' + tot.active + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+    if (tot.sankyu > 0) s += '<div><div style="font-size:10px;color:#888;">🌸 産休育休中</div><div style="font-size:22px;font-weight:800;color:#d81b60;">' + tot.sankyu + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+    if (tot.sankyuOwari > 0) s += '<div><div style="font-size:10px;color:#888;">休業終了</div><div style="font-size:22px;font-weight:800;color:#7e57c2;">' + tot.sankyuOwari + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+    if (tot.shobyo > 0) s += '<div><div style="font-size:10px;color:#888;">🤒 傷病手当中</div><div style="font-size:22px;font-weight:800;color:#a06a00;">' + tot.shobyo + '<span style="font-size:12px;font-weight:500;color:#888;margin-left:3px;">名</span></div></div>';
+    s += '</div>';
+    sumEl.innerHTML = s;
+  }
+
+  if (rows.length === 0) {
+    bodyEl.innerHTML = '<div class="empty-state"><p>担当している派遣先がありません</p></div>';
+    return;
+  }
+
+  var maxJ = Math.max(1, Math.max.apply(null, rows.map(function(r) { return r.jitsudou; })));
+  var html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+  rows.forEach(function(r) {
+    var pct = Math.round((r.jitsudou / maxJ) * 100);
+    var bukaArg = escHtml(r.buka).replace(/'/g, "\\'");
+    var addrHtml = r.address
+      ? '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(r.address) + '" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:#1565c0;text-decoration:none;">📍 ' + escHtml(r.address) + '</a>'
+      : '<span style="color:#c62828;">📍 住所 未登録 (派遣先リストに入力してください)</span>';
+    var badges = '';
+    if (r.sankyu > 0)      badges += '<span style="margin-left:4px;padding:1px 6px;background:#fce4ec;border:1px solid #f8bbd0;border-radius:8px;font-size:10px;font-weight:700;color:#d81b60;">🌸 ' + r.sankyu + '</span>';
+    if (r.sankyuOwari > 0) badges += '<span style="margin-left:4px;padding:1px 6px;background:#ede7f6;border:1px solid #d1c4e9;border-radius:8px;font-size:10px;font-weight:700;color:#7e57c2;">終 ' + r.sankyuOwari + '</span>';
+    if (r.shobyo > 0)      badges += '<span style="margin-left:4px;padding:1px 6px;background:#fff8e1;border:1px solid #ffe082;border-radius:8px;font-size:10px;font-weight:700;color:#a06a00;">🤒 ' + r.shobyo + '</span>';
+    html += '<div style="background:#fff;border:1.5px solid #e8e8f0;border-radius:12px;padding:10px 12px;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;flex-wrap:wrap;">' +
+      '<span style="font-size:14px;font-weight:700;color:var(--primary);">🏭 ' + escHtml(r.name) + badges + '</span>' +
+      '<span><span style="font-size:18px;font-weight:800;color:#2e7d32;">' + r.jitsudou + '</span><span style="font-size:11px;color:#888;margin-left:2px;">名 実働</span>' +
+      (r.active !== r.jitsudou ? '<span style="font-size:10px;color:#888;margin-left:5px;">(在職 ' + r.active + ')</span>' : '') + '</span>' +
+      '</div>' +
+      '<div style="font-size:11px;line-height:1.6;margin-bottom:6px;">' + addrHtml + '</div>' +
+      '<div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden;margin-bottom:8px;">' +
+      '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#66bb6a,#2e7d32);border-radius:3px;"></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;">' +
+      '<button type="button" onclick="openHakenListFromAdmin(\'' + bukaArg + '\')" style="flex:1;font-size:11px;font-weight:700;padding:7px 8px;border:1px solid #c5cae9;border-radius:8px;background:#f5f5ff;color:#3949ab;cursor:pointer;">👥 社員一覧</button>' +
+      '<button type="button" onclick="openHakenMap(' + JSON.stringify(_tantoDetailName).replace(/"/g, '&quot;') + ', ' + JSON.stringify(r.buka).replace(/"/g, '&quot;') + ')" style="flex:1;font-size:11px;font-weight:700;padding:7px 8px;border:1px solid #bbdefb;border-radius:8px;background:#f1f8ff;color:#1565c0;cursor:pointer;">🗺️ 地図</button>' +
+      '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  bodyEl.innerHTML = html;
+}
+
+// ------------------------------------------------------------
+// 2. Excel ダウンロード (担当者サマリー + 派遣先明細)
+// ------------------------------------------------------------
+async function downloadTantoHakenExcel(tantoFilter) {
+  if (!_adminDashCache) { showToast('先に「担当別 在職者分析」を読み込んでください', 'warn'); return; }
+  var rows = buildTantoHakenRows(tantoFilter || null);
+  if (rows.length === 0) { showToast('出力対象の派遣先がありません', 'warn'); return; }
+  try {
+    showToast('Excel生成中...', 'info');
+    await _loadXlsxLib();
+  } catch (e) {
+    showToast('Excelライブラリの読み込み失敗 (ネット接続を確認)', 'error');
+    return;
+  }
+
+  function fmtD(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+  }
+
+  // --- Sheet 1: 担当者サマリー ---
+  var byT = {};
+  rows.forEach(function(r) {
+    if (!byT[r.tanto]) byT[r.tanto] = { hakenCount: 0, jitsudou: 0, active: 0, sankyu: 0, sankyuOwari: 0, shobyo: 0, retired: 0 };
+    var t = byT[r.tanto];
+    if (r.jitsudou > 0) t.hakenCount++;
+    t.jitsudou += r.jitsudou; t.active += r.active; t.sankyu += r.sankyu;
+    t.sankyuOwari += r.sankyuOwari; t.shobyo += r.shobyo; t.retired += r.retired;
+  });
+  var sumHeader = ['担当者', '派遣先数', '実働人数', '在職人数', '産休育休中', '休業終了', '傷病手当中'];
+  var sumRows = [sumHeader];
+  var tantoNames = Object.keys(byT).sort(function(a, b) { return byT[b].jitsudou - byT[a].jitsudou || a.localeCompare(b, 'ja'); });
+  tantoNames.forEach(function(n) {
+    var t = byT[n];
+    sumRows.push([n, t.hakenCount, t.jitsudou, t.active, t.sankyu, t.sankyuOwari, t.shobyo]);
+  });
+  // 合計行
+  var gt = tantoNames.reduce(function(a, n) {
+    var t = byT[n];
+    a[0] += t.hakenCount; a[1] += t.jitsudou; a[2] += t.active; a[3] += t.sankyu; a[4] += t.sankyuOwari; a[5] += t.shobyo;
+    return a;
+  }, [0, 0, 0, 0, 0, 0]);
+  sumRows.push(['合計'].concat(gt));
+
+  // --- Sheet 2: 派遣先明細 ---
+  var detHeader = ['担当者', '番号', '派遣先名 (部課)', '派遣先会社名', '組織単位 / 就業場所',
+                   '住所 (就業場所)', '本社住所', '電話番号', '実働人数', '在職人数',
+                   '産休育休中', '休業終了', '傷病手当中', '契約終了日', 'Googleマップ'];
+  var detRows = [detHeader];
+  rows.forEach(function(r) {
+    detRows.push([
+      r.tanto, r.no, r.name, r.company, r.soshiki,
+      r.address, r.honsha, r.tel, r.jitsudou, r.active,
+      r.sankyu, r.sankyuOwari, r.shobyo, fmtD(r.periodEnd),
+      r.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(r.address) : ''
+    ]);
+  });
+
+  // --- 書式付けヘルパー (既存の Excel 出力と同じ体裁) ---
+  function styleSheet(ws, headerLen, dataLen, widths, freeze) {
+    ws['!cols'] = widths.map(function(w) { return { wch: w }; });
+    ws['!rows'] = [{ hpt: 26 }];
+    for (var ri = 1; ri <= dataLen; ri++) ws['!rows'].push({ hpt: 19 });
+    // ウィンドウ枠固定 (既存の Excel 出力と同じ書き方: !views と !freeze の両方が必要)
+    if (freeze) {
+      var tl = XLSX.utils.encode_cell({ r: freeze.ySplit, c: freeze.xSplit });
+      ws['!views'] = [{ state: 'frozen', xSplit: freeze.xSplit, ySplit: freeze.ySplit, topLeftCell: tl, activePane: 'bottomRight' }];
+      ws['!freeze'] = { xSplit: freeze.xSplit, ySplit: freeze.ySplit };
+    }
+    var border = {
+      top:    { style: 'thin', color: { rgb: 'FFB0B7C3' } },
+      bottom: { style: 'thin', color: { rgb: 'FFB0B7C3' } },
+      left:   { style: 'thin', color: { rgb: 'FFB0B7C3' } },
+      right:  { style: 'thin', color: { rgb: 'FFB0B7C3' } }
+    };
+    for (var c = 0; c < headerLen; c++) {
+      var ha = XLSX.utils.encode_cell({ r: 0, c: c });
+      if (!ws[ha]) continue;
+      ws[ha].s = {
+        font: { bold: true, sz: 11, color: { rgb: 'FFFFFFFF' }, name: 'Meiryo' },
+        fill: { patternType: 'solid', fgColor: { rgb: 'FF5E35B1' } },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        border: border
+      };
+    }
+    for (var r2 = 1; r2 <= dataLen; r2++) {
+      var isTotal = (ws[XLSX.utils.encode_cell({ r: r2, c: 0 })] || {}).v === '合計';
+      for (var c2 = 0; c2 < headerLen; c2++) {
+        var ca = XLSX.utils.encode_cell({ r: r2, c: c2 });
+        if (!ws[ca]) ws[ca] = { t: 's', v: '' };
+        var isNum = (typeof ws[ca].v === 'number');
+        ws[ca].s = {
+          font: { sz: 10, name: 'Meiryo', bold: !!isTotal },
+          fill: { patternType: 'solid', fgColor: { rgb: isTotal ? 'FFFFF3D4' : (r2 % 2 === 0 ? 'FFF5F5FA' : 'FFFFFFFF') } },
+          alignment: { horizontal: isNum ? 'center' : 'left', vertical: 'center', wrapText: false },
+          border: border
+        };
+      }
+    }
+  }
+
+  var wsSum = XLSX.utils.aoa_to_sheet(sumRows);
+  styleSheet(wsSum, sumHeader.length, sumRows.length - 1, [16, 10, 10, 10, 12, 11, 12], { xSplit: 1, ySplit: 1 });
+  var wsDet = XLSX.utils.aoa_to_sheet(detRows);
+  styleSheet(wsDet, detHeader.length, detRows.length - 1, [14, 8, 26, 30, 20, 42, 42, 16, 10, 10, 12, 11, 12, 13, 50], { xSplit: 3, ySplit: 1 });
+  // オートフィルタ (明細シート)
+  wsDet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: detRows.length - 1, c: detHeader.length - 1 } }) };
+
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsSum, '担当者サマリー');
+  XLSX.utils.book_append_sheet(wb, wsDet, '派遣先明細');
+
+  var today = new Date();
+  var ymd = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+  var safeName = String(tantoFilter || '全担当者').replace(/[\\\/:\*\?"<>\|\s　]/g, '');
+  var fname = '担当別派遣先一覧_' + safeName + '_' + ymd + '.xlsx';
+  try {
+    XLSX.writeFile(wb, fname);
+    showToast('✓ ' + rows.length + '件の派遣先をExcel出力しました', 'success');
+  } catch (e) {
+    console.error('XLSX write error:', e);
+    showToast('Excel書き出しエラー: ' + e.message, 'error');
+  }
+}
+
+// ------------------------------------------------------------
+// 3. 地図 (Leaflet + 国土地理院タイル)
+// ------------------------------------------------------------
+var TANTO_MAP_COLORS = ['#1565c0', '#c62828', '#2e7d32', '#ef6c00', '#6a1b9a', '#00838f', '#ad1457', '#4e342e', '#37474f', '#9e9d24'];
+var HAKEN_GEO_LS_KEY = 'hakenGeoCacheV1';
+var _hakenMapState = null;   // { rows, colors, markers, map, selected:Set-like object }
+
+function _loadLeaflet() {
+  if (window.L && window.L.map) return Promise.resolve();
+  return new Promise(function(resolve, reject) {
+    if (!document.getElementById('leafletCssTag')) {
+      var lk = document.createElement('link');
+      lk.id = 'leafletCssTag';
+      lk.rel = 'stylesheet';
+      lk.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(lk);
+      // アプリ側の全称セレクタ reset (box-sizing:border-box / margin:0) が
+      // タイル画像に効いて地図が崩れるのを防ぐ上書き
+      var st = document.createElement('style');
+      st.id = 'leafletFixCss';
+      st.textContent =
+        '.leaflet-container img { max-width: none !important; box-sizing: content-box !important; }' +
+        '.leaflet-pane, .leaflet-tile, .leaflet-marker-icon { box-sizing: content-box !important; }' +
+        '.haken-pin { background: transparent !important; border: none !important; }' +
+        '.leaflet-popup-content { margin: 10px 12px !important; }';
+      document.head.appendChild(st);
+    }
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = function() { resolve(); };
+    s.onerror = function() { reject(new Error('地図ライブラリ (Leaflet) の読み込みに失敗')); };
+    document.head.appendChild(s);
+  });
+}
+
+// ジオコード結果を localStorage に永続化 (住所は滅多に変わらないので再取得不要)
+function _loadHakenGeoCache() {
+  try {
+    var raw = localStorage.getItem(HAKEN_GEO_LS_KEY);
+    if (!raw) return;
+    var obj = JSON.parse(raw) || {};
+    window._sougeiGeocodeCache = window._sougeiGeocodeCache || {};
+    Object.keys(obj).forEach(function(k) {
+      if (window._sougeiGeocodeCache[k] === undefined) window._sougeiGeocodeCache[k] = obj[k];
+    });
+  } catch (e) { /* 破損キャッシュは無視 */ }
+}
+function _saveHakenGeoCache() {
+  try {
+    var src = window._sougeiGeocodeCache || {};
+    var out = {};
+    // null (ジオコード失敗) は保存しない — 住所修正後に再試行させるため
+    Object.keys(src).forEach(function(k) { if (src[k]) out[k] = src[k]; });
+    localStorage.setItem(HAKEN_GEO_LS_KEY, JSON.stringify(out));
+  } catch (e) { /* 容量超過等は無視 */ }
+}
+
+// tantoFilter: 指定するとその担当者だけ初期選択 / focusBuka: その派遣先にズーム
+async function openHakenMap(tantoFilter, focusBuka) {
+  if (!_adminDashCache) { showToast('先に「担当別 在職者分析」を読み込んでください', 'warn'); return; }
+  var rows = buildTantoHakenRows(null).filter(function(r) { return r.jitsudou > 0 || r.active > 0; });
+  if (rows.length === 0) { showToast('表示できる派遣先がありません', 'warn'); return; }
+
+  var old = document.getElementById('hakenMapOverlay');
+  if (old) old.remove();
+
+  // 担当者ごとの色
+  var tantos = [];
+  rows.forEach(function(r) { if (tantos.indexOf(r.tanto) < 0) tantos.push(r.tanto); });
+  tantos.sort(function(a, b) { return a.localeCompare(b, 'ja'); });
+  var colors = {};
+  tantos.forEach(function(t, i) { colors[t] = TANTO_MAP_COLORS[i % TANTO_MAP_COLORS.length]; });
+
+  // 初期選択: 担当者指定があればその担当者のみ / なければ全件
+  var selected = {};
+  rows.forEach(function(r) { selected[r.buka] = tantoFilter ? (r.tanto === tantoFilter) : true; });
+
+  var ov = document.createElement('div');
+  ov.id = 'hakenMapOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:11000;background:#fff;display:flex;flex-direction:column;';
+  ov.innerHTML =
+    '<div style="flex-shrink:0;padding:10px 12px;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;display:flex;align-items:center;gap:8px;">' +
+      '<div style="font-size:20px;">🗺️</div>' +
+      '<div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:800;">派遣先マップ</div>' +
+      '<div id="hakenMapSubtitle" style="font-size:10px;opacity:0.85;">' + escHtml(tantoFilter || '全担当者') + '</div></div>' +
+      '<button onclick="closeHakenMap()" style="background:rgba(255,255,255,0.22);color:#fff;border:none;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0;">×</button>' +
+    '</div>' +
+    '<div style="flex-shrink:0;padding:8px 10px;border-bottom:1px solid #e8e8f0;background:#fafaff;">' +
+      '<div id="hakenMapTantoChips" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;"></div>' +
+      '<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">' +
+        '<button type="button" onclick="hakenMapSelectAll(true)" style="font-size:11px;font-weight:700;padding:5px 10px;border:1px solid #c5cae9;border-radius:7px;background:#fff;color:#3949ab;cursor:pointer;">全選択</button>' +
+        '<button type="button" onclick="hakenMapSelectAll(false)" style="font-size:11px;font-weight:700;padding:5px 10px;border:1px solid #ddd;border-radius:7px;background:#fff;color:#777;cursor:pointer;">全解除</button>' +
+        '<button type="button" onclick="hakenMapFitBounds()" style="font-size:11px;font-weight:700;padding:5px 10px;border:1px solid #bbdefb;border-radius:7px;background:#fff;color:#1565c0;cursor:pointer;">🔍 表示範囲にズーム</button>' +
+        '<span style="flex:1;"></span>' +
+        '<button type="button" id="hakenMapListToggle" onclick="toggleHakenMapList()" style="font-size:11px;font-weight:700;padding:5px 10px;border:1px solid #c5cae9;border-radius:7px;background:#5e35b1;color:#fff;cursor:pointer;">📋 派遣先を選ぶ ▾</button>' +
+      '</div>' +
+      '<div id="hakenMapListPanel" style="display:none;margin-top:8px;max-height:38vh;overflow-y:auto;border:1px solid #e8e8f0;border-radius:9px;background:#fff;padding:6px;"></div>' +
+    '</div>' +
+    '<div id="hakenMapCanvas" style="flex:1;min-height:0;background:#e8eef3;"></div>' +
+    '<div id="hakenMapStatus" style="flex-shrink:0;padding:7px 12px;font-size:11px;color:#555;background:#fafaff;border-top:1px solid #e8e8f0;"></div>';
+  document.body.appendChild(ov);
+
+  _hakenMapState = { rows: rows, colors: colors, selected: selected, markers: {}, map: null, tantos: tantos, focusBuka: focusBuka || null };
+
+  var statusEl = document.getElementById('hakenMapStatus');
+  statusEl.textContent = '地図ライブラリを読み込み中…';
+
+  try {
+    await _loadLeaflet();
+  } catch (e) {
+    statusEl.innerHTML = '<span style="color:#c62828;">' + escHtml(e.message) + '</span>';
+    return;
+  }
+
+  // 住所 → 緯度経度 (localStorage キャッシュ優先・未取得のみ GSI へ問い合わせ)
+  _loadHakenGeoCache();
+  var need = rows.filter(function(r) { return r.address && window._sougeiGeocodeCache[String(r.address).trim()] === undefined; });
+  var done = 0;
+  for (var i = 0; i < need.length; i++) {
+    statusEl.textContent = '住所を地図座標に変換中… (' + (done + 1) + '/' + need.length + ') ' + need[i].name;
+    // eslint-disable-next-line no-await-in-loop
+    await _geocodeJp(need[i].address);
+    done++;
+  }
+  if (need.length > 0) _saveHakenGeoCache();
+
+  rows.forEach(function(r) {
+    r.pos = r.address ? (window._sougeiGeocodeCache[String(r.address).trim()] || null) : null;
+  });
+
+  // 地図生成 (国土地理院 淡色タイル)
+  var map = L.map('hakenMapCanvas', { zoomControl: true, attributionControl: true }).setView([34.72, 137.85], 10);
+  L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+    attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>',
+    maxZoom: 18
+  }).addTo(map);
+  _hakenMapState.map = map;
+
+  rows.forEach(function(r) {
+    if (!r.pos) return;
+    var color = colors[r.tanto] || '#666';
+    var mk = L.marker([r.pos.lat, r.pos.lng], { icon: _hakenPinIcon(color, r.jitsudou) });
+    mk.bindPopup(_hakenPopupHtml(r, color), { maxWidth: 280 });
+    _hakenMapState.markers[r.buka] = mk;
+  });
+
+  renderHakenMapChips();
+  renderHakenMapList();
+  applyHakenMapFilter(true);
+
+  // 個別派遣先を指定して開いた場合はそこへズーム + ポップアップ
+  if (focusBuka && _hakenMapState.markers[focusBuka]) {
+    var fm = _hakenMapState.markers[focusBuka];
+    map.setView(fm.getLatLng(), 14);
+    setTimeout(function() { fm.openPopup(); }, 300);
+  }
+  // Leaflet はコンテナサイズ確定後に invalidateSize が必要
+  setTimeout(function() { map.invalidateSize(); }, 200);
+}
+
+function _hakenPinIcon(color, n) {
+  var size = 34;
+  var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50% 50% 50% 6px;transform:rotate(-45deg);' +
+    'background:' + color + ';border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;">' +
+    '<span style="transform:rotate(45deg);color:#fff;font-weight:800;font-size:' + (String(n).length >= 3 ? 10 : 13) + 'px;line-height:1;">' + n + '</span></div>';
+  return L.divIcon({ html: html, className: 'haken-pin', iconSize: [size, size], iconAnchor: [size / 2, size], popupAnchor: [0, -size + 2] });
+}
+
+function _hakenPopupHtml(r, color) {
+  var gmap = r.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(r.address) : '';
+  var h = '<div style="font-family:inherit;min-width:190px;">' +
+    '<div style="font-size:13px;font-weight:800;color:' + color + ';margin-bottom:3px;">🏭 ' + escHtml(r.name) + '</div>' +
+    '<div style="font-size:11px;color:#555;margin-bottom:5px;">👤 ' + escHtml(r.tanto) + '</div>' +
+    '<div style="font-size:11px;color:#333;margin-bottom:5px;">📍 ' + escHtml(r.address || '(住所未登録)') + '</div>' +
+    '<div style="font-size:12px;margin-bottom:6px;"><b style="color:#2e7d32;font-size:15px;">' + r.jitsudou + '</b> 名 実働' +
+      (r.active !== r.jitsudou ? ' <span style="color:#888;font-size:10px;">(在職 ' + r.active + ')</span>' : '') + '</div>';
+  if (gmap) h += '<a href="' + gmap + '" target="_blank" rel="noopener" style="display:inline-block;font-size:11px;font-weight:700;padding:5px 9px;border-radius:7px;background:#1565c0;color:#fff;text-decoration:none;">Googleマップで開く ↗</a>';
+  h += '</div>';
+  return h;
+}
+
+// 担当者チップ (タップでその担当者の派遣先をまとめて ON/OFF)
+function renderHakenMapChips() {
+  var st = _hakenMapState;
+  var el = document.getElementById('hakenMapTantoChips');
+  if (!st || !el) return;
+  el.innerHTML = st.tantos.map(function(t) {
+    var of = st.rows.filter(function(r) { return r.tanto === t; });
+    var on = of.filter(function(r) { return st.selected[r.buka]; }).length;
+    var allOn = (on === of.length && of.length > 0);
+    var c = st.colors[t];
+    var jit = of.filter(function(r) { return st.selected[r.buka]; }).reduce(function(a, r) { return a + r.jitsudou; }, 0);
+    return '<button type="button" onclick="toggleHakenMapTanto(' + JSON.stringify(t).replace(/"/g, '&quot;') + ')" ' +
+      'style="font-size:11px;font-weight:700;padding:5px 10px;border:1.5px solid ' + c + ';border-radius:14px;cursor:pointer;' +
+      'background:' + (allOn ? c : '#fff') + ';color:' + (allOn ? '#fff' : c) + ';">' +
+      (allOn ? '● ' : (on > 0 ? '◐ ' : '○ ')) + escHtml(t) + ' <span style="opacity:0.85;">' + jit + '名</span></button>';
+  }).join('');
+}
+
+// 派遣先チェックボックス一覧 (担当者ごとにグループ化)
+function renderHakenMapList() {
+  var st = _hakenMapState;
+  var el = document.getElementById('hakenMapListPanel');
+  if (!st || !el) return;
+  var html = '';
+  st.tantos.forEach(function(t) {
+    var of = st.rows.filter(function(r) { return r.tanto === t; })
+                    .sort(function(a, b) { return b.jitsudou - a.jitsudou; });
+    if (of.length === 0) return;
+    html += '<div style="font-size:11px;font-weight:800;color:' + st.colors[t] + ';margin:6px 0 3px;padding-left:2px;">👤 ' + escHtml(t) + '</div>';
+    of.forEach(function(r) {
+      var noGeo = !r.pos;
+      html += '<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px;font-size:12px;' + (noGeo ? 'opacity:0.55;' : '') + '">' +
+        '<input type="checkbox" ' + (st.selected[r.buka] ? 'checked' : '') + ' onchange="toggleHakenMapOne(' + JSON.stringify(r.buka).replace(/"/g, '&quot;') + ', this.checked)" style="accent-color:' + st.colors[t] + ';width:16px;height:16px;">' +
+        '<span style="flex:1;min-width:0;">' + escHtml(r.name) +
+        (noGeo ? '<span style="color:#c62828;font-size:10px;margin-left:4px;">⚠ 住所なし</span>' : '') + '</span>' +
+        '<span style="font-size:11px;font-weight:800;color:#2e7d32;">' + r.jitsudou + '</span></label>';
+    });
+  });
+  el.innerHTML = html;
+}
+
+function toggleHakenMapList() {
+  var p = document.getElementById('hakenMapListPanel');
+  var b = document.getElementById('hakenMapListToggle');
+  if (!p) return;
+  var open = (p.style.display === 'none');
+  p.style.display = open ? 'block' : 'none';
+  if (b) b.textContent = open ? '📋 派遣先を選ぶ ▴' : '📋 派遣先を選ぶ ▾';
+}
+
+function toggleHakenMapTanto(tanto) {
+  var st = _hakenMapState;
+  if (!st) return;
+  var of = st.rows.filter(function(r) { return r.tanto === tanto; });
+  var allOn = of.every(function(r) { return st.selected[r.buka]; });
+  of.forEach(function(r) { st.selected[r.buka] = !allOn; });
+  renderHakenMapChips();
+  renderHakenMapList();
+  applyHakenMapFilter(true);
+}
+
+function toggleHakenMapOne(buka, checked) {
+  var st = _hakenMapState;
+  if (!st) return;
+  st.selected[buka] = !!checked;
+  renderHakenMapChips();
+  applyHakenMapFilter(false);
+}
+
+function hakenMapSelectAll(on) {
+  var st = _hakenMapState;
+  if (!st) return;
+  st.rows.forEach(function(r) { st.selected[r.buka] = !!on; });
+  renderHakenMapChips();
+  renderHakenMapList();
+  applyHakenMapFilter(true);
+}
+
+// 選択状態をピンの表示/非表示に反映し、ステータス行を更新
+function applyHakenMapFilter(fit) {
+  var st = _hakenMapState;
+  if (!st || !st.map) return;
+  var shown = 0, jit = 0, noGeo = 0;
+  st.rows.forEach(function(r) {
+    var mk = st.markers[r.buka];
+    var on = !!st.selected[r.buka];
+    if (on) { jit += r.jitsudou; if (!r.pos) noGeo++; }
+    if (!mk) return;
+    if (on) {
+      if (!st.map.hasLayer(mk)) mk.addTo(st.map);
+      shown++;
+    } else if (st.map.hasLayer(mk)) {
+      st.map.removeLayer(mk);
+    }
+  });
+  var status = document.getElementById('hakenMapStatus');
+  if (status) {
+    status.innerHTML = '表示中 <b style="color:#1565c0;">' + shown + '</b> 拠点 / 実働 <b style="color:#2e7d32;">' + jit + '</b> 名' +
+      (noGeo > 0 ? ' <span style="color:#c62828;">・住所未登録で地図に出せない拠点 ' + noGeo + ' 件</span>' : '');
+  }
+  if (fit) hakenMapFitBounds();
+}
+
+function hakenMapFitBounds() {
+  var st = _hakenMapState;
+  if (!st || !st.map) return;
+  var pts = st.rows.filter(function(r) { return st.selected[r.buka] && r.pos; })
+                   .map(function(r) { return [r.pos.lat, r.pos.lng]; });
+  if (pts.length === 0) return;
+  if (pts.length === 1) { st.map.setView(pts[0], 13); return; }
+  st.map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 14 });
+}
+
+function closeHakenMap() {
+  var st = _hakenMapState;
+  if (st && st.map) { try { st.map.remove(); } catch (e) {} }
+  _hakenMapState = null;
+  var ov = document.getElementById('hakenMapOverlay');
+  if (ov) ov.remove();
 }
 
 // ============================================================
