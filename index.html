@@ -38698,6 +38698,23 @@ async function openEmployeeMaebariFromApproval(shainNo) {
   }
 }
 
+// 前払い承認/却下を本人ポータルへPush通知 (Functions経由・国籍別言語ja/pt/en・バッジ付き)。
+// best-effort: 通知が失敗しても承認/却下処理は成立させる (await しない)
+function notifyMaebariResult(shainNo, shinseiId, action, reason, amount, kiboubi) {
+  (async function () {
+    try {
+      const token = await getToken();
+      if (!token) return;
+      await fetch(FUNC_OCR_BASE + '/yukyu/maebarai-notify', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shainNo: shainNo, id: shinseiId, action: action,
+                               reason: reason || '', amount: amount || '', kiboubi: kiboubi || '' })
+      });
+    } catch (e) { console.warn('maebarai notify skip:', e); }
+  })();
+}
+
 async function confirmApproveMaebari(shinseiId) {
   if (!confirm('この申請を承認しますか？\n承認すると既存の「前払い」リストに自動追加されます。')) return;
   await approveMaebariShinsei(shinseiId);
@@ -38819,6 +38836,8 @@ async function approveMaebariShinsei(shinseiId, bulk) {
       if (!bulk) showToast('承認しましたが、ステータス更新に失敗しました', 'success');
     } else {
       if (!bulk) showToast('承認しました (前払い#' + newMaebariId + ')', 'success');
+      // 本人へロック画面Push (国籍別言語・バッジ)
+      notifyMaebariResult(shainNo, shinseiId, 'approved', '', String(shinsei[MS.amount] || ''), shinsei[MS.kiboubi] || '');
     }
     if (!bulk) { loadMaebariPending(); updateMaebariApprovalBadge(); }
     return true;
@@ -38836,6 +38855,12 @@ async function rejectMaebariShinsei(shinseiId, reason) {
     const token = await getToken();
     if (!token) throw new Error('認証エラー');
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items(" + shinseiId + ")";
+    // 通知用に申請内容(社員番号/金額/希望日)を控える (取得失敗しても却下処理は続行)
+    let _shinseiForNotify = null;
+    try {
+      const r0 = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+      if (r0.ok) _shinseiForNotify = (await r0.json()).d;
+    } catch (e) {}
     const entity = await getListItemEntityType(LIST_MAEBARI_SHINSEI_GUID);
     const approverName = (function () {
       try {
@@ -38864,6 +38889,11 @@ async function rejectMaebariShinsei(shinseiId, reason) {
       throw new Error('却下失敗 ' + resp.status + ' ' + errTxt.substring(0, 300));
     }
     showToast('却下しました', 'success');
+    // 本人へロック画面Push (国籍別言語・却下理由付き)
+    if (_shinseiForNotify && _shinseiForNotify[MS.shainNo]) {
+      notifyMaebariResult(_shinseiForNotify[MS.shainNo], shinseiId, 'rejected', reason,
+                          String(_shinseiForNotify[MS.amount] || ''), _shinseiForNotify[MS.kiboubi] || '');
+    }
     loadMaebariPending();
     updateMaebariApprovalBadge();
   } catch (e) {
