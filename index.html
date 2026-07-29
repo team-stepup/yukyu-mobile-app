@@ -9537,7 +9537,9 @@ async function resetPortalPin(emp) {
   if (!token) throw new Error('認証エラー（再ログインしてください）');
   var entityType = await getListItemEntityType(LIST_EMPLOYEES_GUID);
   var body = { __metadata: { type: entityType } };
-  body[PORTAL_PIN_ODATA_KEY.replace(/^OData_/, '')] = null;
+  // このフィールドは InternalName が「_」始まりのため EntityPropertyName (OData_付き) で書き込む
+  // (OData_を外すと 400 InvalidClientQueryException「プロパティが型に存在しません」)
+  body[PORTAL_PIN_ODATA_KEY] = null;
   var url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + emp.Id + ")";
   var resp = await fetch(url, {
     method: 'POST',
