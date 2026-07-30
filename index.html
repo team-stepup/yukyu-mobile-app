@@ -6268,6 +6268,34 @@ select.sankyu-edit-input {
     <div id="sougeiApprovedList" style="padding:8px 12px;display:none;"></div>
   </div>
 
+  <!-- Screen: 送迎実績 (運転手ごとの月次集計・回数/金額。承認画面とは別で「実績の確認」用) -->
+  <div class="screen" id="sougeiJissekiScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('approveHubScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">🚌 送迎実績</h2>
+      <button class="refresh-btn" onclick="loadSougeiJisseki(true)" style="margin-left:auto;">&#x21bb; 更新</button>
+    </div>
+    <!-- 月送り -->
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 0;">
+      <button onclick="sgjShiftMonth(-1)" style="background:#fff;border:1px solid #cfd8e8;border-radius:8px;padding:6px 12px;font-size:15px;font-weight:800;cursor:pointer;">◀</button>
+      <div id="sgjMonthLabel" style="flex:1;text-align:center;font-size:15px;font-weight:800;color:#04604a;">―</div>
+      <button id="sgjNextBtn" onclick="sgjShiftMonth(1)" style="background:#fff;border:1px solid #cfd8e8;border-radius:8px;padding:6px 12px;font-size:15px;font-weight:800;cursor:pointer;">▶</button>
+    </div>
+    <!-- 一覧ペイン -->
+    <div id="sgjListPane">
+      <div id="sgjSummary" style="padding:10px 12px 0;"></div>
+      <div id="sgjList" style="padding:8px 12px 20px;"></div>
+    </div>
+    <!-- 明細ペイン (運転手をタップしたとき) -->
+    <div id="sgjDetailPane" style="display:none;">
+      <div style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+        <button onclick="sgjBackToList()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 一覧</button>
+        <div id="sgjDetailName" style="font-size:14px;font-weight:800;color:#04604a;"></div>
+      </div>
+      <div id="sgjDetail" style="padding:0 12px 20px;"></div>
+    </div>
+  </div>
+
   <!-- Screen: 承認ハブ (前払い / 弁当 / 送迎記録 を分けて表示) -->
   <div class="screen" id="approveHubScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
@@ -6291,6 +6319,12 @@ select.sankyu-edit-input {
         <span style="font-size:30px;">🚌</span>
         <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#04604a;">送迎記録 承認</span>
         <span id="hubSougeiCount" style="min-width:54px;text-align:center;background:#e6f6f1;color:#04604a;border-radius:20px;padding:6px 12px;font-size:14px;font-weight:800;">0件</span>
+        <span style="font-size:20px;color:#bbb;">›</span>
+      </button>
+      <button id="hubSougeiJissekiBtn" onclick="openSougeiJissekiScreen()" style="display:none;align-items:center;gap:12px;width:100%;background:#fff;border:1.5px solid #b8d4ea;border-radius:14px;padding:18px 16px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <span style="font-size:30px;">📊</span>
+        <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#1f3864;">送迎実績（人別）</span>
+        <span style="min-width:54px;text-align:center;background:#eaf2fb;color:#1f3864;border-radius:20px;padding:6px 12px;font-size:12px;font-weight:800;">月次</span>
         <span style="font-size:20px;color:#bbb;">›</span>
       </button>
       <div style="font-size:11px;color:var(--text-light);text-align:center;margin-top:4px;">各ボタンを開くと申請の詳細・承認/却下ができます</div>
@@ -7648,7 +7682,7 @@ function switchScreen(screenId, skipHistory) {
   }
   var _mainContent = document.querySelector('.main-content');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', astiWizardScreen: 'ASTI入社ウィザード', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', joshaListScreen: '送迎乗車リスト', approveHubScreen: '承認', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', astiWizardScreen: 'ASTI入社ウィザード', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', joshaListScreen: '送迎乗車リスト', approveHubScreen: '承認', sougeiJissekiScreen: '送迎実績', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -38388,8 +38422,11 @@ function openApproveHub() {
     showToast('承認権限がありません', 'error'); return;
   }
   switchScreen('approveHubScreen');
+  var sgOk = (typeof isSougeiApprover === 'function' && isSougeiApprover());
   var sgBtn = document.getElementById('hubSougeiBtn');
-  if (sgBtn) sgBtn.style.display = (typeof isSougeiApprover === 'function' && isSougeiApprover()) ? 'flex' : 'none';
+  if (sgBtn) sgBtn.style.display = sgOk ? 'flex' : 'none';
+  var sgjBtn = document.getElementById('hubSougeiJissekiBtn');
+  if (sgjBtn) sgjBtn.style.display = sgOk ? 'flex' : 'none';
   function paint() {
     var m = window._pendMaebari || 0, b = window._pendBento || 0, s = window._pendSougei || 0;
     var em = document.getElementById('hubMaebariCount');
@@ -39059,6 +39096,259 @@ function _setSougeiTabBadge() {
   var n = window._pendSougei || 0;
   b.textContent = n;
   b.classList.toggle('zero', n === 0);
+}
+
+// ============================================================
+// 送迎実績 (人別・月送り) — 2026-07-30 追加
+// 承認画面が「1件ずつ承認する」用途なのに対し、こちらは運転手ごとの月次実績を見る用途。
+// バックエンド不要: 承認画面と同じ SP「送迎記録」List を直接読み、単価は社員Listの給与体系。
+// 集計方法は月次Excel (sougei_kiroku/sougei_monthly_report.py) と揃えている
+//   - 支払い対象 = approved のみ / 取消(cancelled)は集計外
+//   - 単価 = 社員Listの「給与体系」。094在職レコードを優先。未登録は 1200円 仮置き(⚠表示)
+// ============================================================
+const SGJ_DEFAULT_TANKA = 1200;
+var _sgjYear = 0, _sgjMonth = 0, _sgjTankaMap = null, _sgjRows = null;
+
+function _sgjPad(n) { return String(n).padStart(2, '0'); }
+function _sgjYen(n) { return '¥' + Number(n || 0).toLocaleString('ja-JP'); }
+function _sgjEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+function openSougeiJissekiScreen() {
+  if (!isSougeiApprover()) { showToast('権限がありません', 'error'); return; }
+  if (!_sgjYear) {
+    var n = new Date();
+    _sgjYear = n.getFullYear(); _sgjMonth = n.getMonth() + 1;
+  }
+  switchScreen('sougeiJissekiScreen');
+  sgjBackToList();
+  loadSougeiJisseki();
+}
+
+function sgjShiftMonth(d) {
+  var m = _sgjMonth + d, y = _sgjYear;
+  if (m < 1) { m = 12; y--; } else if (m > 12) { m = 1; y++; }
+  _sgjYear = y; _sgjMonth = m;
+  sgjBackToList();
+  loadSougeiJisseki();
+}
+
+function sgjBackToList() {
+  var lp = document.getElementById('sgjListPane'), dp = document.getElementById('sgjDetailPane');
+  if (lp) lp.style.display = '';
+  if (dp) dp.style.display = 'none';
+}
+
+// SP「送迎記録」から対象月のレコードを取得 (前後1日マージンを付けて JST で絞り直す)
+async function _sgjFetchMonth(y, m) {
+  var select = ['Id', SG.shainNo, SG.name, SG.date, SG.dest, SG.cat, SG.slot, SG.memo,
+                SG.status, SG.approvedBy, SG.approvedAt, 'Created'].join(',');
+  var from = new Date(Date.UTC(y, m - 1, 1) - 86400000).toISOString().slice(0, 19) + 'Z';
+  var to = new Date(Date.UTC(y, m, 1) + 2 * 86400000).toISOString().slice(0, 19) + 'Z';
+  var f = SG.date + " ge datetime'" + from + "' and " + SG.date + " le datetime'" + to + "'";
+  var q = '$filter=' + encodeURIComponent(f) + '&$select=' + encodeURIComponent(select)
+        + '&$orderby=Id desc&$top=2000';
+  var rows = await spGetAll(LIST_SOUGEI_KIROKU_GUID, q);
+  // 0件のときは「本当に無い」のか「日付フィルタが効かなかった」のかを切り分ける
+  if (!rows.length) {
+    var probe = await spGetAll(LIST_SOUGEI_KIROKU_GUID, '$select=Id&$top=1');
+    if (probe.length) {
+      rows = await spGetAll(LIST_SOUGEI_KIROKU_GUID,
+        '$select=' + encodeURIComponent(select) + '&$orderby=Id desc&$top=5000');
+    }
+  }
+  var ym = y + '-' + _sgjPad(m);
+  var out = [];
+  rows.forEach(function (it) {
+    var dateStr = _sougeiJstDate(it[SG.date]);
+    if (dateStr.slice(0, 7) !== ym) return;
+    var sn = it[SG.shainNo], snInt = parseInt(sn, 10);
+    var createdStr = _sougeiJstDate(it.Created);
+    var backdated = false;
+    if (dateStr && createdStr) {
+      backdated = ((new Date(createdStr + 'T00:00:00') - new Date(dateStr + 'T00:00:00')) / 86400000) >= 2;
+    }
+    out.push({
+      id: it.Id,
+      shainNo: (sn == null || sn === '') ? '' : String(isNaN(snInt) ? sn : snInt),
+      name: String(it[SG.name] || ''),
+      date: dateStr,
+      dest: String(it[SG.dest] || ''),
+      cat: String(it[SG.cat] || ''),
+      slot: String(it[SG.slot] || ''),
+      memo: String(it[SG.memo] || ''),
+      status: String(it[SG.status] || 'active'),
+      approvedBy: String(it[SG.approvedBy] || ''),
+      backdated: backdated
+    });
+  });
+  // 担当者は自分の送迎先のみ (役員は全件)
+  var my = _mySougeiDests();
+  if (my !== null) out = out.filter(function (r) { return my.indexOf(r.dest) >= 0; });
+  return out;
+}
+
+// 社員List → {社員番号: {tanka, name}}。月次Excel と同じ優先度で1件を選ぶ
+async function _sgjLoadTanka() {
+  if (_sgjTankaMap) return _sgjTankaMap;
+  var kyuyoKey = null;
+  try {
+    var meta = await fetchEmployeeFields();
+    if (meta) kyuyoKey = buildFieldKeyMap(meta)['kyuyoTaikei'];
+  } catch (e) { console.warn('sgj: 給与体系キー解決に失敗', e); }
+  var E_BUKA = 'OData__x90e8__x8ab2_';
+  var sel = ['Id', 'Title', F.syainNo, E_BUKA, F.hakenTaisha].concat(kyuyoKey ? [kyuyoKey] : []).join(',');
+  var rows = await spGetAll(LIST_EMPLOYEES_GUID, '$select=' + encodeURIComponent(sel) + '&$top=5000');
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var cand = {};
+  rows.forEach(function (it) {
+    var no = parseInt(it[F.syainNo], 10);
+    if (isNaN(no)) return;
+    no = String(no);
+    var buka = String(it[E_BUKA] || '');
+    var ts = it[F.hakenTaisha] ? new Date(_sougeiJstDate(it[F.hakenTaisha]) + 'T00:00:00') : null;
+    var active = !ts || ts >= today;
+    var tanka = kyuyoKey ? parseFloat(it[kyuyoKey]) : NaN;
+    if (isNaN(tanka) || tanka <= 0) tanka = null;
+    var score = (active ? 2 : 0) + (buka.indexOf('094:') === 0 ? 1 : 0);
+    (cand[no] = cand[no] || []).push({ score: score, id: it.Id || 0, tanka: tanka, name: String(it.Title || '').trim() });
+  });
+  var map = {};
+  Object.keys(cand).forEach(function (no) {
+    var lst = cand[no].sort(function (a, b) { return (b.score - a.score) || (b.id - a.id); });
+    var t = null, nm = '';
+    lst.forEach(function (c) { if (t === null && c.tanka) t = c.tanka; if (!nm && c.name) nm = c.name; });
+    map[no] = { tanka: t, name: nm };
+  });
+  _sgjTankaMap = map;
+  return map;
+}
+
+async function loadSougeiJisseki(force) {
+  var lab = document.getElementById('sgjMonthLabel');
+  if (lab) lab.textContent = _sgjYear + '年 ' + _sgjMonth + '月（1日〜月末）';
+  var sumEl = document.getElementById('sgjSummary'), listEl = document.getElementById('sgjList');
+  if (!listEl) return;
+  if (force) _sgjTankaMap = null;
+  sumEl.innerHTML = '';
+  listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#666;">読み込み中...</div>';
+  try {
+    var recs = await _sgjFetchMonth(_sgjYear, _sgjMonth);
+    var tanka = await _sgjLoadTanka();
+    _sgjRows = recs;
+    renderSougeiJisseki(recs, tanka);
+  } catch (e) {
+    console.error('送迎実績の取得に失敗', e);
+    listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#c62828;">取得に失敗しました: '
+      + String(e && e.message ? e.message : e) + '</div>';
+  }
+}
+
+function renderSougeiJisseki(recs, tankaMap) {
+  var sumEl = document.getElementById('sgjSummary'), listEl = document.getElementById('sgjList');
+  var live = recs.filter(function (r) { return r.status !== 'cancelled'; });
+  if (!live.length) {
+    sumEl.innerHTML = '';
+    listEl.innerHTML = '<div style="text-align:center;padding:30px 16px;color:#999;line-height:1.7;">'
+      + 'この月の送迎記録はありません。<br><span style="font-size:11.5px;">運転手がポータルの「🚌 送迎記録」で1タップ記録すると、ここに集計されます。</span></div>';
+    return;
+  }
+  // 運転手ごとに集計
+  var per = {};
+  live.forEach(function (r) {
+    var k = r.shainNo || r.name;
+    var d = per[k] = per[k] || { shainNo: r.shainNo, name: r.name, total: 0, approved: 0, pending: 0, backdated: 0, dests: {} };
+    d.total++;
+    if (r.status === 'approved') d.approved++; else d.pending++;
+    if (r.backdated) d.backdated++;
+    d.dests[r.dest] = (d.dests[r.dest] || 0) + 1;
+    if (!d.name && r.name) d.name = r.name;
+  });
+  var drivers = Object.keys(per).map(function (k) { return per[k]; })
+    .sort(function (a, b) { return b.total - a.total; });
+  var gTotal = 0, gApproved = 0, gPending = 0, gAmount = 0, anyMissingTanka = false;
+  drivers.forEach(function (d) {
+    var t = (tankaMap[d.shainNo] || {}).tanka;
+    d.tankaMissing = !t;
+    if (!t) { t = SGJ_DEFAULT_TANKA; anyMissingTanka = true; }
+    d.tanka = t;
+    d.amount = d.approved * t;              // 支払い対象=承認済のみ (月次Excelと同じ)
+    d.pendingAmount = d.pending * t;
+    gTotal += d.total; gApproved += d.approved; gPending += d.pending; gAmount += d.amount;
+  });
+  sumEl.innerHTML =
+    '<div style="background:linear-gradient(135deg,#04604a,#0b8f6e);color:#fff;border-radius:14px;padding:12px 14px;box-shadow:0 3px 10px rgba(4,96,74,.25);">'
+    + '<div style="display:flex;align-items:flex-end;gap:10px;">'
+    + '<div style="flex:1;"><div style="font-size:11.5px;opacity:.85;">運転手 ' + drivers.length + '名 ・ 合計</div>'
+    + '<div style="font-size:22px;font-weight:800;line-height:1.15;">' + gTotal + '回</div></div>'
+    + '<div style="text-align:right;"><div style="font-size:11.5px;opacity:.85;">承認済の支払い額</div>'
+    + '<div style="font-size:20px;font-weight:800;line-height:1.15;">' + _sgjYen(gAmount) + '</div></div>'
+    + '</div>'
+    + '<div style="margin-top:7px;font-size:11.5px;opacity:.92;">✓ 承認済 ' + gApproved + '回'
+    + (gPending ? ' ／ <span style="color:#ffe082;font-weight:800;">未承認 ' + gPending + '回（支払い対象外）</span>' : ' ／ 未承認 0回')
+    + '</div></div>'
+    + (anyMissingTanka ? '<div style="margin-top:8px;background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:8px 10px;font-size:11.5px;color:#8d6e00;">⚠ 社員データの「給与体系」が未登録の運転手がいます。'
+        + SGJ_DEFAULT_TANKA + '円で仮計算しています（★印）。総務で入力すると正しくなります。</div>' : '');
+
+  listEl.innerHTML = drivers.map(function (d, i) {
+    var destTxt = Object.keys(d.dests).sort(function (a, b) { return d.dests[b] - d.dests[a]; })
+      .map(function (k) { return (k || '(未設定)') + ' ' + d.dests[k]; }).join(' ・ ');
+    return '<button onclick="sgjOpenDetail(' + i + ')" style="display:block;width:100%;text-align:left;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #0b8f6e;border-radius:12px;padding:11px 12px;margin-bottom:9px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.05);">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      +   '<div style="flex:1;min-width:0;">'
+      +     '<div style="font-size:14.5px;font-weight:800;color:#1f3864;">' + _sgjEsc(d.name || '(氏名なし)')
+      +       ' <span style="font-size:11px;color:#8b98ab;font-weight:600;">' + _sgjEsc(d.shainNo) + '</span></div>'
+      +     '<div style="font-size:11px;color:#6b7a90;margin-top:2px;">' + _sgjEsc(destTxt) + '</div>'
+      +   '</div>'
+      +   '<div style="text-align:right;">'
+      +     '<div style="font-size:18px;font-weight:800;color:#04604a;line-height:1.1;">' + d.total + '<span style="font-size:11px;">回</span></div>'
+      +     '<div style="font-size:12px;font-weight:800;color:#1f3864;">' + _sgjYen(d.amount) + (d.tankaMissing ? '★' : '') + '</div>'
+      +   '</div>'
+      +   '<span style="font-size:18px;color:#c3ccd8;">›</span>'
+      + '</div>'
+      + '<div style="margin-top:6px;font-size:11px;color:#6b7a90;">✓' + d.approved + '回 × ' + _sgjYen(d.tanka)
+      + (d.pending ? ' ／ <span style="color:#e65100;font-weight:800;">未承認 ' + d.pending + '回（' + _sgjYen(d.pendingAmount) + '）</span>' : '')
+      + (d.backdated ? ' ／ <span style="color:#8d6e00;">⏰遡り ' + d.backdated + '件</span>' : '')
+      + '</div></button>';
+  }).join('');
+  window._sgjDrivers = drivers;
+}
+
+function sgjOpenDetail(idx) {
+  var d = (window._sgjDrivers || [])[idx];
+  if (!d || !_sgjRows) return;
+  var rows = _sgjRows.filter(function (r) { return (r.shainNo || r.name) === (d.shainNo || d.name); })
+    .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.slot < b.slot ? -1 : 1); });
+  document.getElementById('sgjDetailName').textContent =
+    (d.name || '') + '（' + d.shainNo + '）  ' + _sgjYear + '年' + _sgjMonth + '月  ' + d.total + '回 ' + _sgjYen(d.amount);
+  var html = '<div style="font-size:11px;color:#6b7a90;margin:0 0 8px;">✓=承認済 ／ ⏳=未承認 ／ 取=担当者が取消（集計外） ／ ⏰=遡り入力</div>';
+  var lastDate = '';
+  html += rows.map(function (r) {
+    var mark = r.status === 'approved' ? '<span style="color:#04724a;font-weight:800;">✓</span>'
+             : r.status === 'cancelled' ? '<span style="color:#c62828;font-weight:800;">取</span>'
+             : '<span style="color:#e65100;font-weight:800;">⏳</span>';
+    var dim = r.status === 'cancelled' ? 'opacity:.5;text-decoration:line-through;' : '';
+    var dayLabel = (r.date === lastDate) ? '' : r.date.slice(5).replace('-', '/');
+    lastDate = r.date;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px dashed #eef1f5;' + dim + '">'
+      + '<div style="width:42px;font-size:12px;font-weight:800;color:#1f3864;">' + dayLabel + '</div>'
+      + '<div style="width:18px;text-align:center;">' + (SOUGEI_APPROVE_CAT_ICON[r.cat] || '🚌') + '</div>'
+      + '<div style="flex:1;min-width:0;font-size:12px;color:#33445c;">' + _sgjEsc(r.cat)
+      +   (r.slot ? ' <b>' + _sgjEsc(r.slot) + '</b>' : '')
+      +   '<span style="color:#8b98ab;"> ・ ' + _sgjEsc(r.dest || '') + '</span>'
+      +   (r.memo ? '<div style="font-size:10.5px;color:#8b98ab;">' + _sgjEsc(r.memo) + '</div>' : '')
+      + '</div>'
+      + '<div style="width:34px;text-align:right;font-size:12px;">' + (r.backdated ? '⏰' : '') + mark + '</div>'
+      + '</div>';
+  }).join('');
+  html += '<div style="margin-top:10px;font-size:11.5px;color:#6b7a90;">送迎先別: '
+    + Object.keys(d.dests).map(function (k) { return _sgjEsc(k || '(未設定)') + ' ' + d.dests[k] + '回'; }).join(' ／ ') + '</div>';
+  if (d.pending) {
+    html += '<button onclick="openSougeiApprovalScreen()" style="margin-top:12px;width:100%;background:#04724a;color:#fff;border:none;border-radius:10px;padding:11px;font-size:13.5px;font-weight:800;cursor:pointer;">未承認 '
+      + d.pending + '件を承認画面で確認する</button>';
+  }
+  document.getElementById('sgjDetail').innerHTML = html;
+  document.getElementById('sgjListPane').style.display = 'none';
+  document.getElementById('sgjDetailPane').style.display = '';
 }
 
 async function loadSougeiPending() {
