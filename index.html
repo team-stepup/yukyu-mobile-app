@@ -38426,7 +38426,8 @@ function openApproveHub() {
   var sgBtn = document.getElementById('hubSougeiBtn');
   if (sgBtn) sgBtn.style.display = sgOk ? 'flex' : 'none';
   var sgjBtn = document.getElementById('hubSougeiJissekiBtn');
-  if (sgjBtn) sgjBtn.style.display = sgOk ? 'flex' : 'none';
+  if (sgjBtn) sgjBtn.style.display =
+    (typeof canViewSougeiJisseki === 'function' && canViewSougeiJisseki()) ? 'flex' : 'none';
   function paint() {
     var m = window._pendMaebari || 0, b = window._pendBento || 0, s = window._pendSougei || 0;
     var em = document.getElementById('hubMaebariCount');
@@ -39101,6 +39102,9 @@ function _setSougeiTabBadge() {
 // ============================================================
 // 送迎実績 (人別・月送り) — 2026-07-30 追加
 // 承認画面が「1件ずつ承認する」用途なのに対し、こちらは運転手ごとの月次実績を見る用途。
+// 【閲覧範囲】2026-07-30 ユーザー指示で「全件・全担当者」に変更。
+//   役員 + 担当者(城かおり/森まこと/吉浦/森ゆうじ) の全員が、送迎先に関係なく全運転手を見られる。
+//   ※承認画面(sougeiApprovalScreen)は責任分担のため従来どおり担当送迎先のみ。
 // バックエンド不要: 承認画面と同じ SP「送迎記録」List を直接読み、単価は社員Listの給与体系。
 // 集計方法は月次Excel (sougei_kiroku/sougei_monthly_report.py) と揃えている
 //   - 支払い対象 = approved のみ / 取消(cancelled)は集計外
@@ -39113,8 +39117,18 @@ function _sgjPad(n) { return String(n).padStart(2, '0'); }
 function _sgjYen(n) { return '¥' + Number(n || 0).toLocaleString('ja-JP'); }
 function _sgjEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+// 送迎実績の閲覧可否 = アプリを使える人全員 (役員 + 担当者4名)。承認権限とは別建て
+function canViewSougeiJisseki() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    var email = getLoggedInEmail();
+    if (!email) return false;
+    return ALLOWED_EMAILS.indexOf(email) >= 0;
+  } catch (e) { return false; }
+}
+
 function openSougeiJissekiScreen() {
-  if (!isSougeiApprover()) { showToast('権限がありません', 'error'); return; }
+  if (!canViewSougeiJisseki()) { showToast('権限がありません', 'error'); return; }
   if (!_sgjYear) {
     var n = new Date();
     _sgjYear = n.getFullYear(); _sgjMonth = n.getMonth() + 1;
@@ -39181,9 +39195,7 @@ async function _sgjFetchMonth(y, m) {
       backdated: backdated
     });
   });
-  // 担当者は自分の送迎先のみ (役員は全件)
-  var my = _mySougeiDests();
-  if (my !== null) out = out.filter(function (r) { return my.indexOf(r.dest) >= 0; });
+  // 閲覧は全件 (担当送迎先での絞り込みはしない)。承認画面側だけが担当者スコープを持つ
   return out;
 }
 
