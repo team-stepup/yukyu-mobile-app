@@ -45037,7 +45037,7 @@ async function openIdouForm(opts) {
         '<div class="taisha-emp-info">' +
           '<strong>' + escHtml(no + ' ' + name) + '</strong>' +
           '<span>' + (isRejoin ? '前派遣先: ' : '現派遣先: ') + escHtml(oldBuka || '-') + '</span>' +
-          '<span>有休起算日: ' + escHtml(kisan || '-') + '(継続)</span>' +
+          '<span>有休起算日: ' + (isRejoin ? '再入社日から再起算' : escHtml(kisan || '-') + '(継続)') + '</span>' +
         '</div>' +
       '</div>' +
       '<div class="taisha-body">' +
@@ -45271,7 +45271,7 @@ async function submitIdouForm() {
     '派遣先: ' + escHtml(buka) + '<br>' +
     (soshiki ? '組織: ' + escHtml(soshiki) + '<br>' : '') +
     (syokusyu ? '職種: ' + escHtml(syokusyu) + '<br>' : '') +
-    '有休起算日: 旧レコードから継続' +
+    '有休起算日: ' + (isRejoin ? escHtml(nyushaDate) + ' (再入社日から再起算)' : '旧レコードから継続') +
     '</div>' +
     '<div class="confirm-btns">' +
     '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
@@ -45342,8 +45342,10 @@ async function executeIdouSubmit(p) {
     newBody['Title'] = emp.Title || '';
     newBody[F.syainNo.replace(/^OData_/, '')] = emp[F.syainNo];
 
-    // 起算日(継続)
-    if (emp[F.kisanDate]) {
+    // 起算日: 再入社は再入社日から再起算 / 移動入社は旧レコードから継続
+    if (p.isRejoin) {
+      newBody[F.kisanDate.replace(/^OData_/, '')] = p.nyushaDate + 'T00:00:00Z';
+    } else if (emp[F.kisanDate]) {
       newBody[F.kisanDate.replace(/^OData_/, '')] = emp[F.kisanDate];
     }
 
