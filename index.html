@@ -45,6 +45,41 @@
   --header-height: 56px;
 }
 
+/* ダークモード (役員テスト 2026-08-01): html[data-theme="dark"] で変数を上書き */
+html[data-theme="dark"] {
+  --primary: #7B7DC9;
+  --primary-dark: #4b4d8a;
+  --primary-light: #9aa0e8;
+  --bg: #14161f;
+  --card-bg: #1e2130;
+  --text: #e6e8f2;
+  --text-light: #a7abc4;
+  --border: #343a52;
+  --weekend-bg: #2e2230;
+  --selected-bg: #2a2d45;
+  --disabled-bg: #2c2f42;
+}
+/* インラインの白背景ハードコードを救済 (完全網羅ではない・見つけ次第追補) */
+html[data-theme="dark"] [style*="background:#fff"],
+html[data-theme="dark"] [style*="background: #fff"],
+html[data-theme="dark"] [style*="background:#ffffff"],
+html[data-theme="dark"] [style*="background:white"],
+html[data-theme="dark"] [style*="background: white"],
+html[data-theme="dark"] [style*="background:#fafafa"],
+html[data-theme="dark"] [style*="background:#f9f9f9"],
+html[data-theme="dark"] [style*="background:#f5f5f5"],
+html[data-theme="dark"] [style*="background:#f8f8f8"] {
+  background: var(--card-bg) !important;
+  color: var(--text);
+}
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  background: var(--card-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
 html, body {
   height: 100%;
   font-family: 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
@@ -5361,6 +5396,7 @@ select.sankyu-edit-input {
   <h1 id="headerTitle" style="display:none;">ホーム</h1>
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
+  <button class="header-cache-btn" id="themeToggleBtn" style="display:none;" onclick="toggleAppTheme()" title="ダーク/ライト切替">🌙</button>
   <button class="update-badge" id="updateBadge" onclick="headerUpdateClick()" title="更新する">⟳</button>
   <button class="teams-btn" id="teamsBtn" data-needs-consent="1" onclick="openTeamsActivity()" title="Teams アクティビティ">
     💬
@@ -18598,6 +18634,8 @@ async function loadHomeBadges() {
   try { updateBentoAdminBadge(); } catch(e) { console.warn('bento badge error:', e); }
   // 乗車リストボタン (山下浩俊のみ表示)
   try { var _jlBtn = document.getElementById('joshaListBtn'); if (_jlBtn) _jlBtn.style.display = (getLoggedInEmail() === 'h.yamashita@team-stepup.com') ? '' : 'none'; } catch(e) {}
+  // ダーク/ライト切替ボタン (役員テスト・ADMIN_USERSのみ表示)
+  try { var _thBtn = document.getElementById('themeToggleBtn'); if (_thBtn) _thBtn.style.display = (ADMIN_USERS.indexOf(getLoggedInEmail()) >= 0) ? 'flex' : 'none'; } catch(e) {}
   var today = new Date();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
@@ -38413,6 +38451,23 @@ async function _loadCurrentSankyuCounts(allEmps) {
 // 役員専用ダッシュボード（派遣先別在職者分析）
 // ============================================================
 const ADMIN_USERS = ['h.yamashita@team-stepup.com', 'a.yamashita@team-stepup.com'];
+
+// ===== ダーク/ライト切替 (役員テスト 2026-08-01) =====
+// 端末ごとに localStorage('appTheme') で記憶。ボタン表示は ADMIN_USERS のみ(適用自体は保存値があれば誰でも)
+function applyAppTheme() {
+  var t = 'light';
+  try { t = localStorage.getItem('appTheme') || 'light'; } catch(e) {}
+  document.documentElement.setAttribute('data-theme', t);
+  var b = document.getElementById('themeToggleBtn');
+  if (b) b.textContent = (t === 'dark') ? '☀️' : '🌙';
+}
+function toggleAppTheme() {
+  var next = 'dark';
+  try { next = (localStorage.getItem('appTheme') === 'dark') ? 'light' : 'dark'; } catch(e) {}
+  try { localStorage.setItem('appTheme', next); } catch(e) {}
+  applyAppTheme();
+}
+applyAppTheme();
 // 担当者 (一般利用: 役員専用機能は不可)
 const STAFF_USERS = [
   'kaori.j@team-stepup.com',     // 城 かおり
