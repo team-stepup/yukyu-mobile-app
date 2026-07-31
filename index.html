@@ -21985,16 +21985,17 @@ async function fetchSoumuShahoInCount() {
       if (!kVal) return;
       var kDate = new Date(kVal); kDate.setHours(0,0,0,0);
       if (isNaN(kDate.getTime())) return;
-      if (kDate >= today) return;     // 加入日<Today() (今日より前)
       var kubun = kubunKey ? String(item[kubunKey] || '').trim() : '';
       // 扶養追加/扶養削除: 本人は加入済み(✓取得完了)が普通なので「総務-社保」除外は掛けず、
       // 進捗は List9 の「扶養加入」列 (✓完了/扶養なし=処理済み) で判定する
       if (kubun === '扶養追加' || kubun === '扶養削除' || kubun === '扶養喪失') {
+        if (kDate > today) return;      // 異動届は5日以内提出のため加入日当日からカードに出す
         var fVal = fuyouStatusKey ? String(item[fuyouStatusKey] || '').trim() : '';
         if (fVal.indexOf('完了') >= 0 || fVal === '扶養なし') return;   // 処理済み
         if (kubun === '扶養追加') fuyouAdd.push(item); else fuyouDel.push(item);
         return;
       }
+      if (kDate >= today) return;     // 本人系は従来通り 加入日<Today() (今日より前)
       // 本人系: IsBlank(本人加入)
       if (honninKey) {
         var hVal = item[honninKey];
