@@ -18535,7 +18535,8 @@ function _dedupeSoumuShahoInItems(items, allEmps, km) {
   var skip = {};
   allEmps.forEach(function(e){
     var sv = String(e[odShaho] || '').trim();
-    if (sv && (sv.indexOf('申請')>=0 || sv.indexOf('完了')>=0 || sv.indexOf('喪失')>=0 || sv.indexOf('移動')>=0)) {
+    // 喪失(申請中/完了)の社員は除外しない: 再入社の新規加入申請が永久に表示されなくなるため
+    if (sv && sv.indexOf('喪失') < 0 && (sv.indexOf('申請')>=0 || sv.indexOf('完了')>=0 || sv.indexOf('移動')>=0)) {
       var bn = _norm(F.syainNo ? e[F.syainNo] : ''); if (bn) skip[bn] = true;
     }
   });
@@ -21683,12 +21684,14 @@ async function loadSoumuDashboard() {
         var shinseiCount = 0;
         _soumuAllEmps.forEach(function(e) {
           var sv = String(e[odShaho] || '').trim();
-          // 「総務-社保」に何らかの社保ステータスが入っている社員はすべて加入カードから除外する。
+          // 「総務-社保」に社保ステータスが入っている社員は加入カードから除外する。
           //   - →申請中 / 取得申請中 / 申請中     → 既に申請済（重複防止）
           //   - ✓取得完了                          → 既に加入完了
-          //   - →喪失申請中 / ✓喪失完了           → 既に離脱手続中・離脱済
           //   - →移動 / ✓移動                     → 別会社等への移動扱い
-          if (sv && (sv.indexOf('申請') >= 0 || sv.indexOf('完了') >= 0 || sv.indexOf('喪失') >= 0 || sv.indexOf('移動') >= 0)) {
+          //   - ただし 喪失(申請中/完了) は除外しない (2026-07-31):
+          //     再入社の社員は総務-社保が「✓喪失完了」のまま新規加入申請が来るため、
+          //     除外すると再入社の加入手続きが永久にカードに出なくなる (例: ヤスタケ50333)
+          if (sv && sv.indexOf('喪失') < 0 && (sv.indexOf('申請') >= 0 || sv.indexOf('完了') >= 0 || sv.indexOf('移動') >= 0)) {
             var bn = _normBango(F.syainNo ? e[F.syainNo] : '');
             if (bn) { shinseiBangoSet[bn] = true; shinseiCount++; }
           }
@@ -21995,7 +21998,7 @@ async function fetchSoumuShahoInCount() {
         if (kubun === '扶養追加') fuyouAdd.push(item); else fuyouDel.push(item);
         return;
       }
-      if (kDate >= today) return;     // 本人系は従来通り 加入日<Today() (今日より前)
+      if (kDate > today) return;      // 本人系も加入日当日からカードに出す (取得届は5日以内提出)
       // 本人系: IsBlank(本人加入)
       if (honninKey) {
         var hVal = item[honninKey];
