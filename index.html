@@ -44051,8 +44051,17 @@ async function openShahoForm() {
       var hnameOdKey = fmap.huyouName ? (fmap.huyouName.InternalName.indexOf('_')===0 ? 'OData_' + fmap.huyouName.InternalName : fmap.huyouName.InternalName) : null;
       var tsuzOdKey  = fmap.huyouTsuzukigara ? (fmap.huyouTsuzukigara.InternalName.indexOf('_')===0 ? 'OData_' + fmap.huyouTsuzukigara.InternalName : fmap.huyouTsuzukigara.InternalName) : null;
       var kanyOdKey  = fmap.kanyuubi ? (fmap.kanyuubi.InternalName.indexOf('_')===0 ? 'OData_' + fmap.kanyuubi.InternalName : fmap.kanyuubi.InternalName) : null;
-      function _normFuyouNm(s) { return String(s || '').replace(/[\s　]/g, ''); }
-      var seenFuyouNames = {};
+      var birthOdKey = fmap.huyouBirthday ? (fmap.huyouBirthday.InternalName.indexOf('_')===0 ? 'OData_' + fmap.huyouBirthday.InternalName : fmap.huyouBirthday.InternalName) : null;
+      // 表記ゆれ対策: 空白除去 + 小書きカナ→大文字化 (ジョバンナ vs ジヨバツナ 等は名前では拾えないため生年月日でも突合)
+      function _normFuyouNm(s) {
+        var small = 'ァィゥェォッャュョヮぁぃぅぇぉっゃゅょゎ';
+        var large = 'アイウエオツヤユヨワあいうえおつやゆよわ';
+        return String(s || '').replace(/[\s　]/g, '').split('').map(function(ch) {
+          var i = small.indexOf(ch);
+          return i >= 0 ? large[i] : ch;
+        }).join('');
+      }
+      var seenFuyouNames = {}, seenFuyouBirthdays = {};
       var optHtml = '<option value="">選択してください</option>';
       fuyouHistory.forEach(function(it) {
         var id = it.Id || it.ID;
@@ -44065,10 +44074,14 @@ async function openShahoForm() {
         optHtml += '<option value="' + escHtml(String(id)) + '">' + escHtml(label) + '</option>';
         if (hname) seenFuyouNames[_normFuyouNm(hname)] = true;
         if (furi)  seenFuyouNames[_normFuyouNm(furi)]  = true;
+        var bd = birthOdKey ? (it[birthOdKey] ? String(it[birthOdKey]).substring(0,10) : '') : '';
+        if (bd) seenFuyouBirthdays[bd] = true;
       });
-      // 社員List 扶養①〜④由来 (List9と同名は重複させない)
+      // 社員List 扶養①〜④由来 (List9と同名 or 同一生年月日は同一人物とみなし重複させない)
       _shahoFormEmpFuyou.forEach(function(c) {
         if (seenFuyouNames[_normFuyouNm(c.name)]) return;
+        var cBd = c.birthday ? String(c.birthday).substring(0,10) : '';
+        if (cBd && seenFuyouBirthdays[cBd]) return;
         var marks = ['①', '②', '③', '④'];
         var label = '扶養' + (marks[c.slot - 1] || c.slot) + ' ' + (c.tsuzuki ? c.tsuzuki + ' ' : '') + c.name;
         optHtml += '<option value="emp:' + c.slot + '">' + escHtml(label) + '</option>';
