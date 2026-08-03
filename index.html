@@ -19104,6 +19104,7 @@ var _soumuShahoInCount = 0;
 var _soumuShahoInItems = [];
 var _soumuFuyouAddItems = []; // 申請区分=扶養追加 の未処理レコード
 var _soumuFuyouDelItems = []; // 申請区分=扶養削除 の未処理レコード
+var _soumuFuyouPendingItems = []; // 扶養加入=申請中→ の届出済みレコード (「社保 申請中」で数える)
 var _soumuShahoInFields = {}; // kanyuubi/hakensaki/bango/name のキー
 var _shahoFromSoumuDash = false; // 総務「社保加入」カード発の遷移なら true → 申請詳細保存後に総務へ戻す
 var _soumuSankyuSummary = { active: 0, upcoming: 0, overdue: 0 };
@@ -21766,6 +21767,7 @@ async function loadSoumuDashboard() {
     _soumuShahoInItems = shahoInResult.items;
     _soumuFuyouAddItems = shahoInResult.fuyouAdd || [];
     _soumuFuyouDelItems = shahoInResult.fuyouDel || [];
+    _soumuFuyouPendingItems = (shahoInResult.fuyouAddPending || []).concat(shahoInResult.fuyouDelPending || []);
     renderSoumuDashboard();
   } catch (e) {
     console.error('loadSoumuDashboard error:', e);
@@ -22020,7 +22022,7 @@ async function fetchSoumuShahoInCount() {
     }
     var today = new Date(); today.setHours(0,0,0,0);
     var fuyouStatusKey = _soumuShahoInFields.fuyouStatus || null;
-    var filtered = [], fuyouAdd = [], fuyouDel = [];
+    var filtered = [], fuyouAdd = [], fuyouDel = [], fuyouAddPending = [], fuyouDelPending = [];
     allItems.forEach(function(item) {
       var kVal = kanyuuKey ? item[kanyuuKey] : null;
       if (!kVal) return;
@@ -22030,9 +22032,13 @@ async function fetchSoumuShahoInCount() {
       // 扶養追加/扶養削除: 本人は加入済み(✓取得完了)が普通なので「総務-社保」除外は掛けず、
       // 進捗は List9 の「扶養加入」列 (✓完了/扶養なし=処理済み) で判定する
       if (kubun === '扶養追加' || kubun === '扶養削除' || kubun === '扶養喪失') {
-        if (kDate > today) return;      // 異動届は5日以内提出のため加入日当日からカードに出す
         var fVal = fuyouStatusKey ? String(item[fuyouStatusKey] || '').trim() : '';
         if (fVal.indexOf('完了') >= 0 || fVal === '扶養なし') return;   // 処理済み
+        if (fVal.indexOf('申請中') >= 0) {                               // 届出済み → 「社保 申請中」で数える (日付不問)
+          if (kubun === '扶養追加') fuyouAddPending.push(item); else fuyouDelPending.push(item);
+          return;
+        }
+        if (kDate > today) return;      // 異動届は5日以内提出のため加入日当日からカードに出す
         if (kubun === '扶養追加') fuyouAdd.push(item); else fuyouDel.push(item);
         return;
       }
@@ -22048,8 +22054,9 @@ async function fetchSoumuShahoInCount() {
       }
       filtered.push(item);
     });
-    console.log('[社保加入] total:', allItems.length, '本人:', filtered.length, '扶養追加:', fuyouAdd.length, '扶養削除:', fuyouDel.length, 'kanyuuKey:', kanyuuKey, 'kubunKey:', kubunKey, 'honninKey:', honninKey, 'fuyouStatusKey:', fuyouStatusKey);
-    return { count: filtered.length, items: filtered, fuyouAdd: fuyouAdd, fuyouDel: fuyouDel };
+    console.log('[社保加入] total:', allItems.length, '本人:', filtered.length, '扶養追加:', fuyouAdd.length, '扶養削除:', fuyouDel.length, '扶養届出中:', fuyouAddPending.length + fuyouDelPending.length, 'kanyuuKey:', kanyuuKey, 'kubunKey:', kubunKey, 'honninKey:', honninKey, 'fuyouStatusKey:', fuyouStatusKey);
+    return { count: filtered.length, items: filtered, fuyouAdd: fuyouAdd, fuyouDel: fuyouDel,
+             fuyouAddPending: fuyouAddPending, fuyouDelPending: fuyouDelPending };
   } catch (e) {
     console.warn('fetchSoumuShahoInCount error:', e);
     return { count: 0, items: [] };
@@ -23148,7 +23155,8 @@ function renderSoumuDashboard() {
   var c = {
     koyouMochuu: soumuCount('soumuKoyou', mKoyou, true),
     rishokuMochuu: rishokuMochuuCount,
-    shahoMochuu: soumuCount('soumuShaho', mShaho, true),
+    // 社保申請中 = 社員List「総務-社保」の申請中 + List9 扶養の届出済み(扶養加入=申請中→)
+    shahoMochuu: soumuCount('soumuShaho', mShaho, true) + (_soumuFuyouPendingItems || []).length,
     koyouIn: koyouInCount,
     koyouOut: koyouOutCount,
     shahoIn: _soumuShahoInCount || 0,
@@ -24412,7 +24420,10 @@ function renderShahoKanyuuDownloadOverlay(items, opts) {
             ' style="width:100%;padding:11px;background:' + (_shahoHonninN ? 'linear-gradient(135deg,#e53935,#b71c1c)' : '#ccc') + ';color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:' + (_shahoHonninN ? 'pointer' : 'not-allowed') + ';box-shadow:0 2px 8px rgba(183,28,28,0.25);">🧑 本人分をExcel（資格取得届）' + (_shahoHonninN ? '' : ' — 対象なし') + '</button>' +
           '<button onclick="downloadShahoFuyouExcel()"' + (_shahoFuyouN ? '' : ' disabled') +
             ' style="width:100%;margin-top:8px;padding:11px;background:' + (_shahoFuyouN ? 'linear-gradient(135deg,#7e57c2,#4527a0)' : '#ccc') + ';color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:' + (_shahoFuyouN ? 'pointer' : 'not-allowed') + ';box-shadow:0 2px 8px rgba(69,39,160,0.25);">👪 扶養分をExcel（被扶養者異動届）' + (_shahoFuyouN ? '' : ' — 対象なし') + '</button>' +
-          '<div style="font-size:10px;color:#777;margin-top:7px;text-align:center;line-height:1.5;">届書作成プログラム 手入力補助用 (.xlsx)<br>扶養分は扶養者1名につき1行で出力します</div>' +
+          (mode !== 'honnin' && _shahoFuyouN ?
+            '<button onclick="markFuyouShinseichuu()" style="width:100%;margin-top:8px;padding:11px;background:linear-gradient(135deg,#ff9800,#e65100);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(230,81,0,0.25);">📤 選択分を「申請中→」にする（e-Gov届出済み）</button>' : '') +
+          '<div style="font-size:10px;color:#777;margin-top:7px;text-align:center;line-height:1.5;">届書作成プログラム 手入力補助用 (.xlsx)<br>扶養分は扶養者1名につき1行で出力します' +
+          (mode !== 'honnin' ? '<br>届出を出したら📤で「社保 申請中」へ移動。公文書処理で自動✓完了' : '') + '</div>' +
         '</div>'
       ) : '') +
     '</div>';
@@ -24423,6 +24434,72 @@ function renderShahoKanyuuDownloadOverlay(items, opts) {
   document.querySelectorAll('.koyou-dl-chk').forEach(function(cb) {
     cb.addEventListener('change', koyouDlUpdateCount);
   });
+}
+
+// 扶養カードの一覧で選択した申請を「申請中→」にする (e-Gov届出を出した後に押す)
+// → 扶養加入/扶養喪失カードから消え「社保 申請中」でカウントされる。公文書処理で✓完了になる
+async function markFuyouShinseichuu() {
+  var items = window._koyouDlList || [];
+  var fuyouMap = window._shahoFuyouGroups || {};
+  var statusKey = (_soumuShahoInFields && _soumuShahoInFields.fuyouStatus) || null;
+  if (!statusKey) { showToast('「扶養加入」フィールドが見つかりません', 'error'); return; }
+  // 選択行 → グループ展開 (扶養者1名につき1レコードのため全レコードを対象にする)
+  var targets = [];
+  document.querySelectorAll('.koyou-dl-chk:checked').forEach(function(cb) {
+    var i = Number(cb.getAttribute('data-emp-idx'));
+    (fuyouMap[i] || [i]).forEach(function(j) { if (items[j]) targets.push(items[j]); });
+  });
+  if (targets.length === 0) { showToast('対象を選択してください', 'error'); return; }
+
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '99999';
+  ov.innerHTML = '<div class="confirm-box">' +
+    '<div class="confirm-title">📤 届出済みにする</div>' +
+    '<div class="confirm-msg" style="text-align:left;">選択中の ' + targets.length + ' 件の申請を「申請中→」にします。<br>' +
+    '<span style="font-size:11px;color:#777;">扶養カードから消え「社保 申請中」でカウントされます。<br>公文書が届いたら e-Gov 処理で ✓完了 になります。</span></div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
+    '<button class="btn-ok" id="fuyouShinseiOk" style="background:linear-gradient(135deg,#ff9800,#e65100);">申請中にする</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+
+  document.getElementById('fuyouShinseiOk').onclick = async function() {
+    ov.remove();
+    try {
+      var token = await getToken();
+      if (!token) throw new Error('認証エラー');
+      var hdrs = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
+      var listUrl = SP_ROOT_URL + "/_api/web/GetList('" + SOUMU_SHAHO_IN_LIST_PATH + "')";
+      var listData = await (await fetch(listUrl + '?$select=ListItemEntityTypeFullName', { headers: hdrs })).json();
+      var entityType = listData.d && listData.d.ListItemEntityTypeFullName;
+      var digestData = await (await fetch(SP_ROOT_URL + '/_api/contextinfo', { method: 'POST', headers: hdrs })).json();
+      var digest = digestData.d && digestData.d.GetContextWebInformation && digestData.d.GetContextWebInformation.FormDigestValue;
+      var okCount = 0;
+      for (var t = 0; t < targets.length; t++) {
+        var body = { '__metadata': { type: entityType } };
+        body[statusKey] = '申請中→';
+        var resp = await fetch(listUrl + '/items(' + targets[t].Id + ')', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose',
+                     'Content-Type': 'application/json;odata=verbose',
+                     'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*', 'X-RequestDigest': digest || '' },
+          body: JSON.stringify(body)
+        });
+        if (resp.ok) okCount++;
+        else console.error('[markFuyouShinseichuu] Id=' + targets[t].Id + ' HTTP ' + resp.status, await resp.text());
+      }
+      showToast('📤 ' + okCount + '/' + targets.length + ' 件を申請中にしました', okCount === targets.length ? 'success' : 'error');
+      var lo = document.getElementById('soumuListOverlay');
+      if (lo) lo.remove();
+      _shahoYoteiLoaded = false;
+      if (typeof loadSoumuDashboard === 'function') loadSoumuDashboard();
+    } catch (e) {
+      console.error('markFuyouShinseichuu error:', e);
+      showToast('更新に失敗しました: ' + e.message, 'error');
+    }
+  };
 }
 
 async function downloadShahoKanyuuExcel() {
@@ -25007,8 +25084,9 @@ function renderShahoMochuuList(list) {
   ov.id = 'soumuListOverlay';
   ov.className = 'confirm-overlay';
   var odShaho = _soumuKeyMap['soumuShaho'];
+  var fuyouPending = _soumuFuyouPendingItems || [];
   var itemsHtml = '';
-  if (list.length === 0) {
+  if (list.length === 0 && fuyouPending.length === 0) {
     itemsHtml = '<div style="text-align:center;padding:30px;color:var(--text-light);">該当者なし</div>';
   } else {
     list.forEach(function(emp, i) {
@@ -25028,11 +25106,31 @@ function renderShahoMochuuList(list) {
       itemsHtml +=   '<div style="font-size:11px;padding:3px 8px;border-radius:10px;white-space:nowrap;font-weight:700;' + badgeStyle + '">' + escHtml(shahoVal) + '</div>';
       itemsHtml += '</div>';
     });
+    // 👪 扶養の届出済み (List9 扶養加入=申請中→) — 公文書が届いたら e-Gov 処理で ✓完了 になる
+    if (fuyouPending.length > 0) {
+      var SFp = _soumuShahoInFields || {};
+      itemsHtml += '<div style="margin:10px -2px 6px;padding:6px 10px;background:#7e57c2;color:#fff;font-size:12px;font-weight:800;border-radius:8px;display:flex;align-items:center;gap:6px;">'
+                 + '<span>👪</span><span>扶養 届出済み (公文書待ち)</span>'
+                 + '<span style="margin-left:auto;background:rgba(255,255,255,0.25);padding:1px 9px;border-radius:10px;font-size:11px;">' + fuyouPending.length + '件</span></div>';
+      fuyouPending.forEach(function(it) {
+        var bango = SFp.bango ? (it[SFp.bango] || '') : '';
+        var nm = (SFp.name && it[SFp.name]) || it.Title || '';
+        var fnm = SFp.fuyouName ? (it[SFp.fuyouName] || '') : '';
+        var kubun = SFp.kubun ? String(it[SFp.kubun] || '').trim() : '';
+        itemsHtml += '<div class="soumu-list-item" data-fuyou-bango="' + escHtml(String(bango)) + '" style="border-left:4px solid #7e57c2;cursor:pointer;">';
+        itemsHtml +=   '<div style="flex:1;min-width:0;">';
+        itemsHtml +=     '<div style="font-weight:700;font-size:14px;">' + escHtml(String(nm)) + '</div>';
+        itemsHtml +=     '<div style="font-size:11px;color:var(--text-light);">No.' + escHtml(String(bango)) + (fnm ? ' / 👪 ' + escHtml(String(fnm)) : '') + '</div>';
+        itemsHtml +=   '</div>';
+        itemsHtml +=   '<div style="font-size:11px;padding:3px 8px;border-radius:10px;white-space:nowrap;font-weight:700;background:#ede7f6;color:#4527a0;border:1px solid #b39ddb;">' + escHtml(kubun || '扶養') + ' 申請中→</div>';
+        itemsHtml += '</div>';
+      });
+    }
   }
   ov.innerHTML =
     '<div style="background:#fff;border-radius:14px;max-width:92vw;width:500px;max-height:85vh;display:flex;flex-direction:column;">' +
       '<div style="padding:14px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;">' +
-        '<div style="font-size:15px;font-weight:700;flex:1;">🏥 社保 申請中 (' + list.length + '名)</div>' +
+        '<div style="font-size:15px;font-weight:700;flex:1;">🏥 社保 申請中 (' + (list.length + fuyouPending.length) + '名)</div>' +
         '<button onclick="document.getElementById(\'soumuListOverlay\').remove()" style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;">×</button>' +
       '</div>' +
       '<div style="padding:8px 12px;background:#f5f5f5;font-size:10px;color:#555;border-bottom:1px solid #e0e0e0;line-height:1.5;">🔵 取得申請中 → 社保取得編集ダイアログ<br>🔴 喪失申請中 → 社保喪失編集ダイアログ</div>' +
@@ -25042,6 +25140,17 @@ function renderShahoMochuuList(list) {
   // 各行にクリックイベント付与 (JSON.stringify を onclick に埋め込まずに data属性で参照)
   document.querySelectorAll('#soumuListOverlay .soumu-list-item').forEach(function(row) {
     row.addEventListener('click', function() {
+      // 扶養届出済み行: 社員番号から社員詳細を開く
+      var fuyouBango = row.getAttribute('data-fuyou-bango');
+      if (fuyouBango) {
+        var femp = _soumuAllEmps.find(function(e) {
+          var v = e[F.syainNo]; if (v === null || v === undefined) return false;
+          return String(v).replace(/\.0$/, '') === String(fuyouBango).replace(/\.0$/, '');
+        });
+        document.getElementById('soumuListOverlay').remove();
+        if (femp) selectEmployee(femp); else showToast('社員データが見つかりません: ' + fuyouBango, 'error');
+        return;
+      }
       var empId = parseInt(row.getAttribute('data-emp-id'));
       var action = row.getAttribute('data-action');
       var emp = _soumuAllEmps.find(function(e) { return e.Id === empId; });
