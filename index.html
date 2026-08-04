@@ -39593,11 +39593,26 @@ function renderSougeiJisseki(recs, tankaMap) {
 function sgjOpenDetail(idx) {
   var d = (window._sgjDrivers || [])[idx];
   if (!d || !_sgjRows) return;
+  // 同日内は時刻(slot)昇順。時刻のない記録(早退など)はその日の一番下
+  var slotMin = function (r) {
+    var m = /(\d{1,2}):(\d{2})/.exec(r.slot || '');
+    return m ? (Number(m[1]) * 60 + Number(m[2])) : 100000;
+  };
   var rows = _sgjRows.filter(function (r) { return (r.shainNo || r.name) === (d.shainNo || d.name); })
-    .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.slot < b.slot ? -1 : 1); });
+    .sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      var sa = slotMin(a), sb = slotMin(b);
+      if (sa !== sb) return sa - sb;
+      return (a.id || 0) - (b.id || 0);
+    });
+  window._sgjDetailIdx = idx;
+  var isApprover = (typeof isSougeiApprover === 'function') && isSougeiApprover();
+  var myDests = isApprover ? _mySougeiDests() : [];
+  var todayStr = _sougeiTodayStr();
   document.getElementById('sgjDetailName').textContent =
     (d.name || '') + '（' + d.shainNo + '）  ' + _sgjYear + '年' + _sgjMonth + '月  ' + d.total + '回 ' + _sgjYen(d.amount);
-  var html = '<div style="font-size:11px;color:#6b7a90;margin:0 0 8px;">✓=承認済 ／ ⏳=未承認 ／ 取=担当者が取消（集計外） ／ ⏰=遡り入力</div>';
+  var html = '<div style="font-size:11px;color:#6b7a90;margin:0 0 8px;">✓=承認済 ／ ⏳=未承認 ／ 取=担当者が取消（集計外） ／ ⏰=遡り入力'
+    + (isApprover ? '<br>⏳の行は「承認」ボタンでこの場で承認できます（担当送迎先・当日までの記録のみ）' : '') + '</div>';
   var lastDate = '';
   html += rows.map(function (r) {
     var mark = r.status === 'approved' ? '<span style="color:#04724a;font-weight:800;">✓</span>'
@@ -39606,6 +39621,12 @@ function sgjOpenDetail(idx) {
     var dim = r.status === 'cancelled' ? 'opacity:.5;text-decoration:line-through;' : '';
     var dayLabel = (r.date === lastDate) ? '' : r.date.slice(5).replace('-', '/');
     lastDate = r.date;
+    // 未承認かつ 承認権限の範囲内 (担当送迎先・当日以前) なら、この場で承認できるボタン
+    var aprBtn = '';
+    if (isApprover && r.status !== 'approved' && r.status !== 'cancelled'
+        && (myDests === null || myDests.indexOf(r.dest) >= 0) && r.date <= todayStr) {
+      aprBtn = '<button onclick="sgjApprove(' + r.id + ')" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:5px 11px;font-size:11.5px;font-weight:800;cursor:pointer;flex-shrink:0;">承認</button>';
+    }
     return '<div style="display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px dashed #eef1f5;' + dim + '">'
       + '<div style="width:42px;font-size:12px;font-weight:800;color:#1f3864;">' + dayLabel + '</div>'
       + '<div style="width:18px;text-align:center;">' + (SOUGEI_APPROVE_CAT_ICON[r.cat] || '🚌') + '</div>'
@@ -39615,6 +39636,7 @@ function sgjOpenDetail(idx) {
       +   (r.memo ? '<div style="font-size:10.5px;color:#8b98ab;">' + _sgjEsc(r.memo) + '</div>' : '')
       + '</div>'
       + '<div style="width:34px;text-align:right;font-size:12px;">' + (r.backdated ? '⏰' : '') + mark + '</div>'
+      + aprBtn
       + '</div>';
   }).join('');
   html += '<div style="margin-top:10px;font-size:11.5px;color:#6b7a90;">送迎先別: '
@@ -39626,6 +39648,27 @@ function sgjOpenDetail(idx) {
   document.getElementById('sgjDetail').innerHTML = html;
   document.getElementById('sgjListPane').style.display = 'none';
   document.getElementById('sgjDetailPane').style.display = '';
+}
+
+// 送迎実績の詳細画面からの承認 (承認画面と同じ approveSougeiRecord を利用)
+async function sgjApprove(recId) {
+  if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return; }
+  try {
+    await approveSougeiRecord(recId, true);   // bulk=true: 承認画面側の再読込・トーストを抑止
+    (_sgjRows || []).some(function (r) { if (r.id === recId) { r.status = 'approved'; return true; } return false; });
+    showToast('承認しました', 'success');
+    // 合計・一覧ペイン(裏)を更新してから同じ運転手の詳細を開き直す
+    var d = (window._sgjDrivers || [])[window._sgjDetailIdx];
+    var key = d ? (d.shainNo || d.name) : '';
+    var tanka = await _sgjLoadTanka();
+    renderSougeiJisseki(_sgjRows, tanka);
+    var ni = (window._sgjDrivers || []).findIndex(function (x) { return (x.shainNo || x.name) === key; });
+    if (ni >= 0) sgjOpenDetail(ni);
+    if (typeof updateSougeiApprovalBadge === 'function') updateSougeiApprovalBadge();
+  } catch (e) {
+    console.error('sgjApprove error:', e);
+    showToast('承認エラー: ' + (e && e.message ? e.message : e), 'error');
+  }
 }
 
 async function loadSougeiPending() {
