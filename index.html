@@ -22429,10 +22429,14 @@ function renderShahoKanyuuYoteiList() {
   }
 
   // List9 の処理状況チップ (本人=「本人加入」列 / 扶養追加=「扶養加入」列)
-  function buildShoriChip(label, val) {
+  // shahoFallback: List9が空欄でも社員Listの「総務-社保」が取得申請中なら黄色「申請中」表示 (赤の未処理は紛らわしい)
+  function buildShoriChip(label, val, shahoFallback) {
     var v = String(val || '').trim();
     var bg = '#ffebee', color = '#c62828', border = '#ef9a9a', text = '未処理';   // 空欄 = 未処理 (赤)
-    if (v.indexOf('完了') >= 0)            { bg = '#e8f5e9'; color = '#2e7d32'; border = '#a5d6a7'; text = v; }
+    if (!v && String(shahoFallback || '').indexOf('取得申請中') >= 0) {
+      bg = '#fff8e1'; color = '#ef6c00'; border = '#ffe082'; text = '申請中';
+    }
+    else if (v.indexOf('完了') >= 0)       { bg = '#e8f5e9'; color = '#2e7d32'; border = '#a5d6a7'; text = v; }
     else if (v.indexOf('申請中') >= 0 ||
              v.indexOf('データ待ち') >= 0) { bg = '#fff8e1'; color = '#ef6c00'; border = '#ffe082'; text = v; }
     else if (v)                            { bg = '#eceff1'; color = '#546e7a'; border = '#b0bec5'; text = v; }  // キャンセル/扶養なし等
@@ -22491,7 +22495,7 @@ function renderShahoKanyuuYoteiList() {
     if (kubunV === '扶養追加') {
       shoriChip = buildShoriChip('扶養加入', SF.fuyouStatus ? item[SF.fuyouStatus] : '');
     } else {
-      shoriChip = buildShoriChip('本人加入', SF.honninStatus ? item[SF.honninStatus] : '');
+      shoriChip = buildShoriChip('本人加入', SF.honninStatus ? item[SF.honninStatus] : '', shahoVal);
     }
     html += '<div style="text-align:right;display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap;">' + shoriChip + buildShahoMiniChip(shahoVal) + '</div>';
     html += bangoStr ? '</button>' : '</div>';
