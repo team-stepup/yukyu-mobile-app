@@ -17916,7 +17916,7 @@ async function renderEmployeeUpdateHistory(itemId, fieldsMeta) {
 // Calculate 前払い合計 for current period
 async function calcMaebariTotal(syainNo) {
   try {
-    const period = getMaebariPeriod(0);
+    const period = getMaebariPeriod(getTodayMaebariOffset());
     const startISO = period.start.toISOString();
     const endISO = period.end.toISOString();
     const filter = "$filter=" + MF.syainNo + " eq '" + syainNo + "' and " +
@@ -30598,7 +30598,7 @@ function switchTopTab(tab) {
     refreshBtn.style.display = 'none';
   }
   if (tab === 'maebari') {
-    maebariPeriodOffset = 0;
+    maebariPeriodOffset = getTodayMaebariOffset();
     loadMaebariData();
   }
   if (tab === 'profile') {
@@ -30659,6 +30659,21 @@ function getMaebariPeriod(offset) {
   return { start: start, end: end, customEnd: !!customEndStr };
 }
 
+// 今日を含む前払い期間のオフセットを返す
+// 月初〜第2金曜前日は前月期間 (-1) が現行。期間の谷間は次期間 (0) 扱い
+function getTodayMaebariOffset() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const p0 = getMaebariPeriod(0);
+  if (today < p0.start) {
+    const pm = getMaebariPeriod(-1);
+    const pmEnd = new Date(pm.end);
+    pmEnd.setHours(23, 59, 59, 999);
+    if (today <= pmEnd) return -1;
+  }
+  return 0;
+}
+
 // 表示中の月 (maebariPeriodOffset) の年月を返す
 function getMaebariRefYearMonth(offset) {
   const today = new Date();
@@ -30677,7 +30692,7 @@ function formatCurrency(num) {
 // 前払い Data Loading
 // ============================================================
 function isCurrentMaebariPeriod(offset) {
-  return offset === 0;
+  return offset === getTodayMaebariOffset();
 }
 
 async function loadMaebariData() {
@@ -38748,10 +38763,10 @@ async function loadMaebariPending() {
       const empUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items?$filter="
         + encodeURIComponent(orFilterEmp) + "&$select=" + encodeURIComponent(empSelect) + "&$orderby=Id desc&$top=500";
 
-      // 今月分前払い (期間: getMaebariPeriod(0) と同じ)
+      // 今月分前払い (今日を含む期間)
       let mUrl = null;
       try {
-        const period = getMaebariPeriod(0);
+        const period = getMaebariPeriod(getTodayMaebariOffset());
         if (period && period.start && period.end) {
           const startISO = new Date(period.start).toISOString();
           // 期間終わりの23:59:59まで含める
