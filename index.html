@@ -38776,7 +38776,7 @@ async function loadMaebariPending() {
           const orFilterM = shainNos.map(n => MF.syainNo + " eq '" + String(n) + "'").join(' or ');
           const dateFilter = MF.payDate + " ge datetime'" + startISO + "' and " + MF.payDate + " le datetime'" + endISO + "'";
           const mFilter = "(" + orFilterM + ") and (" + dateFilter + ")";
-          const mSelect = ['Id', MF.syainNo, MF.amount, MF.payDate].join(',');
+          const mSelect = ['Id', MF.syainNo, MF.amount, MF.fee, MF.total, MF.payDate].join(',');
           mUrl = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items?$filter="
             + encodeURIComponent(mFilter) + "&$select=" + encodeURIComponent(mSelect) + "&$top=500";
         }
@@ -38809,10 +38809,13 @@ async function loadMaebariPending() {
         if (respM && respM.ok) {
           const dataM = await respM.json();
           const recs = (dataM.d && dataM.d.results) || [];
+          // 金額はChoice列でカンマ付き文字列 ("100,000") のため Number() では NaN になる
+          const parseNum = v => { if (typeof v === 'number') return v; if (typeof v === 'string') return parseFloat(v.replace(/,/g, '')) || 0; return 0; };
           recs.forEach(r => {
             const sno = String(r[MF.syainNo] || '');
-            const amt = Number(r[MF.amount] || 0);
-            if (!sno || isNaN(amt)) return;
+            if (!sno) return;
+            let amt = parseNum(r[MF.total]);
+            if (!amt) amt = parseNum(r[MF.amount]) + parseNum(r[MF.fee]);
             totalsMap[sno] = (totalsMap[sno] || 0) + amt;
           });
         }
