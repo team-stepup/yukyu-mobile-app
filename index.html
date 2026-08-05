@@ -6309,7 +6309,7 @@ select.sankyu-edit-input {
   <!-- Screen: 送迎実績 (運転手ごとの月次集計・回数/金額。承認画面とは別で「実績の確認」用) -->
   <div class="screen" id="sougeiJissekiScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
-      <button onclick="switchScreen('approveHubScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <button onclick="sgjHeaderBack()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <h2 style="margin:0;font-size:1.05em;color:var(--primary);">🚌 送迎実績</h2>
       <button class="refresh-btn" onclick="loadSougeiJisseki(true)" style="margin-left:auto;">&#x21bb; 更新</button>
     </div>
@@ -6327,8 +6327,8 @@ select.sankyu-edit-input {
     <!-- 明細ペイン (運転手をタップしたとき) -->
     <div id="sgjDetailPane" style="display:none;">
       <div style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
-        <button onclick="sgjBackToList()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 一覧</button>
-        <div id="sgjDetailName" style="font-size:14px;font-weight:800;color:#04604a;"></div>
+        <button onclick="sgjBackToList()" style="background:#fff;border:1px solid #cfd8e8;border-radius:10px;padding:7px 14px;font-size:13px;font-weight:700;color:#1f3864;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.06);white-space:nowrap;">← 実績一覧</button>
+        <div id="sgjDetailName" style="flex:1;font-size:14px;font-weight:800;color:#04604a;"></div>
       </div>
       <div id="sgjDetail" style="padding:0 12px 20px;"></div>
     </div>
@@ -39435,6 +39435,13 @@ function sgjBackToList() {
   if (dp) dp.style.display = 'none';
 }
 
+// ヘッダーの「← 戻る」: 明細ペインを開いているときは実績一覧へ、一覧のときは承認ハブへ
+function sgjHeaderBack() {
+  var dp = document.getElementById('sgjDetailPane');
+  if (dp && dp.style.display !== 'none') { sgjBackToList(); return; }
+  switchScreen('approveHubScreen');
+}
+
 // SP「送迎記録」から対象月のレコードを取得 (前後1日マージンを付けて JST で絞り直す)
 async function _sgjFetchMonth(y, m) {
   var select = ['Id', SG.shainNo, SG.name, SG.date, SG.dest, SG.cat, SG.slot, SG.memo,
@@ -39627,38 +39634,72 @@ function sgjOpenDetail(idx) {
   var isApprover = (typeof isSougeiApprover === 'function') && isSougeiApprover();
   var myDests = isApprover ? _mySougeiDests() : [];
   var todayStr = _sougeiTodayStr();
-  document.getElementById('sgjDetailName').textContent =
-    (d.name || '') + '（' + d.shainNo + '）  ' + _sgjYear + '年' + _sgjMonth + '月  ' + d.total + '回 ' + _sgjYen(d.amount);
-  var html = '<div style="font-size:11px;color:#6b7a90;margin:0 0 8px;">✓=承認済 ／ ⏳=未承認 ／ 取=担当者が取消（集計外） ／ ⏰=遡り入力'
-    + (isApprover ? '<br>⏳の行は「承認」ボタンでこの場で承認できます（担当送迎先・当日までの記録のみ）' : '') + '</div>';
-  var lastDate = '';
-  html += rows.map(function (r) {
-    var mark = r.status === 'approved' ? '<span style="color:#04724a;font-weight:800;">✓</span>'
-             : r.status === 'cancelled' ? '<span style="color:#c62828;font-weight:800;">取</span>'
-             : '<span style="color:#e65100;font-weight:800;">⏳</span>';
-    var dim = r.status === 'cancelled' ? 'opacity:.5;text-decoration:line-through;' : '';
-    var dayLabel = (r.date === lastDate) ? '' : r.date.slice(5).replace('-', '/');
-    lastDate = r.date;
-    // 未承認かつ 承認権限の範囲内 (担当送迎先・当日以前) なら、この場で承認できるボタン
-    var aprBtn = '';
-    if (isApprover && r.status !== 'approved' && r.status !== 'cancelled'
-        && (myDests === null || myDests.indexOf(r.dest) >= 0) && r.date <= todayStr) {
-      aprBtn = '<button onclick="sgjApprove(' + r.id + ')" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:5px 11px;font-size:11.5px;font-weight:800;cursor:pointer;flex-shrink:0;">承認</button>';
-    }
-    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px dashed #eef1f5;' + dim + '">'
-      + '<div style="width:42px;font-size:12px;font-weight:800;color:#1f3864;">' + dayLabel + '</div>'
-      + '<div style="width:18px;text-align:center;">' + (SOUGEI_APPROVE_CAT_ICON[r.cat] || '🚌') + '</div>'
-      + '<div style="flex:1;min-width:0;font-size:12px;color:#33445c;">' + _sgjEsc(r.cat)
-      +   (r.slot ? ' <b>' + _sgjEsc(r.slot) + '</b>' : '')
-      +   '<span style="color:#8b98ab;"> ・ ' + _sgjEsc(r.dest || '') + '</span>'
-      +   (r.memo ? '<div style="font-size:10.5px;color:#8b98ab;">' + _sgjEsc(r.memo) + '</div>' : '')
-      + '</div>'
-      + '<div style="width:34px;text-align:right;font-size:12px;">' + (r.backdated ? '⏰' : '') + mark + '</div>'
-      + aprBtn
-      + '</div>';
+  document.getElementById('sgjDetailName').textContent = _sgjYear + '年' + _sgjMonth + '月';
+  // ヒーローカード (運転手名・回数・金額)
+  var html = '<div style="background:linear-gradient(135deg,#04604a,#0b8f6e);color:#fff;border-radius:14px;padding:13px 15px;box-shadow:0 3px 10px rgba(4,96,74,.25);margin-bottom:10px;">'
+    + '<div style="display:flex;align-items:flex-end;gap:10px;">'
+    + '<div style="flex:1;min-width:0;"><div style="font-size:16.5px;font-weight:800;line-height:1.2;">' + _sgjEsc(d.name || '(氏名なし)') + '</div>'
+    + '<div style="font-size:11.5px;opacity:.85;margin-top:3px;">' + _sgjEsc(d.shainNo) + ' ・ ' + _sgjYear + '年' + _sgjMonth + '月</div></div>'
+    + '<div style="text-align:right;"><div style="font-size:22px;font-weight:800;line-height:1.1;">' + d.total + '<span style="font-size:12px;">回</span></div>'
+    + '<div style="font-size:15px;font-weight:800;">' + _sgjYen(d.amount) + (d.tankaMissing ? '★' : '') + '</div></div>'
+    + '</div>'
+    + '<div style="margin-top:7px;font-size:11px;opacity:.92;">✓ 承認済 ' + d.approved + '回 × ' + _sgjYen(d.tanka)
+    + (d.pending ? ' ／ <span style="color:#ffe082;font-weight:800;">未承認 ' + d.pending + '回（支払い対象外）</span>' : '')
+    + (d.backdated ? ' ／ ⏰ 遡り ' + d.backdated + '件' : '')
+    + '</div></div>';
+  if (isApprover) {
+    html += '<div style="font-size:10.5px;color:#8b98ab;margin:0 2px 8px;">「未」の行は「承認」ボタンでこの場で承認できます（担当送迎先・当日までの記録のみ）</div>';
+  }
+  // 日付ごとにカードでグループ表示
+  var YOBI = ['日', '月', '火', '水', '木', '金', '土'];
+  var days = [], byDate = {};
+  rows.forEach(function (r) {
+    if (!byDate[r.date]) { byDate[r.date] = []; days.push(r.date); }
+    byDate[r.date].push(r);
+  });
+  html += days.map(function (ds) {
+    var w = new Date(ds + 'T00:00:00').getDay();
+    var wColor = w === 0 ? '#c62828' : (w === 6 ? '#1565c0' : '#8b98ab');
+    var list = byDate[ds];
+    var body = list.map(function (r, ri) {
+      var pill = r.status === 'approved'
+        ? '<span style="background:#e6f6f1;color:#04724a;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:800;white-space:nowrap;flex-shrink:0;">✓ 済</span>'
+        : r.status === 'cancelled'
+          ? '<span style="background:#fdecea;color:#c62828;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:800;white-space:nowrap;flex-shrink:0;">取消</span>'
+          : '<span style="background:#fff3e0;color:#e65100;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:800;white-space:nowrap;flex-shrink:0;">未</span>';
+      var dim = r.status === 'cancelled' ? 'opacity:.55;' : '';
+      var strike = r.status === 'cancelled' ? 'text-decoration:line-through;' : '';
+      // 未承認かつ 承認権限の範囲内 (担当送迎先・当日以前) なら、この場で承認できるボタン
+      var aprBtn = '';
+      if (isApprover && r.status !== 'approved' && r.status !== 'cancelled'
+          && (myDests === null || myDests.indexOf(r.dest) >= 0) && r.date <= todayStr) {
+        aprBtn = '<button onclick="sgjApprove(' + r.id + ')" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:800;cursor:pointer;flex-shrink:0;">承認</button>';
+      }
+      return '<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;' + (ri < list.length - 1 ? 'border-bottom:1px solid #f0f3f7;' : '') + dim + '">'
+        + '<span style="font-size:19px;flex-shrink:0;">' + (SOUGEI_APPROVE_CAT_ICON[r.cat] || '🚌') + '</span>'
+        + '<div style="flex:1;min-width:0;' + strike + '">'
+        +   '<div style="font-size:13px;font-weight:800;color:#33445c;">' + _sgjEsc(r.cat)
+        +     (r.slot ? ' <span style="color:#1f3864;">' + _sgjEsc(r.slot) + '</span>' : '') + '</div>'
+        +   '<div style="font-size:11px;color:#8b98ab;margin-top:1px;">' + _sgjEsc(r.dest || '(送迎先未設定)') + (r.backdated ? ' ・ ⏰ 遡り入力' : '') + '</div>'
+        +   (r.memo ? '<div style="font-size:10.5px;color:#8b98ab;margin-top:1px;">📝 ' + _sgjEsc(r.memo) + '</div>' : '')
+        + '</div>'
+        + pill + aprBtn
+        + '</div>';
+    }).join('');
+    return '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:9px;box-shadow:0 2px 6px rgba(0,0,0,.05);overflow:hidden;">'
+      + '<div style="display:flex;align-items:center;gap:7px;padding:7px 12px;background:#f4f7fa;border-bottom:1px solid #e8edf3;">'
+      +   '<span style="font-size:13.5px;font-weight:800;color:#1f3864;">' + ds.slice(5).replace('-', '/') + '</span>'
+      +   '<span style="font-size:11.5px;font-weight:800;color:' + wColor + ';">(' + YOBI[w] + ')</span>'
+      +   '<span style="margin-left:auto;font-size:10.5px;color:#8b98ab;">' + list.length + '件</span>'
+      + '</div>' + body + '</div>';
   }).join('');
-  html += '<div style="margin-top:10px;font-size:11.5px;color:#6b7a90;">送迎先別: '
-    + Object.keys(d.dests).map(function (k) { return _sgjEsc(k || '(未設定)') + ' ' + d.dests[k] + '回'; }).join(' ／ ') + '</div>';
+  // 送迎先別チップ
+  html += '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">'
+    + '<span style="font-size:11.5px;color:#6b7a90;">送迎先別:</span>'
+    + Object.keys(d.dests).map(function (k) {
+        return '<span style="background:#eaf2fb;color:#1f3864;border-radius:20px;padding:4px 11px;font-size:11.5px;font-weight:700;">' + _sgjEsc(k || '(未設定)') + ' ' + d.dests[k] + '回</span>';
+      }).join('')
+    + '</div>';
   if (d.pending) {
     html += '<button onclick="openSougeiApprovalScreen()" style="margin-top:12px;width:100%;background:#04724a;color:#fff;border:none;border-radius:10px;padding:11px;font-size:13.5px;font-weight:800;cursor:pointer;">未承認 '
       + d.pending + '件を承認画面で確認する</button>';
