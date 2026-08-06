@@ -5632,8 +5632,27 @@ select.sankyu-edit-input {
           <span style="flex:1;font-weight:600;">求人掲載 <span style="font-size:10px;color:#999;font-weight:500;">(HP採用情報)</span></span>
           <span style="color:#bbb;font-size:14px;">›</span>
         </button>
+        <button type="button" onclick="openJimushoShainScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:linear-gradient(135deg,#fff,#fdf5ff);cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">🏢</span>
+          <span style="flex:1;font-weight:600;">事務所社員 <span style="font-size:10px;color:#999;font-weight:500;">(社員情報・役員のみ)</span></span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
       </div>
     </div>
+  </div>
+
+  <!-- Screen: 事務所社員（役員専用 / SP List「事務所社員」= 役員のみ閲覧の固有権限List） -->
+  <div class="screen" id="jimushoShainScreen">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="font-size:16px;font-weight:700;color:var(--primary);margin:0;flex:1;">🏢 事務所社員</h2>
+      <button onclick="loadJimushoShain(true)" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;">↻</button>
+      <span style="font-size:9px;font-weight:800;color:#fff;background:linear-gradient(135deg,#f0b000,#d99000);padding:2px 7px;border-radius:8px;">👑 役員</span>
+    </div>
+    <div style="background:#fdf2f8;border:1px solid #f0d0e0;border-radius:10px;padding:9px 12px;font-size:11.5px;color:#6e3b55;line-height:1.6;margin-bottom:12px;">
+      事務所管理スタッフ・役員の社員情報（標準報酬・口座含む）。<b>取扱注意（機密情報）</b>。役員のみ閲覧できます。
+    </div>
+    <div id="jimushoShainBody">読み込み中...</div>
   </div>
 
   <!-- Screen: 業務日報（役員専用 / SP List「業務日報」を担当者×日別に閲覧） -->
@@ -40087,6 +40106,94 @@ function showAccessDeniedOverlay(email) {
   btn.addEventListener('click', function(){
     try { accessToken = null; if (msalInstance) msalInstance.logoutRedirect(); } catch(e){ location.reload(); }
   });
+}
+
+// ============================================================
+// 🏢 事務所社員 (役員専用) — List「事務所社員」(役員のみ閲覧の固有権限) を SP 直読み
+// ============================================================
+const JIMUSHO_SHAIN_GUID = 'f6272734-d397-4a73-9f6a-810017d4b638';
+// 表示グループ: [セクション名, [[内部名, ラベル], ...]]
+const JIMUSHO_FIELD_GROUPS = [
+  ['基本情報', [['EmpNo', '社員番号'], ['Title', '社員氏名'], ['Furigana', 'フリガナ'], ['Seibetsu', '性別'],
+    ['Birthday', '生年月日'], ['Age', '年齢'], ['Buka', '部課'], ['Shokushu', '職種'], ['Shokkai', '職階'],
+    ['Kyusei', '旧姓'], ['NyushaDate', '入社日'], ['TaishokuDate', '退職年月日'], ['KinzokuNensu', '勤続年数']]],
+  ['連絡先・住所', [['Yubin', '郵便番号'], ['Jusho', '住所'], ['ShichosonJusho', '市町村(住所地)'],
+    ['Keitai', '携帯電話'], ['Email', 'Eメール'], ['KeitaiMail', '携帯メール'], ['UPN', 'M365アカウント']]],
+  ['社会保険', [['KenpoHihokensha', '健保:被保険者'], ['HihokenshaSeiriNo', '被保険者整理番号'],
+    ['KenpoHyojun', '健保:標準報酬'], ['KoseiHihokensha', '厚生年金:被保険者'], ['KoseiHyojun', '厚生年金:標準報酬'],
+    ['KenpoShutoku', '健保:資格取得日']]],
+  ['雇用保険・労災', [['KoyoHihokenshaNo', '雇用:被保険者番号'], ['KoyoShutoku', '雇用:資格取得日'],
+    ['RosaiHihokensha', '労災:被保険者'], ['RosaiRinji', '労災:臨時労働者']]],
+  ['外国籍・在留', [['Gaikokujin', '本人:外国人'], ['Kokuseki', '本(国)籍'], ['ZairyuShikaku', '在留資格'],
+    ['ZairyuKigen', '在留期限'], ['ZairyuBiko1', '在留:備考1'], ['ZairyuBiko2', '在留:備考2']]],
+  ['運転免許', [['MenkyoUmu', '運転免許の有無'], ['MenkyoShurui', '運転免許の種類']]],
+  ['給与・振込先', [['ShikyuKomoku1', '支給項目1'], ['KyuyoBank1', '銀行'], ['KyuyoShiten1', '支店'], ['KyuyoKoza1', '口座番号']]],
+  ['特記事項', [['Tokki1', '特記事項1'], ['Tokki2', '特記事項2']]]
+];
+let _jimushoShainItems = [];
+
+function openJimushoShainScreen() {
+  if (!isAdminUser()) return;
+  switchScreen('jimushoShainScreen');
+  loadJimushoShain();
+}
+
+async function loadJimushoShain(force) {
+  const body = document.getElementById('jimushoShainBody');
+  if (!body) return;
+  if (_jimushoShainItems.length && !force) { renderJimushoShainList(); return; }
+  body.innerHTML = '読み込み中...';
+  try {
+    const token = await getToken();
+    const resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + JIMUSHO_SHAIN_GUID + "')/items?$top=100",
+      { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=nometadata' } });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + (resp.status === 403 ? ' (このListは役員のみ閲覧できます)' : ''));
+    const data = await resp.json();
+    _jimushoShainItems = (data.value || []).slice();
+    _jimushoShainItems.sort(function(a, b) { return (parseInt(a.EmpNo, 10) || 0) - (parseInt(b.EmpNo, 10) || 0); });
+    renderJimushoShainList();
+  } catch (e) {
+    body.innerHTML = '<div style="color:#c62828;">読み込みエラー: ' + e.message + '</div>';
+  }
+}
+
+function renderJimushoShainList() {
+  const body = document.getElementById('jimushoShainBody');
+  if (!body) return;
+  let html = '';
+  _jimushoShainItems.forEach(function(it) {
+    const taishoku = String(it.TaishokuDate || '').trim();
+    html += '<button type="button" onclick="showJimushoShainDetail(' + it.Id + ')" style="width:100%;margin-bottom:8px;padding:12px;border:none;border-radius:11px;background:#fff;cursor:pointer;text-align:left;display:flex;align-items:center;gap:11px;box-shadow:0 1px 4px rgba(0,0,0,0.08);">';
+    html += '<span style="font-size:22px;">' + (['1', '2'].indexOf(String(it.EmpNo)) >= 0 ? '👑' : '👤') + '</span>';
+    html += '<span style="flex:1;">';
+    html += '<span style="display:block;font-weight:700;font-size:14.5px;">' + (it.Title || '') + (taishoku ? ' <span style="font-size:10px;color:#c62828;">(退職: ' + taishoku + ')</span>' : '') + '</span>';
+    html += '<span style="display:block;font-size:11.5px;color:#78909c;">No.' + (it.EmpNo || '-') + '　' + (it.Shokushu || '') + '</span>';
+    html += '</span><span style="color:#bbb;font-size:15px;">›</span></button>';
+  });
+  body.innerHTML = html || '<div>データがありません</div>';
+}
+
+function showJimushoShainDetail(id) {
+  const body = document.getElementById('jimushoShainBody');
+  const it = _jimushoShainItems.filter(function(x) { return x.Id === id; })[0];
+  if (!body || !it) return;
+  let html = '<button type="button" onclick="renderJimushoShainList()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer;margin-bottom:10px;">← 一覧へ</button>';
+  html += '<div style="font-size:17px;font-weight:700;margin-bottom:2px;">' + (it.Title || '') + '</div>';
+  html += '<div style="font-size:12px;color:#78909c;margin-bottom:12px;">No.' + (it.EmpNo || '-') + '　' + (it.Furigana || '') + '</div>';
+  JIMUSHO_FIELD_GROUPS.forEach(function(grp) {
+    const rows = [];
+    grp[1].forEach(function(f) {
+      const v = String(it[f[0]] == null ? '' : it[f[0]]).trim();
+      if (!v) return;
+      rows.push('<tr><td style="padding:5px 8px 5px 0;color:#78909c;white-space:nowrap;vertical-align:top;">' + f[1] + '</td><td style="padding:5px 0;word-break:break-all;">' + v + '</td></tr>');
+    });
+    if (!rows.length) return;
+    html += '<div class="home-search-card" style="margin-bottom:10px;">';
+    html += '<div style="font-weight:700;font-size:13px;margin-bottom:5px;">' + grp[0] + '</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">' + rows.join('') + '</table></div>';
+  });
+  body.innerHTML = html;
+  try { window.scrollTo(0, 0); } catch (e) {}
 }
 
 // ============================================================
