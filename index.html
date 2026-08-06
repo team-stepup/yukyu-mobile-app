@@ -5486,6 +5486,11 @@ select.sankyu-edit-input {
         <span class="ql-icon">⛽</span>
         <span class="ql-text">給油申請</span>
       </button>
+      <button class="quick-link-btn kintai-allowed" onclick="openKintaiScreen()" style="position:relative;display:none;">
+        <span class="ql-icon">🕐</span>
+        <span class="ql-text">勤怠</span>
+        <span id="kintaiAdminBadge" class="ql-badge" title="前週 未承認" style="background:#5e35b1;display:none;top:4px;right:4px;"></span>
+      </button>
       <!-- 弁当注文ボタンは廃止: 弁当の承認は「承認」ハブ(✅)→「弁当 承認」に統合 (重複のため削除 2026-06-22) -->
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
         <span class="ql-icon">🚗</span>
@@ -6107,6 +6112,63 @@ select.sankyu-edit-input {
   </div>
 
   <!-- Screen: 入退連絡 -->
+  <!-- ============ 🕐 事務所勤怠 (打刻・本人確認) ============ -->
+  <div class="screen" id="kintaiScreen">
+    <div style="max-width:560px;margin:0 auto;padding:12px;">
+      <div style="background:linear-gradient(135deg,#1565c0,#42a5f5);border-radius:16px;padding:18px;color:#fff;box-shadow:0 4px 14px rgba(21,101,192,.30);">
+        <div id="kintaiClockDate" style="font-size:14px;opacity:.92;"></div>
+        <div id="kintaiClockNow" style="font-size:42px;font-weight:700;letter-spacing:2px;line-height:1.15;">--:--</div>
+        <div id="kintaiTodayStatus" style="margin-top:6px;font-size:13.5px;opacity:.96;">読み込み中...</div>
+        <div style="display:flex;gap:10px;margin-top:14px;">
+          <button id="kintaiInBtn" onclick="kintaiPunch('in')" style="flex:1;padding:16px 0;border:none;border-radius:12px;background:#fff;color:#1565c0;font-size:18px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.15);cursor:pointer;">🌅 出勤</button>
+          <button id="kintaiOutBtn" onclick="kintaiPunch('out')" style="flex:1;padding:16px 0;border:none;border-radius:12px;background:#0d47a1;color:#fff;font-size:18px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.15);cursor:pointer;">🌇 退勤</button>
+        </div>
+        <div style="margin-top:8px;font-size:11px;opacity:.8;">⏱ 打刻はサーバー時刻で記録されます（端末の時計は使いません）</div>
+      </div>
+
+      <div class="home-search-card" style="margin-top:14px;">
+        <div style="font-weight:700;margin-bottom:8px;">📋 有給・欠勤の記録</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="date" id="kintaiMarkDate" style="flex:1;min-width:140px;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;">
+          <select id="kintaiMarkKubun" style="flex:1;min-width:120px;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;">
+            <option value="出勤">出勤</option>
+            <option value="有給1日">有給1日</option>
+            <option value="AM有給">AM有給</option>
+            <option value="PM有給">PM有給</option>
+            <option value="欠勤">欠勤</option>
+          </select>
+        </div>
+        <input id="kintaiMarkMemo" placeholder="備考（任意）" style="width:100%;margin-top:8px;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;box-sizing:border-box;">
+        <button onclick="kintaiMark()" style="width:100%;margin-top:10px;padding:11px 0;border:none;border-radius:10px;background:#00897b;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">登録する</button>
+      </div>
+
+      <div class="home-search-card" style="margin-top:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <button onclick="kintaiMonthMove(-1)" style="border:none;background:#eceff1;border-radius:8px;padding:6px 12px;font-size:15px;cursor:pointer;">◀</button>
+          <div id="kintaiMonthLabel" style="font-weight:700;font-size:15.5px;"></div>
+          <button onclick="kintaiMonthMove(1)" style="border:none;background:#eceff1;border-radius:8px;padding:6px 12px;font-size:15px;cursor:pointer;">▶</button>
+        </div>
+        <div id="kintaiMonthTable" style="font-size:12.5px;"></div>
+      </div>
+
+      <button id="kintaiAdminLink" onclick="openKintaiAdminScreen()" style="display:none;width:100%;margin-top:14px;padding:13px 0;border:none;border-radius:12px;background:linear-gradient(135deg,#5e35b1,#9575cd);color:#fff;font-size:15.5px;font-weight:700;box-shadow:0 3px 10px rgba(94,53,177,.3);cursor:pointer;">✅ 週次承認（役員）</button>
+    </div>
+  </div>
+
+  <!-- ============ 🕐 事務所勤怠 週次承認 (役員のみ) ============ -->
+  <div class="screen" id="kintaiAdminScreen">
+    <div style="max-width:640px;margin:0 auto;padding:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <button onclick="kintaiAdminWeekMove(-1)" style="border:none;background:#eceff1;border-radius:8px;padding:7px 13px;font-size:15px;cursor:pointer;">◀ 前週</button>
+        <div id="kintaiAdminWeekLabel" style="font-weight:700;font-size:14.5px;"></div>
+        <button onclick="kintaiAdminWeekMove(1)" style="border:none;background:#eceff1;border-radius:8px;padding:7px 13px;font-size:15px;cursor:pointer;">次週 ▶</button>
+      </div>
+      <div id="kintaiAdminSummary" style="font-size:12.5px;color:#607d8b;margin-bottom:10px;"></div>
+      <div id="kintaiAdminList">読み込み中...</div>
+      <button id="kintaiApproveAllBtn" onclick="kintaiApproveAll()" style="display:none;width:100%;margin-top:12px;padding:13px 0;border:none;border-radius:12px;background:linear-gradient(135deg,#2e7d32,#66bb6a);color:#fff;font-size:15.5px;font-weight:700;box-shadow:0 3px 10px rgba(46,125,50,.3);cursor:pointer;">✅ この週を全員一括承認</button>
+    </div>
+  </div>
+
   <div class="screen" id="nyutaiScreen">
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 0;">
       <button class="nyutai-nav-btn" onclick="changeNyutaiMonth(-1)">◀</button>
@@ -7720,7 +7782,7 @@ function switchScreen(screenId, skipHistory) {
   }
   var _mainContent = document.querySelector('.main-content');
 
-  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', astiWizardScreen: 'ASTI入社ウィザード', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', joshaListScreen: '送迎乗車リスト', approveHubScreen: '承認', sougeiJissekiScreen: '送迎実績', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細' };
+  const titles = { searchScreen: '', detailScreen: '社員情報', applyScreen: '有給申請', maebariListScreen: '前払い一覧', yukyuListScreen: '有給確認', maebariEditScreen: '修正・削除', yukyuEditScreen: '有給修正・削除', profileScreen: '社員情報', hakenListScreen: '派遣先社員一覧', addEmployeeScreen: '新規社員登録', astiWizardScreen: 'ASTI入社ウィザード', nyutaiScreen: '入退連絡', sougeiScreen: '送迎連絡', joshaListScreen: '送迎乗車リスト', approveHubScreen: '承認', sougeiJissekiScreen: '送迎実績', bentoScreen: '弁当注文', vehicleListScreen: '車両管理', vehicleDetailScreen: '車両台帳', tenkenListScreen: '点検記録', repairHistoryScreen: '修理履歴', soumuScreen: '総務部', sankyuScreen: '産休・育休', sankyuDetailScreen: '産休育休 詳細', kintaiScreen: '事務所勤怠', kintaiAdminScreen: '勤怠 週次承認' };
   const isHome = screenId === 'searchScreen' || screenId === 'loginScreen';
   document.getElementById('headerLogo').style.display = isHome ? 'block' : 'none';
   document.getElementById('headerTitle').style.display = isHome ? 'none' : 'block';
@@ -40027,6 +40089,360 @@ function showAccessDeniedOverlay(email) {
   });
 }
 
+// ============================================================
+// 🕐 事務所勤怠 (打刻・本人月次・役員週次承認) — Functions kintai/* 経由
+//   List「事務所タイムカード」は役員のみ閲覧。スタッフの読み書きは全て API (MI) 経由
+// ============================================================
+const KINTAI_USERS = ADMIN_USERS.concat([
+  'kaori.j@team-stepup.com',     // 城 かおり
+  'm.yoshiura@team-stepup.com',  // 吉浦 マルセロ
+  'y.mori@team-stepup.com'       // 森 ゆうじ
+]);
+function canUseKintai() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    const email = getLoggedInEmail();
+    if (!email) return false;
+    return KINTAI_USERS.indexOf(email) >= 0;
+  } catch (e) { return false; }
+}
+
+async function _kintaiApi(path, body) {
+  const token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  const opt = { headers: { 'Authorization': 'Bearer ' + token } };
+  if (body) {
+    opt.method = 'POST';
+    opt.headers['Content-Type'] = 'application/json';
+    opt.body = JSON.stringify(body);
+  }
+  const resp = await fetch(FUNC_OCR_BASE + path, opt);
+  let data = {};
+  try { data = await resp.json(); } catch (e) {}
+  if (!resp.ok) throw new Error((data && data.error) || ('HTTP ' + resp.status));
+  return data;
+}
+
+let _kintaiMonth = '';        // 'YYYY-MM'
+let _kintaiClockTimer = null;
+let _kintaiMe = null;
+
+function _kintaiPad(n) { return (n < 10 ? '0' : '') + n; }
+function _kintaiTodayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + _kintaiPad(d.getMonth() + 1) + '-' + _kintaiPad(d.getDate());
+}
+const KINTAI_YOBI = ['日', '月', '火', '水', '木', '金', '土'];
+
+function _kintaiTickClock() {
+  const d = new Date();
+  const el1 = document.getElementById('kintaiClockDate');
+  const el2 = document.getElementById('kintaiClockNow');
+  if (el1) el1.textContent = d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日（' + KINTAI_YOBI[d.getDay()] + '）';
+  if (el2) el2.textContent = _kintaiPad(d.getHours()) + ':' + _kintaiPad(d.getMinutes()) + ':' + _kintaiPad(d.getSeconds());
+}
+
+function openKintaiScreen() {
+  switchScreen('kintaiScreen');
+  const d = new Date();
+  _kintaiMonth = d.getFullYear() + '-' + _kintaiPad(d.getMonth() + 1);
+  const md = document.getElementById('kintaiMarkDate');
+  if (md && !md.value) md.value = _kintaiTodayStr();
+  _kintaiTickClock();
+  if (_kintaiClockTimer) clearInterval(_kintaiClockTimer);
+  _kintaiClockTimer = setInterval(_kintaiTickClock, 1000);
+  loadKintaiMy();
+}
+
+function _kintaiKubunChip(kubun) {
+  const colors = { '出勤': '#78909c', '有給1日': '#c62828', 'AM有給': '#e53935', 'PM有給': '#e53935', '欠勤': '#6d4c41' };
+  const c = colors[kubun] || '#78909c';
+  if (kubun === '出勤') return '';
+  return '<span style="display:inline-block;padding:1px 7px;border-radius:8px;background:' + c + ';color:#fff;font-size:10.5px;font-weight:700;">' + kubun + '</span>';
+}
+function _kintaiStatusChip(st) {
+  if (st === '承認済') return '<span style="color:#2e7d32;font-weight:700;">✔承認済</span>';
+  if (st === '自動確定') return '<span style="color:#607d8b;">確定</span>';
+  return '<span style="color:#f57c00;font-weight:700;">未承認</span>';
+}
+
+async function loadKintaiMy() {
+  const stEl = document.getElementById('kintaiTodayStatus');
+  const tbl = document.getElementById('kintaiMonthTable');
+  const lbl = document.getElementById('kintaiMonthLabel');
+  if (lbl) lbl.textContent = _kintaiMonth.replace('-', '年') + '月';
+  try {
+    const data = await _kintaiApi('/kintai/my?month=' + _kintaiMonth);
+    _kintaiMe = data.me || null;
+    // 当日状態
+    const t = data.today;
+    if (stEl) {
+      if (t) {
+        let s = '出勤 ' + (t.clockIn || '--:--') + '　退勤 ' + (t.clockOut || '--:--');
+        if (t.kubun && t.kubun !== '出勤') s += '　【' + t.kubun + '】';
+        stEl.textContent = s;
+      } else {
+        stEl.textContent = '本日はまだ打刻がありません';
+      }
+    }
+    // 役員リンク
+    const adm = document.getElementById('kintaiAdminLink');
+    if (adm) adm.style.display = (data.me && data.me.yakuin) ? '' : 'none';
+    // 月次表
+    if (tbl) {
+      const byDate = {};
+      (data.rows || []).forEach(function(r) { byDate[r.date] = r; });
+      const parts = _kintaiMonth.split('-');
+      const y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
+      const last = new Date(y, m, 0).getDate();
+      const todayStr = _kintaiTodayStr();
+      let html = '<table style="width:100%;border-collapse:collapse;">';
+      html += '<tr style="color:#90a4ae;font-size:11px;"><th style="text-align:left;padding:3px 2px;">日付</th><th>出勤</th><th>退勤</th><th>区分</th><th style="text-align:right;">状態</th></tr>';
+      let cntIn = 0, cntYukyu = 0;
+      for (let d = 1; d <= last; d++) {
+        const ds = y + '-' + _kintaiPad(m) + '-' + _kintaiPad(d);
+        const dow = new Date(y, m - 1, d).getDay();
+        const r = byDate[ds];
+        if (ds > todayStr && !r) continue;
+        const dowColor = dow === 0 ? '#e53935' : (dow === 6 ? '#1e88e5' : 'inherit');
+        const isToday = ds === todayStr;
+        html += '<tr style="border-top:1px solid #eceff1;' + (isToday ? 'background:rgba(21,101,192,.07);' : '') + '">';
+        html += '<td style="padding:4px 2px;color:' + dowColor + ';white-space:nowrap;">' + d + '日(' + KINTAI_YOBI[dow] + ')</td>';
+        if (r) {
+          if (r.clockIn) cntIn++;
+          if (r.kubun === '有給1日') cntYukyu += 1;
+          if (r.kubun === 'AM有給' || r.kubun === 'PM有給') cntYukyu += 0.5;
+          html += '<td style="text-align:center;">' + (r.clockIn || '-') + '</td>';
+          html += '<td style="text-align:center;">' + (r.clockOut || '-') + '</td>';
+          html += '<td style="text-align:center;">' + (_kintaiKubunChip(r.kubun) || '-') + '</td>';
+          html += '<td style="text-align:right;font-size:11px;">' + _kintaiStatusChip(r.status) + '</td>';
+        } else {
+          html += '<td colspan="4" style="text-align:center;color:#cfd8dc;">-</td>';
+        }
+        html += '</tr>';
+      }
+      html += '</table>';
+      html += '<div style="margin-top:8px;font-size:12px;color:#607d8b;">出勤打刻 ' + cntIn + '日　／　有給 ' + cntYukyu + '日</div>';
+      tbl.innerHTML = html;
+    }
+  } catch (e) {
+    if (stEl) stEl.textContent = '読み込みエラー: ' + e.message;
+    if (tbl) tbl.innerHTML = '<div style="color:#c62828;">読み込みエラー: ' + e.message + '</div>';
+  }
+}
+
+function kintaiMonthMove(diff) {
+  const parts = _kintaiMonth.split('-');
+  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1 + diff, 1);
+  _kintaiMonth = d.getFullYear() + '-' + _kintaiPad(d.getMonth() + 1);
+  loadKintaiMy();
+}
+
+async function kintaiPunch(type) {
+  const label = type === 'in' ? '出勤' : '退勤';
+  if (!confirm(label + 'を打刻しますか？')) return;
+  const btn = document.getElementById(type === 'in' ? 'kintaiInBtn' : 'kintaiOutBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const data = await _kintaiApi('/kintai/punch', { type: type });
+    if (data.already) {
+      alert('本日の' + label + 'は ' + data.time + ' に打刻済みです。\n修正が必要な場合は役員に連絡してください。');
+    } else {
+      alert('✅ ' + label + ' ' + data.time + ' を記録しました');
+    }
+    loadKintaiMy();
+  } catch (e) {
+    alert('打刻に失敗しました: ' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function kintaiMark() {
+  const date = (document.getElementById('kintaiMarkDate') || {}).value || '';
+  const kubun = (document.getElementById('kintaiMarkKubun') || {}).value || '';
+  const memo = (document.getElementById('kintaiMarkMemo') || {}).value || '';
+  if (!date) { alert('日付を選択してください'); return; }
+  if (!confirm(date + ' を「' + kubun + '」として登録しますか？')) return;
+  try {
+    await _kintaiApi('/kintai/mark', { date: date, kubun: kubun, memo: memo });
+    alert('✅ 登録しました');
+    const mm = document.getElementById('kintaiMarkMemo');
+    if (mm) mm.value = '';
+    if (date.substring(0, 7) === _kintaiMonth) loadKintaiMy();
+  } catch (e) {
+    if (String(e.message).indexOf('already_approved') >= 0) {
+      alert('この日は承認済みのため変更できません。役員に連絡してください。');
+    } else {
+      alert('登録に失敗しました: ' + e.message);
+    }
+  }
+}
+
+// ---------- 役員: 週次承認 ----------
+let _kintaiWeekStart = null;   // Date (月曜)
+let _kintaiAdminRows = [];
+let _kintaiAdminMembers = [];
+
+function _kintaiDateStr(d) {
+  return d.getFullYear() + '-' + _kintaiPad(d.getMonth() + 1) + '-' + _kintaiPad(d.getDate());
+}
+
+function openKintaiAdminScreen() {
+  // 既定 = 前週の月曜〜日曜 (月曜朝に前週分を承認する運用)
+  const now = new Date();
+  const dow = (now.getDay() + 6) % 7;   // 月=0
+  const thisMon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
+  _kintaiWeekStart = new Date(thisMon.getFullYear(), thisMon.getMonth(), thisMon.getDate() - 7);
+  switchScreen('kintaiAdminScreen');
+  loadKintaiAdmin();
+}
+
+function kintaiAdminWeekMove(diff) {
+  _kintaiWeekStart = new Date(_kintaiWeekStart.getFullYear(), _kintaiWeekStart.getMonth(), _kintaiWeekStart.getDate() + diff * 7);
+  loadKintaiAdmin();
+}
+
+async function loadKintaiAdmin() {
+  const list = document.getElementById('kintaiAdminList');
+  const lbl = document.getElementById('kintaiAdminWeekLabel');
+  const sum = document.getElementById('kintaiAdminSummary');
+  const from = _kintaiDateStr(_kintaiWeekStart);
+  const toD = new Date(_kintaiWeekStart.getFullYear(), _kintaiWeekStart.getMonth(), _kintaiWeekStart.getDate() + 6);
+  const to = _kintaiDateStr(toD);
+  if (lbl) lbl.textContent = from.replace(/-/g, '/') + ' 〜 ' + to.replace(/-/g, '/');
+  if (list) list.innerHTML = '読み込み中...';
+  try {
+    const data = await _kintaiApi('/kintai/list?from=' + from + '&to=' + to);
+    _kintaiAdminRows = data.rows || [];
+    _kintaiAdminMembers = data.members || [];
+    const todayStr = _kintaiTodayStr();
+    let pendingTotal = 0, missTotal = 0;
+    let html = '';
+    _kintaiAdminMembers.forEach(function(mem) {
+      const rows = _kintaiAdminRows.filter(function(r) { return r.empNo === mem.empNo; });
+      const byDate = {};
+      rows.forEach(function(r) { byDate[r.date] = r; });
+      const pendingIds = rows.filter(function(r) { return r.status === '未承認'; }).map(function(r) { return r.id; });
+      pendingTotal += pendingIds.length;
+      html += '<div class="home-search-card" style="margin-bottom:12px;">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
+      html += '<div style="font-weight:700;">' + mem.name + (mem.yakuin ? ' <span style="font-size:10px;color:#b8860b;">👑役員(承認不要)</span>' : '') + '</div>';
+      if (!mem.yakuin && pendingIds.length > 0) {
+        html += '<button onclick="kintaiApproveMember(\'' + mem.empNo + '\')" style="border:none;border-radius:9px;background:#2e7d32;color:#fff;padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer;">✅ ' + pendingIds.length + '件を承認</button>';
+      } else if (!mem.yakuin) {
+        html += '<span style="font-size:12px;color:#2e7d32;font-weight:700;">✔ 承認済</span>';
+      }
+      html += '</div>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">';
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(_kintaiWeekStart.getFullYear(), _kintaiWeekStart.getMonth(), _kintaiWeekStart.getDate() + i);
+        const ds = _kintaiDateStr(d);
+        const dow = d.getDay();
+        const r = byDate[ds];
+        const dowColor = dow === 0 ? '#e53935' : (dow === 6 ? '#1e88e5' : 'inherit');
+        const isWorkday = dow >= 1 && dow <= 5;
+        const missed = isWorkday && ds <= todayStr && (!r || ((!r.clockIn || !r.clockOut) && (!r.kubun || r.kubun === '出勤')));
+        if (missed) missTotal++;
+        html += '<tr style="border-top:1px solid #eceff1;cursor:pointer;" onclick="kintaiOpenEditor(\'' + mem.empNo + '\',\'' + ds + '\')">';
+        html += '<td style="padding:4px 2px;color:' + dowColor + ';white-space:nowrap;">' + (d.getMonth() + 1) + '/' + d.getDate() + '(' + KINTAI_YOBI[dow] + ')</td>';
+        if (r) {
+          html += '<td style="text-align:center;">' + (r.clockIn || '-') + '</td>';
+          html += '<td style="text-align:center;">' + (r.clockOut || '-') + '</td>';
+          html += '<td style="text-align:center;">' + (_kintaiKubunChip(r.kubun) || '') + (missed ? '<span style="color:#c62828;font-size:10.5px;font-weight:700;">未打刻</span>' : '') + '</td>';
+          html += '<td style="text-align:right;font-size:11px;">' + _kintaiStatusChip(r.status) + '</td>';
+        } else {
+          html += '<td colspan="4" style="text-align:center;color:' + (missed ? '#c62828' : '#cfd8dc') + ';font-size:11px;">' + (missed ? '未打刻' : '-') + '</td>';
+        }
+        html += '</tr>';
+        html += '<tr id="kintaiEd_' + mem.empNo + '_' + ds + '" style="display:none;"><td colspan="5"></td></tr>';
+      }
+      html += '</table></div>';
+    });
+    if (list) list.innerHTML = html || '<div>データがありません</div>';
+    if (sum) sum.textContent = '未承認 ' + pendingTotal + '件　／　未打刻 ' + missTotal + '件（行をタップで修正）';
+    const allBtn = document.getElementById('kintaiApproveAllBtn');
+    if (allBtn) allBtn.style.display = pendingTotal > 0 ? '' : 'none';
+  } catch (e) {
+    if (list) list.innerHTML = '<div style="color:#c62828;">読み込みエラー: ' + e.message + '</div>';
+  }
+}
+
+// 行タップ → インライン修正フォーム (役員のみ到達できる画面)
+function kintaiOpenEditor(empNo, ds) {
+  const tr = document.getElementById('kintaiEd_' + empNo + '_' + ds);
+  if (!tr) return;
+  if (tr.style.display !== 'none') { tr.style.display = 'none'; return; }
+  // 他のエディタを閉じる
+  document.querySelectorAll('tr[id^="kintaiEd_"]').forEach(function(el) { el.style.display = 'none'; });
+  const r = _kintaiAdminRows.filter(function(x) { return x.empNo === empNo && x.date === ds; })[0] || null;
+  const td = tr.children[0];
+  const kubunOpts = ['出勤', '有給1日', 'AM有給', 'PM有給', '欠勤'].map(function(k) {
+    const sel = (r ? r.kubun : '出勤') === k ? ' selected' : '';
+    return '<option value="' + k + '"' + sel + '>' + k + '</option>';
+  }).join('');
+  td.innerHTML = '<div style="background:#f5f7fa;border-radius:9px;padding:9px;margin:4px 0;">'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;">'
+    + '出<input type="time" id="kintaiEdIn_' + empNo + '_' + ds + '" value="' + (r && r.clockIn ? r.clockIn : '') + '" style="padding:5px;border:1px solid #cfd8dc;border-radius:7px;">'
+    + '退<input type="time" id="kintaiEdOut_' + empNo + '_' + ds + '" value="' + (r && r.clockOut ? r.clockOut : '') + '" style="padding:5px;border:1px solid #cfd8dc;border-radius:7px;">'
+    + '<select id="kintaiEdKubun_' + empNo + '_' + ds + '" style="padding:5px;border:1px solid #cfd8dc;border-radius:7px;">' + kubunOpts + '</select>'
+    + '</div>'
+    + '<input id="kintaiEdMemo_' + empNo + '_' + ds + '" placeholder="修正理由・備考" value="' + (r && r.memo ? String(r.memo).replace(/"/g, '&quot;') : '') + '" style="width:100%;margin-top:6px;padding:6px;border:1px solid #cfd8dc;border-radius:7px;font-size:12px;box-sizing:border-box;">'
+    + '<div style="display:flex;gap:8px;margin-top:7px;">'
+    + '<button onclick="kintaiSaveEdit(\'' + empNo + '\',\'' + ds + '\')" style="flex:1;border:none;border-radius:8px;background:#1565c0;color:#fff;padding:8px 0;font-size:12.5px;font-weight:700;cursor:pointer;">保存</button>'
+    + '<button onclick="kintaiOpenEditor(\'' + empNo + '\',\'' + ds + '\')" style="flex:1;border:none;border-radius:8px;background:#b0bec5;color:#fff;padding:8px 0;font-size:12.5px;cursor:pointer;">閉じる</button>'
+    + '</div></div>';
+  tr.style.display = '';
+}
+
+async function kintaiSaveEdit(empNo, ds) {
+  const gv = function(prefix) {
+    const el = document.getElementById(prefix + empNo + '_' + ds);
+    return el ? el.value : '';
+  };
+  const cin = gv('kintaiEdIn_');
+  const cout = gv('kintaiEdOut_');
+  const kubun = gv('kintaiEdKubun_');
+  const memo = gv('kintaiEdMemo_');
+  try {
+    let r = _kintaiAdminRows.filter(function(x) { return x.empNo === empNo && x.date === ds; })[0] || null;
+    // 行が無ければ mark で作成 (区分・備考も同時に)
+    const markResp = await _kintaiApi('/kintai/mark', { empNo: empNo, date: ds, kubun: kubun, memo: memo });
+    const rowId = r ? r.id : (markResp.row ? markResp.row.id : null);
+    if (rowId) {
+      await _kintaiApi('/kintai/edit', { id: rowId, clockIn: cin, clockOut: cout, memo: memo });
+    }
+    loadKintaiAdmin();
+  } catch (e) {
+    alert('保存に失敗しました: ' + e.message);
+  }
+}
+
+async function kintaiApproveMember(empNo) {
+  const rows = _kintaiAdminRows.filter(function(r) { return r.empNo === empNo && r.status === '未承認'; });
+  if (rows.length === 0) return;
+  const mem = _kintaiAdminMembers.filter(function(m) { return m.empNo === empNo; })[0];
+  if (!confirm((mem ? mem.name : empNo) + ' の ' + rows.length + '件を承認しますか？')) return;
+  try {
+    await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
+    loadKintaiAdmin();
+  } catch (e) {
+    alert('承認に失敗しました: ' + e.message);
+  }
+}
+
+async function kintaiApproveAll() {
+  const rows = _kintaiAdminRows.filter(function(r) { return r.status === '未承認'; });
+  if (rows.length === 0) return;
+  if (!confirm('この週の未承認 ' + rows.length + '件をすべて承認しますか？')) return;
+  try {
+    await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
+    loadKintaiAdmin();
+  } catch (e) {
+    alert('承認に失敗しました: ' + e.message);
+  }
+}
+
 function applyAdminVisibility() {
   const admin = isAdminUser();
   document.querySelectorAll('.admin-only').forEach(el => {
@@ -40041,6 +40457,11 @@ function applyAdminVisibility() {
   const bentoOk = canUseBento();
   document.querySelectorAll('.bento-allowed').forEach(el => {
     el.style.display = bentoOk ? '' : 'none';
+  });
+  // 事務所勤怠は役員＋事務所スタッフ3名のみ
+  const kintaiOk = canUseKintai();
+  document.querySelectorAll('.kintai-allowed').forEach(el => {
+    el.style.display = kintaiOk ? '' : 'none';
   });
   // 通知ボタンは承認者(前払い担当者 or 弁当承認者)に表示
   const approveOk = _canApprove();
