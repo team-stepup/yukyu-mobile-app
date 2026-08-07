@@ -34635,7 +34635,7 @@ function _enhanceCardForOcr(dataUrl) {
 async function _fetchAndEnhanceCard(serverRelativeUrl) {
   var token = await getToken();
   var enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
-  var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
+  var r = await fetch(_spApiBase(serverRelativeUrl) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   var blob = await r.blob();
   var du = await new Promise(function(res, rej) { var fr = new FileReader(); fr.onload = function() { res(fr.result); }; fr.onerror = function() { rej(new Error('read fail')); }; fr.readAsDataURL(blob); });
@@ -35135,6 +35135,11 @@ function copyOcrText(docId) {
 
 // SharePoint Document Library Upload
 const SP_DOC_SITE_URL = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup';
+// サーバー相対パスから所属サイトのAPIベースURLを得る (役員サイト TeamStepup-58 等の別サイトのファイルも同じビューアで扱えるように)
+function _spApiBase(srUrl) {
+  var m = /^\/sites\/([^\/]+)/.exec(String(srUrl || ''));
+  return m ? 'https://teamstepupcom774.sharepoint.com/sites/' + m[1] : SP_DOC_SITE_URL;
+}
 const SP_DOC_LIB_PATH = '/sites/TeamStepup/Shared Documents/社員ファイル';
 // 書類スキャンの控え(バックアップ)保存先。役員のみ閲覧(権限はSharePoint側で設定)。
 // マイナンバーは特定個人情報のため控えを作らない。
@@ -35145,7 +35150,7 @@ async function ensureSpFolder(folderPath) {
   if (!token) throw new Error('認証エラー');
   var encodedPath = encodeURIComponent(folderPath).replace(/%2F/g, '/');
   // フォルダ存在チェック（Existsプロパティまで確認）
-  var checkUrl = SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')?$select=Exists";
+  var checkUrl = _spApiBase(folderPath) + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')?$select=Exists";
   try {
     var checkResp = await fetch(checkUrl, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
@@ -35159,7 +35164,7 @@ async function ensureSpFolder(folderPath) {
     }
   } catch(_) {}
   // フォルダ作成（AddUsingPath APIを優先、失敗したら従来方式）
-  var addUrl = SP_DOC_SITE_URL + "/_api/web/folders/AddUsingPath(decodedurl='" + encodedPath + "')";
+  var addUrl = _spApiBase(folderPath) + "/_api/web/folders/AddUsingPath(decodedurl='" + encodedPath + "')";
   try {
     var resp = await fetch(addUrl, {
       method: 'POST',
@@ -35182,7 +35187,7 @@ async function ensureSpFolder(folderPath) {
     console.warn('AddUsingPath failed, trying legacy method:', resp.status);
   } catch(_) {}
   // フォールバック: 従来の SP.Folder メタデータ方式
-  var legacyUrl = SP_DOC_SITE_URL + "/_api/web/folders";
+  var legacyUrl = _spApiBase(folderPath) + "/_api/web/folders";
   var resp2 = await fetch(legacyUrl, {
     method: 'POST',
     headers: {
@@ -35215,7 +35220,7 @@ async function deleteSpFile(serverRelativeUrl) {
   if (!token) throw new Error('認証エラー');
   var encoded = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
   // recycle() でごみ箱へ移動（復元可能・権限エラーが少ない）
-  var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + encoded + "')/recycle()";
+  var url = _spApiBase(serverRelativeUrl) + "/_api/web/GetFileByServerRelativeUrl('" + encoded + "')/recycle()";
   console.log('[DELETE FILE] url:', url);
   var resp = await fetch(url, {
     method: 'POST',
@@ -35265,7 +35270,7 @@ async function deleteSpFolder(serverRelativeUrl) {
   }
 
   // フォルダ自体を削除
-  var url = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')/recycle()";
+  var url = _spApiBase(serverRelativeUrl) + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')/recycle()";
   console.log('[DELETE FOLDER] url:', url);
   var resp = await fetch(url, {
     method: 'POST',
@@ -35276,7 +35281,7 @@ async function deleteSpFolder(serverRelativeUrl) {
   });
   if (!resp.ok) {
     // recycle失敗 → DELETE方式にフォールバック
-    var url2 = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')";
+    var url2 = _spApiBase(serverRelativeUrl) + "/_api/web/GetFolderByServerRelativeUrl('" + encoded + "')";
     var resp2 = await fetch(url2, {
       method: 'POST',
       headers: {
@@ -36427,7 +36432,7 @@ async function _fetchPdfAsImages(serverRelativeUrl, maxPages) {
   if (!pdfjsLib) throw new Error('pdf.js未ロード');
   var token = await getToken();
   var enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/g, '/');
-  var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value",
+  var r = await fetch(_spApiBase(serverRelativeUrl) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value",
     { headers: { 'Authorization': 'Bearer ' + token } });
   if (!r.ok) throw new Error('PDF取得失敗 ' + r.status);
   var buf = await r.arrayBuffer();
@@ -40112,25 +40117,88 @@ function showAccessDeniedOverlay(email) {
 // 🏢 事務所社員 (役員専用) — List「事務所社員」(役員のみ閲覧の固有権限) を SP 直読み
 // ============================================================
 const JIMUSHO_SHAIN_GUID = 'f6272734-d397-4a73-9f6a-810017d4b638';
-// 表示グループ: [セクション名, [[内部名, ラベル], ...]]
-const JIMUSHO_FIELD_GROUPS = [
-  ['基本情報', [['EmpNo', '社員番号'], ['Title', '社員氏名'], ['Furigana', 'フリガナ'], ['Seibetsu', '性別'],
-    ['Birthday', '生年月日'], ['Age', '年齢'], ['Buka', '部課'], ['Shokushu', '職種'], ['Shokkai', '職階'],
-    ['Kyusei', '旧姓'], ['NyushaDate', '入社日'], ['TaishokuDate', '退職年月日'], ['KinzokuNensu', '勤続年数']]],
-  ['連絡先・住所', [['Yubin', '郵便番号'], ['Jusho', '住所'], ['ShichosonJusho', '市町村(住所地)'],
-    ['Keitai', '携帯電話'], ['Email', 'Eメール'], ['KeitaiMail', '携帯メール'], ['UPN', 'M365アカウント']]],
-  ['社会保険', [['KenpoHihokensha', '健保:被保険者'], ['HihokenshaSeiriNo', '被保険者整理番号'],
-    ['KenpoHyojun', '健保:標準報酬'], ['KoseiHihokensha', '厚生年金:被保険者'], ['KoseiHyojun', '厚生年金:標準報酬'],
-    ['KenpoShutoku', '健保:資格取得日']]],
-  ['雇用保険・労災', [['KoyoHihokenshaNo', '雇用:被保険者番号'], ['KoyoShutoku', '雇用:資格取得日'],
-    ['RosaiHihokensha', '労災:被保険者'], ['RosaiRinji', '労災:臨時労働者']]],
-  ['外国籍・在留', [['Gaikokujin', '本人:外国人'], ['Kokuseki', '本(国)籍'], ['ZairyuShikaku', '在留資格'],
-    ['ZairyuKigen', '在留期限'], ['ZairyuBiko1', '在留:備考1'], ['ZairyuBiko2', '在留:備考2']]],
-  ['運転免許', [['MenkyoUmu', '運転免許の有無'], ['MenkyoShurui', '運転免許の種類']]],
-  ['給与・振込先', [['ShikyuKomoku1', '支給項目1'], ['KyuyoBank1', '銀行'], ['KyuyoShiten1', '支店'], ['KyuyoKoza1', '口座番号']]],
-  ['特記事項', [['Tokki1', '特記事項1'], ['Tokki2', '特記事項2']]]
+// 表示カテゴリ (社員情報と同じアコーディオン・カード形式。key=List内部名 ※全フィールドText型)
+const JIMUSHO_CATEGORIES = [
+  { id: 'jbasic', label: '基本情報', icon: '👤',
+    groups: [
+      { key: 'profile', label: '個人情報', icon: '👤', color: '#7b1fa2', bg: 'linear-gradient(135deg,#f3e5f5,#e1bee7)' },
+      { key: 'contact', label: '連絡先',   icon: '📞', color: '#ef6c00', bg: 'linear-gradient(135deg,#fff3e0,#ffe0b2)' },
+      { key: 'employ',  label: '雇用情報', icon: '💼', color: '#00796b', bg: 'linear-gradient(135deg,#e0f2f1,#b2dfdb)' }
+    ],
+    fields: [
+      { key: 'EmpNo', label: '社員番号', group: 'profile' },
+      { key: 'Title', label: '社員氏名', group: 'profile' },
+      { key: 'Furigana', label: 'フリガナ', group: 'profile' },
+      { key: 'Kyusei', label: '旧姓', group: 'profile' },
+      { key: 'Seibetsu', label: '性別', group: 'profile' },
+      { key: 'Birthday', label: '生年月日', group: 'profile' },
+      { key: 'Age', label: '年齢', group: 'profile' },
+      { key: 'Keitai', label: '携帯電話', group: 'contact' },
+      { key: 'KeitaiMail', label: '携帯メール', group: 'contact' },
+      { key: 'Email', label: 'Eメール', group: 'contact' },
+      { key: 'UPN', label: 'M365アカウント', group: 'contact' },
+      { key: 'Yubin', label: '郵便番号', group: 'contact' },
+      { key: 'Jusho', label: '住所', group: 'contact' },
+      { key: 'ShichosonJusho', label: '市町村(住所地)', group: 'contact' },
+      { key: 'Buka', label: '部課', group: 'employ' },
+      { key: 'Shokushu', label: '職種', group: 'employ' },
+      { key: 'Shokkai', label: '職階', group: 'employ' },
+      { key: 'NyushaDate', label: '入社日', group: 'employ' },
+      { key: 'TaishokuDate', label: '退職年月日', group: 'employ' },
+      { key: 'KinzokuNensu', label: '勤続年数', group: 'employ' }
+    ] },
+  { id: 'jresidence', label: '在留・国籍', icon: '🌏', ocrBtn: true,
+    fields: [
+      { key: 'Gaikokujin', label: '本人:外国人' },
+      { key: 'Kokuseki', label: '本(国)籍' },
+      { key: 'ZairyuShikaku', label: '在留資格' },
+      { key: 'ZairyuKigen', label: '在留期限', expiry: true },
+      { key: 'ZairyuBiko1', label: '在留:備考1' },
+      { key: 'ZairyuBiko2', label: '在留:備考2' }
+    ] },
+  { id: 'jlicense', label: '免許', icon: '🪪', ocrBtn: true,
+    fields: [
+      { key: 'MenkyoUmu', label: '運転免許の有無' },
+      { key: 'MenkyoShurui', label: '運転免許の種類' },
+      { key: 'MenkyoYukoKigen', label: '有効期限', expiry: true }
+    ] },
+  { id: 'jinsurance', label: '社会保険・雇用', icon: '🛡',
+    groups: [
+      { key: 'kenpo',  label: '健康保険', icon: '🏥', color: '#2e7d32', bg: 'linear-gradient(135deg,#e8f5e9,#c8e6c9)' },
+      { key: 'kosei',  label: '厚生年金', icon: '📗', color: '#1565c0', bg: 'linear-gradient(135deg,#e3f2fd,#bbdefb)' },
+      { key: 'koyou',  label: '雇用保険・労災', icon: '👔', color: '#6d4c41', bg: 'linear-gradient(135deg,#efebe9,#d7ccc8)' }
+    ],
+    fields: [
+      { key: 'KenpoHihokensha', label: '被保険者', group: 'kenpo' },
+      { key: 'HihokenshaSeiriNo', label: '被保険者整理番号', group: 'kenpo' },
+      { key: 'KenpoHyojun', label: '標準報酬', group: 'kenpo' },
+      { key: 'KenpoShutoku', label: '資格取得日', group: 'kenpo' },
+      { key: 'KoseiHihokensha', label: '被保険者', group: 'kosei' },
+      { key: 'KoseiHyojun', label: '標準報酬', group: 'kosei' },
+      { key: 'KoyoHihokenshaNo', label: '雇用:被保険者番号', group: 'koyou' },
+      { key: 'KoyoShutoku', label: '雇用:資格取得日', group: 'koyou' },
+      { key: 'RosaiHihokensha', label: '労災:被保険者', group: 'koyou' },
+      { key: 'RosaiRinji', label: '労災:臨時労働者', group: 'koyou' }
+    ] },
+  { id: 'jbank', label: '給与・振込先', icon: '🏦',
+    fields: [
+      { key: 'ShikyuKomoku1', label: '支給項目1' },
+      { key: 'KyuyoBank1', label: '銀行' },
+      { key: 'KyuyoShiten1', label: '支店' },
+      { key: 'KyuyoKoza1', label: '口座番号' }
+    ] },
+  { id: 'jtokki', label: '特記事項', icon: '📝',
+    fields: [
+      { key: 'Tokki1', label: '特記事項1' },
+      { key: 'Tokki2', label: '特記事項2' }
+    ] }
 ];
+// 役員サイト (TeamStepup-58) の事務所スタッフ 役員ファイル
+const JIMUSHO_FILE_SITE = 'https://teamstepupcom774.sharepoint.com/sites/TeamStepup-58';
+const JIMUSHO_FILE_ROOT = '/sites/TeamStepup-58/Shared Documents/役員/👤事務所　スタッフ　役員ファイル';
 let _jimushoShainItems = [];
+let _jimushoDetailId = null;
+var _jimushoOcrProposals = [];
 
 function openJimushoShainScreen() {
   if (!isAdminUser()) return;
@@ -40173,27 +40241,348 @@ function renderJimushoShainList() {
   body.innerHTML = html || '<div>データがありません</div>';
 }
 
+// 期限バッジ (Text保存の日付を柔軟にパース。和暦「R9.3.7」等も対応)
+// 和暦/西暦のText日付を 'YYYY-MM-DD' に正規化 (warekiToSeireki は {year,month,day} を返す)
+function _jimushoParseDate(s) {
+  s = String(s == null ? '' : s).trim();
+  if (!s) return '';
+  var iso = parseFlexibleDateStr(s);
+  if (!iso) {
+    try {
+      var w = warekiToSeireki(s);
+      if (w && w.year && w.month && w.day) {
+        iso = w.year + '-' + String(w.month).padStart(2, '0') + '-' + String(w.day).padStart(2, '0');
+      }
+    } catch (e) {}
+  }
+  return iso || '';
+}
+
+function _jimushoKigenBadge(v) {
+  var s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  var iso = _jimushoParseDate(s);
+  if (!iso) return '';
+  var d = new Date(iso + 'T00:00:00');
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var days = Math.round((d - today) / 86400000);
+  if (days < 0) return '<span style="margin-left:6px;background:#c62828;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:8px;white-space:nowrap;">期限切れ</span>';
+  if (days <= 60) return '<span style="margin-left:6px;background:#ef6c00;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:8px;white-space:nowrap;">あと' + days + '日</span>';
+  return '';
+}
+
 function showJimushoShainDetail(id) {
   const body = document.getElementById('jimushoShainBody');
   const it = _jimushoShainItems.filter(function(x) { return x.Id === id; })[0];
   if (!body || !it) return;
+  _jimushoDetailId = id;
   let html = '<button type="button" onclick="renderJimushoShainList()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer;margin-bottom:10px;">← 一覧へ</button>';
-  html += '<div style="font-size:17px;font-weight:700;margin-bottom:2px;">' + (it.Title || '') + '</div>';
-  html += '<div style="font-size:12px;color:#78909c;margin-bottom:12px;">No.' + (it.EmpNo || '-') + '　' + (it.Furigana || '') + '</div>';
-  JIMUSHO_FIELD_GROUPS.forEach(function(grp) {
-    const rows = [];
-    grp[1].forEach(function(f) {
-      const v = String(it[f[0]] == null ? '' : it[f[0]]).trim();
-      if (!v) return;
-      rows.push('<tr><td style="padding:5px 8px 5px 0;color:#78909c;white-space:nowrap;vertical-align:top;">' + f[1] + '</td><td style="padding:5px 0;word-break:break-all;">' + v + '</td></tr>');
-    });
-    if (!rows.length) return;
-    html += '<div class="home-search-card" style="margin-bottom:10px;">';
-    html += '<div style="font-weight:700;font-size:13px;margin-bottom:5px;">' + grp[0] + '</div>';
-    html += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">' + rows.join('') + '</table></div>';
+  // ヘッダーカード (社員情報と同系の紫グラデ)
+  html += '<div style="background:linear-gradient(135deg,#5c6bc0,#7e57c2);border-radius:14px;padding:14px 16px;color:#fff;margin-bottom:12px;box-shadow:0 2px 8px rgba(94,83,180,0.3);">';
+  html += '<div style="display:flex;align-items:center;gap:10px;">';
+  html += '<span style="font-size:30px;">' + (['1', '2'].indexOf(String(it.EmpNo)) >= 0 ? '👑' : '👤') + '</span>';
+  html += '<div style="flex:1;min-width:0;">';
+  html += '<div style="font-size:17px;font-weight:800;">' + escHtml(it.Title || '') + '</div>';
+  html += '<div style="font-size:11px;opacity:0.85;">No.' + escHtml(String(it.EmpNo || '-')) + '　' + escHtml(it.Furigana || '') + '</div>';
+  html += '</div></div>';
+  html += '<button type="button" onclick="openJimushoShainFolder(' + it.Id + ')" style="width:100%;margin-top:10px;background:rgba(255,255,255,0.18);border:1px solid rgba(255,255,255,0.5);color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">📂 社員ファイルを開く（役員ファイル）</button>';
+  html += '</div>';
+
+  JIMUSHO_CATEGORIES.forEach(function(cat) {
+    var hasAlert = cat.fields.some(function(f) { return f.expiry && _jimushoKigenBadge(it[f.key]); });
+    html += '<div class="accordion-section" id="jacc_' + cat.id + '">';
+    html += '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+    html += '<span class="acc-icon">' + cat.icon + '</span>';
+    html += '<span>' + cat.label + '</span>';
+    if (hasAlert) html += '<span class="acc-alert">期限注意</span>';
+    html += '<span class="acc-arrow" style="margin-left:auto;">&#9654;</span>';
+    html += '</div>';
+    html += '<div class="accordion-body">';
+    if (cat.ocrBtn) {
+      html += '<button onclick="ocrJimushoFromFolder()" style="width:calc(100% - 16px);margin:8px;background:linear-gradient(135deg,#1976d2,#0d47a1);color:#fff;border:none;border-radius:10px;padding:12px 10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(13,71,161,0.3);line-height:1.5;">🤖 役員ファイルをAIで読み取り → 自動入力<br><span style="font-size:10px;font-weight:600;opacity:0.9;">免許証の有効期限・在留カードの在留期限</span></button>';
+    }
+    html += '<table class="acc-table">';
+    function jrow(f, gColor) {
+      var raw = it[f.key];
+      var v = String(raw == null ? '' : raw).trim();
+      var valHtml = v ? escHtml(v) : '<span style="color:#bbb;">—</span>';
+      if (v && f.expiry) valHtml += _jimushoKigenBadge(v);
+      var labelStyle = gColor ? ' style="border-left:3px solid ' + gColor + ';color:' + gColor + ';font-weight:600;"' : '';
+      var trStyle = gColor ? ' style="border-left:3px solid ' + gColor + ';"' : '';
+      return '<tr' + trStyle + ' data-jrow="' + f.key + '">' +
+        '<th' + labelStyle + '>' + f.label + '</th>' +
+        '<td><div class="acc-row-value-wrap" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">' +
+          '<span class="acc-row-value" style="flex:1;min-width:0;word-break:break-all;">' + valHtml + '</span>' +
+          '<button class="row-edit-btn" onclick="startEditJimushoField(\'' + f.key + '\')" title="この項目を編集" style="margin-left:6px;background:transparent;border:none;color:#1976d2;cursor:pointer;font-size:12px;padding:2px 4px;border-radius:4px;opacity:0.55;">✏️</button>' +
+        '</div></td></tr>';
+    }
+    if (cat.groups) {
+      cat.groups.forEach(function(g) {
+        var grpFields = cat.fields.filter(function(f) { return f.group === g.key; });
+        if (!grpFields.length) return;
+        html += '<tr><td colspan="2" style="background:' + g.bg + ';color:' + g.color + ';font-weight:800;font-size:12px;padding:6px 10px;border-top:2px solid ' + g.color + ';letter-spacing:0.5px;">' + g.icon + ' ' + g.label + '</td></tr>';
+        grpFields.forEach(function(f) { html += jrow(f, g.color); });
+      });
+      cat.fields.filter(function(f) { return !f.group; }).forEach(function(f) { html += jrow(f, null); });
+    } else {
+      cat.fields.forEach(function(f) { html += jrow(f, null); });
+    }
+    html += '</table></div></div>';
   });
   body.innerHTML = html;
+  // 基本情報は最初から開いておく
+  var first = document.getElementById('jacc_jbasic');
+  if (first) first.classList.add('open');
   try { window.scrollTo(0, 0); } catch (e) {}
+}
+
+// ── 事務所社員: 単一フィールド インライン編集 (全フィールドText型) ──
+function startEditJimushoField(fieldKey) {
+  var it = _jimushoShainItems.filter(function(x) { return x.Id === _jimushoDetailId; })[0];
+  if (!it) return;
+  var tr = document.querySelector('[data-jrow="' + fieldKey + '"]');
+  if (!tr) return;
+  var wrap = tr.querySelector('.acc-row-value-wrap');
+  if (!wrap) return;
+  if (!wrap.dataset.originalHtml) wrap.dataset.originalHtml = wrap.innerHTML;
+  var cur = String(it[fieldKey] == null ? '' : it[fieldKey]);
+  wrap.innerHTML =
+    '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;">' +
+      '<input id="jEditField_' + fieldKey + '" type="text" value="' + escHtml(cur).replace(/"/g, '&quot;') + '" style="flex:1;min-width:120px;padding:7px 9px;border:1.5px solid #1976d2;border-radius:7px;font-size:13px;box-sizing:border-box;">' +
+      '<button onclick="saveJimushoField(\'' + fieldKey + '\')" style="background:#ef6c00;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">💾 保存</button>' +
+      '<button onclick="cancelEditJimushoField(\'' + fieldKey + '\')" style="background:#9e9e9e;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;">×</button>' +
+    '</div>';
+  var inp = document.getElementById('jEditField_' + fieldKey);
+  if (inp) inp.focus();
+}
+
+function cancelEditJimushoField(fieldKey) {
+  var tr = document.querySelector('[data-jrow="' + fieldKey + '"]');
+  if (!tr) return;
+  var wrap = tr.querySelector('.acc-row-value-wrap');
+  if (wrap && wrap.dataset.originalHtml) {
+    wrap.innerHTML = wrap.dataset.originalHtml;
+    delete wrap.dataset.originalHtml;
+  }
+}
+
+async function jimushoPatchItem(itemId, body) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var entityType = await getListItemEntityType(JIMUSHO_SHAIN_GUID);
+  body['__metadata'] = { type: entityType };
+  var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + JIMUSHO_SHAIN_GUID + "')/items(" + itemId + ")", {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'MERGE'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) {
+    var t = ''; try { t = await resp.text(); } catch (e) {}
+    console.error('jimushoPatchItem error:', resp.status, t.substring(0, 300));
+    throw new Error('HTTP ' + resp.status);
+  }
+}
+
+async function saveJimushoField(fieldKey) {
+  var it = _jimushoShainItems.filter(function(x) { return x.Id === _jimushoDetailId; })[0];
+  if (!it) return;
+  var inp = document.getElementById('jEditField_' + fieldKey);
+  if (!inp) return;
+  var newVal = inp.value.trim();
+  var oldVal = String(it[fieldKey] == null ? '' : it[fieldKey]).trim();
+  if (newVal === oldVal) { showToast('変更がありません', 'info'); cancelEditJimushoField(fieldKey); return; }
+  showSpinner();
+  try {
+    var body = {};
+    body[fieldKey] = newVal || null;
+    await jimushoPatchItem(it.Id, body);
+    it[fieldKey] = newVal;
+    showToast('✓ 保存しました', 'success');
+    // 開いていたアコーディオンとスクロール位置を保持して再描画
+    var openIds = Array.from(document.querySelectorAll('.accordion-section.open')).map(function(el) { return el.id; });
+    var scrollY = window.scrollY;
+    showJimushoShainDetail(it.Id);
+    openIds.forEach(function(oid) { var el = document.getElementById(oid); if (el) el.classList.add('open'); });
+    window.scrollTo({ top: scrollY, behavior: 'instant' });
+  } catch (e) {
+    console.error('jimusho save error:', e);
+    showToast('保存失敗: ' + (e.message || e), 'error');
+  } finally { hideSpinner(); }
+}
+
+// ── 事務所社員: 役員ファイルのフォルダを社員番号で特定 ──
+async function _jimushoFindFolder(empNo) {
+  var token = await getToken();
+  var enc = encodeURIComponent(JIMUSHO_FILE_ROOT).replace(/%2F/g, '/');
+  var resp = await fetch(JIMUSHO_FILE_SITE + "/_api/web/GetFolderByServerRelativeUrl('" + enc + "')/Folders?$select=Name,ServerRelativeUrl&$top=200",
+    { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=nometadata' } });
+  if (!resp.ok) throw new Error('役員ファイルにアクセスできません (HTTP ' + resp.status + ')');
+  var folders = (await resp.json()).value || [];
+  var no = String(empNo == null ? '' : empNo).trim();
+  // フォルダ名の先頭番号と完全一致 (「1」が「1688」に誤マッチしないように)
+  return folders.filter(function(f) { return (String(f.Name).match(/^(\d+)/) || [])[1] === no; })[0] || null;
+}
+
+async function openJimushoShainFolder(id) {
+  var it = _jimushoShainItems.filter(function(x) { return x.Id === id; })[0];
+  if (!it) return;
+  showToast('📂 役員ファイルを確認中…', 'info');
+  try {
+    var hit = await _jimushoFindFolder(it.EmpNo);
+    if (!hit) {
+      showToast('No.' + (it.EmpNo || '-') + ' のフォルダが見つからないため役員ファイル全体を開きます', 'warn');
+      openSyainFolderViewer('https://teamstepupcom774.sharepoint.com' + JIMUSHO_FILE_ROOT, '', '事務所スタッフ 役員ファイル');
+      return;
+    }
+    openSyainFolderViewer('https://teamstepupcom774.sharepoint.com' + hit.ServerRelativeUrl, String(it.EmpNo || ''), String(it.Title || ''));
+  } catch (e) {
+    console.error('jimusho folder error:', e);
+    showToast('フォルダを開けませんでした: ' + (e.message || e), 'error');
+  }
+}
+
+// ── 事務所社員: 役員ファイル内の免許証/在留カードをAI読み取り → 期限を自動入力 ──
+async function ocrJimushoFromFolder() {
+  var it = _jimushoShainItems.filter(function(x) { return x.Id === _jimushoDetailId; })[0];
+  if (!it) return;
+  try {
+    showToast('📂 役員ファイルを確認中…', 'info');
+    var folder = await _jimushoFindFolder(it.EmpNo);
+    if (!folder) { showToast('No.' + (it.EmpNo || '-') + ' のフォルダが見つかりません', 'error'); return; }
+    var token = await getToken();
+    var enc = encodeURIComponent(folder.ServerRelativeUrl).replace(/%2F/g, '/');
+    var resp = await fetch(JIMUSHO_FILE_SITE + "/_api/web/GetFolderByServerRelativeUrl('" + enc + "')/Files?$select=Name,ServerRelativeUrl&$top=200",
+      { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=nometadata' } });
+    if (!resp.ok) throw new Error('フォルダ一覧取得失敗 HTTP ' + resp.status);
+    var files = (await resp.json()).value || [];
+    // ファイル名で分類。扶養者・子供の書類は除外。免許と在留の両方を含む合体PDFより専用ファイルを優先
+    function pick(re) {
+      var cands = files.filter(function(f) {
+        return re.test(f.Name) && !/子供|扶養|家族/.test(f.Name) && /\.(jpe?g|png|webp|pdf)$/i.test(f.Name);
+      });
+      cands.sort(function(a, b) {
+        function score(f) {
+          var s = 0;
+          if (!(/免許/.test(f.Name) && /在留/.test(f.Name))) s -= 100;   // 専用ファイル優先
+          if (!/\.pdf$/i.test(f.Name)) s -= 10;                          // 画像優先
+          if (f.Name.indexOf('表') >= 0) s -= 1;                         // 表面を先に
+          return s;
+        }
+        return score(a) - score(b) || String(a.Name).localeCompare(String(b.Name), 'ja');
+      });
+      return cands.slice(0, 2);
+    }
+    var jobs = [
+      { docType: 'license', label: '免許証', files: pick(/免許/) },
+      { docType: 'zairyu', label: '在留カード', files: pick(/在留/) }
+    ].filter(function(j) { return j.files.length; });
+    if (!jobs.length) { showToast('フォルダに免許証・在留カードが見つかりません (ファイル名に「免許」「在留」が必要)', 'error'); return; }
+
+    function normDate(v) {
+      var isoD = _jimushoParseDate(v);
+      return isoD ? isoD.replace(/-/g, '/') : String(v || '').trim();
+    }
+    var proposals = [];
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      showToast('☁️ ' + j.label + ' をAIで読み取り中… (' + (i + 1) + '/' + jobs.length + ')', 'info');
+      var images = [];
+      for (var fi = 0; fi < j.files.length; fi++) {
+        var f = j.files[fi];
+        try {
+          if (/\.pdf$/i.test(f.Name)) {
+            images = images.concat(await _fetchPdfAsImages(f.ServerRelativeUrl, 2));
+          } else {
+            var buf = await downloadSpFile(token, f.ServerRelativeUrl);
+            var extM = ((f.Name.match(/\.([^.]+)$/) || [])[1] || 'jpeg').toLowerCase();
+            var blob = new Blob([buf], { type: 'image/' + (extM === 'jpg' ? 'jpeg' : extM) });
+            images.push(await new Promise(function(res, rej) {
+              var fr = new FileReader(); fr.onload = function() { res(fr.result); };
+              fr.onerror = function() { rej(new Error('read fail')); }; fr.readAsDataURL(blob);
+            }));
+          }
+        } catch (fe) { console.warn('[事務所OCR] ファイル取得失敗:', f.Name, fe); }
+      }
+      if (!images.length) continue;
+      try {
+        var ocr = await cloudDocOcr(j.docType, { images: images.slice(0, 4), model: 'claude' });
+        console.log('[事務所OCR] ' + j.docType + ' 結果:', ocr);
+        if (j.docType === 'license') {
+          if (ocr.licenseExpiry) proposals.push({ field: 'MenkyoYukoKigen', label: '免許：有効期限', cur: it.MenkyoYukoKigen, val: normDate(ocr.licenseExpiry) });
+          if (ocr.licenseType) proposals.push({ field: 'MenkyoShurui', label: '運転免許の種類', cur: it.MenkyoShurui, val: String(ocr.licenseType).trim() });
+        } else {
+          if (ocr.zairyuKigen) proposals.push({ field: 'ZairyuKigen', label: '在留期限', cur: it.ZairyuKigen, val: normDate(ocr.zairyuKigen) });
+          if (ocr.zairyuShikaku) proposals.push({ field: 'ZairyuShikaku', label: '在留資格', cur: it.ZairyuShikaku, val: String(ocr.zairyuShikaku).trim() });
+        }
+      } catch (oe) {
+        console.warn('[事務所OCR] ' + j.docType + ' 読み取り失敗:', oe);
+        showToast(j.label + ' の読み取りに失敗: ' + (oe.message || oe), 'error');
+      }
+    }
+    if (!proposals.length) { showToast('読み取れた項目がありません', 'error'); return; }
+    _jimushoOcrProposals = proposals;
+    _showJimushoOcrConfirm(proposals);
+  } catch (e) {
+    console.error('ocrJimushoFromFolder error:', e);
+    showToast('読み取りに失敗: ' + (e.message || e), 'error');
+  }
+}
+
+function _showJimushoOcrConfirm(proposals) {
+  var old = document.getElementById('jimushoOcrConfirm');
+  if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.id = 'jimushoOcrConfirm';
+  var rows = proposals.map(function(p, i) {
+    var cur = String(p.cur == null ? '' : p.cur).trim();
+    var changed = cur !== p.val;
+    return '<label style="display:flex;align-items:center;gap:8px;padding:9px 4px;border-bottom:1px solid #eee;font-size:13px;cursor:pointer;">' +
+      '<input type="checkbox" data-jocr="' + i + '"' + (changed ? ' checked' : '') + '>' +
+      '<span style="flex:1;min-width:0;">' +
+        '<span style="display:block;font-size:11px;color:#78909c;">' + escHtml(p.label) + '</span>' +
+        '<span style="display:block;word-break:break-all;">' + (cur ? '<span style="color:#999;text-decoration:line-through;">' + escHtml(cur) + '</span> → ' : '') + '<b>' + escHtml(p.val) + '</b></span>' +
+      '</span></label>';
+  }).join('');
+  ov.innerHTML = '<div class="confirm-box" style="text-align:left;">' +
+    '<div class="confirm-title">🤖 AI読み取り結果</div>' +
+    '<div style="max-height:50vh;overflow-y:auto;margin:8px 0;">' + rows + '</div>' +
+    '<div class="confirm-btns">' +
+    '<button class="btn-cancel" onclick="document.getElementById(\'jimushoOcrConfirm\').remove()">キャンセル</button>' +
+    '<button class="btn-ok" onclick="_saveJimushoOcr()">📝 チェック項目を保存</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+}
+
+async function _saveJimushoOcr() {
+  var it = _jimushoShainItems.filter(function(x) { return x.Id === _jimushoDetailId; })[0];
+  var ov = document.getElementById('jimushoOcrConfirm');
+  if (!it || !ov) return;
+  var body = {};
+  var picked = [];
+  ov.querySelectorAll('input[data-jocr]:checked').forEach(function(cb) {
+    var p = _jimushoOcrProposals[parseInt(cb.dataset.jocr, 10)];
+    if (p) { body[p.field] = p.val; picked.push(p); }
+  });
+  ov.remove();
+  if (!picked.length) { showToast('保存する項目がありません', 'info'); return; }
+  showSpinner();
+  try {
+    await jimushoPatchItem(it.Id, body);
+    picked.forEach(function(p) { it[p.field] = p.val; });
+    showToast('✓ ' + picked.length + '項目を保存しました', 'success');
+    showJimushoShainDetail(it.Id);
+  } catch (e) {
+    console.error('jimusho ocr save error:', e);
+    showToast('保存失敗: ' + (e.message || e), 'error');
+  } finally { hideSpinner(); }
 }
 
 // ============================================================
@@ -51383,9 +51772,9 @@ function openVehicleSpFolder(digits) {
 async function loadVehicleFolderContents(token, srUrl) {
   if (!token) token = await getToken();
   var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' };
-  var filesUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
+  var filesUrl = _spApiBase(srUrl) + "/_api/web/GetFolderByServerRelativeUrl('" +
     encodeURIComponent(srUrl) + "')/Files?$select=Name,ServerRelativeUrl,Length,TimeLastModified&$orderby=TimeLastModified desc&$top=200";
-  var foldersUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" +
+  var foldersUrl = _spApiBase(srUrl) + "/_api/web/GetFolderByServerRelativeUrl('" +
     encodeURIComponent(srUrl) + "')/Folders?$select=Name,ServerRelativeUrl,ItemCount&$top=200";
 
   var results = await Promise.all([
@@ -51623,7 +52012,7 @@ function renderVehicleFolderContents(subfolders, files, digits) {
     var date = f.LastModifiedTime ? formatDate(f.LastModifiedTime) : '';
     var url = f.Path || '';
     var srUrl = f.ServerRelativeUrl || '';
-    var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
+    var dlUrl = srUrl ? (_spApiBase(srUrl) + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
     var prevB64 = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ext: ext })))) : '';
     var delPayload = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ctx: 'vehicle', type: 'file' })))) : '';
 
@@ -51672,7 +52061,7 @@ function deleteFolderFromPayload(b64) {
 async function _syainMoveSpItem(srcSrUrl, destSrUrl, isFolder) {
   var token = await getToken();
   if (!token) throw new Error('認証エラー');
-  var digestResp = await fetch(SP_DOC_SITE_URL + "/_api/contextinfo", {
+  var digestResp = await fetch(_spApiBase(srcSrUrl) + "/_api/contextinfo", {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
   });
@@ -51687,7 +52076,7 @@ async function _syainMoveSpItem(srcSrUrl, destSrUrl, isFolder) {
     try { origin = new URL(SP_DOC_SITE_URL).origin; } catch(_) { origin = 'https://teamstepupcom774.sharepoint.com'; }
     var srcAbs = srcSrUrl.indexOf('http') === 0 ? srcSrUrl : (origin + srcSrUrl);
     var destAbs = destSrUrl.indexOf('http') === 0 ? destSrUrl : (origin + destSrUrl);
-    url = SP_DOC_SITE_URL + '/_api/SP.MoveCopyUtil.MoveFolderByPath';
+    url = _spApiBase(srcSrUrl) + '/_api/SP.MoveCopyUtil.MoveFolderByPath';
     body = JSON.stringify({
       srcPath: { DecodedUrl: srcAbs },
       destPath: { DecodedUrl: destAbs },
@@ -51701,7 +52090,7 @@ async function _syainMoveSpItem(srcSrUrl, destSrUrl, isFolder) {
     };
   } else {
     // File moveto
-    url = SP_DOC_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" + encodeURIComponent(srcSrUrl).replace(/'/g, '%27') + "')/moveto(newurl='" + encodeURIComponent(destSrUrl).replace(/'/g, '%27') + "',flags=1)";
+    url = _spApiBase(srcSrUrl) + "/_api/web/GetFileByServerRelativeUrl('" + encodeURIComponent(srcSrUrl).replace(/'/g, '%27') + "')/moveto(newurl='" + encodeURIComponent(destSrUrl).replace(/'/g, '%27') + "',flags=1)";
     body = null;
     headers = {
       'Authorization': 'Bearer ' + token,
@@ -51909,7 +52298,7 @@ function loadScriptOnce(src) {
 }
 
 async function downloadSpFile(token, path) {
-  var apiUrl = TEAMSTEPUP_SITE_URL + "/_api/web/GetFileByServerRelativeUrl('" +
+  var apiUrl = _spApiBase(path) + "/_api/web/GetFileByServerRelativeUrl('" +
     encodeURIComponent(path).replace(/'/g, "''") + "')/$value";
   var resp = await fetch(apiUrl, {
     headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/octet-stream' }
@@ -52879,7 +53268,7 @@ function switchPreviewToIframe(payloadB64, btnEl) {
 async function openFilePreview(srUrl, name, ext) {
   ext = String(ext || '').toLowerCase().replace(/^\./, '');
   var externalUrl = 'https://teamstepupcom774.sharepoint.com' + srUrl;
-  var dlUrl = TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl);
+  var dlUrl = _spApiBase(srUrl) + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl);
   var pdfExts0 = ['pdf'];
   var isPdf = pdfExts0.indexOf(ext) >= 0;
 
@@ -53434,7 +53823,7 @@ function renderSyainFolderContents(subfolders, files) {
     var date = f.LastModifiedTime ? formatDate(f.LastModifiedTime) : '';
     var url = f.Path || '';
     var srUrl = f.ServerRelativeUrl || '';
-    var dlUrl = srUrl ? (TEAMSTEPUP_SITE_URL + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
+    var dlUrl = srUrl ? (_spApiBase(srUrl) + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(srUrl)) : url;
     var prevB64 = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ext: ext })))) : '';
     var delPayload = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, ctx: 'syain', type: 'file' })))) : '';
     var moveRenamePayload = srUrl ? btoa(unescape(encodeURIComponent(JSON.stringify({ srUrl: srUrl, name: name, type: 'file' })))) : '';
