@@ -8609,7 +8609,7 @@ function balanceAtDate(targetDate, extras) {
   const events = [];
   for (const r of (appliedDatesCache || [])) {
     const d = new Date(r[F.leaveDate]);
-    if (d <= tDate) events.push({ date: d, days: getRecordDays(r) });
+    if (d <= tDate) events.push({ date: d, days: getRecordDays(r), rec: r });
   }
   for (const e of extras) {
     const d = new Date(e.dateStr);
@@ -8621,7 +8621,10 @@ function balanceAtDate(targetDate, extras) {
     let need = ev.days;
     for (const g of sim) {
       if (need <= 0) break;
-      if (ev.date < g.grantDate) continue;
+      if (ev.date < g.grantDate) {
+        // 例外: 旧システム算入指定レコードは付与1回目から消化
+        if (!(g === sim[0] && ev.rec && isPreGrantCounted(currentEmployee, ev.rec))) continue;
+      }
       if (ev.date >= g.expiryDate) continue;
       const avail = g.grantedDays - g._used;
       if (avail <= 0) continue;
@@ -8657,7 +8660,7 @@ function validateLeaveApplications(applications) {
   // 既存申請 + 新規申請を時系列順に
   const events = [];
   for (const r of (appliedDatesCache || [])) {
-    events.push({ date: new Date(r[F.leaveDate]), days: getRecordDays(r), isNew: false });
+    events.push({ date: new Date(r[F.leaveDate]), days: getRecordDays(r), isNew: false, rec: r });
   }
   for (const a of applications) {
     events.push({ date: new Date(a.dateStr), days: a.days, isNew: true, dateStr: a.dateStr });
@@ -8668,7 +8671,10 @@ function validateLeaveApplications(applications) {
     let need = ev.days;
     for (const g of sim) {
       if (need <= 0) break;
-      if (ev.date < g.grantDate) continue;
+      if (ev.date < g.grantDate) {
+        // 例外: 旧システム算入指定レコードは付与1回目から消化
+        if (!(g === sim[0] && ev.rec && isPreGrantCounted(currentEmployee, ev.rec))) continue;
+      }
       if (ev.date >= g.expiryDate) continue;
       const avail = g.grantedDays - g._used;
       if (avail <= 0) continue;
