@@ -5489,7 +5489,7 @@ select.sankyu-edit-input {
       <button class="quick-link-btn kintai-allowed" onclick="openKintaiScreen()" style="position:relative;display:none;">
         <span class="ql-icon">🕐</span>
         <span class="ql-text">勤怠</span>
-        <span id="kintaiAdminBadge" class="ql-badge" title="前週 未承認" style="background:#5e35b1;display:none;top:4px;right:4px;"></span>
+        <span id="kintaiAdminBadge" class="ql-badge" title="承認待ちの有給・欠勤申請" style="background:#5e35b1;display:none;top:4px;right:4px;"></span>
       </button>
       <!-- 弁当注文ボタンは廃止: 弁当の承認は「承認」ハブ(✅)→「弁当 承認」に統合 (重複のため削除 2026-06-22) -->
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
@@ -6146,19 +6146,21 @@ select.sankyu-edit-input {
       </div>
 
       <div class="home-search-card" style="margin-top:14px;">
-        <div style="font-weight:700;margin-bottom:8px;">📋 有給・欠勤の記録</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="date" id="kintaiMarkDate" style="flex:1;min-width:140px;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;">
-          <select id="kintaiMarkKubun" style="flex:1;min-width:120px;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;">
-            <option value="出勤">出勤</option>
-            <option value="有給1日">有給1日</option>
-            <option value="AM有給">AM有給</option>
-            <option value="PM有給">PM有給</option>
-            <option value="欠勤">欠勤</option>
-          </select>
+        <div style="font-weight:700;margin-bottom:2px;">📝 有給・欠勤の申請</div>
+        <div id="kintaiMarkGuide" style="font-size:11.5px;color:#78909c;margin-bottom:10px;">休む日と区分を選んで「申請する」を押してください。役員に通知が届き、承認後に確定します。</div>
+        <div style="font-size:12px;font-weight:700;color:#546e7a;margin-bottom:4px;">① 日付</div>
+        <input type="date" id="kintaiMarkDate" style="width:100%;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;box-sizing:border-box;">
+        <div style="font-size:12px;font-weight:700;color:#546e7a;margin:10px 0 4px;">② 区分</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <button type="button" class="kintai-kubun-btn" data-kubun="有給1日" onclick="kintaiSelKubun(this)" style="padding:12px 4px;border:2px solid #cfd8dc;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#37474f;cursor:pointer;">🏖 有給1日</button>
+          <button type="button" class="kintai-kubun-btn" data-kubun="欠勤" onclick="kintaiSelKubun(this)" style="padding:12px 4px;border:2px solid #cfd8dc;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#37474f;cursor:pointer;">🤒 欠勤</button>
+          <button type="button" class="kintai-kubun-btn" data-kubun="AM有給" onclick="kintaiSelKubun(this)" style="padding:12px 4px;border:2px solid #cfd8dc;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#37474f;cursor:pointer;">🌅 AM有給<span style="display:block;font-size:10px;font-weight:400;color:#78909c;">午前を休む</span></button>
+          <button type="button" class="kintai-kubun-btn" data-kubun="PM有給" onclick="kintaiSelKubun(this)" style="padding:12px 4px;border:2px solid #cfd8dc;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#37474f;cursor:pointer;">🌇 PM有給<span style="display:block;font-size:10px;font-weight:400;color:#78909c;">午後を休む</span></button>
         </div>
-        <input id="kintaiMarkMemo" placeholder="備考（任意）" style="width:100%;margin-top:8px;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;box-sizing:border-box;">
-        <button onclick="kintaiMark()" style="width:100%;margin-top:10px;padding:11px 0;border:none;border-radius:10px;background:#00897b;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">登録する</button>
+        <div style="font-size:12px;font-weight:700;color:#546e7a;margin:10px 0 4px;">③ 理由・備考（任意）</div>
+        <input id="kintaiMarkMemo" placeholder="例）私用のため" style="width:100%;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;box-sizing:border-box;">
+        <button id="kintaiMarkBtn" onclick="kintaiMark()" style="width:100%;margin-top:12px;padding:12px 0;border:none;border-radius:10px;background:#00897b;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">📨 申請する</button>
+        <button type="button" onclick="kintaiMarkReset()" style="width:100%;margin-top:6px;padding:8px 0;border:none;background:none;color:#90a4ae;font-size:12px;text-decoration:underline;cursor:pointer;">申請を取り消す（その日を「出勤」に戻す）</button>
       </div>
 
       <div class="home-search-card" style="margin-top:14px;">
@@ -6177,6 +6179,7 @@ select.sankyu-edit-input {
   <!-- ============ 🕐 事務所勤怠 週次承認 (役員のみ) ============ -->
   <div class="screen" id="kintaiAdminScreen">
     <div style="max-width:640px;margin:0 auto;padding:12px;">
+      <div id="kintaiPendingBox"></div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <button onclick="kintaiAdminWeekMove(-1)" style="border:none;background:#eceff1;border-radius:8px;padding:7px 13px;font-size:15px;cursor:pointer;">◀ 前週</button>
         <div id="kintaiAdminWeekLabel" style="font-weight:700;font-size:14.5px;"></div>
@@ -7087,6 +7090,7 @@ function refreshApprovalBadges() {
   try { if (typeof updateMaebariApprovalBadge === 'function') updateMaebariApprovalBadge(); } catch (e) {}
   try { if (typeof updateBentoAdminBadge === 'function') updateBentoAdminBadge(); } catch (e) {}
   try { if (typeof updateSougeiApprovalBadge === 'function') updateSougeiApprovalBadge(); } catch (e) {}
+  try { if (typeof updateKintaiAdminBadge === 'function') updateKintaiAdminBadge(); } catch (e) {}
 }
 
 // Check when user returns to the app (tab switch, phone unlock)
@@ -40746,6 +40750,15 @@ async function loadKintaiMy() {
     // 役員リンク
     const adm = document.getElementById('kintaiAdminLink');
     if (adm) adm.style.display = (data.me && data.me.yakuin) ? '' : 'none';
+    // 申請カードの文言を役割に合わせる (役員=承認不要の「登録」/スタッフ=「申請」)
+    if (data.me) {
+      const guide = document.getElementById('kintaiMarkGuide');
+      const mbtn = document.getElementById('kintaiMarkBtn');
+      if (guide) guide.textContent = data.me.yakuin
+        ? '日付と区分を選んで登録してください（役員は承認不要で自動確定します）'
+        : '休む日と区分を選んで「申請する」を押してください。役員に通知が届き、承認後に確定します。';
+      if (mbtn) mbtn.textContent = data.me.yakuin ? '登録する' : '📨 申請する';
+    }
     // 月次表
     if (tbl) {
       const byDate = {};
@@ -40816,23 +40829,68 @@ async function kintaiPunch(type) {
   }
 }
 
+let _kintaiMarkKubun = '';   // 区分ボタンで選択中の値
+
+function kintaiSelKubun(btn) {
+  _kintaiMarkKubun = btn.getAttribute('data-kubun') || '';
+  document.querySelectorAll('.kintai-kubun-btn').forEach(function(b) {
+    const on = (b === btn);
+    b.style.borderColor = on ? '#00897b' : '#cfd8dc';
+    b.style.background = on ? '#e0f2f1' : '#fff';
+    b.style.color = on ? '#00695c' : '#37474f';
+  });
+}
+
+function _kintaiClearKubunSel() {
+  _kintaiMarkKubun = '';
+  document.querySelectorAll('.kintai-kubun-btn').forEach(function(b) {
+    b.style.borderColor = '#cfd8dc';
+    b.style.background = '#fff';
+    b.style.color = '#37474f';
+  });
+}
+
 async function kintaiMark() {
   const date = (document.getElementById('kintaiMarkDate') || {}).value || '';
-  const kubun = (document.getElementById('kintaiMarkKubun') || {}).value || '';
+  const kubun = _kintaiMarkKubun;
   const memo = (document.getElementById('kintaiMarkMemo') || {}).value || '';
-  if (!date) { alert('日付を選択してください'); return; }
-  if (!confirm(date + ' を「' + kubun + '」として登録しますか？')) return;
+  if (!date) { alert('① 日付を選択してください'); return; }
+  if (!kubun) { alert('② 区分（有給1日・AM有給・PM有給・欠勤）をタップして選択してください'); return; }
+  const yakuin = !!(_kintaiMe && _kintaiMe.yakuin);
+  const msg = yakuin
+    ? date + ' を「' + kubun + '」として登録しますか？\n（役員は承認不要で確定します）'
+    : date + ' を「' + kubun + '」で申請しますか？\n役員に通知が届き、承認後に確定します。';
+  if (!confirm(msg)) return;
   try {
     await _kintaiApi('/kintai/mark', { date: date, kubun: kubun, memo: memo });
-    alert('✅ 登録しました');
+    alert(yakuin ? '✅ 登録しました' : '✅ 申請しました。役員の承認をお待ちください。');
     const mm = document.getElementById('kintaiMarkMemo');
     if (mm) mm.value = '';
+    _kintaiClearKubunSel();
     if (date.substring(0, 7) === _kintaiMonth) loadKintaiMy();
   } catch (e) {
     if (String(e.message).indexOf('already_approved') >= 0) {
       alert('この日は承認済みのため変更できません。役員に連絡してください。');
     } else {
       alert('登録に失敗しました: ' + e.message);
+    }
+  }
+}
+
+async function kintaiMarkReset() {
+  const date = (document.getElementById('kintaiMarkDate') || {}).value || '';
+  if (!date) { alert('① 取り消す日付を選択してください'); return; }
+  if (!confirm(date + ' の有給・欠勤の申請を取り消して「出勤」に戻しますか？')) return;
+  try {
+    await _kintaiApi('/kintai/mark', { date: date, kubun: '出勤', memo: '' });
+    alert('✅ 取り消しました（「出勤」に戻しました）');
+    _kintaiClearKubunSel();
+    if (date.substring(0, 7) === _kintaiMonth) loadKintaiMy();
+  } catch (e) {
+    if (String(e.message).indexOf('already_approved') >= 0) {
+      alert('この日は承認済みのため変更できません。役員に連絡してください。');
+    } else {
+      alert('取り消しに失敗しました: ' + e.message);
     }
   }
 }
@@ -40853,6 +40911,7 @@ function openKintaiAdminScreen() {
   const thisMon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
   _kintaiWeekStart = new Date(thisMon.getFullYear(), thisMon.getMonth(), thisMon.getDate() - 7);
   switchScreen('kintaiAdminScreen');
+  loadKintaiPendingBox();
   loadKintaiAdmin();
 }
 
@@ -40983,7 +41042,9 @@ async function kintaiApproveMember(empNo) {
   if (!confirm((mem ? mem.name : empNo) + ' の ' + rows.length + '件を承認しますか？')) return;
   try {
     await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
+    loadKintaiPendingBox();
     loadKintaiAdmin();
+    try { updateKintaiAdminBadge(); } catch (e2) {}
   } catch (e) {
     alert('承認に失敗しました: ' + e.message);
   }
@@ -40995,10 +41056,65 @@ async function kintaiApproveAll() {
   if (!confirm('この週の未承認 ' + rows.length + '件をすべて承認しますか？')) return;
   try {
     await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
+    loadKintaiPendingBox();
     loadKintaiAdmin();
+    try { updateKintaiAdminBadge(); } catch (e2) {}
   } catch (e) {
     alert('承認に失敗しました: ' + e.message);
   }
+}
+
+// ---------- 役員: 承認待ちの申請 (有給・欠勤) ----------
+// 週次承認は「前週」既定のため、未来日の有給申請が埋もれる問題への対策。
+// 日付範囲なしで Status=未承認 かつ 区分≠出勤 を全件表示する。
+async function loadKintaiPendingBox() {
+  const box = document.getElementById('kintaiPendingBox');
+  if (!box) return;
+  try {
+    const data = await _kintaiApi('/kintai/pending');
+    const rows = data.rows || [];
+    if (rows.length === 0) { box.innerHTML = ''; return; }
+    let html = '<div class="home-search-card" style="margin-bottom:12px;border:2px solid #ffb300;">';
+    html += '<div style="font-weight:700;margin-bottom:4px;">📨 承認待ちの申請 <span style="color:#e65100;">' + rows.length + '件</span></div>';
+    rows.forEach(function(r) {
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #eceff1;">';
+      html += '<div style="flex:1;min-width:0;">';
+      html += '<div style="font-size:13.5px;"><span style="font-weight:700;">' + r.name + '</span>　' + String(r.date || '').replace(/-/g, '/') + '　' + _kintaiKubunChip(r.kubun) + '</div>';
+      if (r.memo) html += '<div style="font-size:11.5px;color:#78909c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">💬 ' + r.memo + '</div>';
+      html += '</div>';
+      html += '<button onclick="kintaiApproveOne(' + r.id + ')" style="border:none;border-radius:9px;background:#2e7d32;color:#fff;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;flex-shrink:0;">✅ 承認</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '';
+  }
+}
+
+async function kintaiApproveOne(id) {
+  if (!confirm('この申請を承認しますか？')) return;
+  try {
+    await _kintaiApi('/kintai/approve', { ids: [id] });
+    loadKintaiPendingBox();
+    loadKintaiAdmin();
+    try { updateKintaiAdminBadge(); } catch (e2) {}
+  } catch (e) {
+    alert('承認に失敗しました: ' + e.message);
+  }
+}
+
+// ホーム🕐勤怠ボタンの承認待ちバッジ (役員のみ・90秒ポーリングの refreshApprovalBadges から呼ばれる)
+async function updateKintaiAdminBadge() {
+  const el = document.getElementById('kintaiAdminBadge');
+  if (!el) return;
+  try {
+    if (typeof isAdminUser !== 'function' || !isAdminUser() || !canUseKintai()) { el.style.display = 'none'; return; }
+    const data = await _kintaiApi('/kintai/pending');
+    const n = (data.rows || []).length;
+    el.textContent = n;
+    el.style.display = n > 0 ? '' : 'none';
+  } catch (e) { /* 通信失敗時は前回表示を維持 */ }
 }
 
 function applyAdminVisibility() {
