@@ -9403,6 +9403,9 @@ async function loadLeaveDetails() {
       // 次回付与期間(カード未生成)に属する取得 — 次回付与から消化される
       const nextPeriodRecords = !nextGrant ? leaveRecords.filter(r => new Date(r[F.leaveDate]) >= periodEndFilter)
         .sort((a,b) => new Date(a[F.leaveDate]) - new Date(b[F.leaveDate])) : [];
+      // 付与1回目より前の取得（旧システム時代のイレギュラー）— 赤字で表示のみ（使用/残/累計に含めない）
+      const preSystemRecords = origIdx === 0 ? leaveRecords.filter(r => new Date(r[F.leaveDate]) < gStart)
+        .sort((a,b) => new Date(b[F.leaveDate]) - new Date(a[F.leaveDate])) : [];
 
       // 取得日を「古い順」で番号(①②...)と累計日数を計算してマップ化
       // (表示は既存の新しい順だが、各行に古い順での通算番号と累計を出すため)
@@ -9498,9 +9501,9 @@ async function loadLeaveDetails() {
               </div>`).join('')}
           </div>` : ''}
 
-        ${grantRecords.length > 0 ? `
+        ${(grantRecords.length > 0 || preSystemRecords.length > 0) ? `
           <div style="font-size:12px;font-weight:600;color:var(--text-light);margin-bottom:6px;">
-            取得履歴 ${grantRecords.length}件（合計 ${actualUsedDays}日消化）
+            取得履歴 ${grantRecords.length}件（合計 ${actualUsedDays}日消化）${preSystemRecords.length > 0 ? `<span style="color:#c62828;font-weight:700;">　＋期間外 ${preSystemRecords.length}件</span>` : ''}
           </div>
           <div style="background:#fafafa;border-radius:8px;padding:4px 8px;">
             ${grantRecords.map(r => {
@@ -9525,6 +9528,15 @@ async function loadLeaveDetails() {
                   style="background:#ffebee;border:1px solid #ffcdd2;border-radius:50%;width:24px;height:24px;font-size:14px;color:var(--danger);cursor:pointer;line-height:1;flex-shrink:0;">&times;</button>` : ''}
               </div>`;
             }).join('')}
+            ${preSystemRecords.map(r => `
+              <div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;gap:6px;background:#fff5f5;border-radius:6px;">
+                <span style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;background:#ffcdd2;color:#c62828;border-radius:50%;font-size:10px;font-weight:700;flex-shrink:0;">旧</span>
+                <span style="font-weight:600;color:#c62828;flex-shrink:0;">${formatDate(r[F.leaveDate])}</span>
+                <span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;min-width:55px;text-align:center;flex-shrink:0;">
+                  ${getRecordTypeLabel(r)}
+                </span>
+                <span style="margin-left:auto;font-size:10px;font-weight:700;color:#c62828;background:#ffebee;padding:3px 8px;border-radius:8px;flex-shrink:0;">期間外(旧ｼｽﾃﾑ)･累計対象外</span>
+              </div>`).join('')}
           </div>
         ` : `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px;">取得なし</div>`}
 
