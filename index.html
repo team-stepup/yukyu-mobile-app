@@ -31551,7 +31551,10 @@ function openMaebariEdit(itemId) {
   const syainNo = record[MF.syainNo] || '';
   const name = record[MF.name] || '';
   const zaiyoku = record.zaiyokusyubetu || '';
-  const amount = record[MF.amount] || '';
+  let amount = record[MF.amount] || '';
+  // ポータル承認分はカンマ無し("30000")で保存されていたことがある → プルダウン形式("30,000")へ正規化
+  const _amtDigits = String(amount).replace(/[^\d]/g, '');
+  if (_amtDigits && String(amount).indexOf(',') < 0) amount = parseInt(_amtDigits, 10).toLocaleString('ja-JP');
   const fee = record[MF.fee] || '';
   const bank = record[MF.bank] || '';
   const branch = record[MF.branch] || '';
@@ -39205,7 +39208,10 @@ async function approveMaebariShinsei(shinseiId, bulk) {
     insertBody[MF.payDate] = kibouISO;
     insertBody[MF.syainNo] = String(shainNo);  // NO_x002e_ (no OData_ prefix)
     insertBody[MF.name] = emp.Title || '';
-    insertBody[MF.amount] = String(shinsei[MS.amount] || '');
+    // 金額は既存運用と同じ「30,000」形式で保存 (申請ListはNumber型でカンマ無し。
+    // カンマ無しだと修正・削除画面の金額プルダウンに反映されない)
+    const amtNum = parseInt(String(shinsei[MS.amount] || '').replace(/[^\d]/g, ''), 10);
+    insertBody[MF.amount] = isNaN(amtNum) ? String(shinsei[MS.amount] || '') : amtNum.toLocaleString('ja-JP');
     insertBody[MF.hakensaki] = shinsei[MS.hakensaki] || stripBukaPrefix(emp[E_BUKA] || '');
     insertBody[MF.bank] = emp[E_GINKO] || '';
     insertBody[MF.branch] = emp[E_SHITEN] || '';
