@@ -5616,6 +5616,11 @@ select.sankyu-edit-input {
           <span style="flex:1;font-weight:600;">有給データ バックアップ (CSV)</span>
           <span style="color:#bbb;font-size:14px;">↓</span>
         </button>
+        <button type="button" onclick="openKyuyuJissekiScreen()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:linear-gradient(135deg,#fff,#eef3ff);cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:20px;">⛽</span>
+          <span style="flex:1;font-weight:600;">給油実績 <span style="font-size:10px;color:#999;font-weight:500;">(運転手別・月別／走行距離・給料)</span></span>
+          <span style="color:#bbb;font-size:14px;">›</span>
+        </button>
         <button type="button" onclick="openJobsAdmin()" style="width:100%;margin-top:6px;padding:11px;border:none;border-radius:10px;background:linear-gradient(135deg,#fff,#f0fff4);cursor:pointer;font-size:13px;text-align:left;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
           <span style="font-size:20px;">📢</span>
           <span style="flex:1;font-weight:600;">求人掲載 <span style="font-size:10px;color:#999;font-weight:500;">(HP採用情報)</span></span>
@@ -6265,6 +6270,31 @@ select.sankyu-edit-input {
     <div style="padding:8px 12px 0;font-size:11.5px;color:var(--text-light);">運転手がポータルで記録した送迎実績です。内容を確認して承認してください（承認後は運転手本人は取り消せません）。間違いは「修正」で内容を直してから承認、または「取消」で無効にできます。</div>
     <div id="sougeiPendingList" style="padding:8px 12px;"></div>
     <div id="sougeiApprovedList" style="padding:8px 12px;display:none;"></div>
+  </div>
+
+  <!-- Screen: 給油実績 (役員専用・SP List54「ガソリン代払い戻し」を運転手別×月別に集計。2026-08-19) -->
+  <div class="screen" id="kyuyuJissekiScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="kjHeaderBack()" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">⛽ 給油実績</h2>
+      <button class="refresh-btn" onclick="loadKyuyuJisseki(true)" style="margin-left:auto;">&#x21bb; 更新</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 0;">
+      <button onclick="kjShiftMonth(-1)" style="background:#fff;border:1px solid #cfd8e8;border-radius:8px;padding:6px 12px;font-size:15px;font-weight:800;cursor:pointer;">◀</button>
+      <div id="kjMonthLabel" style="flex:1;min-width:0;text-align:center;font-size:clamp(11px,3.6vw,15px);font-weight:800;color:#1a3c8f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">―</div>
+      <button onclick="kjShiftMonth(1)" style="background:#fff;border:1px solid #cfd8e8;border-radius:8px;padding:6px 12px;font-size:15px;font-weight:800;cursor:pointer;">▶</button>
+    </div>
+    <div id="kjListPane">
+      <div id="kjSummary" style="padding:10px 12px 0;"></div>
+      <div id="kjList" style="padding:8px 12px 20px;"></div>
+    </div>
+    <div id="kjDetailPane" style="display:none;">
+      <div style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+        <button onclick="kjBackToList()" style="background:#fff;border:1px solid #cfd8e8;border-radius:10px;padding:7px 14px;font-size:13px;font-weight:700;color:#1f3864;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.06);white-space:nowrap;">← 運転手一覧</button>
+        <div id="kjDetailName" style="flex:1;font-size:14px;font-weight:800;color:#1a3c8f;"></div>
+      </div>
+      <div id="kjDetailBody" style="padding:0 12px 24px;"></div>
+    </div>
   </div>
 
   <!-- Screen: 送迎実績 (運転手ごとの月次集計・回数/金額。承認画面とは別で「実績の確認」用) -->
@@ -39035,6 +39065,245 @@ function _setSougeiTabBadge() {
   var n = window._pendSougei || 0;
   b.textContent = n;
   b.classList.toggle('zero', n === 0);
+}
+
+// ============================================================
+// ⛽ 給油実績 (役員専用・運転手別×月別) — 2026-08-19 追加
+//   SP List54「ガソリン代払い戻し」(ポータル給油申請/旧Formsの両方が溜まる) を月で絞り、運転手ごとに
+//   給油回数・総走行距離(=その月の給油間距離の合計)・給油量・給油代・平均燃費を集計。
+//   「給料」= 送迎記録の承認済回数 × 給与体系 (送迎実績画面と同じ計算: _sgjFetchMonth/_sgjLoadTanka を再利用)
+//   運転手の特定: Title「{社員番号} 氏名 (YYYY-MM-DD)」→ 社員番号/氏名。旧Forms分は 申請者(User) の表示名。
+//   月の判定: Title の日付(JST) → 無ければ Created+9h。
+// ============================================================
+const LIST_GASORIN_GUID = 'ac84ec0e-6853-463a-9469-d94b52940485';
+const KJ = {
+  vehicle: 'OData__x30ca__x30f3__x30d0__x30fc__x30', amount: 'OData__x6255__x623b__x91d1__x984d_',
+  payType: 'OData__x652f__x6255__x3044__x306e__x7a', receipt1: 'OData__x9818__x53ce__x66f8_NEW',
+  receipt2: 'OData__x9818__x53ce__x66f8_2', receipt3: 'OData__x9818__x53ce__x66f8_3',
+  odoImg: 'OData__x8d70__x884c__x8ddd__x96e2__x75', odo: 'OData__x73fe__x5728__x8d70__x884c__x8d',
+  dist: 'OData__x7d66__x6cb9__x9593__x8ddd__x96', liters: 'OData__x7d66__x6cb9__x91cf__x2113_',
+  nenpi: 'OData__x71c3__x8cbb_', kankaku: 'OData__x7a7a__x767d__x671f__x9593_',
+  purpose: 'OData__x5229__x7528__x76ee__x7684_', applicant: 'OData__x7533__x8acb__x8005_'
+};
+var _kjYear = 0, _kjMonth = 0, _kjRows = null, _kjDrivers = null;
+
+function _kjNum(v) { var n = parseFloat(String(v == null ? '' : v).replace(/[^\d.]/g, '')); return isNaN(n) ? null : n; }
+function _kjYen(n) { return '¥' + Math.round(Number(n || 0)).toLocaleString('ja-JP'); }
+function _kjKm(n) { return Math.round(Number(n || 0)).toLocaleString('ja-JP') + ' km'; }
+function _kjEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function _kjVeh(v) { return String(v || '').replace(/[\s　]+/g, ' ').trim(); }
+
+function canViewKyuyuJisseki() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    return ADMIN_USERS.indexOf(getLoggedInEmail()) >= 0;
+  } catch (e) { return false; }
+}
+function openKyuyuJissekiScreen() {
+  if (!canViewKyuyuJisseki()) { showToast('役員のみ閲覧できます', 'error'); return; }
+  if (!_kjYear) { var n = new Date(); _kjYear = n.getFullYear(); _kjMonth = n.getMonth() + 1; }
+  switchScreen('kyuyuJissekiScreen');
+  kjBackToList();
+  loadKyuyuJisseki();
+}
+function kjShiftMonth(d) {
+  var m = _kjMonth + d, y = _kjYear;
+  if (m < 1) { m = 12; y--; } else if (m > 12) { m = 1; y++; }
+  _kjYear = y; _kjMonth = m;
+  kjBackToList();
+  loadKyuyuJisseki();
+}
+function kjBackToList() {
+  var lp = document.getElementById('kjListPane'), dp = document.getElementById('kjDetailPane');
+  if (lp) lp.style.display = '';
+  if (dp) dp.style.display = 'none';
+}
+function kjHeaderBack() {
+  var dp = document.getElementById('kjDetailPane');
+  if (dp && dp.style.display !== 'none') { kjBackToList(); return; }
+  switchScreen('searchScreen');
+}
+
+// List54 から対象月の給油レコードを取得 (Created 前後2日マージン → Title日付/JSTで絞り直し)
+async function _kjFetchMonth(y, m) {
+  var sel = ['Id', 'Title', 'Created', KJ.vehicle, KJ.amount, KJ.payType, KJ.receipt1, KJ.receipt2, KJ.receipt3,
+             KJ.odoImg, KJ.odo, KJ.dist, KJ.liters, KJ.nenpi, KJ.kankaku, KJ.purpose, KJ.applicant + '/Title'].join(',');
+  var from = new Date(Date.UTC(y, m - 1, 1) - 2 * 86400000).toISOString().slice(0, 19) + 'Z';
+  var to = new Date(Date.UTC(y, m, 1) + 2 * 86400000).toISOString().slice(0, 19) + 'Z';
+  var f = "Created ge datetime'" + from + "' and Created le datetime'" + to + "'";
+  var q = '$filter=' + encodeURIComponent(f) + '&$select=' + encodeURIComponent(sel)
+        + '&$expand=' + KJ.applicant + '&$orderby=Id desc&$top=2000';
+  var rows = await spGetAll(LIST_GASORIN_GUID, q);
+  var ym = y + '-' + _sgjPad(m);
+  var out = [];
+  rows.forEach(function (it) {
+    var title = String(it.Title || '').trim();
+    var mt = /^(?:(\d{4,6})\s+)?(.*?)\s*\((\d{4}-\d{2}-\d{2})\)\s*$/.exec(title);
+    var shainNo = '', name = '', date = '';
+    if (mt) { shainNo = mt[1] || ''; name = mt[2].trim(); date = mt[3]; }
+    else if (title) { var m2 = /^(\d{4,6})\s+(.*)$/.exec(title); if (m2) { shainNo = m2[1]; name = m2[2].trim(); } else name = title; }
+    if (!name) { var ap = it[KJ.applicant]; name = (ap && ap.Title) ? String(ap.Title).trim() : ''; }
+    if (!date) date = _sougeiJstDate(it.Created);
+    if (date.slice(0, 7) !== ym) return;
+    var urls = [];
+    [KJ.receipt1, KJ.receipt2, KJ.receipt3].forEach(function (k) { var u = it[k]; if (u && typeof u === 'object') u = u.Url; if (u) urls.push(String(u)); });
+    var odoImg = it[KJ.odoImg]; if (odoImg && typeof odoImg === 'object') odoImg = odoImg.Url;
+    out.push({
+      id: it.Id, shainNo: shainNo, name: name || '(不明)', date: date,
+      vehicle: _kjVeh(it[KJ.vehicle]), amount: _kjNum(it[KJ.amount]), liters: _kjNum(it[KJ.liters]),
+      odo: _kjNum(it[KJ.odo]), dist: _kjNum(it[KJ.dist]), nenpi: _kjNum(it[KJ.nenpi]),
+      kankaku: String(it[KJ.kankaku] || ''), purpose: String(it[KJ.purpose] || ''), payType: String(it[KJ.payType] || ''),
+      receipts: urls, odoImg: odoImg ? String(odoImg) : ''
+    });
+  });
+  return out;
+}
+
+async function loadKyuyuJisseki(force) {
+  var lab = document.getElementById('kjMonthLabel');
+  if (lab) lab.textContent = _kjYear + '年 ' + _kjMonth + '月（1日〜月末）';
+  var sumEl = document.getElementById('kjSummary'), listEl = document.getElementById('kjList');
+  if (!listEl) return;
+  if (force) _sgjTankaMap = null;
+  sumEl.innerHTML = '';
+  listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#666;">読み込み中...</div>';
+  try {
+    var res = await Promise.all([
+      _kjFetchMonth(_kjYear, _kjMonth),
+      _sgjFetchMonth(_kjYear, _kjMonth).catch(function (e) { console.warn('kj: 送迎記録取得失敗', e); return []; }),
+      _sgjLoadTanka().catch(function (e) { console.warn('kj: 単価取得失敗', e); return {}; })
+    ]);
+    _kjRows = res[0];
+    renderKyuyuJisseki(res[0], res[1], res[2] || {});
+  } catch (e) {
+    console.error('給油実績の取得に失敗', e);
+    listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#c62828;">取得に失敗しました: ' + _kjEsc(e && e.message ? e.message : e) + '</div>';
+  }
+}
+
+function renderKyuyuJisseki(recs, sougeiRecs, tankaMap) {
+  var sumEl = document.getElementById('kjSummary'), listEl = document.getElementById('kjList');
+  // 送迎給料 (承認済 × 単価) を社員番号ごとに
+  var pay = {};
+  (sougeiRecs || []).forEach(function (r) {
+    if (!r.shainNo) return;
+    var d = pay[r.shainNo] = pay[r.shainNo] || { approved: 0, pending: 0, name: r.name };
+    if (r.status === 'approved') d.approved++; else if (r.status !== 'cancelled') d.pending++;
+  });
+  Object.keys(pay).forEach(function (no) {
+    var t = (tankaMap[no] || {}).tanka; pay[no].tankaMissing = !t; pay[no].tanka = t || SGJ_DEFAULT_TANKA;
+    pay[no].amount = pay[no].approved * pay[no].tanka;
+  });
+  if (!recs.length) {
+    sumEl.innerHTML = '';
+    listEl.innerHTML = '<div style="text-align:center;padding:30px 16px;color:#999;line-height:1.7;">この月の給油記録はありません。</div>';
+    _kjDrivers = [];
+    return;
+  }
+  var per = {};
+  recs.forEach(function (r) {
+    var k = r.shainNo || r.name;
+    var d = per[k] = per[k] || { key: k, shainNo: r.shainNo, name: r.name, count: 0, km: 0, liters: 0, amount: 0, nenpiKm: 0, nenpiL: 0, vehicles: {}, noDist: 0 };
+    d.count++;
+    if (r.dist) { d.km += r.dist; } else d.noDist++;
+    if (r.liters) d.liters += r.liters;
+    if (r.amount) d.amount += r.amount;
+    if (r.dist && r.liters) { d.nenpiKm += r.dist; d.nenpiL += r.liters; }
+    if (r.vehicle) d.vehicles[r.vehicle] = (d.vehicles[r.vehicle] || 0) + 1;
+    if (!d.shainNo && r.shainNo) d.shainNo = r.shainNo;
+  });
+  var drivers = Object.keys(per).map(function (k) { return per[k]; }).sort(function (a, b) { return b.km - a.km || b.count - a.count; });
+  var gKm = 0, gL = 0, gAmt = 0, gCnt = 0, gPay = 0, anyMissing = false;
+  drivers.forEach(function (d) {
+    d.nenpi = d.nenpiL ? (d.nenpiKm / d.nenpiL) : null;
+    d.pay = d.shainNo ? pay[d.shainNo] : null;
+    if (d.pay) { gPay += d.pay.amount; if (d.pay.tankaMissing) anyMissing = true; }
+    gKm += d.km; gL += d.liters; gAmt += d.amount; gCnt += d.count;
+  });
+  _kjDrivers = drivers;
+  var stat = function (lbl, val) {
+    return '<div style="flex:1;min-width:0;text-align:center;"><div style="font-size:10.5px;opacity:.85;white-space:nowrap;">' + lbl + '</div>'
+      + '<div style="font-size:clamp(13px,4.2vw,18px);font-weight:800;line-height:1.2;white-space:nowrap;">' + val + '</div></div>';
+  };
+  sumEl.innerHTML =
+    '<div style="background:linear-gradient(135deg,#1a3c8f,#3b6fd8);color:#fff;border-radius:14px;padding:12px 12px 10px;box-shadow:0 3px 10px rgba(26,60,143,.28);">'
+    + '<div style="font-size:11.5px;opacity:.85;margin-bottom:6px;">運転手 ' + drivers.length + '名 ・ 給油 ' + gCnt + '回</div>'
+    + '<div style="display:flex;gap:6px;">' + stat('総走行距離', _kjKm(gKm)) + stat('給油量', Math.round(gL).toLocaleString('ja-JP') + ' ℓ') + stat('給油代', _kjYen(gAmt)) + stat('送迎給料(承認済)', _kjYen(gPay)) + '</div>'
+    + '</div>'
+    + '<div style="margin-top:6px;font-size:10.5px;color:#8b98ab;line-height:1.5;">※総走行距離＝その月に給油した各回の「給油間距離」(前回給油からの距離)の合計。送迎給料＝送迎記録の承認済回数×給与体系（送迎実績画面と同じ）。'
+    + (anyMissing ? '<span style="color:#8d6e00;">給与体系未登録の運転手は ' + SGJ_DEFAULT_TANKA + '円で仮計算(★)。</span>' : '') + '</div>';
+
+  listEl.innerHTML = drivers.map(function (d, i) {
+    var vehTxt = Object.keys(d.vehicles).sort(function (a, b) { return d.vehicles[b] - d.vehicles[a]; }).join(' ・ ');
+    var payTxt = d.pay ? (_kjYen(d.pay.amount) + (d.pay.tankaMissing ? '★' : '') + ' <span style="font-size:10px;color:#6b7a90;font-weight:600;">(' + d.pay.approved + '回' + (d.pay.pending ? '・未承認' + d.pay.pending : '') + ')</span>')
+                       : '<span style="color:#b0b8c4;">―</span>';
+    var cell = function (lbl, val, color) {
+      return '<div style="flex:1;min-width:0;background:#f6f8fc;border-radius:8px;padding:5px 4px;text-align:center;">'
+        + '<div style="font-size:9.5px;color:#8b98ab;white-space:nowrap;">' + lbl + '</div>'
+        + '<div style="font-size:12.5px;font-weight:800;color:' + (color || '#1f3864') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + val + '</div></div>';
+    };
+    return '<button onclick="kjOpenDetail(' + i + ')" style="display:block;width:100%;text-align:left;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #3b6fd8;border-radius:12px;padding:10px 11px;margin-bottom:9px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.05);">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      +   '<div style="flex:1;min-width:0;">'
+      +     '<div style="font-size:14.5px;font-weight:800;color:#1f3864;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _kjEsc(d.name)
+      +       (d.shainNo ? ' <span style="font-size:11px;color:#8b98ab;font-weight:600;">' + _kjEsc(d.shainNo) + '</span>' : '') + '</div>'
+      +     '<div style="font-size:11px;color:#6b7a90;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🚗 ' + _kjEsc(vehTxt || '―') + '</div>'
+      +   '</div>'
+      +   '<div style="text-align:right;flex-shrink:0;"><div style="font-size:18px;font-weight:800;color:#1a3c8f;line-height:1.1;">' + _kjKm(d.km) + '</div>'
+      +     '<div style="font-size:10.5px;color:#8b98ab;">給油 ' + d.count + '回' + (d.noDist ? '（距離なし' + d.noDist + '）' : '') + '</div></div>'
+      +   '<span style="font-size:18px;color:#c3ccd8;">›</span>'
+      + '</div>'
+      + '<div style="display:flex;gap:5px;margin-top:7px;">'
+      +   cell('給油量', (d.liters ? Math.round(d.liters * 10) / 10 : 0) + ' ℓ')
+      +   cell('給油代', _kjYen(d.amount), '#c0392b')
+      +   cell('燃費', d.nenpi ? (Math.round(d.nenpi * 10) / 10) + ' km/ℓ' : '―')
+      +   cell('送迎給料', payTxt, '#04724a')
+      + '</div></button>';
+  }).join('');
+}
+
+function kjOpenDetail(idx) {
+  var d = (_kjDrivers || [])[idx];
+  if (!d || !_kjRows) return;
+  var rows = _kjRows.filter(function (r) { return (r.shainNo || r.name) === d.key; })
+    .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.id - b.id); });
+  document.getElementById('kjDetailName').textContent = _kjYear + '年' + _kjMonth + '月';
+  var html = '<div style="background:linear-gradient(135deg,#1a3c8f,#3b6fd8);color:#fff;border-radius:14px;padding:13px 15px;box-shadow:0 3px 10px rgba(26,60,143,.28);margin-bottom:10px;">'
+    + '<div style="font-size:16.5px;font-weight:800;line-height:1.2;">' + _kjEsc(d.name) + (d.shainNo ? ' <span style="font-size:11px;opacity:.85;font-weight:600;">' + _kjEsc(d.shainNo) + '</span>' : '') + '</div>'
+    + '<div style="display:flex;gap:6px;margin-top:8px;">'
+    + '<div style="flex:1;text-align:center;"><div style="font-size:10.5px;opacity:.85;">総走行距離</div><div style="font-size:17px;font-weight:800;">' + _kjKm(d.km) + '</div></div>'
+    + '<div style="flex:1;text-align:center;"><div style="font-size:10.5px;opacity:.85;">給油代</div><div style="font-size:17px;font-weight:800;">' + _kjYen(d.amount) + '</div></div>'
+    + '<div style="flex:1;text-align:center;"><div style="font-size:10.5px;opacity:.85;">送迎給料</div><div style="font-size:17px;font-weight:800;">' + (d.pay ? _kjYen(d.pay.amount) + (d.pay.tankaMissing ? '★' : '') : '―') + '</div></div>'
+    + '</div>'
+    + '<div style="margin-top:7px;font-size:11px;opacity:.92;">給油 ' + d.count + '回 ・ ' + (Math.round(d.liters * 10) / 10) + ' ℓ ・ 燃費 ' + (d.nenpi ? (Math.round(d.nenpi * 10) / 10) + ' km/ℓ' : '―')
+    + (d.pay ? ' ・ 送迎 承認済 ' + d.pay.approved + '回 × ' + _kjYen(d.pay.tanka) + (d.pay.pending ? '（未承認 ' + d.pay.pending + '回）' : '') : '') + '</div></div>';
+  var YOBI = ['日', '月', '火', '水', '木', '金', '土'];
+  html += rows.map(function (r) {
+    var dt = new Date(r.date + 'T00:00:00'), w = dt.getDay();
+    var wColor = w === 0 ? '#c62828' : (w === 6 ? '#1565c0' : '#8b98ab');
+    var links = [];
+    if (r.odoImg) links.push('<a href="' + _kjEsc(r.odoImg) + '" target="_blank" rel="noopener" style="color:#1565c0;text-decoration:none;">🚗 メーター</a>');
+    r.receipts.forEach(function (u, i) { links.push('<a href="' + _kjEsc(u) + '" target="_blank" rel="noopener" style="color:#1565c0;text-decoration:none;">🧾 領収書' + (i + 1) + '</a>'); });
+    return '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:9px 11px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.04);">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      +   '<div style="font-size:13.5px;font-weight:800;color:#1f3864;white-space:nowrap;">' + Number(r.date.slice(5, 7)) + '/' + Number(r.date.slice(8, 10)) + ' <span style="font-size:11px;color:' + wColor + ';">(' + YOBI[w] + ')</span></div>'
+      +   '<div style="flex:1;min-width:0;font-size:11.5px;color:#6b7a90;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🚗 ' + _kjEsc(r.vehicle || '―') + (r.purpose && r.purpose !== 'ガソリン給油' ? ' ・ ' + _kjEsc(r.purpose) : '') + '</div>'
+      +   '<div style="font-size:14px;font-weight:800;color:#c0392b;white-space:nowrap;">' + (r.amount != null ? _kjYen(r.amount) : '―') + '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:10px;margin-top:5px;font-size:11.5px;color:#4a5568;flex-wrap:wrap;">'
+      +   '<span>⛽ ' + (r.liters != null ? r.liters + ' ℓ' : '―') + '</span>'
+      +   '<span>📏 ' + (r.dist != null ? _kjKm(r.dist) : '<span style="color:#b0b8c4;">距離なし</span>') + (r.odo != null ? ' <span style="color:#8b98ab;">(' + Math.round(r.odo).toLocaleString('ja-JP') + ' km)</span>' : '') + '</span>'
+      +   '<span>🔁 ' + (r.nenpi != null ? r.nenpi + ' km/ℓ' : '―') + '</span>'
+      +   (r.kankaku ? '<span style="color:#8b98ab;">前回 ' + _kjEsc(r.kankaku) + '前</span>' : '')
+      +   (r.payType ? '<span style="color:#8b98ab;">' + _kjEsc(r.payType) + '</span>' : '')
+      + '</div>'
+      + (links.length ? '<div style="margin-top:5px;font-size:11.5px;display:flex;gap:12px;">' + links.join('') + '</div>' : '')
+      + '</div>';
+  }).join('');
+  document.getElementById('kjDetailBody').innerHTML = html;
+  document.getElementById('kjListPane').style.display = 'none';
+  document.getElementById('kjDetailPane').style.display = '';
+  try { window.scrollTo(0, 0); } catch (e) {}
 }
 
 // ============================================================
