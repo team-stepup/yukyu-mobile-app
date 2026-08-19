@@ -5396,7 +5396,6 @@ select.sankyu-edit-input {
   <h1 id="headerTitle" style="display:none;">ホーム</h1>
   <button class="header-refresh-btn" id="headerRefreshBtn" style="display:none;" onclick="employeeFieldsCache=null;loadEmployeeProfile()" title="更新">&#x21bb;</button>
   <button class="header-cache-btn" id="headerCacheBtn" style="display:none;" onclick="clearCacheAndReload()" title="キャッシュクリア">🧹</button>
-  <button class="header-cache-btn" id="themeToggleBtn" style="display:none;" onclick="toggleAppTheme()" title="ダーク/ライト切替">🌙</button>
   <button class="update-badge" id="updateBadge" onclick="headerUpdateClick()" title="更新する">⟳</button>
   <button class="teams-btn" id="teamsBtn" data-needs-consent="1" onclick="openTeamsActivity()" title="Teams アクティビティ">
     💬
@@ -18700,7 +18699,6 @@ async function loadHomeBadges() {
   // 乗車リストボタン (山下浩俊のみ表示)
   try { var _jlBtn = document.getElementById('joshaListBtn'); if (_jlBtn) _jlBtn.style.display = (getLoggedInEmail() === 'h.yamashita@team-stepup.com') ? '' : 'none'; } catch(e) {}
   // ダーク/ライト切替ボタン (役員テスト・ADMIN_USERSのみ表示)
-  try { var _thBtn = document.getElementById('themeToggleBtn'); if (_thBtn) _thBtn.style.display = (ADMIN_USERS.indexOf(getLoggedInEmail()) >= 0) ? 'flex' : 'none'; } catch(e) {}
   var today = new Date();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   var monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
@@ -38246,22 +38244,10 @@ async function _loadCurrentSankyuCounts(allEmps) {
 // ============================================================
 const ADMIN_USERS = ['h.yamashita@team-stepup.com', 'a.yamashita@team-stepup.com'];
 
-// ===== ダーク/ライト切替 (役員テスト 2026-08-01) =====
-// 端末ごとに localStorage('appTheme') で記憶。ボタン表示は ADMIN_USERS のみ(適用自体は保存値があれば誰でも)
-function applyAppTheme() {
-  var t = 'light';
-  try { t = localStorage.getItem('appTheme') || 'light'; } catch(e) {}
-  document.documentElement.setAttribute('data-theme', t);
-  var b = document.getElementById('themeToggleBtn');
-  if (b) b.textContent = (t === 'dark') ? '☀️' : '🌙';
-}
-function toggleAppTheme() {
-  var next = 'dark';
-  try { next = (localStorage.getItem('appTheme') === 'dark') ? 'light' : 'dark'; } catch(e) {}
-  try { localStorage.setItem('appTheme', next); } catch(e) {}
-  applyAppTheme();
-}
-applyAppTheme();
+// ===== ダーク/ライト切替ボタンは 2026-08-19 に廃止(ユーザー指示)。CSS の html[data-theme="dark"] 定義は将来のダーク化用に温存 =====
+// 以前のテストで端末に保存された 'dark' が残っていてもライトに戻す
+try { localStorage.removeItem('appTheme'); } catch(e) {}
+document.documentElement.setAttribute('data-theme', 'light');
 // 担当者 (一般利用: 役員専用機能は不可)
 const STAFF_USERS = [
   'kaori.j@team-stepup.com',     // 城 かおり
