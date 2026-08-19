@@ -6262,7 +6262,7 @@ select.sankyu-edit-input {
       <button id="sougeiTabPending" class="approve-tab active" onclick="switchSougeiTab('pending')">承認待ち <span id="sougeiTabPendingBadge" class="tab-badge zero" style="background:#04724a;">0</span></button>
       <button id="sougeiTabApproved" class="approve-tab" onclick="switchSougeiTab('approved')">承認済み</button>
     </div>
-    <div style="padding:8px 12px 0;font-size:11.5px;color:var(--text-light);">運転手がポータルで記録した送迎実績です。内容を確認して承認してください（承認後は運転手本人は取り消せません）。間違いは「取消」で無効にできます。</div>
+    <div style="padding:8px 12px 0;font-size:11.5px;color:var(--text-light);">運転手がポータルで記録した送迎実績です。内容を確認して承認してください（承認後は運転手本人は取り消せません）。間違いは「修正」で内容を直してから承認、または「取消」で無効にできます。</div>
     <div id="sougeiPendingList" style="padding:8px 12px;"></div>
     <div id="sougeiApprovedList" style="padding:8px 12px;display:none;"></div>
   </div>
@@ -39436,11 +39436,13 @@ function renderSougeiPending(rows) {
         + '<div style="font-size:' + nmSize + 'px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _esc(nm) + (r.memo ? '　📝' + _esc(r.memo) : '') + '</div>'
         + '</div>'
         + '<button onclick="approveSougeiRecord(' + r.id + ')" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;">承認</button>'
-        + '<button onclick="rejectSougeiRecord(' + r.id + ')" style="background:#fde8e8;color:#c0392b;border:none;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;">取消</button>'
+        + '<button onclick="openSougeiEdit(' + r.id + ')" style="background:#e3f2fd;color:#1565c0;border:none;border-radius:8px;padding:7px 9px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;">修正</button>'
+        + '<button onclick="rejectSougeiRecord(' + r.id + ')" style="background:#fde8e8;color:#c0392b;border:none;border-radius:8px;padding:7px 9px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;">取消</button>'
         + '</div>';
     });
     html += '</div>';
   });
+  window._sougeiPendingRows = rows;   // 修正モーダルが元データを参照する
   const bar = '<div id="sougeiBulkBar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #eee;padding:8px 4px;display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
     + '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="sougeiSelectAll" onchange="toggleSougeiSelectAll(this.checked)" style="width:18px;height:18px;"> 全選択</label>'
     + '<span id="sougeiBulkCount" style="font-size:12px;color:#888;">選択 0件</span>'
@@ -39537,6 +39539,109 @@ async function rejectSougeiRecord(recId) {
   } catch (e) {
     console.error('rejectSougeiRecord error:', e);
     showToast('取消エラー: ' + e.message, 'error');
+  }
+}
+
+// ===== 送迎記録の修正 (承認者用・2026-08-19 追加) =====
+// 運転手の入力ミス(送迎先/区分/時刻/日付)を承認者がその場で直せる。取消→再入力の手間を省く。
+// 選択肢マスタはポータルBE(function_app.py SOUGEI_DESTS/SOUGEI_SPECIALS)と同じ内容。変更時は両方直す。
+const SOUGEI_EDIT_MASTER = {
+  'ASTI浜松': { go: ['8:00'], back: ['17:00', '18:00', '19:00', '20:00'] },
+  'ユーシン': { go: ['9:00'], back: ['17:40', '19:45'] },
+  'ASTI掛川': { go: ['8:00'], back: ['17:00', '18:00', '19:00'] },
+  'ASTI都田': { go: ['8:00', '20:15'], back: ['17:00', '20:10', '5:15', '8:00'] }
+};
+const SOUGEI_EDIT_CATS = ['行き', '帰り', '遅刻', '早退', '病院対応', 'その他（休業）'];
+function _sgeSlotOptions(dest, cat, current) {
+  const m = SOUGEI_EDIT_MASTER[dest] || { go: [], back: [] };
+  let list = (cat === '行き') ? m.go.slice() : (cat === '帰り') ? m.back.slice() : [];
+  if (current && list.indexOf(current) < 0) list.unshift(current);
+  const need = (cat === '行き' || cat === '帰り');
+  let html = need ? '' : '<option value="">（時刻なし）</option>';
+  list.forEach(t => { html += '<option value="' + _esc(t) + '"' + (t === current ? ' selected' : '') + '>' + _esc(t) + '</option>'; });
+  return html;
+}
+function _sgeRefreshSlots() {
+  const dest = document.getElementById('sgeDest').value, cat = document.getElementById('sgeCat').value;
+  const sel = document.getElementById('sgeSlot');
+  const cur = sel.value;
+  sel.innerHTML = _sgeSlotOptions(dest, cat, (cat === '行き' || cat === '帰り') ? cur : '');
+  sel.disabled = !(cat === '行き' || cat === '帰り');
+}
+function openSougeiEdit(recId) {
+  if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return; }
+  const r = (window._sougeiPendingRows || []).find(x => String(x.id) === String(recId));
+  if (!r) { showToast('記録が見つかりません。更新してください', 'error'); return; }
+  const my = _mySougeiDests();
+  const dests = Object.keys(SOUGEI_EDIT_MASTER).filter(d => my === null || my.indexOf(d) >= 0);
+  if (r.dest && dests.indexOf(r.dest) < 0) dests.unshift(r.dest);
+  const old = document.getElementById('sougeiEditOverlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'sougeiEditOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px;';
+  const lab = 'font-size:12px;font-weight:700;color:#555;margin:10px 0 4px;';
+  const inp = 'width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:9px;padding:9px 10px;font-size:14px;background:#fff;';
+  ov.innerHTML = '<div style="background:#fff;border-radius:16px;padding:16px 16px 14px;width:100%;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,0.25);max-height:92vh;overflow:auto;">'
+    + '<div style="font-weight:800;font-size:15px;color:var(--primary);">✏️ 送迎記録を修正</div>'
+    + '<div style="font-size:12px;color:#777;margin-top:4px;">' + _esc(r.name) + '　<span style="color:#aaa;">(元: ' + _esc(r.date) + ' ' + _esc(r.dest) + ' ' + _esc(r.cat) + (r.slot ? ' ' + _esc(r.slot) : '') + ')</span></div>'
+    + '<div style="' + lab + '">送迎日</div><input type="date" id="sgeDate" value="' + _esc(r.date) + '" style="' + inp + '">'
+    + '<div style="' + lab + '">送迎先</div><select id="sgeDest" onchange="_sgeRefreshSlots()" style="' + inp + '">'
+    + dests.map(d => '<option value="' + _esc(d) + '"' + (d === r.dest ? ' selected' : '') + '>' + _esc(d) + '</option>').join('') + '</select>'
+    + '<div style="' + lab + '">区分</div><select id="sgeCat" onchange="_sgeRefreshSlots()" style="' + inp + '">'
+    + SOUGEI_EDIT_CATS.concat(SOUGEI_EDIT_CATS.indexOf(r.cat) < 0 && r.cat ? [r.cat] : []).map(c => '<option value="' + _esc(c) + '"' + (c === r.cat ? ' selected' : '') + '>' + (SOUGEI_APPROVE_CAT_ICON[c] || '') + ' ' + _esc(c) + '</option>').join('') + '</select>'
+    + '<div style="' + lab + '">時刻 <span style="font-weight:500;color:#999;">(行き/帰りのみ)</span></div><select id="sgeSlot" style="' + inp + '">' + _sgeSlotOptions(r.dest, r.cat, r.slot) + '</select>'
+    + '<div style="' + lab + '">修正理由 <span style="color:#c62828;">*</span></div><input type="text" id="sgeReason" placeholder="例: 帰り17:00を18:00に訂正" style="' + inp + '">'
+    + '<div style="display:flex;gap:8px;margin-top:14px;">'
+    + '<button onclick="document.getElementById(\'sougeiEditOverlay\').remove()" style="flex:1;background:#f0f0f0;color:#555;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;">やめる</button>'
+    + '<button onclick="saveSougeiEdit(' + r.id + ', false)" style="flex:1;background:#e3f2fd;color:#1565c0;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;">保存</button>'
+    + '<button onclick="saveSougeiEdit(' + r.id + ', true)" style="flex:1.3;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;">保存して承認</button>'
+    + '</div></div>';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  const sl = document.getElementById('sgeSlot'); if (sl) sl.disabled = !(r.cat === '行き' || r.cat === '帰り');
+}
+async function saveSougeiEdit(recId, approveToo) {
+  const r = (window._sougeiPendingRows || []).find(x => String(x.id) === String(recId));
+  if (!r) return;
+  const date = document.getElementById('sgeDate').value;
+  const dest = document.getElementById('sgeDest').value;
+  const cat = document.getElementById('sgeCat').value;
+  const slot = (cat === '行き' || cat === '帰り') ? document.getElementById('sgeSlot').value : '';
+  const reason = String(document.getElementById('sgeReason').value || '').trim();
+  if (!date || !dest || !cat) { showToast('送迎日・送迎先・区分は必須です', 'error'); return; }
+  if ((cat === '行き' || cat === '帰り') && !slot) { showToast('行き/帰りは時刻を選んでください', 'error'); return; }
+  if (date > _sougeiTodayStr()) { showToast('未来の日付には修正できません', 'error'); return; }
+  const changed = [];
+  if (date !== r.date) changed.push('日付 ' + r.date + '→' + date);
+  if (dest !== r.dest) changed.push('送迎先 ' + r.dest + '→' + dest);
+  if (cat !== r.cat) changed.push('区分 ' + r.cat + '→' + cat);
+  if (slot !== (r.slot || '')) changed.push('時刻 ' + (r.slot || 'なし') + '→' + (slot || 'なし'));
+  if (!changed.length && !approveToo) { showToast('変更がありません', 'info'); return; }
+  if (changed.length && !reason) { showToast('修正理由を入力してください', 'error'); return; }
+  try {
+    const body = {};
+    if (changed.length) {
+      // RecordDate は JST 0:00 を UTC で保存 (運転手ポータルの保存形式と同じ +9h 変換で読める)
+      body[SG.date] = new Date(date + 'T00:00:00+09:00').toISOString();
+      body[SG.dest] = dest;
+      body[SG.cat] = cat;
+      body[SG.slot] = slot;
+      // 元の内容と修正者を Memo に残す (監査用)。運転手のメモも残す
+      const stamp = '【担当者修正 ' + _sougeiApproverName() + '】' + changed.join('・') + '／理由: ' + reason;
+      body[SG.memo] = (r.memo ? r.memo + '　' : '') + stamp;
+    }
+    if (approveToo) {
+      body[SG.status] = 'approved';
+      body[SG.approvedBy] = _sougeiApproverName();
+      body[SG.approvedAt] = new Date().toISOString();
+    }
+    await _sougeiPatch(recId, body);
+    const ov = document.getElementById('sougeiEditOverlay'); if (ov) ov.remove();
+    showToast(approveToo ? (changed.length ? '修正して承認しました' : '承認しました') : '修正を保存しました', 'success');
+    loadSougeiPending();
+  } catch (e) {
+    console.error('saveSougeiEdit error:', e);
+    showToast('修正エラー: ' + e.message, 'error');
   }
 }
 
