@@ -5839,6 +5839,14 @@ select.sankyu-edit-input {
           <span onclick="document.getElementById('vehicleSearchInput').value='';applyVehicleFilter();" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);color:#999;cursor:pointer;font-size:14px;">&times;</span>
         </div>
       </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+        <span style="font-size:11px;color:var(--text-light);white-space:nowrap;">並べ替え</span>
+        <select id="vehicleSortSelect" onchange="applyVehicleFilter()" style="flex:1;padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:#fafaff;color:var(--text);">
+          <option value="insp">🛠️ 点検日が近い順</option>
+          <option value="firstReg">📅 初年度登録が古い順</option>
+          <option value="odo">🛣️ 走行距離が多い順</option>
+        </select>
+      </div>
     </div>
     <div id="vehicleListBody"></div>
   </div>
@@ -49398,7 +49406,10 @@ async function loadVehicleList() {
     pickupSel.innerHTML = pickupHtml;
 
     // Store field mapping globally
-    window._vf = { number: fNumber, no1: fNo1, no2: fNo2, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation };
+    var fFirstReg = findProp('初年度') || findProp('First Year');
+    window._vf = { number: fNumber, no1: fNo1, no2: fNo2, carType: fCarType, driver: fDriver, hakensaki: fHakensaki, syaken: fSyaken, color: fColor, usage: fUsage, affiliation: fAffiliation, firstReg: fFirstReg };
+    // 走行距離 = 給油申請(List54)の最新「現在走行距離」をナンバーごとに拾う (非同期・取れたら再描画)
+    _loadVehicleOdoMap().then(function () { if (document.getElementById('vehicleListBody')) applyVehicleFilter(); }).catch(function (e) { console.warn('走行距離マップ取得失敗', e); });
     window._vehicleUsageFilter = '使用';
     window._vehiclePickupFilter = 'all';
 
@@ -49425,6 +49436,45 @@ function filterVehicleUsage(btn, usage) {
 function filterVehiclePickup(val) {
   window._vehiclePickupFilter = val;
   applyVehicleFilter();
+}
+
+// ナンバー(4桁数字) → {odo, date}  給油申請 List54 の最新「現在走行距離」
+var _vehicleOdoMap = null;
+function _vehiclePlateKey(v) {
+  var m = /^\s*(\d+)/.exec(String(v || ''));
+  return m ? String(parseInt(m[1], 10)) : String(v || '').replace(/[\s　]/g, '');
+}
+async function _loadVehicleOdoMap() {
+  if (_vehicleOdoMap) return _vehicleOdoMap;
+  var V = 'OData__x30ca__x30f3__x30d0__x30fc__x30', O = 'OData__x73fe__x5728__x8d70__x884c__x8d';
+  var rows = await spGetAll('ac84ec0e-6853-463a-9469-d94b52940485',
+    '$select=Id,Created,Title,' + V + ',' + O + '&$orderby=Id desc&$top=600');
+  var map = {};
+  rows.forEach(function (it) {
+    var key = _vehiclePlateKey(it[V]);
+    if (!key || !/^\d+$/.test(key)) return;              // 代車など番号なしは対象外
+    var odo = parseFloat(String(it[O] || '').replace(/[^\d.]/g, ''));
+    if (isNaN(odo) || odo <= 0) return;
+    var created = it.Created ? new Date(it.Created).getTime() : 0;
+    // 新しい記録を優先。ただし明らかな入力ミス(直近より小さい値)で上書きはしない
+    if (!map[key] || created > map[key].created) map[key] = { odo: odo, created: created, date: _sougeiJstDate(it.Created) };
+  });
+  _vehicleOdoMap = map;
+  return map;
+}
+function _vehicleOdoOf(item) {
+  var vf = window._vf || {};
+  if (!_vehicleOdoMap) return null;
+  var key = _vehiclePlateKey(item[vf.number] || item['Title'] || '');
+  return _vehicleOdoMap[key] || null;
+}
+function _vehicleFirstRegLabel(item) {
+  var vf = window._vf || {};
+  var v = vf.firstReg ? item[vf.firstReg] : '';
+  if (!v) return '';
+  var d = new Date(v); if (isNaN(d)) return '';
+  var jst = new Date(d.getTime() + 9 * 3600 * 1000);
+  return jst.getUTCFullYear() + '/' + (jst.getUTCMonth() + 1);
 }
 
 function applyVehicleFilter() {
@@ -49465,14 +49515,31 @@ function applyVehicleFilter() {
     var nen = new Date(d); nen.setFullYear(nen.getFullYear() - 1);
     return nen.getTime() >= _todayMs ? nen.getTime() : d.getTime();
   }
-  filtered.sort(function(a, b) {
-    var da = vf.syaken ? (a[vf.syaken] || '') : '';
-    var db = vf.syaken ? (b[vf.syaken] || '') : '';
-    if (!da && !db) return 0;
-    if (!da) return 1;
-    if (!db) return -1;
-    return _vehicleNextInspMs(da) - _vehicleNextInspMs(db);
-  });
+  var sortSel = document.getElementById('vehicleSortSelect');
+  var sortMode = sortSel ? sortSel.value : 'insp';
+  if (sortMode === 'firstReg') {
+    // 初年度登録が古い順 (未登録は最後)
+    filtered.sort(function(a, b) {
+      var ta = vf.firstReg && a[vf.firstReg] ? new Date(a[vf.firstReg]).getTime() : Infinity;
+      var tb = vf.firstReg && b[vf.firstReg] ? new Date(b[vf.firstReg]).getTime() : Infinity;
+      return ta - tb;
+    });
+  } else if (sortMode === 'odo') {
+    // 走行距離が多い順 (給油申請の最新メーター値。無い車両は最後)
+    filtered.sort(function(a, b) {
+      var oa = _vehicleOdoOf(a), ob = _vehicleOdoOf(b);
+      return (ob ? ob.odo : -1) - (oa ? oa.odo : -1);
+    });
+  } else {
+    filtered.sort(function(a, b) {
+      var da = vf.syaken ? (a[vf.syaken] || '') : '';
+      var db = vf.syaken ? (b[vf.syaken] || '') : '';
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return _vehicleNextInspMs(da) - _vehicleNextInspMs(db);
+    });
+  }
 
   document.getElementById('vehicleListCount').textContent = filtered.length + '台';
   renderVehicleCards(filtered);
@@ -49530,6 +49597,17 @@ function renderVehicleCards(items) {
     html += '<div>🧑 ' + escHtml(driver) + '</div>';
     html += '<div>' + escHtml(hakensaki) + '</div>';
     html += '</div>';
+    // 初年度登録 / 走行距離 (給油申請の最新メーター値)
+    var frLabel = _vehicleFirstRegLabel(item);
+    var od = _vehicleOdoOf(item);
+    if (frLabel || od) {
+      var ageTxt = '';
+      if (frLabel) { var fy = parseInt(frLabel, 10); if (fy) ageTxt = ' <span style="color:#aaa;">(' + (today.getFullYear() - fy) + '年)</span>'; }
+      html += '<div style="display:flex;gap:12px;font-size:11px;color:#6b7a90;margin-top:4px;">'
+        + (frLabel ? '<span>📅 初年度 ' + frLabel + ageTxt + '</span>' : '')
+        + (od ? '<span>🛣️ ' + Math.round(od.odo).toLocaleString('ja-JP') + ' km <span style="color:#aaa;">(' + od.date.slice(5).replace('-', '/') + '時点)</span></span>' : '')
+        + '</div>';
+    }
     if (displayStr) {
       html += '<div style="margin-top:6px;">';
       html += '<span style="display:inline-flex;align-items:center;gap:5px;background:' + chipBg + ';color:' + chipFg + ';padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid ' + chipBorder + ';">';
