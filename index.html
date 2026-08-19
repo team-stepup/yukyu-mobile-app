@@ -39093,6 +39093,15 @@ function _kjKm(n) { return Math.round(Number(n || 0)).toLocaleString('ja-JP') + 
 function _kjEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function _kjVeh(v) { return String(v || '').replace(/[\s　]+/g, ' ').trim(); }
 
+function _kjNameKey(n) { return String(n || '').replace(/[\s　]+/g, '').replace(/[ァ-ン]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x60); }); }
+// 入力ミスの疑い (OCRの小数点落ち等): 給油量>100ℓ / 燃費<3 or >40 km/ℓ / 単価<100円/ℓ
+function _kjWarn(r) {
+  var w = [];
+  if (r.liters != null && r.liters > 100) w.push('給油量が大きすぎ');
+  if (r.nenpi != null && (r.nenpi < 3 || r.nenpi > 40)) w.push('燃費が異常');
+  if (r.liters && r.amount && r.amount / r.liters < 100) w.push('単価<100円/ℓ');
+  return w.join('・');
+}
 function canViewKyuyuJisseki() {
   try {
     if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
@@ -39200,11 +39209,20 @@ function renderKyuyuJisseki(recs, sougeiRecs, tankaMap) {
     _kjDrivers = [];
     return;
   }
+  // 旧Forms分(社員番号なし・申請者名のみ)は、同じ月に社員番号付きで申請している同名の人へ寄せる
+  // (氏名の空白/全角半角ゆれを無視して照合。例: 「福田 ロドルフォ」→ 111356 福田　ロドルフォ)
+  var nameToNo = {};
+  recs.forEach(function (r) { if (r.shainNo) nameToNo[_kjNameKey(r.name)] = r.shainNo; });
+  recs.forEach(function (r) {
+    if (!r.shainNo && nameToNo[_kjNameKey(r.name)]) r.shainNo = nameToNo[_kjNameKey(r.name)];
+    r.warn = _kjWarn(r);
+  });
   var per = {};
   recs.forEach(function (r) {
     var k = r.shainNo || r.name;
-    var d = per[k] = per[k] || { key: k, shainNo: r.shainNo, name: r.name, count: 0, km: 0, liters: 0, amount: 0, nenpiKm: 0, nenpiL: 0, vehicles: {}, noDist: 0 };
+    var d = per[k] = per[k] || { key: k, shainNo: r.shainNo, name: r.name, count: 0, km: 0, liters: 0, amount: 0, nenpiKm: 0, nenpiL: 0, vehicles: {}, noDist: 0, warns: 0 };
     d.count++;
+    if (r.warn) d.warns++;
     if (r.dist) { d.km += r.dist; } else d.noDist++;
     if (r.liters) d.liters += r.liters;
     if (r.amount) d.amount += r.amount;
@@ -39231,7 +39249,8 @@ function renderKyuyuJisseki(recs, sougeiRecs, tankaMap) {
     + '<div style="display:flex;gap:6px;">' + stat('総走行距離', _kjKm(gKm)) + stat('給油量', Math.round(gL).toLocaleString('ja-JP') + ' ℓ') + stat('給油代', _kjYen(gAmt)) + stat('送迎給料(承認済)', _kjYen(gPay)) + '</div>'
     + '</div>'
     + '<div style="margin-top:6px;font-size:10.5px;color:#8b98ab;line-height:1.5;">※総走行距離＝その月に給油した各回の「給油間距離」(前回給油からの距離)の合計。送迎給料＝送迎記録の承認済回数×給与体系（送迎実績画面と同じ）。'
-    + (anyMissing ? '<span style="color:#8d6e00;">給与体系未登録の運転手は ' + SGJ_DEFAULT_TANKA + '円で仮計算(★)。</span>' : '') + '</div>';
+    + (anyMissing ? '<span style="color:#8d6e00;">給与体系未登録の運転手は ' + SGJ_DEFAULT_TANKA + '円で仮計算(★)。</span>' : '')
+    + (drivers.some(function (d) { return d.warns; }) ? '<span style="color:#c62828;">⚠＝入力ミスの疑い(給油量/燃費が異常)。明細で確認しリストを修正してください。</span>' : '') + '</div>';
 
   listEl.innerHTML = drivers.map(function (d, i) {
     var vehTxt = Object.keys(d.vehicles).sort(function (a, b) { return d.vehicles[b] - d.vehicles[a]; }).join(' ・ ');
@@ -39250,7 +39269,8 @@ function renderKyuyuJisseki(recs, sougeiRecs, tankaMap) {
       +     '<div style="font-size:11px;color:#6b7a90;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🚗 ' + _kjEsc(vehTxt || '―') + '</div>'
       +   '</div>'
       +   '<div style="text-align:right;flex-shrink:0;"><div style="font-size:18px;font-weight:800;color:#1a3c8f;line-height:1.1;">' + _kjKm(d.km) + '</div>'
-      +     '<div style="font-size:10.5px;color:#8b98ab;">給油 ' + d.count + '回' + (d.noDist ? '（距離なし' + d.noDist + '）' : '') + '</div></div>'
+      +     '<div style="font-size:10.5px;color:#8b98ab;">給油 ' + d.count + '回' + (d.noDist ? '（距離なし' + d.noDist + '）' : '')
+      +       (d.warns ? ' <span style="color:#c62828;font-weight:800;">⚠' + d.warns + '</span>' : '') + '</div></div>'
       +   '<span style="font-size:18px;color:#c3ccd8;">›</span>'
       + '</div>'
       + '<div style="display:flex;gap:5px;margin-top:7px;">'
@@ -39290,6 +39310,7 @@ function kjOpenDetail(idx) {
       +   '<div style="flex:1;min-width:0;font-size:11.5px;color:#6b7a90;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🚗 ' + _kjEsc(r.vehicle || '―') + (r.purpose && r.purpose !== 'ガソリン給油' ? ' ・ ' + _kjEsc(r.purpose) : '') + '</div>'
       +   '<div style="font-size:14px;font-weight:800;color:#c0392b;white-space:nowrap;">' + (r.amount != null ? _kjYen(r.amount) : '―') + '</div>'
       + '</div>'
+      + (r.warn ? '<div style="margin-top:4px;background:#fdecea;color:#c62828;border-radius:8px;padding:3px 8px;font-size:11px;font-weight:700;">⚠ ' + _kjEsc(r.warn) + '（レシートを確認して <a href="' + SP_SITE_URL + '/Lists/List54/DispForm.aspx?ID=' + r.id + '" target="_blank" rel="noopener" style="color:#c62828;">リストを修正</a>）</div>' : '')
       + '<div style="display:flex;gap:10px;margin-top:5px;font-size:11.5px;color:#4a5568;flex-wrap:wrap;">'
       +   '<span>⛽ ' + (r.liters != null ? r.liters + ' ℓ' : '―') + '</span>'
       +   '<span>📏 ' + (r.dist != null ? _kjKm(r.dist) : '<span style="color:#b0b8c4;">距離なし</span>') + (r.odo != null ? ' <span style="color:#8b98ab;">(' + Math.round(r.odo).toLocaleString('ja-JP') + ' km)</span>' : '') + '</span>'
