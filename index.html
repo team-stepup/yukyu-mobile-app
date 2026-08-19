@@ -7011,7 +7011,14 @@ function refreshApprovalBadges() {
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible') {
     checkForUpdate();
-    if (accessToken && Date.now() > accessTokenExpiresAt - 15 * 60 * 1000) refreshSpTokenSilent();
+    if (accessToken && Date.now() > accessTokenExpiresAt - 15 * 60 * 1000) {
+      refreshSpTokenSilent().then(function(t) {
+        // 復帰時に静かな更新もできない = Microsoftのセッション(最長24h)切れ。
+        // ユーザーが操作を始めてから飛ばされるより、開いた直後のここで再認証しておく方が安全
+        // (iPhone A2HS で日中に突然ログイン画面へ戻される体感を減らす)
+        if (!t && navigator.onLine && Date.now() >= accessTokenExpiresAt) { accessToken = null; acquireToken(); }
+      });
+    }
     if (typeof updateTeamsBadge === 'function') updateTeamsBadge();
     refreshApprovalBadges();   // 復帰時に承認待ち件数を取り直す
   }
