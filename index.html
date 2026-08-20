@@ -39159,7 +39159,7 @@ function arariCalcFromSeikyu() {
   var s = _arariNum('arariSeikyuIn');
   var out = document.getElementById('arariSeikyuOut'), note = document.getElementById('arariSeikyuNote');
   if (!s) { out.textContent = '―'; note.textContent = ''; return; }
-  var k = Math.floor(s * ARARI_RATE);
+  var k = Math.floor(s * 7 / 10);   // ×0.7 (浮動小数点誤差を避けて分数で)
   out.textContent = _arariFmt(k);
   note.textContent = s.toLocaleString('ja-JP') + '円 × 0.7 ＝ ' + k.toLocaleString('ja-JP') + '円（端数切捨て・これを超えると粗利30%割れ）';
 }
@@ -39167,9 +39167,9 @@ function arariCalcFromKyuyo() {
   var k = _arariNum('arariKyuyoIn');
   var out = document.getElementById('arariKyuyoOut'), note = document.getElementById('arariKyuyoNote');
   if (!k) { out.textContent = '―'; note.textContent = ''; return; }
-  var sExact = k / ARARI_RATE;
-  var s = Math.ceil(sExact);
-  var s10 = Math.ceil(sExact / 10) * 10;
+  var sExact = k * 10 / 7;          // ÷0.7 (1400÷0.7=2000.0000000000002 → 2001 になる誤差を回避)
+  var s = Math.ceil(sExact - 1e-9);
+  var s10 = Math.ceil(sExact / 10 - 1e-9) * 10;
   out.textContent = _arariFmt(s);
   note.textContent = k.toLocaleString('ja-JP') + '円 ÷ 0.7 ＝ ' + s.toLocaleString('ja-JP') + '円（切上げ）'
     + (s10 !== s ? '　交渉は10円単位なら ' + s10.toLocaleString('ja-JP') + '円' : '');
@@ -39182,7 +39182,7 @@ function arariCheck() {
   out.textContent = (Math.round(r * 10) / 10) + '%';
   out.style.color = r >= 30 ? '#04724a' : (r >= 27 ? '#e65100' : '#c62828');
   if (r >= 30) note.textContent = '✅ 粗利30%を確保できています（粗利 ' + Math.round(s - k).toLocaleString('ja-JP') + '円/時）';
-  else note.textContent = '⚠ 30%まで不足。この給料なら請求 ' + Math.ceil(k / ARARI_RATE).toLocaleString('ja-JP') + '円 が必要／この請求なら給料上限 ' + Math.floor(s * ARARI_RATE).toLocaleString('ja-JP') + '円';
+  else note.textContent = '⚠ 30%まで不足。この給料なら請求 ' + Math.ceil(k * 10 / 7 - 1e-9).toLocaleString('ja-JP') + '円 が必要／この請求なら給料上限 ' + Math.floor(s * 7 / 10).toLocaleString('ja-JP') + '円';
 }
 function _arariChip(v, inputId, fn) {
   return '<button onclick="document.getElementById(\'' + inputId + '\').value=\'' + v + '\';' + fn + '()" '
