@@ -5521,6 +5521,10 @@ select.sankyu-edit-input {
         <span id="hakenExpiredBadge" class="ql-badge" style="background:#e53935;display:none;top:4px;right:4px;"></span>
         <span id="hakenSoonBadge" class="ql-badge" style="background:#f9a825;display:none;top:4px;right:28px;"></span>
       </button>
+      <button class="quick-link-btn" onclick="switchScreen('arariCalcScreen')">
+        <span class="ql-icon">🧮</span>
+        <span class="ql-text">粗利計算</span>
+      </button>
     </div>
 
     <!-- 最低賃金チェック＋10〜11月リマインダーバナー -->
@@ -6278,6 +6282,70 @@ select.sankyu-edit-input {
     <div style="padding:8px 12px 0;font-size:11.5px;color:var(--text-light);">運転手がポータルで記録した送迎実績です。内容を確認して承認してください（承認後は運転手本人は取り消せません）。間違いは「修正」で内容を直してから承認、または「取消」で無効にできます。</div>
     <div id="sougeiPendingList" style="padding:8px 12px;"></div>
     <div id="sougeiApprovedList" style="padding:8px 12px;display:none;"></div>
+  </div>
+
+  <!-- Screen: 30%粗利計算機 (請求⇄給料の即時換算。2026-08-20) -->
+  <div class="screen" id="arariCalcScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">🧮 30% 粗利計算</h2>
+    </div>
+    <div style="padding:10px 12px 24px;max-width:480px;margin:0 auto;">
+      <div style="font-size:11.5px;color:var(--text-light);margin-bottom:10px;">粗利30%基準：<b>請求 × 0.7 ＝ 給料</b>　／　<b>給料 ÷ 0.7 ＝ 請求</b></div>
+
+      <!-- 請求 → 給料 -->
+      <div style="background:#fff;border:1px solid #e2e8f0;border-left:5px solid #1a3c8f;border-radius:14px;padding:13px 14px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,.05);">
+        <div style="font-size:13px;font-weight:800;color:#1a3c8f;margin-bottom:8px;">📄 請求から → 支払える給料</div>
+        <div id="arariSeikyuChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;position:relative;">
+            <input id="arariSeikyuIn" type="text" inputmode="numeric" placeholder="請求単価" oninput="arariCalcFromSeikyu()" style="width:100%;box-sizing:border-box;border:2px solid #cfd8e8;border-radius:10px;padding:11px 30px 11px 12px;font-size:18px;font-weight:800;color:#1a3c8f;text-align:right;">
+            <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:#8b98ab;">円</span>
+          </div>
+          <span style="font-size:18px;color:#8b98ab;">→</span>
+          <div style="flex:1;text-align:center;background:#f0f7f2;border-radius:10px;padding:8px 4px;">
+            <div style="font-size:10px;color:#04724a;">給料（時給）</div>
+            <div id="arariSeikyuOut" style="font-size:22px;font-weight:800;color:#04724a;white-space:nowrap;">―</div>
+          </div>
+        </div>
+        <div id="arariSeikyuNote" style="font-size:11px;color:#8b98ab;margin-top:6px;"></div>
+      </div>
+
+      <!-- 給料 → 請求 -->
+      <div style="background:#fff;border:1px solid #e2e8f0;border-left:5px solid #04724a;border-radius:14px;padding:13px 14px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,.05);">
+        <div style="font-size:13px;font-weight:800;color:#04724a;margin-bottom:8px;">💰 給料から → 必要な請求</div>
+        <div id="arariKyuyoChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;position:relative;">
+            <input id="arariKyuyoIn" type="text" inputmode="numeric" placeholder="給料時給" oninput="arariCalcFromKyuyo()" style="width:100%;box-sizing:border-box;border:2px solid #cfe3d8;border-radius:10px;padding:11px 30px 11px 12px;font-size:18px;font-weight:800;color:#04724a;text-align:right;">
+            <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:#8b98ab;">円</span>
+          </div>
+          <span style="font-size:18px;color:#8b98ab;">→</span>
+          <div style="flex:1;text-align:center;background:#eef3ff;border-radius:10px;padding:8px 4px;">
+            <div style="font-size:10px;color:#1a3c8f;">請求単価</div>
+            <div id="arariKyuyoOut" style="font-size:22px;font-weight:800;color:#1a3c8f;white-space:nowrap;">―</div>
+          </div>
+        </div>
+        <div id="arariKyuyoNote" style="font-size:11px;color:#8b98ab;margin-top:6px;"></div>
+      </div>
+
+      <!-- 粗利率チェック -->
+      <div style="background:#fff;border:1px solid #e2e8f0;border-left:5px solid #f57c00;border-radius:14px;padding:13px 14px;box-shadow:0 2px 6px rgba(0,0,0,.05);">
+        <div style="font-size:13px;font-weight:800;color:#e65100;margin-bottom:8px;">📊 いまの契約は何%？（請求と給料を入力）</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;position:relative;">
+            <input id="arariChkSeikyu" type="text" inputmode="numeric" placeholder="請求" oninput="arariCheck()" style="width:100%;box-sizing:border-box;border:1.5px solid #cfd8e8;border-radius:10px;padding:10px 26px 10px 10px;font-size:15px;font-weight:800;color:#1a3c8f;text-align:right;">
+            <span style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:11px;color:#8b98ab;">円</span>
+          </div>
+          <div style="flex:1;position:relative;">
+            <input id="arariChkKyuyo" type="text" inputmode="numeric" placeholder="給料" oninput="arariCheck()" style="width:100%;box-sizing:border-box;border:1.5px solid #cfe3d8;border-radius:10px;padding:10px 26px 10px 10px;font-size:15px;font-weight:800;color:#04724a;text-align:right;">
+            <span style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:11px;color:#8b98ab;">円</span>
+          </div>
+          <div id="arariChkOut" style="flex:1;text-align:center;font-size:20px;font-weight:800;color:#8b98ab;white-space:nowrap;">―</div>
+        </div>
+        <div id="arariChkNote" style="font-size:11px;color:#8b98ab;margin-top:6px;">粗利率 = (請求 − 給料) ÷ 請求。30%以上が目安。</div>
+      </div>
+    </div>
   </div>
 
   <!-- Screen: 給油実績 (役員専用・SP List54「ガソリン代払い戻し」を運転手別×月別に集計。2026-08-19) -->
@@ -39074,6 +39142,57 @@ function _setSougeiTabBadge() {
   b.textContent = n;
   b.classList.toggle('zero', n === 0);
 }
+
+// ============================================================
+// 🧮 30%粗利計算機 — 2026-08-20 追加
+//   請求×0.7=給料 / 給料÷0.7=請求。★恒常ルール(適正請求≈実時給÷0.7)を1タップ化。
+//   端数: 支払える給料=切捨て(払い過ぎ防止) / 必要な請求=切上げ(粗利30%割れ防止)。
+// ============================================================
+var ARARI_RATE = 0.7;
+function _arariNum(id) {
+  var v = String(document.getElementById(id).value || '').replace(/[^\d.]/g, '');
+  var n = parseFloat(v);
+  return (isNaN(n) || n <= 0) ? null : n;
+}
+function _arariFmt(n) { return Math.round(n).toLocaleString('ja-JP') + '円'; }
+function arariCalcFromSeikyu() {
+  var s = _arariNum('arariSeikyuIn');
+  var out = document.getElementById('arariSeikyuOut'), note = document.getElementById('arariSeikyuNote');
+  if (!s) { out.textContent = '―'; note.textContent = ''; return; }
+  var k = Math.floor(s * ARARI_RATE);
+  out.textContent = _arariFmt(k);
+  note.textContent = s.toLocaleString('ja-JP') + '円 × 0.7 ＝ ' + k.toLocaleString('ja-JP') + '円（端数切捨て・これを超えると粗利30%割れ）';
+}
+function arariCalcFromKyuyo() {
+  var k = _arariNum('arariKyuyoIn');
+  var out = document.getElementById('arariKyuyoOut'), note = document.getElementById('arariKyuyoNote');
+  if (!k) { out.textContent = '―'; note.textContent = ''; return; }
+  var sExact = k / ARARI_RATE;
+  var s = Math.ceil(sExact);
+  var s10 = Math.ceil(sExact / 10) * 10;
+  out.textContent = _arariFmt(s);
+  note.textContent = k.toLocaleString('ja-JP') + '円 ÷ 0.7 ＝ ' + s.toLocaleString('ja-JP') + '円（切上げ）'
+    + (s10 !== s ? '　交渉は10円単位なら ' + s10.toLocaleString('ja-JP') + '円' : '');
+}
+function arariCheck() {
+  var s = _arariNum('arariChkSeikyu'), k = _arariNum('arariChkKyuyo');
+  var out = document.getElementById('arariChkOut'), note = document.getElementById('arariChkNote');
+  if (!s || !k) { out.textContent = '―'; out.style.color = '#8b98ab'; note.textContent = '粗利率 = (請求 − 給料) ÷ 請求。30%以上が目安。'; return; }
+  var r = (s - k) / s * 100;
+  out.textContent = (Math.round(r * 10) / 10) + '%';
+  out.style.color = r >= 30 ? '#04724a' : (r >= 27 ? '#e65100' : '#c62828');
+  if (r >= 30) note.textContent = '✅ 粗利30%を確保できています（粗利 ' + Math.round(s - k).toLocaleString('ja-JP') + '円/時）';
+  else note.textContent = '⚠ 30%まで不足。この給料なら請求 ' + Math.ceil(k / ARARI_RATE).toLocaleString('ja-JP') + '円 が必要／この請求なら給料上限 ' + Math.floor(s * ARARI_RATE).toLocaleString('ja-JP') + '円';
+}
+function _arariChip(v, inputId, fn) {
+  return '<button onclick="document.getElementById(\'' + inputId + '\').value=\'' + v + '\';' + fn + '()" '
+    + 'style="background:#f4f6fb;border:1px solid #d7dfec;border-radius:16px;padding:5px 12px;font-size:12.5px;font-weight:700;color:#33445c;cursor:pointer;">' + v.toLocaleString('ja-JP') + '</button>';
+}
+(function initArariChips() {
+  var sc = document.getElementById('arariSeikyuChips'), kc = document.getElementById('arariKyuyoChips');
+  if (sc) sc.innerHTML = [1700, 1800, 1900, 2000, 2100].map(function (v) { return _arariChip(v, 'arariSeikyuIn', 'arariCalcFromSeikyu'); }).join('');
+  if (kc) kc.innerHTML = [1212, 1250, 1300, 1400, 1500].map(function (v) { return _arariChip(v, 'arariKyuyoIn', 'arariCalcFromKyuyo'); }).join('');
+})();
 
 // ============================================================
 // ⛽ 給油実績 (役員専用・運転手別×月別) — 2026-08-19 追加
