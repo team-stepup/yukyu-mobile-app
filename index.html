@@ -13155,7 +13155,7 @@ function renderMaicarTsukinASTI(emp, opts) {
           '<td style="' + TDL + '">人身傷害</td>' +
           '<td style="' + TDC + '" colspan="2">' + v(jinshin) + (jinshin && jinshin.indexOf('万円')<0 ? '万円' : '') + '</td>' +
         '</tr>' +
-        // 条件 (対物) + 車両 (車両保険は手書きで記入するため自動入力しない)
+        // 条件 (対物) + 車両 (社員データの「車両保険」を反映。0 も表示する。未登録のみ手書き用の空欄)
         //   修正: 以前 colspan=3 で row が 10 col 占有 (overflow) していたため colspan=2 に。
         '<tr>' +
           ckEmpty +
@@ -13163,7 +13163,11 @@ function renderMaicarTsukinASTI(emp, opts) {
           '<td style="' + TDL + '">条件</td>' +
           '<td style="' + TDC + '" colspan="2">1,000万円以上</td>' +
           '<td style="' + TDL + '">車両</td>' +
-          '<td style="' + TDC + '" colspan="2">　　　　万円　（免責　　　万円）</td>' +
+          '<td style="' + TDC + '" colspan="2">' +
+            (carHoken !== '' ?
+              '<span style="display:inline-block;min-width:44px;text-align:center;border-bottom:0.4pt dotted #777;">' + v(carHoken).replace(/万円.*$/, '') + '</span> 万円　（免責　　　万円）'
+              : '　　　　万円　（免責　　　万円）') +
+          '</td>' +
         '</tr>' +
 
         // 運転免許証 (3行)
@@ -57034,10 +57038,27 @@ async function _geocodeGSI(addr) {
     if (!resp.ok) return null;
     var data = await resp.json();
     if (!Array.isArray(data) || data.length === 0) return null;
-    var coords = data[0].geometry && data[0].geometry.coordinates;
-    if (!coords || coords.length < 2) return null;
-    return { lat: coords[1], lng: coords[0], src: 'GSI' };
+    // 問い合わせが市より下の住所(町名以下)を持つのに、結果タイトルが「◯◯県◯◯市」止まり
+    // = 市代表点への丸め (旧区名住所で発生。地図が新浜松駅付近に飛ぶ) → その候補は捨てる
+    var qHasTown = /[市郡区].+/.test(String(addr).replace(/[\s　]/g, ''));
+    for (var i = 0; i < data.length; i++) {
+      var title = String((data[i].properties && data[i].properties.title) || '');
+      if (qHasTown && /[市郡]$/.test(title)) continue;   // 丸め候補はスキップ
+      var coords = data[i].geometry && data[i].geometry.coordinates;
+      if (coords && coords.length >= 2) return { lat: coords[1], lng: coords[0], src: 'GSI', title: title };
+    }
+    return null;
   } catch (e) { return null; }
+}
+// 浜松市の旧区名 (2024-01-01 に 7区→3区) を現行区名に置換した住所バリエーションを返す。
+// GSI は旧区名を解決できず市代表点に丸めるため、中央区/浜名区の両方で試す。
+function _hamamatsuKuVariants(addr) {
+  var out = [];
+  var m = /浜松市(中区|東区|西区|南区|北区|浜北区)/.exec(addr || '');
+  if (!m) return out;
+  var news = (m[1] === '浜北区') ? ['浜名区'] : (m[1] === '北区') ? ['中央区', '浜名区'] : ['中央区'];
+  news.forEach(function (ku) { out.push(addr.replace('浜松市' + m[1], '浜松市' + ku)); });
+  return out;
 }
 async function _geocodeNominatim(addr) {
   if (!addr) return null;
@@ -57058,6 +57079,22 @@ async function _geocodeJp(addr) {
   if (window._sougeiGeocodeCache[key] !== undefined) return window._sougeiGeocodeCache[key];
   // 1. GSI で正規住所そのまま
   var pos = await _geocodeGSI(key);
+  // 1.5 浜松市の旧区名 (北区/南区等) は GSI が市代表点に丸める → 現行区名に置換して再試行
+  if (!pos) {
+    var kuVars = _hamamatsuKuVariants(key);
+    for (var kvi = 0; kvi < kuVars.length && !pos; kvi++) pos = await _geocodeGSI(kuVars[kvi]);
+  }
+  // 1.7 建物名・部屋番号 (最初の空白以降) を落として再試行
+  if (!pos) {
+    var head = key.split(/[\s　]+/)[0];
+    if (head && head !== key) {
+      pos = await _geocodeGSI(head);
+      if (!pos) {
+        var kuVars2 = _hamamatsuKuVariants(head);
+        for (var kvj = 0; kvj < kuVars2.length && !pos; kvj++) pos = await _geocodeGSI(kuVars2[kvj]);
+      }
+    }
+  }
   // 2. GSI で番地以降を削ったもので再試行 (例: "...町1-2-3 ハイツ" → "...町")
   if (!pos) {
     var rough = key
