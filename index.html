@@ -12506,33 +12506,37 @@ async function _maicarRenderMapImage(srcPos, dstPos, coords) {
   var padLng = (maxLng - minLng) * 0.15 || 0.005;
   minLat -= padLat; maxLat += padLat; minLng -= padLng; maxLng += padLng;
 
-  // 2. 出力サイズ (経路図ボックスの縦横比に合わせる: 約1.85:1)
-  var W = 1000, H = 540;
+  // 2. 出力サイズ = 表示ボックス (180mm×110mm) と同じ縦横比。
+  //    以前は 1000×540 固定 + object-fit:cover だったため、比率のズレ分だけ上下(または左右)が
+  //    切り取られ、南北に長い経路が枠からはみ出していた。比率を一致させれば cover でも無劣化。
+  var W = 1000, H = Math.round(1000 * 110 / 180);   // ≒611
 
-  // 3. ズーム決定 (bbox が W×H に収まる最大ズーム)
+  // 3. ズーム決定 (bbox が W×H の 92% に収まる最大ズーム = 全経路+余白が必ず枠内)
   var zoom = 10;
   for (var z = 17; z >= 5; z--) {
     var pxW = (_maicarLonToTileX(maxLng, z) - _maicarLonToTileX(minLng, z)) * 256;
     var pxH = (_maicarLatToTileY(minLat, z) - _maicarLatToTileY(maxLat, z)) * 256;
-    if (pxW <= W && pxH <= H) { zoom = z; break; }
+    if (pxW <= W * 0.92 && pxH <= H * 0.92) { zoom = z; break; }
   }
 
-  // 4. タイル範囲
-  var x1 = Math.floor(_maicarLonToTileX(minLng, zoom));
-  var x2 = Math.floor(_maicarLonToTileX(maxLng, zoom));
-  var y1 = Math.floor(_maicarLatToTileY(maxLat, zoom));
-  var y2 = Math.floor(_maicarLatToTileY(minLat, zoom));
+  // 4. 出力窓 = bbox 中心の W×H (ワールドピクセル基準)。窓を覆うタイルだけ読み込む。
+  //    以前のように「bboxを含むタイルのみ→後で切り抜き」だと、タイル境界の位置次第で
+  //    切り抜き窓がずれて経路が枠外に出ることがあった。
+  var cxW = (_maicarLonToTileX(minLng, zoom) + _maicarLonToTileX(maxLng, zoom)) / 2 * 256;
+  var cyW = (_maicarLatToTileY(maxLat, zoom) + _maicarLatToTileY(minLat, zoom)) / 2 * 256;
+  var x0 = cxW - W / 2, y0 = cyW - H / 2;   // 窓左上 (ワールドpx)
+  var x1 = Math.floor(x0 / 256), x2 = Math.floor((x0 + W) / 256);
+  var y1 = Math.floor(y0 / 256), y2 = Math.floor((y0 + H) / 256);
   var tilesX = x2 - x1 + 1, tilesY = y2 - y1 + 1;
   if (tilesX * tilesY > 80) throw new Error('範囲が広すぎます');
 
-  var canvasW = tilesX * 256, canvasH = tilesY * 256;
   var canvas = document.createElement('canvas');
-  canvas.width = canvasW; canvas.height = canvasH;
+  canvas.width = W; canvas.height = H;
   var ctx = canvas.getContext('2d');
   ctx.fillStyle = '#dde4ea';
-  ctx.fillRect(0, 0, canvasW, canvasH);
+  ctx.fillRect(0, 0, W, H);
 
-  // 5. 国土地理院タイル (std) を並列読み込み (CORS対応)
+  // 5. 国土地理院タイル (std) を並列読み込み (CORS対応) — 窓位置へ直接描画
   var promises = [];
   for (var tx = x1; tx <= x2; tx++) {
     for (var ty = y1; ty <= y2; ty++) {
@@ -12541,7 +12545,7 @@ async function _maicarRenderMapImage(srcPos, dstPos, coords) {
           var img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = function() {
-            try { ctx.drawImage(img, (_tx - x1) * 256, (_ty - y1) * 256); } catch (_) {}
+            try { ctx.drawImage(img, Math.round(_tx * 256 - x0), Math.round(_ty * 256 - y0)); } catch (_) {}
             resolve(true);
           };
           img.onerror = function() { resolve(false); };
@@ -12553,9 +12557,9 @@ async function _maicarRenderMapImage(srcPos, dstPos, coords) {
   var loadResults = await Promise.all(promises);
   if (loadResults.filter(Boolean).length === 0) throw new Error('地図タイル読み込み失敗');
 
-  // 6. lat/lng → canvas pixel 投影
+  // 6. lat/lng → canvas pixel 投影 (窓基準)
   function proj(lng, lat) {
-    return { x: (_maicarLonToTileX(lng, zoom) - x1) * 256, y: (_maicarLatToTileY(lat, zoom) - y1) * 256 };
+    return { x: _maicarLonToTileX(lng, zoom) * 256 - x0, y: _maicarLatToTileY(lat, zoom) * 256 - y0 };
   }
 
   // 7. ポリライン描画 (白縁取り + 青本線)
@@ -12587,25 +12591,8 @@ async function _maicarRenderMapImage(srcPos, dstPos, coords) {
   marker(srcPos.lng, srcPos.lat, '#2e7d32', '自');
   marker(dstPos.lng, dstPos.lat, '#c62828', '会');
 
-  // 9. W×H でセンタリングクロップ
-  //    バグ修正: ソースキャンバスが W×H より小さい場合、出力に黒い
-  //    領域が出てしまう (drawImage がソース外をフェッチして黒で埋める)。
-  //    対策: 出力サイズはソースキャンバス内に収まる範囲に縮小。
-  //         CSS の object-fit:cover で表示時にボックスに合わせる。
-  var p1 = proj(minLng, minLat), p2 = proj(maxLng, maxLat);
-  var cx = (p1.x + p2.x) / 2, cy = (p1.y + p2.y) / 2;
-  var outW = Math.min(W, canvasW);
-  var outH = Math.min(H, canvasH);
-  var cropX = Math.max(0, Math.min(canvasW - outW, cx - outW / 2));
-  var cropY = Math.max(0, Math.min(canvasH - outH, cy - outH / 2));
-  var out = document.createElement('canvas');
-  out.width = outW; out.height = outH;
-  var outCtx = out.getContext('2d');
-  outCtx.fillStyle = '#dde4ea';
-  outCtx.fillRect(0, 0, outW, outH);
-  outCtx.drawImage(canvas, cropX, cropY, outW, outH, 0, 0, outW, outH);
-
-  try { return out.toDataURL('image/jpeg', 0.85); }
+  // 9. 窓 = 出力そのもの (クロップ不要。経路全体+余白が常に枠内に収まる)
+  try { return canvas.toDataURL('image/jpeg', 0.85); }
   catch (e) { throw new Error('画像化失敗 (CORS): ' + e.message); }
 }
 
