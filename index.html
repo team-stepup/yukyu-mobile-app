@@ -6302,6 +6302,19 @@ select.sankyu-edit-input {
     </div>
   </div>
 
+  <!-- 📄 スキルシート 編集フォーム (プレビュー・手修正 → PDF作成) -->
+  <div class="screen" id="skillsheetFormScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('skillsheetScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 一覧</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📄 スキルシート 編集</h2>
+    </div>
+    <div style="padding:10px 12px 40px;max-width:520px;margin:0 auto;">
+      <div style="font-size:11.5px;color:var(--text-light);margin-bottom:10px;">内容を確認・修正して「PDF作成」を押してください。外国語表記は自動で日本語化済みです（氏名・会社名のカタカナ化はここで手入力）。空欄はシートに印字されません。</div>
+      <div id="skillsheetFormBody"></div>
+      <button id="ssfMakeBtn" onclick="skillsheetSubmitPdf(this)" style="width:100%;margin-top:14px;background:linear-gradient(135deg,#7c4dff,#5e35b1);color:#fff;border:none;border-radius:14px;padding:14px;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(94,53,177,.3);">📄 PDF作成</button>
+    </div>
+  </div>
+
   <div class="screen" id="arariCalcScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
@@ -34737,7 +34750,7 @@ async function skillsheetLoadList(query) {
       return;
     }
     box.innerHTML = cands.map(function(c) {
-      return '<button onclick="skillsheetMakePdf(' + Number(c.id1) + ', this)" style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #6a3fb5;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.05);">'
+      return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #6a3fb5;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.05);">'
         + '<span style="font-weight:700;">' + _esc(c.name) + '</span>'
         + '<span style="font-size:11.5px;color:#94a3b8;">' + _esc(c.date || '') + '</span></button>';
     }).join('');
@@ -34745,15 +34758,91 @@ async function skillsheetLoadList(query) {
     box.innerHTML = '<div style="color:#c62828;padding:16px;text-align:center;">読み込み失敗: ' + _esc(String(e.message || e)) + '</div>';
   }
 }
-async function skillsheetMakePdf(id1, btn) {
+// 一覧タップ → 初期値(日本語化済み)を取得して編集フォームへ
+async function skillsheetOpenForm(id1, btn) {
   var orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span style="color:#6a3fb5;font-weight:700;">📄 PDF作成中…</span>'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span style="color:#6a3fb5;font-weight:700;">読み込み中…</span>'; }
   try {
     var token = await getToken();
     var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pdf', id1: id1 })
+      body: JSON.stringify({ action: 'data', id1: id1 })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    skillsheetRenderForm(data.fields || {});
+    switchScreen('skillsheetFormScreen');
+  } catch (e) {
+    alert('データ取得に失敗しました: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
+function _ssfInput(id, label, val, flex) {
+  return '<div style="' + (flex ? 'flex:1;min-width:0;' : '') + 'margin-bottom:8px;">'
+    + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;">' + label + '</div>'
+    + '<input id="ssf_' + id + '" type="text" value="' + _esc(val || '') + '"'
+    + ' style="width:100%;box-sizing:border-box;padding:9px 10px;font-size:15px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">'
+    + '</div>';
+}
+
+function skillsheetRenderForm(F) {
+  var box = document.getElementById('skillsheetFormBody');
+  if (!box) return;
+  var h = '';
+  h += _ssfInput('name', '氏名（カタカナ推奨）', F.name);
+  h += _ssfInput('furigana', 'フリガナ', F.furigana);
+  h += '<div style="display:flex;gap:8px;">' + _ssfInput('sex', '性別', F.sex, 1) + _ssfInput('age', '年齢', F.age, 1) + _ssfInput('no', 'No.（社員番号等）', F.no, 1) + '</div>';
+  h += '<div style="display:flex;gap:8px;">' + _ssfInput('marital', '配偶者', F.marital, 1) + _ssfInput('commute', '通勤手段', F.commute, 1) + '</div>';
+  h += _ssfInput('addr', '住所', F.addr);
+  h += _ssfInput('edu', '最終学歴（例: 高校卒業）', F.edu);
+  h += '<div style="display:flex;gap:8px;">' + _ssfInput('zangyo', '残業', F.zangyo, 1) + _ssfInput('sat', '土曜日', F.sat, 1) + '</div>';
+  h += '<div style="display:flex;gap:8px;">' + _ssfInput('hayade', '早出', F.hayade, 1) + _ssfInput('kotai', '交代', F.kotai, 1) + '</div>';
+  h += _ssfInput('license', '資格', F.license);
+  h += '<div style="display:flex;gap:8px;">' + _ssfInput('uwagi', '作業服 上着', F.uwagi, 1) + _ssfInput('pants', 'ズボン', F.pants, 1) + _ssfInput('shoes', '靴', F.shoes, 1) + '</div>';
+  var jobs = F.jobs || [];
+  h += '<div style="font-size:12.5px;font-weight:800;color:#5e35b1;margin:12px 0 6px;">職歴（会社名もここで日本語に直せます）</div>';
+  for (var i = 0; i < 5; i++) {
+    var jb = jobs[i] || {};
+    h += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:8px 10px 2px;margin-bottom:8px;">'
+      + '<div style="display:flex;gap:8px;">' + _ssfInput('jc' + i, '会社名 ' + (i + 1), jb.company, 1) + _ssfInput('jk' + i, '期間', jb.kikan, 1) + '</div>'
+      + _ssfInput('jn' + i, '業務内容', jb.naiyou)
+      + '</div>';
+  }
+  h += _ssfInput('jp', '日本語能力', F.jp);
+  h += '<div style="display:flex;gap:8px;">' + _ssfInput('height', '身長', F.height, 1) + _ssfInput('weight', '体重', F.weight, 1) + '</div>';
+  box.innerHTML = h;
+}
+
+function _ssfVal(id) {
+  var el = document.getElementById('ssf_' + id);
+  return el ? el.value.trim() : '';
+}
+
+// フォームの値でPDF生成 → 表示
+async function skillsheetSubmitPdf(btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '📄 PDF作成中…'; }
+  try {
+    var fields = {
+      name: _ssfVal('name'), furigana: _ssfVal('furigana'), sex: _ssfVal('sex'),
+      age: _ssfVal('age'), no: _ssfVal('no'), marital: _ssfVal('marital'),
+      commute: _ssfVal('commute'), addr: _ssfVal('addr'), edu: _ssfVal('edu'),
+      zangyo: _ssfVal('zangyo'), sat: _ssfVal('sat'), hayade: _ssfVal('hayade'),
+      kotai: _ssfVal('kotai'), license: _ssfVal('license'), uwagi: _ssfVal('uwagi'),
+      pants: _ssfVal('pants'), shoes: _ssfVal('shoes'), jp: _ssfVal('jp'),
+      height: _ssfVal('height'), weight: _ssfVal('weight'), jobs: []
+    };
+    for (var i = 0; i < 5; i++) {
+      fields.jobs.push({ company: _ssfVal('jc' + i), naiyou: _ssfVal('jn' + i), kikan: _ssfVal('jk' + i) });
+    }
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pdf', fields: fields })
     });
     if (!resp.ok) {
       var detail = '';
@@ -34763,13 +34852,13 @@ async function skillsheetMakePdf(id1, btn) {
     var data = await resp.json();
     var bin = atob(data.pdf);
     var bytes = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    for (var i2 = 0; i2 < bin.length; i2++) bytes[i2] = bin.charCodeAt(i2);
     var blob = new Blob([bytes], { type: 'application/pdf' });
     var url = URL.createObjectURL(blob);
     var w = window.open(url, '_blank');
     if (!w) {
       var a = document.createElement('a');
-      a.href = url; a.download = (data.name || '') + '　スキルシート.pdf';
+      a.href = url; a.download = (fields.name || '') + '　スキルシート.pdf';
       document.body.appendChild(a); a.click(); a.remove();
     }
     if (typeof showToast === 'function') showToast('スキルシートを作成しました。共有 → プリント で印刷できます', 'success');
