@@ -5525,6 +5525,10 @@ select.sankyu-edit-input {
         <span class="ql-icon">🧮</span>
         <span class="ql-text">粗利計算</span>
       </button>
+      <button class="quick-link-btn" onclick="openSkillsheetScreen()">
+        <span class="ql-icon">📄</span>
+        <span class="ql-text">スキルシート</span>
+      </button>
     </div>
 
     <!-- 最低賃金チェック＋10〜11月リマインダーバナー -->
@@ -6285,6 +6289,19 @@ select.sankyu-edit-input {
   </div>
 
   <!-- Screen: 30%粗利計算機 (請求⇄給料の即時換算。2026-08-20) -->
+  <!-- 📄 スキルシート作成 (2026-08-25 旧PowerApps様式をFunctionsで再現・役員+担当者利用可) -->
+  <div class="screen" id="skillsheetScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📄 スキルシート</h2>
+    </div>
+    <div style="padding:10px 12px 24px;max-width:520px;margin:0 auto;">
+      <div style="font-size:11.5px;color:var(--text-light);margin-bottom:8px;">面接シート（Forms）のデータからスキルシートPDFを作成します。名前をタップするとPDFが開きます。</div>
+      <input id="skillsheetSearchInput" type="text" placeholder="名前で検索（例: ナカガワ）" oninput="skillsheetSearchDebounced()" style="width:100%;box-sizing:border-box;padding:11px 12px;font-size:15px;border:1.5px solid #cbd5e1;border-radius:12px;margin-bottom:10px;">
+      <div id="skillsheetList" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+  </div>
+
   <div class="screen" id="arariCalcScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
@@ -34680,6 +34697,87 @@ async function cloudDocOcr(docType, opts) {
   }
   const data = await resp.json();
   return data.ocr || {};
+}
+
+// ============================================================
+// 📄 スキルシート作成 (2026-08-25)
+//   面接シート(Forms→SP「面接表」)のデータから旧PowerApps様式のPDFを
+//   employee-portal Functions (yukyu/skillsheet) で生成して表示。
+//   役員+担当者利用可 (認証は Functions 側 require_staff_auth)。
+// ============================================================
+var _skillsheetTimer = null;
+function openSkillsheetScreen() {
+  switchScreen('skillsheetScreen');
+  var box = document.getElementById('skillsheetList');
+  if (box && !box.dataset.loaded) skillsheetLoadList('');
+}
+function skillsheetSearchDebounced() {
+  clearTimeout(_skillsheetTimer);
+  _skillsheetTimer = setTimeout(function() {
+    skillsheetLoadList(document.getElementById('skillsheetSearchInput').value.trim());
+  }, 350);
+}
+async function skillsheetLoadList(query) {
+  var box = document.getElementById('skillsheetList');
+  if (!box) return;
+  box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">読み込み中…</div>';
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list', query: query || '' })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    var cands = data.candidates || [];
+    box.dataset.loaded = '1';
+    if (!cands.length) {
+      box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">該当なし</div>';
+      return;
+    }
+    box.innerHTML = cands.map(function(c) {
+      return '<button onclick="skillsheetMakePdf(' + Number(c.id1) + ', this)" style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #6a3fb5;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.05);">'
+        + '<span style="font-weight:700;">' + _esc(c.name) + '</span>'
+        + '<span style="font-size:11.5px;color:#94a3b8;">' + _esc(c.date || '') + '</span></button>';
+    }).join('');
+  } catch (e) {
+    box.innerHTML = '<div style="color:#c62828;padding:16px;text-align:center;">読み込み失敗: ' + _esc(String(e.message || e)) + '</div>';
+  }
+}
+async function skillsheetMakePdf(id1, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span style="color:#6a3fb5;font-weight:700;">📄 PDF作成中…</span>'; }
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pdf', id1: id1 })
+    });
+    if (!resp.ok) {
+      var detail = '';
+      try { detail = JSON.stringify(await resp.json()).substring(0, 150); } catch (_) {}
+      throw new Error('HTTP ' + resp.status + ' ' + detail);
+    }
+    var data = await resp.json();
+    var bin = atob(data.pdf);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    var blob = new Blob([bytes], { type: 'application/pdf' });
+    var url = URL.createObjectURL(blob);
+    var w = window.open(url, '_blank');
+    if (!w) {
+      var a = document.createElement('a');
+      a.href = url; a.download = (data.name || '') + '　スキルシート.pdf';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    if (typeof showToast === 'function') showToast('スキルシートを作成しました。共有 → プリント で印刷できます', 'success');
+  } catch (e) {
+    alert('スキルシート作成に失敗しました: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
 }
 
 // 銀行カード/通帳用: エンボス(銀色凸文字)を読みやすくする高解像度化＋グレースケール＋コントラスト強調
