@@ -6309,9 +6309,13 @@ select.sankyu-edit-input {
       <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📄 スキルシート 編集</h2>
     </div>
     <div style="padding:10px 12px 40px;max-width:520px;margin:0 auto;">
-      <div style="font-size:11.5px;color:var(--text-light);margin-bottom:10px;">内容を確認・修正して「PDF作成」を押してください。外国語表記は自動で日本語化済みです（氏名・会社名のカタカナ化はここで手入力）。空欄はシートに印字されません。</div>
+      <div style="font-size:11.5px;color:var(--text-light);margin-bottom:6px;">内容を確認・修正して「PDF作成」を押してください。外国語表記は自動で日本語化済みです（氏名・会社名のカタカナ化はここで手入力）。空欄はシートに印字されません。</div>
+      <div id="ssfSavedNote" style="display:none;font-size:11.5px;font-weight:700;color:#2e7d32;background:#e8f5e9;border-radius:8px;padding:6px 10px;margin-bottom:8px;">✅ 保存済みの修正内容を表示しています</div>
       <div id="skillsheetFormBody"></div>
-      <button id="ssfMakeBtn" onclick="skillsheetSubmitPdf(this)" style="width:100%;margin-top:14px;background:linear-gradient(135deg,#7c4dff,#5e35b1);color:#fff;border:none;border-radius:14px;padding:14px;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(94,53,177,.3);">📄 PDF作成</button>
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button id="ssfSaveBtn" onclick="skillsheetSaveOnly(this)" style="flex:1;background:#fff;color:#5e35b1;border:2px solid #5e35b1;border-radius:14px;padding:13px;font-size:15px;font-weight:800;cursor:pointer;">💾 保存</button>
+        <button id="ssfMakeBtn" onclick="skillsheetSubmitPdf(this)" style="flex:1.4;background:linear-gradient(135deg,#7c4dff,#5e35b1);color:#fff;border:none;border-radius:14px;padding:13px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(94,53,177,.3);">📄 PDF作成</button>
+      </div>
     </div>
   </div>
 
@@ -34750,15 +34754,23 @@ async function skillsheetLoadList(query) {
       return;
     }
     box.innerHTML = cands.map(function(c) {
+      var st = c.status || '';
+      var chip = '';
+      if (st) {
+        var col = st === '採用' ? '#2e7d32' : (st === '不採用' ? '#757575' : '#111');
+        chip = '<span style="font-size:11px;font-weight:800;color:#fff;background:' + col + ';border-radius:8px;padding:2px 8px;margin-left:8px;white-space:nowrap;flex-shrink:0;">' + _esc(st) + '</span>';
+      }
       return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #6a3fb5;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.05);">'
-        + '<span style="font-weight:700;">' + _esc(c.name) + '</span>'
-        + '<span style="font-size:11.5px;color:#94a3b8;">' + _esc(c.date || '') + '</span></button>';
+        + '<span style="font-weight:700;display:flex;align-items:center;min-width:0;"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(c.name) + '</span>' + chip + '</span>'
+        + '<span style="font-size:11.5px;color:#94a3b8;margin-left:8px;flex-shrink:0;">' + _esc(c.date || '') + '</span></button>';
     }).join('');
   } catch (e) {
     box.innerHTML = '<div style="color:#c62828;padding:16px;text-align:center;">読み込み失敗: ' + _esc(String(e.message || e)) + '</div>';
   }
 }
-// 一覧タップ → 初期値(日本語化済み)を取得して編集フォームへ
+// 一覧タップ → 初期値(保存済みがあればそれ・なければ日本語化済み自動値)を取得して編集フォームへ
+var _ssfId1 = null;
+var _ssfStatus = '';
 async function skillsheetOpenForm(id1, btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span style="color:#6a3fb5;font-weight:700;">読み込み中…</span>'; }
@@ -34771,13 +34783,34 @@ async function skillsheetOpenForm(id1, btn) {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var data = await resp.json();
+    _ssfId1 = id1;
+    _ssfStatus = data.status || '';
     skillsheetRenderForm(data.fields || {});
+    var note = document.getElementById('ssfSavedNote');
+    if (note) note.style.display = data.saved ? 'block' : 'none';
     switchScreen('skillsheetFormScreen');
   } catch (e) {
     alert('データ取得に失敗しました: ' + (e.message || e));
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
   }
+}
+
+// 採用状況セレクタ (社内用・PDFには印字しない)
+function skillsheetSetStatus(s) {
+  _ssfStatus = (s === _ssfStatus) ? '' : s;   // 同じボタン再タップで解除
+  skillsheetPaintStatus();
+}
+function skillsheetPaintStatus() {
+  var defs = { '採用': '#2e7d32', '不採用': '#757575', 'ブラック': '#111' };
+  Object.keys(defs).forEach(function(s) {
+    var el = document.getElementById('ssfStatus_' + s);
+    if (!el) return;
+    var on = (s === _ssfStatus);
+    el.style.background = on ? defs[s] : '#fff';
+    el.style.color = on ? '#fff' : defs[s];
+    el.style.borderColor = defs[s];
+  });
 }
 
 function _ssfInput(id, label, val, flex) {
@@ -34792,6 +34825,13 @@ function skillsheetRenderForm(F) {
   var box = document.getElementById('skillsheetFormBody');
   if (!box) return;
   var h = '';
+  h += '<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:12px;padding:8px 10px;margin-bottom:10px;">'
+    + '<div style="font-size:11px;color:#9a3412;font-weight:800;margin-bottom:5px;">採用状況（社内用・PDFには印字されません）</div>'
+    + '<div style="display:flex;gap:8px;">'
+    + ['採用', '不採用', 'ブラック'].map(function(s) {
+        return '<button id="ssfStatus_' + s + '" onclick="skillsheetSetStatus(\'' + s + '\')" style="flex:1;border:2px solid #ccc;background:#fff;border-radius:10px;padding:8px 0;font-size:14px;font-weight:800;cursor:pointer;">' + s + '</button>';
+      }).join('')
+    + '</div></div>';
   h += _ssfInput('name', '氏名（カタカナ推奨）', F.name);
   h += _ssfInput('furigana', 'フリガナ', F.furigana);
   h += '<div style="display:flex;gap:8px;">' + _ssfInput('sex', '性別', F.sex, 1) + _ssfInput('age', '年齢', F.age, 1) + _ssfInput('no', 'No.（社員番号等）', F.no, 1) + '</div>';
@@ -34812,6 +34852,46 @@ function skillsheetRenderForm(F) {
   }
   h += _ssfInput('jp', '日本語能力', F.jp);
   box.innerHTML = h;
+  skillsheetPaintStatus();
+}
+
+// フォーム値を収集
+function _ssfCollect() {
+  var fields = {
+    name: _ssfVal('name'), furigana: _ssfVal('furigana'), sex: _ssfVal('sex'),
+    age: _ssfVal('age'), no: _ssfVal('no'), marital: _ssfVal('marital'),
+    commute: _ssfVal('commute'), addr: _ssfVal('addr'), edu: _ssfVal('edu'),
+    zangyo: _ssfVal('zangyo'), sat: _ssfVal('sat'),
+    kotai: _ssfVal('kotai'), license: _ssfVal('license'), uwagi: _ssfVal('uwagi'),
+    pants: _ssfVal('pants'), shoes: _ssfVal('shoes'), jp: _ssfVal('jp'),
+    jobs: []
+  };
+  for (var i = 0; i < 5; i++) {
+    fields.jobs.push({ company: _ssfVal('jc' + i), naiyou: _ssfVal('jn' + i), kikan: _ssfVal('jk' + i) });
+  }
+  return fields;
+}
+
+// 保存のみ (PDFは作らない)
+async function skillsheetSaveOnly(btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '💾 保存中…'; }
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save', id1: _ssfId1, fields: _ssfCollect(), status: _ssfStatus })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var lb = document.getElementById('skillsheetList');
+    if (lb) lb.dataset.loaded = '';
+    if (typeof showToast === 'function') showToast('保存しました', 'success');
+  } catch (e) {
+    alert('保存に失敗しました: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
 }
 
 function _ssfVal(id) {
@@ -34819,29 +34899,20 @@ function _ssfVal(id) {
   return el ? el.value.trim() : '';
 }
 
-// フォームの値でPDF生成 → 表示
+// フォームの値でPDF生成 → 表示 (同時に保存もされる)
 async function skillsheetSubmitPdf(btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '📄 PDF作成中…'; }
   try {
-    var fields = {
-      name: _ssfVal('name'), furigana: _ssfVal('furigana'), sex: _ssfVal('sex'),
-      age: _ssfVal('age'), no: _ssfVal('no'), marital: _ssfVal('marital'),
-      commute: _ssfVal('commute'), addr: _ssfVal('addr'), edu: _ssfVal('edu'),
-      zangyo: _ssfVal('zangyo'), sat: _ssfVal('sat'),
-      kotai: _ssfVal('kotai'), license: _ssfVal('license'), uwagi: _ssfVal('uwagi'),
-      pants: _ssfVal('pants'), shoes: _ssfVal('shoes'), jp: _ssfVal('jp'),
-      jobs: []
-    };
-    for (var i = 0; i < 5; i++) {
-      fields.jobs.push({ company: _ssfVal('jc' + i), naiyou: _ssfVal('jn' + i), kikan: _ssfVal('jk' + i) });
-    }
+    var fields = _ssfCollect();
     var token = await getToken();
     var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pdf', fields: fields })
+      body: JSON.stringify({ action: 'pdf', id1: _ssfId1, status: _ssfStatus, fields: fields })
     });
+    var lb0 = document.getElementById('skillsheetList');
+    if (lb0) lb0.dataset.loaded = '';
     if (!resp.ok) {
       var detail = '';
       try { detail = JSON.stringify(await resp.json()).substring(0, 150); } catch (_) {}
