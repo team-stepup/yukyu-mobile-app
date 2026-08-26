@@ -6297,7 +6297,34 @@ select.sankyu-edit-input {
     </div>
     <div style="padding:10px 12px 24px;max-width:520px;margin:0 auto;">
       <div style="font-size:11.5px;color:var(--text-light);margin-bottom:8px;">面接シート（Forms）のデータからスキルシートPDFを作成します。名前をタップするとPDFが開きます。</div>
-      <input id="skillsheetSearchInput" type="text" placeholder="名前で検索（例: ナカガワ）" oninput="skillsheetSearchDebounced()" style="width:100%;box-sizing:border-box;padding:11px 12px;font-size:15px;border:1.5px solid #cbd5e1;border-radius:12px;margin-bottom:10px;">
+      <input id="skillsheetSearchInput" type="text" placeholder="名前で検索（例: ナカガワ）" oninput="skillsheetSearchDebounced()" style="width:100%;box-sizing:border-box;padding:11px 12px;font-size:15px;border:1.5px solid #cbd5e1;border-radius:12px;margin-bottom:8px;">
+      <div id="skillsheetFilters" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+        <select id="ssFilterSex" onchange="skillsheetApplyFilters()" style="padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
+          <option value="">性別: すべて</option>
+          <option value="男">男性</option>
+          <option value="女">女性</option>
+        </select>
+        <select id="ssFilterAge" onchange="skillsheetApplyFilters()" style="padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
+          <option value="">年齢: すべて</option>
+          <option value="50over">50歳以上</option>
+          <option value="50under">50歳未満</option>
+        </select>
+        <select id="ssFilterCommute" onchange="skillsheetApplyFilters()" style="padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
+          <option value="">通勤: すべて</option>
+          <option value="車">🚗 車通勤</option>
+          <option value="送迎">🚌 送迎</option>
+          <option value="その他">その他</option>
+        </select>
+        <select id="ssFilterJp" onchange="skillsheetApplyFilters()" style="padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
+          <option value="">日本語: すべて</option>
+          <option value="80">80%以上</option>
+          <option value="60">60%以上</option>
+          <option value="40">40%以上</option>
+        </select>
+        <select id="ssFilterSite" onchange="skillsheetApplyFilters()" style="grid-column:1 / -1;padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
+          <option value="">📍 派遣先から20km圏内: 指定なし</option>
+        </select>
+      </div>
       <div id="skillsheetList" style="display:flex;flex-direction:column;gap:8px;"></div>
     </div>
   </div>
@@ -34738,6 +34765,7 @@ async function cloudDocOcr(docType, opts) {
 var _skillsheetTimer = null;
 function openSkillsheetScreen() {
   switchScreen('skillsheetScreen');
+  skillsheetLoadSites();   // 派遣先ドロップダウン(初回のみ取得)
   var box = document.getElementById('skillsheetList');
   if (box && !box.dataset.loaded) skillsheetLoadList('');
 }
@@ -34760,32 +34788,150 @@ async function skillsheetLoadList(query) {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var data = await resp.json();
-    var cands = data.candidates || [];
+    _ssCands = data.candidates || [];
     box.dataset.loaded = '1';
-    if (!cands.length) {
-      box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">該当なし</div>';
-      return;
-    }
-    box.innerHTML = cands.map(function(c) {
-      var st = c.status || '';
-      var chip = '';
-      var isBlack = (st === 'ブラック');
-      if (st) {
-        var col = st === '採用' ? '#2e7d32' : (st === '不採用' ? '#757575' : '#111');
-        chip = '<span style="font-size:11px;font-weight:800;color:#fff;background:' + col + ';border-radius:8px;padding:2px 8px;margin-left:8px;white-space:nowrap;flex-shrink:0;">' + _esc(st) + '</span>';
-      }
-      var rowStyle = isBlack
-        ? 'display:flex;justify-content:space-between;align-items:center;background:#e2e2e2;border:1px solid #cfcfcf;border-left:5px solid #555;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;opacity:.7;'
-        : 'display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #6a3fb5;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.05);';
-      var nameStyle = isBlack ? 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666;' : 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="' + rowStyle + '">'
-        + '<span style="font-weight:700;display:flex;align-items:center;min-width:0;"><span style="' + nameStyle + '">' + _esc(c.name) + '</span>' + chip + '</span>'
-        + '<span style="font-size:11.5px;color:#94a3b8;margin-left:8px;flex-shrink:0;">' + _esc(c.date || '') + '</span></button>';
-    }).join('');
+    await skillsheetApplyFilters();
   } catch (e) {
     box.innerHTML = '<div style="color:#c62828;padding:16px;text-align:center;">読み込み失敗: ' + _esc(String(e.message || e)) + '</div>';
   }
 }
+
+// ===== 絞り込み =====
+var _ssCands = [];
+var _ssGeoCache = {};
+var _ssSitesLoaded = false;
+
+function _ssSel(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+
+// 派遣先ドロップダウンの選択肢を読み込む(初回のみ)
+async function skillsheetLoadSites() {
+  if (_ssSitesLoaded) return;
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'hakensaki' })
+    });
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var sel = document.getElementById('ssFilterSite');
+    if (!sel) return;
+    (data.sites || []).forEach(function(s) {
+      var o = document.createElement('option');
+      o.value = s.addr;
+      o.textContent = s.name;
+      sel.appendChild(o);
+    });
+    _ssSitesLoaded = true;
+  } catch (e) { console.warn('sites load failed', e); }
+}
+
+async function _ssEnsureGeo(addrs) {
+  var missing = [];
+  addrs.forEach(function(a) { if (a && !(a in _ssGeoCache) && missing.indexOf(a) < 0) missing.push(a); });
+  if (!missing.length) return;
+  var token = await getToken();
+  var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'geocode', addresses: missing })
+  });
+  if (!resp.ok) return;
+  var data = await resp.json();
+  var geo = (data && data.geo) || {};
+  Object.keys(geo).forEach(function(k) { _ssGeoCache[k] = geo[k]; });
+}
+
+function _ssKm(a, b) {
+  var R = 6371;
+  var dLat = (b[0] - a[0]) * Math.PI / 180;
+  var dLon = (b[1] - a[1]) * Math.PI / 180;
+  var s = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180)
+    * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+async function skillsheetApplyFilters() {
+  var box = document.getElementById('skillsheetList');
+  if (!box) return;
+  var sex = _ssSel('ssFilterSex');
+  var age = _ssSel('ssFilterAge');
+  var com = _ssSel('ssFilterCommute');
+  var jp = _ssSel('ssFilterJp');
+  var site = _ssSel('ssFilterSite');
+  var list = _ssCands.slice();
+  if (sex) list = list.filter(function(c) { return c.sex === sex; });
+  if (age === '50over') list = list.filter(function(c) { return c.age != null && c.age >= 50; });
+  if (age === '50under') list = list.filter(function(c) { return c.age != null && c.age < 50; });
+  if (com === 'その他') list = list.filter(function(c) { return c.commute && c.commute !== '車' && c.commute !== '送迎'; });
+  else if (com) list = list.filter(function(c) { return c.commute === com; });
+  if (jp) {
+    var th = Number(jp);
+    list = list.filter(function(c) { return c.jpMin != null && c.jpMin >= th; });
+  }
+  list.forEach(function(c) { delete c._km; });
+  if (site) {
+    box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">📍 距離を計算中…</div>';
+    try {
+      var addrs = [site];
+      list.forEach(function(c) { if (c.addr) addrs.push(c.addr); });
+      await _ssEnsureGeo(addrs);
+      var sg = _ssGeoCache[site];
+      if (sg) {
+        list = list.filter(function(c) {
+          var g = c.addr ? _ssGeoCache[c.addr] : null;
+          if (!g) return false;
+          c._km = _ssKm(sg, g);
+          return c._km <= 20;
+        });
+        list.sort(function(a, b) { return (a._km || 0) - (b._km || 0); });
+      }
+    } catch (e) { console.warn('geo filter failed', e); }
+  }
+  skillsheetRenderRows(list);
+}
+
+function skillsheetRenderRows(cands) {
+  var box = document.getElementById('skillsheetList');
+  if (!box) return;
+  if (!cands.length) {
+    box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">該当なし</div>';
+    return;
+  }
+  box.innerHTML = cands.map(function(c) {
+    var st = c.status || '';
+    var isBlack = (st === 'ブラック');
+    var isFemale = (c.sex === '女');
+    var chip = '';
+    if (st) {
+      var col = st === '採用' ? '#2e7d32' : (st === '不採用' ? '#757575' : '#111');
+      chip = '<span style="font-size:10.5px;font-weight:800;color:#fff;background:' + col + ';border-radius:6px;padding:1px 7px;margin-left:5px;white-space:nowrap;flex-shrink:0;">' + _esc(st) + '</span>';
+    }
+    var idBadge = (c.id1 != null)
+      ? '<span style="font-size:10.5px;font-weight:800;color:#64748b;background:' + (isBlack ? '#d4d4d4' : '#eef2f7') + ';border-radius:6px;padding:1px 6px;margin-right:7px;flex-shrink:0;">' + c.id1 + '</span>' : '';
+    var sexChip = c.sex
+      ? '<span style="font-size:10.5px;font-weight:800;border-radius:6px;padding:1px 6px;margin-left:6px;flex-shrink:0;' + (isFemale ? 'color:#c2185b;background:#fce4ec;' : 'color:#1565c0;background:#e3f2fd;') + '">' + _esc(c.sex) + '</span>' : '';
+    var ck = c.commute || '';
+    var comChip = ck
+      ? '<span style="font-size:10.5px;font-weight:700;color:#374151;background:#f3f4f6;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">' + (ck === '車' ? '🚗車' : (ck === '送迎' ? '🚌送迎' : _esc(ck))) + '</span>' : '';
+    var kmChip = (c._km != null)
+      ? '<span style="font-size:10.5px;font-weight:800;color:#065f46;background:#d1fae5;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">' + c._km.toFixed(1) + 'km</span>' : '';
+    var bg = isBlack ? '#e2e2e2' : (isFemale ? '#fdf0f3' : '#fff');
+    var rowStyle = 'display:flex;justify-content:space-between;align-items:center;background:' + bg
+      + ';border:1px solid ' + (isBlack ? '#cfcfcf' : (isFemale ? '#f5d5dd' : '#e2e8f0'))
+      + ';border-left:5px solid ' + (isBlack ? '#555' : '#6a3fb5')
+      + ';border-radius:12px;padding:11px 12px;font-size:15px;cursor:pointer;text-align:left;'
+      + (isBlack ? 'opacity:.7;' : 'box-shadow:0 2px 6px rgba(0,0,0,.05);');
+    var nameStyle = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (isBlack ? 'color:#666;' : '');
+    return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="' + rowStyle + '">'
+      + '<span style="font-weight:700;display:flex;align-items:center;min-width:0;">' + idBadge
+      + '<span style="' + nameStyle + '">' + _esc(c.name) + '</span>' + sexChip + comChip + kmChip + chip + '</span>'
+      + '<span style="font-size:11px;color:#94a3b8;margin-left:6px;flex-shrink:0;">' + _esc(c.date || '') + '</span></button>';
+  }).join('');
+}
+
 // 一覧タップ → 初期値(保存済みがあればそれ・なければ日本語化済み自動値)を取得して編集フォームへ
 var _ssfId1 = null;
 var _ssfStatus = '';
