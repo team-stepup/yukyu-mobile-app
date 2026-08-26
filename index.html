@@ -6322,6 +6322,14 @@ select.sankyu-edit-input {
           <option value="60">60%以上</option>
           <option value="40">40%以上</option>
         </select>
+        <select id="ssFilterPeriod" onchange="skillsheetApplyFilters()" style="padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
+          <option value="">応募時期: すべて</option>
+          <option value="92">3ヶ月以内</option>
+          <option value="183">6ヶ月以内</option>
+          <option value="366">1年以内</option>
+          <option value="731">2年以内</option>
+        </select>
+        <button onclick="skillsheetClearFilters()" style="padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#f8fafc;color:#475569;font-weight:700;cursor:pointer;">✖ 絞り込み解除</button>
         <select id="ssFilterSite" onchange="skillsheetApplyFilters()" style="grid-column:1 / -1;padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
           <option value="">📍 派遣先から20km圏内: 指定なし</option>
         </select>
@@ -34807,6 +34815,17 @@ async function skillsheetLoadList(query) {
 var _ssCands = [];
 var _ssGeoCache = {};
 var _ssSitesLoaded = false;
+var _ssManualAddr = {};   // 住所未登録派遣先/直接入力の住所(セッション内記憶)
+
+function skillsheetClearFilters() {
+  ['ssFilterSex', 'ssFilterAge', 'ssFilterCommute', 'ssFilterJp', 'ssFilterPeriod', 'ssFilterSite'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  var q = document.getElementById('skillsheetSearchInput');
+  if (q) q.value = '';
+  skillsheetApplyFilters();
+}
 
 function _ssSel(id) { var el = document.getElementById(id); return el ? el.value : ''; }
 
@@ -34826,10 +34845,20 @@ async function skillsheetLoadSites() {
     if (!sel) return;
     (data.sites || []).forEach(function(s) {
       var o = document.createElement('option');
-      o.value = s.addr;
-      o.textContent = s.name;
+      if (s.addr) {
+        o.value = s.addr;
+        o.textContent = s.name;
+      } else {
+        // 住所未登録の派遣先(契約なし・過去取引先): 選択時に住所を入力してもらう
+        o.value = '__ask__::' + s.name;
+        o.textContent = s.name + '（住所入力）';
+      }
       sel.appendChild(o);
     });
+    var om = document.createElement('option');
+    om.value = '__manual__';
+    om.textContent = '✏️ 住所を直接入力…';
+    sel.appendChild(om);
     _ssSitesLoaded = true;
   } catch (e) { console.warn('sites load failed', e); }
 }
@@ -34868,10 +34897,32 @@ async function skillsheetApplyFilters() {
   var com = _ssSel('ssFilterCommute');
   var jp = _ssSel('ssFilterJp');
   var site = _ssSel('ssFilterSite');
+  // 住所未登録の派遣先/直接入力 → その場で住所を入力してもらう(セッション内は記憶)
+  if (site === '__manual__' || site.indexOf('__ask__::') === 0) {
+    if (!_ssManualAddr[site]) {
+      var lbl = site === '__manual__' ? '' : site.split('::')[1] + ' の';
+      var a = prompt(lbl + '住所を入力してください（例: 磐田市高木1550）');
+      if (a && a.trim()) {
+        _ssManualAddr[site] = a.trim();
+      } else {
+        var selEl = document.getElementById('ssFilterSite');
+        if (selEl) selEl.value = '';
+        site = '';
+      }
+    }
+    if (site) site = _ssManualAddr[site];
+  }
+  var per = _ssSel('ssFilterPeriod');
   var list = _ssCands.slice();
   var qEl = document.getElementById('skillsheetSearchInput');
   var q = qEl ? qEl.value.replace(/[\s　]+/g, '') : '';
   if (q) list = list.filter(function(c) { return String(c.name || '').replace(/[\s　]+/g, '').indexOf(q) >= 0; });
+  if (per) {
+    var lim = new Date();
+    lim.setDate(lim.getDate() - Number(per));
+    var limS = lim.getFullYear() + '-' + String(lim.getMonth() + 1).padStart(2, '0') + '-' + String(lim.getDate()).padStart(2, '0');
+    list = list.filter(function(c) { return c.date && c.date >= limS; });
+  }
   if (sex) list = list.filter(function(c) { return c.sex === sex; });
   if (age === '50over') list = list.filter(function(c) { return c.age != null && c.age >= 50; });
   if (age === '50under') list = list.filter(function(c) { return c.age != null && c.age < 50; });
@@ -34910,7 +34961,10 @@ function skillsheetRenderRows(cands) {
     box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">該当なし</div>';
     return;
   }
-  box.innerHTML = '<div style="font-size:11.5px;color:#64748b;font-weight:700;margin:0 2px 2px;">該当 ' + cands.length + '件</div>' + cands.map(function(c) {
+  var oldest = '';
+  cands.forEach(function(c) { if (c.date && (!oldest || c.date < oldest)) oldest = c.date; });
+  box.innerHTML = '<div style="font-size:11.5px;color:#64748b;font-weight:700;margin:0 2px 2px;">該当 ' + cands.length + '件'
+    + (oldest ? '<span style="font-weight:400;">（' + oldest.replace(/-/g, '/') + ' 〜 の応募）</span>' : '') + '</div>' + cands.map(function(c) {
     var st = c.status || '';
     var isBlack = (st === 'ブラック');
     var isFemale = (c.sex === '女');
