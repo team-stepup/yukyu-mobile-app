@@ -6294,6 +6294,7 @@ select.sankyu-edit-input {
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 戻る</button>
       <h2 style="margin:0;font-size:1.05em;color:var(--primary);flex:1;">📄 スキルシート</h2>
+      <button onclick="skillsheetCreateManual()" style="background:#f0fdf4;border:1.5px solid #16a34a;color:#15803d;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap;">✍️ 手入力</button>
       <button onclick="skillsheetOpenFolder()" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap;">📁 保存フォルダ</button>
     </div>
     <div style="padding:10px 12px 24px;max-width:520px;margin:0 auto;">
@@ -34777,6 +34778,33 @@ function openSkillsheetScreen() {
   skillsheetLoadSites();   // 派遣先ドロップダウン(初回のみ取得)
   var box = document.getElementById('skillsheetList');
   if (box && !box.dataset.loaded) skillsheetLoadList('');
+}
+
+// ✍️ 担当者の手入力で新規応募者を作成 → そのまま編集フォームへ
+async function skillsheetCreateManual() {
+  var nm = prompt('応募者の名前を入力してください（カタカナ推奨）');
+  if (!nm || !nm.trim()) return;
+  var tel = prompt('電話番号（任意・空欄可）') || '';
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', name: nm.trim(), tel: tel.trim() })
+    });
+    if (!resp.ok) {
+      var detail = '';
+      try { detail = JSON.stringify(await resp.json()).substring(0, 120); } catch (_) {}
+      throw new Error('HTTP ' + resp.status + ' ' + detail);
+    }
+    var d = await resp.json();
+    var lb = document.getElementById('skillsheetList');
+    if (lb) lb.dataset.loaded = '';
+    if (typeof showToast === 'function') showToast('作成しました (ID ' + d.id1 + ')。内容を入力して保存してください', 'success');
+    skillsheetOpenForm(d.id1, null);
+  } catch (e) {
+    alert('作成に失敗しました: ' + (e.message || e));
+  }
 }
 
 // 保存フォルダ(社員ファイル/スキルシート)をSharePointで開く
