@@ -6330,7 +6330,7 @@ select.sankyu-edit-input {
           <option value="731">2年以内</option>
         </select>
         <button onclick="skillsheetClearFilters()" style="padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#f8fafc;color:#475569;font-weight:700;cursor:pointer;">✖ 絞り込み解除</button>
-        <select id="ssFilterSite" onchange="skillsheetApplyFilters()" style="grid-column:1 / -1;padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
+        <select id="ssFilterSite" onchange="skillsheetApplyFilters()" onfocus="skillsheetLoadSites()" style="grid-column:1 / -1;padding:9px 8px;font-size:13px;border:1.5px solid #cbd5e1;border-radius:10px;background:#fff;">
           <option value="">📍 派遣先から20km圏内: 指定なし</option>
         </select>
       </div>
@@ -34829,9 +34829,12 @@ function skillsheetClearFilters() {
 
 function _ssSel(id) { var el = document.getElementById(id); return el ? el.value : ''; }
 
-// 派遣先ドロップダウンの選択肢を読み込む(初回のみ)
+// 派遣先ドロップダウンの選択肢を派遣先情報(派遣先List)から読み込む(成功するまで再試行可)
+var _ssSitesLoading = false;
 async function skillsheetLoadSites() {
-  if (_ssSitesLoaded) return;
+  if (_ssSitesLoaded || _ssSitesLoading) return;
+  _ssSitesLoading = true;
+  var sel = document.getElementById('ssFilterSite');
   try {
     var token = await getToken();
     var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
@@ -34839,11 +34842,11 @@ async function skillsheetLoadSites() {
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'hakensaki' })
     });
-    if (!resp.ok) return;
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var data = await resp.json();
-    var sel = document.getElementById('ssFilterSite');
     if (!sel) return;
-    (data.sites || []).forEach(function(s) {
+    var sites = data.sites || [];
+    sites.forEach(function(s) {
       var o = document.createElement('option');
       if (s.addr) {
         o.value = s.addr;
@@ -34859,8 +34862,14 @@ async function skillsheetLoadSites() {
     om.value = '__manual__';
     om.textContent = '✏️ 住所を直接入力…';
     sel.appendChild(om);
+    if (sel.options.length) sel.options[0].textContent = '📍 派遣先から20km圏内(' + sites.length + '社): 指定なし';
     _ssSitesLoaded = true;
-  } catch (e) { console.warn('sites load failed', e); }
+  } catch (e) {
+    console.warn('sites load failed', e);
+    if (sel && sel.options.length) sel.options[0].textContent = '📍 派遣先の読み込み失敗（タップで再試行）';
+  } finally {
+    _ssSitesLoading = false;
+  }
 }
 
 async function _ssEnsureGeo(addrs) {
