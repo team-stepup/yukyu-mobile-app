@@ -6306,7 +6306,8 @@ select.sankyu-edit-input {
   <div class="screen" id="skillsheetFormScreen">
     <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
       <button onclick="switchScreen('skillsheetScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 一覧</button>
-      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📄 スキルシート 編集</h2>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);flex:1;">📄 スキルシート 編集</h2>
+      <button onclick="skillsheetShowRaw()" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap;">📋 応募内容</button>
     </div>
     <div style="padding:10px 12px 40px;max-width:520px;margin:0 auto;">
       <div style="font-size:11.5px;color:var(--text-light);margin-bottom:6px;">内容を確認・修正して「PDF作成」を押してください。外国語表記は自動で日本語化済みです（氏名・会社名のカタカナ化はここで手入力）。空欄はシートに印字されません。</div>
@@ -6316,6 +6317,18 @@ select.sankyu-edit-input {
         <button id="ssfSaveBtn" onclick="skillsheetSaveOnly(this)" style="flex:1;background:#fff;color:#5e35b1;border:2px solid #5e35b1;border-radius:14px;padding:13px;font-size:15px;font-weight:800;cursor:pointer;">💾 保存</button>
         <button id="ssfMakeBtn" onclick="skillsheetSubmitPdf(this)" style="flex:1.4;background:linear-gradient(135deg,#7c4dff,#5e35b1);color:#fff;border:none;border-radius:14px;padding:13px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(94,53,177,.3);">📄 PDF作成</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 📋 応募シート原文ビュー (編集フォームと行き来・入力値は保持される) -->
+  <div class="screen" id="skillsheetRawScreen">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+      <button onclick="switchScreen('skillsheetFormScreen')" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:800;cursor:pointer;">← 編集に戻る</button>
+      <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📋 応募内容（原文）</h2>
+    </div>
+    <div style="padding:10px 12px 40px;max-width:520px;margin:0 auto;">
+      <div style="font-size:11.5px;color:var(--text-light);margin-bottom:8px;">面接シート（Forms）の回答をそのまま表示しています。「← 編集に戻る」で入力中のスキルシートに戻れます（入力値は保持されます）。</div>
+      <div id="skillsheetRawBody"></div>
     </div>
   </div>
 
@@ -34756,12 +34769,17 @@ async function skillsheetLoadList(query) {
     box.innerHTML = cands.map(function(c) {
       var st = c.status || '';
       var chip = '';
+      var isBlack = (st === 'ブラック');
       if (st) {
         var col = st === '採用' ? '#2e7d32' : (st === '不採用' ? '#757575' : '#111');
         chip = '<span style="font-size:11px;font-weight:800;color:#fff;background:' + col + ';border-radius:8px;padding:2px 8px;margin-left:8px;white-space:nowrap;flex-shrink:0;">' + _esc(st) + '</span>';
       }
-      return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #6a3fb5;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.05);">'
-        + '<span style="font-weight:700;display:flex;align-items:center;min-width:0;"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(c.name) + '</span>' + chip + '</span>'
+      var rowStyle = isBlack
+        ? 'display:flex;justify-content:space-between;align-items:center;background:#e2e2e2;border:1px solid #cfcfcf;border-left:5px solid #555;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;opacity:.7;'
+        : 'display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-left:5px solid #6a3fb5;border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.05);';
+      var nameStyle = isBlack ? 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666;' : 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="' + rowStyle + '">'
+        + '<span style="font-weight:700;display:flex;align-items:center;min-width:0;"><span style="' + nameStyle + '">' + _esc(c.name) + '</span>' + chip + '</span>'
         + '<span style="font-size:11.5px;color:#94a3b8;margin-left:8px;flex-shrink:0;">' + _esc(c.date || '') + '</span></button>';
     }).join('');
   } catch (e) {
@@ -34771,6 +34789,24 @@ async function skillsheetLoadList(query) {
 // 一覧タップ → 初期値(保存済みがあればそれ・なければ日本語化済み自動値)を取得して編集フォームへ
 var _ssfId1 = null;
 var _ssfStatus = '';
+var _ssfRaw = [];
+
+// 応募シート(Forms回答)の原文ビュー。フォームの入力値は画面を切り替えても保持される
+function skillsheetShowRaw() {
+  var box = document.getElementById('skillsheetRawBody');
+  if (!box) return;
+  if (!_ssfRaw.length) {
+    box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">応募内容がありません</div>';
+  } else {
+    box.innerHTML = _ssfRaw.map(function(e) {
+      return '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:6px;">'
+        + '<div style="font-size:10.5px;color:#94a3b8;font-weight:700;">' + _esc(e.label) + '</div>'
+        + '<div style="font-size:14.5px;color:#1e293b;word-break:break-word;">' + _esc(e.value) + '</div>'
+        + '</div>';
+    }).join('');
+  }
+  switchScreen('skillsheetRawScreen');
+}
 async function skillsheetOpenForm(id1, btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span style="color:#6a3fb5;font-weight:700;">読み込み中…</span>'; }
@@ -34785,6 +34821,7 @@ async function skillsheetOpenForm(id1, btn) {
     var data = await resp.json();
     _ssfId1 = id1;
     _ssfStatus = data.status || '';
+    _ssfRaw = data.raw || [];
     skillsheetRenderForm(data.fields || {});
     var note = document.getElementById('ssfSavedNote');
     if (note) note.style.display = data.saved ? 'block' : 'none';
