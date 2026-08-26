@@ -6304,7 +6304,7 @@ select.sankyu-edit-input {
 
   <!-- 📄 スキルシート 編集フォーム (プレビュー・手修正 → PDF作成) -->
   <div class="screen" id="skillsheetFormScreen">
-    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:30;background:var(--bg);box-shadow:0 2px 8px rgba(0,0,0,.06);">
       <button onclick="switchScreen('skillsheetScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 一覧</button>
       <h2 style="margin:0;font-size:1.05em;color:var(--primary);flex:1;">📄 スキルシート 編集</h2>
       <button onclick="skillsheetShowRaw()" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap;">📋 応募内容</button>
@@ -6313,7 +6313,7 @@ select.sankyu-edit-input {
       <div style="font-size:11.5px;color:var(--text-light);margin-bottom:6px;">内容を確認・修正して「PDF作成」を押してください。外国語表記は自動で日本語化済みです（氏名・会社名のカタカナ化はここで手入力）。空欄はシートに印字されません。</div>
       <div id="ssfSavedNote" style="display:none;font-size:11.5px;font-weight:700;color:#2e7d32;background:#e8f5e9;border-radius:8px;padding:6px 10px;margin-bottom:8px;">✅ 保存済みの修正内容を表示しています</div>
       <div id="skillsheetFormBody"></div>
-      <div style="display:flex;gap:10px;margin-top:14px;">
+      <div style="position:sticky;bottom:0;z-index:30;display:flex;gap:10px;margin-top:14px;padding:10px 0 12px;background:var(--bg);box-shadow:0 -6px 12px -6px rgba(0,0,0,.12);">
         <button id="ssfSaveBtn" onclick="skillsheetSaveOnly(this)" style="flex:1;background:#fff;color:#5e35b1;border:2px solid #5e35b1;border-radius:14px;padding:13px;font-size:15px;font-weight:800;cursor:pointer;">💾 保存</button>
         <button id="ssfMakeBtn" onclick="skillsheetSubmitPdf(this)" style="flex:1.4;background:linear-gradient(135deg,#7c4dff,#5e35b1);color:#fff;border:none;border-radius:14px;padding:13px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(94,53,177,.3);">📄 PDF作成</button>
       </div>
@@ -6322,7 +6322,7 @@ select.sankyu-edit-input {
 
   <!-- 📋 応募シート原文ビュー (編集フォームと行き来・入力値は保持される) -->
   <div class="screen" id="skillsheetRawScreen">
-    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;">
+    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:30;background:var(--bg);box-shadow:0 2px 8px rgba(0,0,0,.06);">
       <button onclick="switchScreen('skillsheetFormScreen')" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:800;cursor:pointer;">← 編集に戻る</button>
       <h2 style="margin:0;font-size:1.05em;color:var(--primary);">📋 応募内容（原文）</h2>
     </div>
@@ -34792,18 +34792,49 @@ var _ssfStatus = '';
 var _ssfRaw = [];
 
 // 応募シート(Forms回答)の原文ビュー。フォームの入力値は画面を切り替えても保持される
+// 職歴(会社①〜④)はセクション見出しで区切って表示する
 function skillsheetShowRaw() {
   var box = document.getElementById('skillsheetRawBody');
   if (!box) return;
   if (!_ssfRaw.length) {
     box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">応募内容がありません</div>';
   } else {
-    box.innerHTML = _ssfRaw.map(function(e) {
-      return '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:6px;">'
+    function grp(label) {
+      if (!/会社名|派遣会社|職種|仕事内容|勤続期間|退職した理由|setores/.test(label)) return 0;
+      if (label.indexOf('①') >= 0) return 1;
+      if (label.indexOf('②') >= 0) return 2;
+      if (label.indexOf('③') >= 0) return 3;
+      if (label.indexOf('④') >= 0) return 4;
+      var m = label.replace(/\s+$/, '').match(/([2-4])$/);
+      return m ? Number(m[1]) : 1;
+    }
+    function secHeader(text, fg, bg, line) {
+      return '<div style="margin:14px 0 6px;font-size:12.5px;font-weight:800;color:' + fg + ';display:flex;align-items:center;gap:8px;">'
+        + '<span style="background:' + bg + ';border-radius:8px;padding:3px 10px;white-space:nowrap;">' + text + '</span>'
+        + '<span style="flex:1;height:1px;background:' + line + ';"></span></div>';
+    }
+    var html = secHeader('👤 基本情報', '#0f766e', '#ccfbf1', '#99f6e4');
+    var cur = 0;
+    var jobsSeen = false;
+    _ssfRaw.forEach(function(e) {
+      var g = grp(e.label);
+      if (g !== cur) {
+        if (g > 0) {
+          html += secHeader('🏭 過去の勤務先 ' + '①②③④'.charAt(g - 1), '#5e35b1', '#ede7f6', '#d1c4e9');
+          jobsSeen = true;
+        } else if (jobsSeen) {
+          html += secHeader('📝 その他の回答', '#0369a1', '#e0f2fe', '#bae6fd');
+          jobsSeen = false;
+        }
+        cur = g;
+      }
+      var border = g > 0 ? 'border-left:4px solid #7e57c2;' : '';
+      html += '<div style="background:#fff;border:1px solid #e2e8f0;' + border + 'border-radius:10px;padding:8px 12px;margin-bottom:6px;">'
         + '<div style="font-size:10.5px;color:#94a3b8;font-weight:700;">' + _esc(e.label) + '</div>'
         + '<div style="font-size:14.5px;color:#1e293b;word-break:break-word;">' + _esc(e.value) + '</div>'
         + '</div>';
-    }).join('');
+    });
+    box.innerHTML = html;
   }
   switchScreen('skillsheetRawScreen');
 }
