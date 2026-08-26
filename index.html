@@ -34778,10 +34778,9 @@ function skillsheetOpenFolder() {
     + encodeURIComponent(p), '_blank', 'noopener');
 }
 function skillsheetSearchDebounced() {
+  // 全件をロード済みなので検索はクライアント側で即時絞り込み
   clearTimeout(_skillsheetTimer);
-  _skillsheetTimer = setTimeout(function() {
-    skillsheetLoadList(document.getElementById('skillsheetSearchInput').value.trim());
-  }, 350);
+  _skillsheetTimer = setTimeout(function() { skillsheetApplyFilters(); }, 250);
 }
 async function skillsheetLoadList(query) {
   var box = document.getElementById('skillsheetList');
@@ -34870,6 +34869,9 @@ async function skillsheetApplyFilters() {
   var jp = _ssSel('ssFilterJp');
   var site = _ssSel('ssFilterSite');
   var list = _ssCands.slice();
+  var qEl = document.getElementById('skillsheetSearchInput');
+  var q = qEl ? qEl.value.replace(/[\s　]+/g, '') : '';
+  if (q) list = list.filter(function(c) { return String(c.name || '').replace(/[\s　]+/g, '').indexOf(q) >= 0; });
   if (sex) list = list.filter(function(c) { return c.sex === sex; });
   if (age === '50over') list = list.filter(function(c) { return c.age != null && c.age >= 50; });
   if (age === '50under') list = list.filter(function(c) { return c.age != null && c.age < 50; });
@@ -34908,7 +34910,7 @@ function skillsheetRenderRows(cands) {
     box.innerHTML = '<div style="color:#888;padding:16px;text-align:center;">該当なし</div>';
     return;
   }
-  box.innerHTML = cands.map(function(c) {
+  box.innerHTML = '<div style="font-size:11.5px;color:#64748b;font-weight:700;margin:0 2px 2px;">該当 ' + cands.length + '件</div>' + cands.map(function(c) {
     var st = c.status || '';
     var isBlack = (st === 'ブラック');
     var isFemale = (c.sex === '女');
