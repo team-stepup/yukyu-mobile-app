@@ -35057,6 +35057,7 @@ function skillsheetRenderRows(cands) {
 var _ssfId1 = null;
 var _ssfStatus = '';
 var _ssfRaw = [];
+var _ssfAttachments = [];
 
 // 応募シート(Forms回答)の原文ビュー。フォームの入力値は画面を切り替えても保持される
 // 職歴(会社①〜④)はセクション見出しで区切って表示する
@@ -35101,7 +35102,31 @@ function skillsheetShowRaw() {
         + '<div style="font-size:14.5px;color:#1e293b;word-break:break-word;">' + _esc(e.value) + '</div>'
         + '</div>';
     });
+    // 📎 添付ファイル (在留カード画像など) — SPから認証付きで取得して表示
+    if (_ssfAttachments.length) {
+      html += secHeader('📎 添付（在留カードなど）', '#92400e', '#fef3c7', '#fde68a');
+      _ssfAttachments.forEach(function(a, i) {
+        html += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:6px;">'
+          + '<div style="font-size:10.5px;color:#94a3b8;font-weight:700;">' + _esc(a.name) + '</div>'
+          + '<img id="ssfAtt' + i + '" style="max-width:100%;border-radius:8px;margin-top:4px;" alt="読み込み中…">'
+          + '</div>';
+      });
+    }
     box.innerHTML = html;
+    if (_ssfAttachments.length) {
+      _ssfAttachments.forEach(function(a, i) {
+        (async function() {
+          try {
+            var token = await getToken();
+            var resp = await fetch(a.url, { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!resp.ok) return;
+            var blob = await resp.blob();
+            var el = document.getElementById('ssfAtt' + i);
+            if (el) el.src = URL.createObjectURL(blob);
+          } catch (e) { console.warn('attachment load failed', e); }
+        })();
+      });
+    }
   }
   switchScreen('skillsheetRawScreen');
 }
@@ -35120,6 +35145,7 @@ async function skillsheetOpenForm(id1, btn) {
     _ssfId1 = id1;
     _ssfStatus = data.status || '';
     _ssfRaw = data.raw || [];
+    _ssfAttachments = data.attachments || [];
     skillsheetRenderForm(data.fields || {});
     var note = document.getElementById('ssfSavedNote');
     if (note) note.style.display = data.saved ? 'block' : 'none';
