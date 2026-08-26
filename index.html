@@ -34817,6 +34817,24 @@ var _ssGeoCache = {};
 var _ssSitesLoaded = false;
 var _ssManualAddr = {};   // 住所未登録派遣先/直接入力の住所(セッション内記憶)
 
+// 入力された住所を派遣先情報(派遣先List「就業場所(所在地)」)へ保存
+async function skillsheetSaveSiteAddr(name, addr) {
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/yukyu/skillsheet', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save-site-addr', name: name, addr: addr })
+    });
+    if (resp.ok) {
+      var d = await resp.json();
+      if (d.updated > 0 && typeof showToast === 'function') {
+        showToast('派遣先情報に住所を保存しました（' + name + '）', 'success');
+      }
+    }
+  } catch (e) { console.warn('save-site-addr failed', e); }
+}
+
 function skillsheetClearFilters() {
   ['ssFilterSex', 'ssFilterAge', 'ssFilterCommute', 'ssFilterJp', 'ssFilterPeriod', 'ssFilterSite'].forEach(function(id) {
     var el = document.getElementById(id);
@@ -34909,10 +34927,12 @@ async function skillsheetApplyFilters() {
   // 住所未登録の派遣先/直接入力 → その場で住所を入力してもらう(セッション内は記憶)
   if (site === '__manual__' || site.indexOf('__ask__::') === 0) {
     if (!_ssManualAddr[site]) {
-      var lbl = site === '__manual__' ? '' : site.split('::')[1] + ' の';
-      var a = prompt(lbl + '住所を入力してください（例: 磐田市高木1550）');
+      var compName = site === '__manual__' ? '' : site.split('::')[1];
+      var a = prompt((compName ? compName + ' の' : '') + '住所を入力してください（例: 磐田市高木1550）');
       if (a && a.trim()) {
         _ssManualAddr[site] = a.trim();
+        // 派遣先情報(所在地空欄の行)にも保存 → 次回からドロップダウンに常設される
+        if (compName) skillsheetSaveSiteAddr(compName, a.trim());
       } else {
         var selEl = document.getElementById('ssFilterSite');
         if (selEl) selEl.value = '';
