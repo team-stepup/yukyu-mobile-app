@@ -40117,6 +40117,23 @@ async function loadKyuyuJisseki(force) {
   }
 }
 
+// 出光ガソリンカード ⇔ 車両 対応表 (****-0081-7319-XXX* の XXX)。
+// 2026年7月利用明細×List54給油実績の突合で特定 (2026-08-27)。カード再発行時はここを更新。
+var GAS_CARD_BY_VEHICLE = {
+  '1724': '049', '7875': '059', '26': '079', '8504': '089', '7638': '109',
+  '5179': '119', '363': '129', '1967': '149', '3011': '159', '2862': '179'
+};
+function gasCardOf(vehicleStr) {
+  var m = String(vehicleStr || '').trim().match(/^(\d+)/);
+  return (m && GAS_CARD_BY_VEHICLE[m[1]]) || '';
+}
+function gasCardChip(card, light) {
+  if (!card) return '';
+  var st = light ? 'background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.35);'
+                 : 'background:#eef2f9;color:#3b5bb0;border:1px solid #d5deef;';
+  return ' <span title="出光カード ****-0081-7319-' + card + '*" style="' + st + 'border-radius:8px;padding:0 6px;font-size:10px;font-weight:700;white-space:nowrap;">💳' + card + '</span>';
+}
+
 function renderKyuyuJisseki(recs, sougeiRecs, tankaMap) {
   var sumEl = document.getElementById('kjSummary'), listEl = document.getElementById('kjList');
   // 送迎給料 (承認済 × 単価) を社員番号ごとに
@@ -40180,7 +40197,8 @@ function renderKyuyuJisseki(recs, sougeiRecs, tankaMap) {
     + (drivers.some(function (d) { return d.warns; }) ? '<span style="color:#c62828;">⚠＝入力ミスの疑い(給油量/燃費が異常)。明細で確認しリストを修正してください。</span>' : '') + '</div>';
 
   listEl.innerHTML = drivers.map(function (d, i) {
-    var vehTxt = Object.keys(d.vehicles).sort(function (a, b) { return d.vehicles[b] - d.vehicles[a]; }).join(' ・ ');
+    var vehTxt = Object.keys(d.vehicles).sort(function (a, b) { return d.vehicles[b] - d.vehicles[a]; })
+      .map(function (v) { return _kjEsc(v) + gasCardChip(gasCardOf(v)); }).join(' ・ ');
     var payTxt = d.pay ? (_kjYen(d.pay.amount) + (d.pay.tankaMissing ? '★' : '') + ' <span style="font-size:10px;color:#6b7a90;font-weight:600;">(' + d.pay.approved + '回' + (d.pay.pending ? '・未承認' + d.pay.pending : '') + ')</span>')
                        : '<span style="color:#b0b8c4;">―</span>';
     var cell = function (lbl, val, color) {
@@ -40193,7 +40211,7 @@ function renderKyuyuJisseki(recs, sougeiRecs, tankaMap) {
       +   '<div style="flex:1;min-width:0;">'
       +     '<div style="font-size:14.5px;font-weight:800;color:#1f3864;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _kjEsc(d.name)
       +       (d.shainNo ? ' <span style="font-size:11px;color:#8b98ab;font-weight:600;">' + _kjEsc(d.shainNo) + '</span>' : '') + '</div>'
-      +     '<div style="font-size:11px;color:#6b7a90;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🚗 ' + _kjEsc(vehTxt || '―') + '</div>'
+      +     '<div style="font-size:11px;color:#6b7a90;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🚗 ' + (vehTxt || '―') + '</div>'
       +   '</div>'
       +   '<div style="text-align:right;flex-shrink:0;"><div style="font-size:18px;font-weight:800;color:#1a3c8f;line-height:1.1;">' + _kjKm(d.km) + '</div>'
       +     '<div style="font-size:10.5px;color:#8b98ab;">給油 ' + d.count + '回' + (d.noDist ? '（距離なし' + d.noDist + '）' : '')
@@ -50611,7 +50629,7 @@ function renderVehicleCards(items) {
     html += '<div style="font-size:12px;color:var(--text-light);">' + escHtml(carType) + (color ? ' / ' + escHtml(color) : '') + '</div>';
     html += '</div>';
     html += '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;">';
-    html += '<div>🧑 ' + escHtml(driver) + '</div>';
+    html += '<div>🧑 ' + escHtml(driver) + gasCardChip(gasCardOf(number)) + '</div>';
     html += '<div>' + escHtml(hakensaki) + '</div>';
     html += '</div>';
     // 初年度登録 / 走行距離 (給油申請の最新メーター値)
