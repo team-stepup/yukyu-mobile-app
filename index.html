@@ -6043,8 +6043,20 @@ select.sankyu-edit-input {
         <div style="margin-top:8px;font-size:11px;opacity:.8;">⏱ 打刻はサーバー時刻で記録されます（端末の時計は使いません）</div>
       </div>
 
+      <div class="home-search-card" id="kintaiYukyuCard" style="margin-top:14px;display:none;">
+        <div onclick="kintaiYukyuToggle()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <div style="font-weight:700;">🏖 有給残 <span id="kintaiYukyuRemain" style="color:#1565c0;font-size:18px;">–</span> 日</div>
+          <span id="kintaiYukyuArrow" style="color:#90a4ae;font-size:13px;">詳細 ▼</span>
+        </div>
+        <div id="kintaiYukyuBody" style="display:none;margin-top:10px;"></div>
+      </div>
+
       <div class="home-search-card" style="margin-top:14px;">
-        <div style="font-weight:700;margin-bottom:2px;">📝 有給・欠勤の申請</div>
+        <div onclick="kintaiMarkToggle()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <div style="font-weight:700;">📝 有給・欠勤の申請</div>
+          <span id="kintaiMarkArrow" style="color:#90a4ae;font-size:13px;">開く ▼</span>
+        </div>
+        <div id="kintaiMarkBody" style="display:none;margin-top:6px;">
         <div id="kintaiMarkGuide" style="font-size:11.5px;color:#78909c;margin-bottom:10px;">休む日と区分を選んで「申請する」を押してください。役員に通知が届き、承認後に確定します。</div>
         <div style="font-size:12px;font-weight:700;color:#546e7a;margin-bottom:4px;">① 日付</div>
         <input type="date" id="kintaiMarkDate" style="width:100%;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;box-sizing:border-box;">
@@ -6059,6 +6071,7 @@ select.sankyu-edit-input {
         <input id="kintaiMarkMemo" placeholder="例）私用のため" style="width:100%;padding:9px;border:1px solid #cfd8dc;border-radius:9px;font-size:14px;box-sizing:border-box;">
         <button id="kintaiMarkBtn" onclick="kintaiMark()" style="width:100%;margin-top:12px;padding:12px 0;border:none;border-radius:10px;background:#00897b;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">📨 申請する</button>
         <button type="button" onclick="kintaiMarkReset()" style="width:100%;margin-top:6px;padding:8px 0;border:none;background:none;color:#90a4ae;font-size:12px;text-decoration:underline;cursor:pointer;">申請を取り消す（その日を「出勤」に戻す）</button>
+        </div>
       </div>
 
       <div class="home-search-card" style="margin-top:14px;">
@@ -41380,11 +41393,11 @@ async function _saveJimushoOcr() {
 // 🕐 事務所勤怠 (打刻・本人月次・役員週次承認) — Functions kintai/* 経由
 //   List「事務所タイムカード」は役員のみ閲覧。スタッフの読み書きは全て API (MI) 経由
 // ============================================================
-// テスト運用中: 役員のみ表示 (2026-08-06)。本運用時は下のスタッフ3名を concat に戻す
+// 本運用 (2026-09-01〜): 役員2名+事務所スタッフ3名
 const KINTAI_USERS = ADMIN_USERS.concat([
-  // 'kaori.j@team-stepup.com',     // 城 かおり
-  // 'm.yoshiura@team-stepup.com',  // 吉浦 マルセロ
-  // 'y.mori@team-stepup.com'       // 森 ゆうじ
+  'kaori.j@team-stepup.com',     // 城 かおり
+  'm.yoshiura@team-stepup.com',  // 吉浦 マルセロ
+  'y.mori@team-stepup.com'       // 森 ゆうじ
 ]);
 function canUseKintai() {
   try {
@@ -41440,6 +41453,66 @@ function openKintaiScreen() {
   if (_kintaiClockTimer) clearInterval(_kintaiClockTimer);
   _kintaiClockTimer = setInterval(_kintaiTickClock, 1000);
   loadKintaiMy();
+  loadKintaiYukyu();
+}
+
+// 📝 申請カードの折り畳み
+function kintaiMarkToggle() {
+  const b = document.getElementById('kintaiMarkBody');
+  const a = document.getElementById('kintaiMarkArrow');
+  const open = b.style.display === 'none';
+  b.style.display = open ? 'block' : 'none';
+  if (a) a.textContent = open ? '閉じる ▲' : '開く ▼';
+}
+
+// 🏖 有給残 (kintai/yukyu) — 事務所有給Listにデータがある人だけカード表示
+function kintaiYukyuToggle() {
+  const b = document.getElementById('kintaiYukyuBody');
+  const a = document.getElementById('kintaiYukyuArrow');
+  const open = b.style.display === 'none';
+  b.style.display = open ? 'block' : 'none';
+  if (a) a.textContent = open ? '閉じる ▲' : '詳細 ▼';
+}
+
+async function loadKintaiYukyu() {
+  const card = document.getElementById('kintaiYukyuCard');
+  if (!card) return;
+  try {
+    const token = await getToken();
+    const resp = await fetch(FUNC_OCR_BASE + '/kintai/yukyu', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!resp.ok) { card.style.display = 'none'; return; }
+    const d = await resp.json();
+    if (!d.available) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    document.getElementById('kintaiYukyuRemain').textContent = d.remain;
+    const tile = function(label, val, hl) {
+      return '<div style="flex:1;text-align:center;background:' + (hl ? '#e8eaf6' : '#f5f7fa') + ';border-radius:10px;padding:8px 2px;">'
+        + '<div style="font-size:10.5px;color:#78909c;">' + label + '</div>'
+        + '<div style="font-size:17px;font-weight:800;color:' + (hl ? '#3949ab' : '#37474f') + ';">' + val + '<span style="font-size:10px;font-weight:400;"> 日</span></div></div>';
+    };
+    let h = '<div style="display:flex;gap:8px;">' + tile('繰越', d.carry) + tile('今期付与', d.currentGrant ? d.currentGrant.days : 0) + tile('合計残', d.remain, 1) + '</div>';
+    if (d.currentGrant) {
+      h += '<div style="font-size:11px;color:#78909c;margin-top:6px;">現在の付与: ' + d.currentGrant.date.replace(/-/g, '/')
+        + ' 付与 ' + d.currentGrant.days + '日（有効期限 ' + d.currentGrant.expire.replace(/-/g, '/') + '）</div>';
+    }
+    if (d.pending > 0) {
+      h += '<div style="font-size:11.5px;color:#f57c00;font-weight:700;margin-top:4px;">⏳ 承認待ちの有給申請 ' + d.pending + '日（承認されると残から引かれます）</div>';
+    }
+    if (d.history && d.history.length) {
+      h += '<div style="font-size:12px;font-weight:700;color:#546e7a;margin:10px 0 4px;">取得履歴（直近）</div>';
+      d.history.forEach(function(u) {
+        const src = u.src === '指定' ? '<span style="color:#8e24aa;font-weight:700;">会社指定</span>' : (u.src === '勤怠' ? u.note : '');
+        h += '<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 2px;border-bottom:1px solid #f0f3f6;">'
+          + '<span>' + u.date.replace(/-/g, '/') + '</span><span>' + u.days + '日 ' + src + '</span></div>';
+      });
+    }
+    h += '<div style="font-size:10.5px;color:#b0bec5;margin-top:6px;">※ 会社指定の半日有給（カレンダー赤枠の日）は自動で0.5日消化されます</div>';
+    document.getElementById('kintaiYukyuBody').innerHTML = h;
+  } catch (e) {
+    card.style.display = 'none';
+  }
 }
 
 function _kintaiKubunChip(kubun) {
