@@ -34866,11 +34866,15 @@ async function skillsheetLoadList(query) {
     var data = await resp.json();
     _ssCands = data.candidates || [];
     skillsheetMarkRepeats(_ssCands);
-    // SP社員データと生年月日+性別で突合 → 在職中/退社済みチップ
+    // SP社員データと突合 → 在職中/退社済みチップ (①生年月日+性別 ②氏名+性別フォールバック)
     try {
       var em = await skillsheetLoadEmpStatus();
       _ssCands.forEach(function(c) {
         c._emp = (c.birth && c.sex) ? (em[c.birth + '|' + c.sex] || null) : null;
+        if (!c._emp && c.sex && _ssEmpNameMap) {
+          var nk = _ssNormName(c.name);
+          if (nk) c._emp = _ssEmpNameMap[nk + '|' + c.sex] || null;
+        }
       });
     } catch (e) { console.warn('emp match failed', e); }
     box.dataset.loaded = '1';
@@ -34916,24 +34920,23 @@ function _ssShortHaken(v) {
   s = s.replace(/株式会社|有限会社|㈱|㈲|\(株\)|\(有\)/g, '').replace(/[\s　]+/g, '').trim();
   return s.length > 7 ? s.slice(0, 6) + '…' : s;
 }
+function _ssNormName(s) {
+  return String(s || '').replace(/[\s　]+/g, '').trim();
+}
+var _ssEmpNameMap = null;   // 氏名(正規化)+性別 → 同 (生年月日不一致時のフォールバック・応募側の生年月日入力ミス対策)
 async function skillsheetLoadEmpStatus() {
   if (_ssEmpStatus) return _ssEmpStatus;
   var SEXK = 'OData__x6027__x5225_';
   var BDK = 'OData__x751f__x5e74__x6708__x65e5_';
   var BKK = 'OData__x90e8__x8ab2_';   // 部課 (例 071:三和電子サーキット㈱)
-  var sel = ['Id', F.syainNo, F.yukyuTaisha, F.hakenTaisha, BDK, SEXK, BKK, F.hakensaki].join(',');
+  var sel = ['Id', 'Title', F.syainNo, F.yukyuTaisha, F.hakenTaisha, BDK, SEXK, BKK, F.hakensaki].join(',');
   var rows = await spGetAll(LIST_EMPLOYEES_GUID, '$select=' + sel + '&$top=2000');
   var map = {};
+  var nmap = {};
   (rows || []).forEach(function(r) {
-    var bv = r[BDK];
-    if (!bv) return;
     var sx = String(r[SEXK] || '').trim();
     sx = sx.indexOf('男') >= 0 ? '男' : (sx.indexOf('女') >= 0 ? '女' : '');
     if (!sx) return;
-    var d = new Date(bv);
-    if (isNaN(d.getTime())) return;
-    var jst = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
-    var utc = String(bv).slice(0, 10);
     var active = !(r[F.yukyuTaisha] || r[F.hakenTaisha]);
     var bango = _bangoNorm(r[F.syainNo]);
     var haken = _ssShortHaken(r[BKK]);
@@ -34942,14 +34945,25 @@ async function skillsheetLoadEmpStatus() {
       var hm = String(r[F.hakensaki] || '').match(/\d+\s*[:：]\s*([^\d]+)/);
       if (hm) haken = _ssShortHaken(hm[1]);
     }
-    [jst, utc].forEach(function(k) {
-      var key = k + '|' + sx;
-      var cur = map[key];
-      if (!cur) map[key] = { active: active, bango: bango, haken: haken };
-      else if (active && !cur.active) { cur.active = true; cur.bango = bango; cur.haken = haken; }
-    });
+    var ent = { active: active, bango: bango, haken: haken };
+    function reg(m, key) {
+      var cur = m[key];
+      if (!cur) m[key] = ent;
+      else if (active && !cur.active) m[key] = ent;
+    }
+    var nm = _ssNormName(r.Title);
+    if (nm) reg(nmap, nm + '|' + sx);
+    var bv = r[BDK];
+    if (!bv) return;
+    var d = new Date(bv);
+    if (isNaN(d.getTime())) return;
+    var jst = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    var utc = String(bv).slice(0, 10);
+    reg(map, jst + '|' + sx);
+    reg(map, utc + '|' + sx);
   });
   _ssEmpStatus = map;
+  _ssEmpNameMap = nmap;
   return map;
 }
 
