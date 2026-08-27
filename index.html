@@ -35297,6 +35297,7 @@ async function skillsheetOpenForm(id1, btn) {
     _ssfRaw = data.raw || [];
     _ssfAttachments = data.attachments || [];
     _ssfBirth = data.birth || '';
+    _ssfNat = data.nationality || '';
     skillsheetRenderForm(data.fields || {});
     var note = document.getElementById('ssfSavedNote');
     if (note) note.style.display = data.saved ? 'block' : 'none';
@@ -35326,14 +35327,17 @@ function skillsheetPaintStatus() {
 }
 
 var _ssfBirth = '';
-// 生年月日は表示のみ(保存/PDF印字なし)。手入力等でデータが無ければ非表示
-function _ssfBirthBox() {
-  if (!_ssfBirth) return '';
-  return '<div style="flex:1.3;min-width:0;margin-bottom:8px;">'
-    + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;">生年月日（表示のみ）</div>'
-    + '<div style="width:100%;box-sizing:border-box;padding:9px 10px;font-size:15px;border:1.5px dashed #cbd5e1;border-radius:10px;background:#f8fafc;color:#475569;">' + _esc(_ssfBirth) + '</div>'
+var _ssfNat = '';
+// 生年月日/国籍は表示のみ(保存/PDF印字なし)。データが無ければ非表示
+function _ssfViewBox(label, val, flex) {
+  if (!val) return '';
+  return '<div style="flex:' + (flex || 1) + ';min-width:0;margin-bottom:8px;">'
+    + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;">' + label + '（表示のみ）</div>'
+    + '<div style="width:100%;box-sizing:border-box;padding:9px 10px;font-size:15px;border:1.5px dashed #cbd5e1;border-radius:10px;background:#f8fafc;color:#475569;">' + _esc(val) + '</div>'
     + '</div>';
 }
+function _ssfBirthBox() { return _ssfViewBox('生年月日', _ssfBirth, 1.3); }
+function _ssfNatBox() { return _ssfViewBox('国籍', _ssfNat, 1); }
 
 function _ssfInput(id, label, val, flex) {
   return '<div style="' + (flex ? 'flex:1;min-width:0;' : '') + 'margin-bottom:8px;">'
@@ -35357,7 +35361,7 @@ function skillsheetRenderForm(F) {
   h += _ssfInput('name', '氏名（カタカナ推奨）', F.name);
   h += _ssfInput('furigana', 'フリガナ', F.furigana);
   h += '<div style="display:flex;gap:8px;">' + _ssfInput('sex', '性別', F.sex, 1) + _ssfInput('age', '年齢', F.age, 1) + _ssfBirthBox() + '</div>';
-  h += '<div style="display:flex;gap:8px;">' + _ssfInput('no', 'No.（社員番号等）', F.no, 1) + _ssfInput('marital', '配偶者', F.marital, 1) + _ssfInput('commute', '通勤手段', F.commute, 1) + '</div>';
+  h += '<div style="display:flex;gap:8px;">' + _ssfNatBox() + _ssfInput('no', 'No.（社員番号等）', F.no, 1) + _ssfInput('marital', '配偶者', F.marital, 1) + _ssfInput('commute', '通勤手段', F.commute, 1) + '</div>';
   h += _ssfInput('addr', '住所', F.addr);
   h += _ssfInput('edu', '最終学歴（例: 高校卒業）', F.edu);
   h += '<div style="display:flex;gap:8px;">' + _ssfInput('zangyo', '残業', F.zangyo, 1) + _ssfInput('sat', '土曜日（休日出勤）', F.sat, 1) + _ssfInput('kotai', '交代勤務', F.kotai, 1) + '</div>';
