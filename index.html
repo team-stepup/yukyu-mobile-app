@@ -34866,6 +34866,13 @@ async function skillsheetLoadList(query) {
     var data = await resp.json();
     _ssCands = data.candidates || [];
     skillsheetMarkRepeats(_ssCands);
+    // SP社員データと生年月日+性別で突合 → 在職中/退社済みチップ
+    try {
+      var em = await skillsheetLoadEmpStatus();
+      _ssCands.forEach(function(c) {
+        c._emp = (c.birth && c.sex) ? (em[c.birth + '|' + c.sex] || null) : null;
+      });
+    } catch (e) { console.warn('emp match failed', e); }
     box.dataset.loaded = '1';
     await skillsheetApplyFilters();
   } catch (e) {
@@ -34895,6 +34902,39 @@ function skillsheetMarkRepeats(cands) {
       }
     });
   });
+}
+
+// SP社員List → (生年月日|性別) → {active(在職中か), bango(社員番号)} のマップ
+// 生年月日はJST日付とUTC先頭10桁の両方をキー登録 (SPの2形式混在ズレ対応)。同一キーで在職レコード優先
+var _ssEmpStatus = null;
+async function skillsheetLoadEmpStatus() {
+  if (_ssEmpStatus) return _ssEmpStatus;
+  var SEXK = 'OData__x6027__x5225_';
+  var BDK = 'OData__x751f__x5e74__x6708__x65e5_';
+  var sel = ['Id', F.syainNo, F.yukyuTaisha, F.hakenTaisha, BDK, SEXK].join(',');
+  var rows = await spGetAll(LIST_EMPLOYEES_GUID, '$select=' + sel + '&$top=2000');
+  var map = {};
+  (rows || []).forEach(function(r) {
+    var bv = r[BDK];
+    if (!bv) return;
+    var sx = String(r[SEXK] || '').trim();
+    sx = sx.indexOf('男') >= 0 ? '男' : (sx.indexOf('女') >= 0 ? '女' : '');
+    if (!sx) return;
+    var d = new Date(bv);
+    if (isNaN(d.getTime())) return;
+    var jst = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    var utc = String(bv).slice(0, 10);
+    var active = !(r[F.yukyuTaisha] || r[F.hakenTaisha]);
+    var bango = _bangoNorm(r[F.syainNo]);
+    [jst, utc].forEach(function(k) {
+      var key = k + '|' + sx;
+      var cur = map[key];
+      if (!cur) map[key] = { active: active, bango: bango };
+      else if (active && !cur.active) { cur.active = true; cur.bango = bango; }
+    });
+  });
+  _ssEmpStatus = map;
+  return map;
 }
 
 // 検索語が生年月日らしければ YYYYMMDD 形式(前方一致用)に正規化。違えば null
@@ -35125,6 +35165,13 @@ function skillsheetRenderRows(cands) {
       ? '<span style="font-size:10.5px;font-weight:700;color:#374151;background:#f3f4f6;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">' + (ck === '車' ? '🚗車' : (ck === '送迎' ? '🚌送迎' : _esc(ck))) + '</span>' : '';
     var kmChip = (c._km != null)
       ? '<span style="font-size:10.5px;font-weight:800;color:#065f46;background:#d1fae5;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">' + c._km.toFixed(1) + 'km</span>' : '';
+    // SP社員データと生年月日+性別が一致 → 在職中/退社済み
+    var empChip = '';
+    if (c._emp) {
+      empChip = c._emp.active
+        ? '<span style="font-size:10.5px;font-weight:800;color:#1b5e20;background:#c8e6c9;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">🏢在職中' + (c._emp.bango ? ' ' + c._emp.bango : '') + '</span>'
+        : '<span style="font-size:10.5px;font-weight:700;color:#546e7a;background:#eceff1;border:1px solid #cfd8dc;border-radius:6px;padding:0 6px;margin-left:4px;flex-shrink:0;">退社済み' + (c._emp.bango ? ' ' + c._emp.bango : '') + '</span>';
+    }
     var bg = isBlack ? '#e2e2e2' : (isFemale ? '#fdf0f3' : '#fff');
     var rowStyle = 'display:flex;justify-content:space-between;align-items:center;background:' + bg
       + ';border:1px solid ' + (isBlack ? '#cfcfcf' : (isFemale ? '#f5d5dd' : '#e2e8f0'))
@@ -35134,7 +35181,7 @@ function skillsheetRenderRows(cands) {
     var nameStyle = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (isBlack ? 'color:#666;' : '');
     return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="' + rowStyle + '">'
       + '<span style="font-weight:700;display:flex;align-items:center;min-width:0;">' + idBadge
-      + '<span style="' + nameStyle + '">' + _esc(c.name) + '</span>' + sexChip + comChip + kmChip + chip + '</span>'
+      + '<span style="' + nameStyle + '">' + _esc(c.name) + '</span>' + sexChip + comChip + empChip + kmChip + chip + '</span>'
       + '<span style="font-size:11px;color:#94a3b8;margin-left:6px;flex-shrink:0;">' + _esc(c.date || '') + '</span></button>';
   }).join('');
 }
