@@ -34907,11 +34907,21 @@ function skillsheetMarkRepeats(cands) {
 // SP社員List → (生年月日|性別) → {active(在職中か), bango(社員番号)} のマップ
 // 生年月日はJST日付とUTC先頭10桁の両方をキー登録 (SPの2形式混在ズレ対応)。同一キーで在職レコード優先
 var _ssEmpStatus = null;
+// 派遣先名の短縮 (番号:や㈱等を除去・8文字以上は6文字+…)
+function _ssShortHaken(v) {
+  var s = String(v || '').trim();
+  if (!s) return '';
+  var m = s.match(/^\s*\d+\s*[:：\-－]\s*(.+)$/);
+  if (m) s = m[1];
+  s = s.replace(/株式会社|有限会社|㈱|㈲|\(株\)|\(有\)/g, '').replace(/[\s　]+/g, '').trim();
+  return s.length > 7 ? s.slice(0, 6) + '…' : s;
+}
 async function skillsheetLoadEmpStatus() {
   if (_ssEmpStatus) return _ssEmpStatus;
   var SEXK = 'OData__x6027__x5225_';
   var BDK = 'OData__x751f__x5e74__x6708__x65e5_';
-  var sel = ['Id', F.syainNo, F.yukyuTaisha, F.hakenTaisha, BDK, SEXK].join(',');
+  var BKK = 'OData__x90e8__x8ab2_';   // 部課 (例 071:三和電子サーキット㈱)
+  var sel = ['Id', F.syainNo, F.yukyuTaisha, F.hakenTaisha, BDK, SEXK, BKK, F.hakensaki].join(',');
   var rows = await spGetAll(LIST_EMPLOYEES_GUID, '$select=' + sel + '&$top=2000');
   var map = {};
   (rows || []).forEach(function(r) {
@@ -34926,11 +34936,17 @@ async function skillsheetLoadEmpStatus() {
     var utc = String(bv).slice(0, 10);
     var active = !(r[F.yukyuTaisha] || r[F.hakenTaisha]);
     var bango = _bangoNorm(r[F.syainNo]);
+    var haken = _ssShortHaken(r[BKK]);
+    if (!haken) {
+      // 部課空欄→ﾊｹﾝｻｷID内の「番号:会社名」を拾う
+      var hm = String(r[F.hakensaki] || '').match(/\d+\s*[:：]\s*([^\d]+)/);
+      if (hm) haken = _ssShortHaken(hm[1]);
+    }
     [jst, utc].forEach(function(k) {
       var key = k + '|' + sx;
       var cur = map[key];
-      if (!cur) map[key] = { active: active, bango: bango };
-      else if (active && !cur.active) { cur.active = true; cur.bango = bango; }
+      if (!cur) map[key] = { active: active, bango: bango, haken: haken };
+      else if (active && !cur.active) { cur.active = true; cur.bango = bango; cur.haken = haken; }
     });
   });
   _ssEmpStatus = map;
@@ -35165,12 +35181,13 @@ function skillsheetRenderRows(cands) {
       ? '<span style="font-size:10.5px;font-weight:700;color:#374151;background:#f3f4f6;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">' + (ck === '車' ? '🚗車' : (ck === '送迎' ? '🚌送迎' : _esc(ck))) + '</span>' : '';
     var kmChip = (c._km != null)
       ? '<span style="font-size:10.5px;font-weight:800;color:#065f46;background:#d1fae5;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">' + c._km.toFixed(1) + 'km</span>' : '';
-    // SP社員データと生年月日+性別が一致 → 在職中/退社済み
+    // SP社員データと生年月日+性別が一致 → 在職中(緑)/退社済み(オレンジ) + 社員番号・派遣先名(短縮)
     var empChip = '';
     if (c._emp) {
+      var empTxt = (c._emp.bango ? ' ' + c._emp.bango : '') + (c._emp.haken ? '・' + c._emp.haken : '');
       empChip = c._emp.active
-        ? '<span style="font-size:10.5px;font-weight:800;color:#1b5e20;background:#c8e6c9;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">🏢在職中' + (c._emp.bango ? ' ' + c._emp.bango : '') + '</span>'
-        : '<span style="font-size:10.5px;font-weight:700;color:#546e7a;background:#eceff1;border:1px solid #cfd8dc;border-radius:6px;padding:0 6px;margin-left:4px;flex-shrink:0;">退社済み' + (c._emp.bango ? ' ' + c._emp.bango : '') + '</span>';
+        ? '<span style="font-size:10.5px;font-weight:800;color:#1b5e20;background:#c8e6c9;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">🏢在職中' + _esc(empTxt) + '</span>'
+        : '<span style="font-size:10.5px;font-weight:800;color:#e65100;background:#ffe0b2;border-radius:6px;padding:1px 6px;margin-left:4px;flex-shrink:0;">退社済み' + _esc(empTxt) + '</span>';
     }
     var bg = isBlack ? '#e2e2e2' : (isFemale ? '#fdf0f3' : '#fff');
     var rowStyle = 'display:flex;justify-content:space-between;align-items:center;background:' + bg
