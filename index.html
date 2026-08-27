@@ -41493,22 +41493,60 @@ async function loadKintaiYukyu() {
         + '<div style="font-size:17px;font-weight:800;color:' + (hl ? '#3949ab' : '#37474f') + ';">' + val + '<span style="font-size:10px;font-weight:400;"> 日</span></div></div>';
     };
     let h = '<div style="display:flex;gap:8px;">' + tile('繰越', d.carry) + tile('今期付与', d.currentGrant ? d.currentGrant.days : 0) + tile('合計残', d.remain, 1) + '</div>';
-    if (d.currentGrant) {
-      h += '<div style="font-size:11px;color:#78909c;margin-top:6px;">現在の付与: ' + d.currentGrant.date.replace(/-/g, '/')
-        + ' 付与 ' + d.currentGrant.days + '日（有効期限 ' + d.currentGrant.expire.replace(/-/g, '/') + '）</div>';
+    if (d.nextGrant) {
+      h += '<div style="font-size:11px;color:#78909c;margin-top:6px;">次回付与: ' + d.nextGrant.date.replace(/-/g, '/') + ' に ' + d.nextGrant.days + '日（自動付与）</div>';
     }
     if (d.pending > 0) {
       h += '<div style="font-size:11.5px;color:#f57c00;font-weight:700;margin-top:4px;">⏳ 承認待ちの有給申請 ' + d.pending + '日（承認されると残から引かれます）</div>';
     }
-    if (d.history && d.history.length) {
-      h += '<div style="font-size:12px;font-weight:700;color:#546e7a;margin:10px 0 4px;">取得履歴（直近）</div>';
-      d.history.forEach(function(u) {
-        const src = u.src === '指定' ? '<span style="color:#8e24aa;font-weight:700;">会社指定</span>' : (u.src === '勤怠' ? u.note : '');
-        h += '<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 2px;border-bottom:1px solid #f0f3f6;">'
-          + '<span>' + u.date.replace(/-/g, '/') + '</span><span>' + u.days + '日 ' + src + '</span></div>';
+    // 付与○回目カード (派遣の有給詳細と同形式・新しい順)
+    const gs = (d.grants || []).slice();
+    const gtile = function(label, val, color, bg) {
+      return '<div style="flex:1;text-align:center;background:' + (bg || '#f5f7fa') + ';border-radius:8px;padding:6px 2px;">'
+        + '<div style="font-size:10px;color:#90a4ae;">' + label + '</div>'
+        + '<div style="font-size:15px;font-weight:800;color:' + (color || '#37474f') + ';">' + val + '<span style="font-size:9px;font-weight:400;"> 日</span></div></div>';
+    };
+    const dayBefore = function(s) {
+      const dt = new Date(s + 'T00:00:00');
+      dt.setDate(dt.getDate() - 1);
+      return dt.getFullYear() + '/' + ('0' + (dt.getMonth() + 1)).slice(-2) + '/' + ('0' + dt.getDate()).slice(-2);
+    };
+    gs.forEach(function(g, i) { g._no = i + 1; });
+    gs.slice().reverse().forEach(function(g) {
+      const isCur = d.currentGrant && g.date === d.currentGrant.date;
+      const lost = g.expired ? g.left : 0;
+      const badge = isCur ? '<span style="background:#3949ab;color:#fff;border-radius:8px;padding:1px 8px;font-size:10.5px;font-weight:700;margin-left:6px;">現在の付与</span>' : '';
+      const state = g.expired
+        ? '<span style="color:#b0bec5;font-size:11px;font-weight:700;">失効</span>'
+        : '<span style="color:#2e7d32;background:#e8f5e9;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700;">有効</span>';
+      h += '<div style="border:1.5px solid ' + (isCur ? '#7986cb' : '#e2e8f0') + ';border-radius:12px;padding:10px;margin-top:10px;' + (g.expired ? 'opacity:.72;' : '') + '">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+        + '<div style="font-weight:800;font-size:13.5px;">付与' + g._no + '回目' + badge + '</div>' + state + '</div>'
+        + '<div style="font-size:11px;color:#90a4ae;margin:2px 0 8px;">' + g.date.replace(/-/g, '/') + ' 〜 ' + dayBefore(g.expire) + '</div>'
+        + '<div style="display:flex;gap:6px;">'
+        + gtile('消滅', lost, lost ? '#e53935' : '#b0bec5')
+        + gtile('付与', g.days, '#3949ab', '#e8eaf6')
+        + gtile('使用', g.used, '#ef6c00', '#fff3e0')
+        + gtile('残', g.left, g.expired ? '#b0bec5' : '#37474f')
+        + '</div></div>';
+    });
+    // 取得履歴 (累計付き・新しい順)
+    const hist = (d.history || []).slice().reverse();
+    if (hist.length) {
+      h += '<div style="font-size:12.5px;font-weight:700;color:#546e7a;margin:12px 0 4px;">取得履歴 ' + hist.length + '件（合計 ' + d.usedTotal + '日消化）</div>';
+      hist.forEach(function(u, idx) {
+        const no = hist.length - idx;
+        const src = u.src === '指定' ? '<span style="color:#8e24aa;font-weight:700;font-size:10.5px;">会社指定</span>'
+          : (u.src === '勤怠' ? '<span style="color:#607d8b;font-size:10.5px;">' + u.note + '</span>' : '');
+        h += '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:5px 2px;border-bottom:1px solid #f0f3f6;">'
+          + '<span style="background:#eceff1;border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:#546e7a;flex-shrink:0;">' + no + '</span>'
+          + '<span style="flex:1;">' + u.date.replace(/-/g, '/') + '</span>'
+          + '<span style="background:#e3f2fd;color:#1565c0;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700;">' + u.days + '日</span>'
+          + src
+          + '<span style="color:#3949ab;font-size:11px;font-weight:700;">累計 ' + u.cum + '日</span></div>';
       });
     }
-    h += '<div style="font-size:10.5px;color:#b0bec5;margin-top:6px;">※ 会社指定の半日有給（カレンダー赤枠の日）は自動で0.5日消化されます</div>';
+    h += '<div style="font-size:10.5px;color:#b0bec5;margin-top:6px;">※ 会社指定の半日有給（カレンダー赤枠の日）は自動で0.5日消化 / 基準日が来たら自動付与されます</div>';
     document.getElementById('kintaiYukyuBody').innerHTML = h;
   } catch (e) {
     card.style.display = 'none';
