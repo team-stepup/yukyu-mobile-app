@@ -35358,6 +35358,57 @@ function _ssfViewBox(label, val, flex) {
 function _ssfBirthBox() { return _ssfViewBox('生年月日', _ssfBirth, 1.3); }
 function _ssfNatBox() { return _ssfViewBox('国籍', _ssfNat, 1); }
 
+// ＋職歴を追加: 非表示の職歴カードを順に表示 (5枚全部出たらボタンを隠す)
+function skillsheetAddJobCard() {
+  var shown = false;
+  for (var i = 0; i < 5; i++) {
+    var el = document.getElementById('ssfJobCard' + i);
+    if (!el) continue;
+    if (!shown && el.style.display === 'none') {
+      el.style.display = '';
+      shown = true;
+      continue;
+    }
+  }
+  var remain = false;
+  for (var j = 0; j < 5; j++) {
+    var e2 = document.getElementById('ssfJobCard' + j);
+    if (e2 && e2.style.display === 'none') remain = true;
+  }
+  var b = document.getElementById('ssfAddJobBtn');
+  if (b && !remain) b.style.display = 'none';
+}
+
+// 🪪 在留カード・免許証ポップアップ (添付をBearer取得して表示)
+function skillsheetShowIdDocs() {
+  if (!_ssfAttachments || !_ssfAttachments.length) return;
+  var ov = document.createElement('div');
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '99999';
+  var inner = '<div class="confirm-box" style="max-width:520px;max-height:86vh;overflow-y:auto;text-align:center;">'
+    + '<div class="confirm-title" style="color:var(--primary);">🪪 在留カード・免許証</div>';
+  _ssfAttachments.forEach(function(a, i) {
+    inner += '<div style="font-size:10.5px;color:#94a3b8;font-weight:700;text-align:left;margin-top:8px;">' + _esc(a.name) + '</div>'
+      + '<img id="ssfDoc' + i + '" style="max-width:100%;border-radius:8px;border:1px solid #eee;margin-top:2px;" alt="読み込み中…">';
+  });
+  inner += '<div class="confirm-btns" style="margin-top:12px;"><button class="btn-cancel" onclick="this.closest(&quot;.confirm-overlay&quot;).remove()">閉じる</button></div></div>';
+  ov.innerHTML = inner;
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  _ssfAttachments.forEach(function(a, i) {
+    (async function() {
+      try {
+        var token = await getToken();
+        var resp = await fetch(a.url, { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!resp.ok) return;
+        var blob = await resp.blob();
+        var el = document.getElementById('ssfDoc' + i);
+        if (el) el.src = URL.createObjectURL(blob);
+      } catch (e) { console.warn('id doc load failed', e); }
+    })();
+  });
+}
+
 function _ssfInput(id, label, val, flex) {
   return '<div style="' + (flex ? 'flex:1;min-width:0;' : '') + 'margin-bottom:8px;">'
     + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;">' + label + '</div>'
@@ -35381,6 +35432,9 @@ function skillsheetRenderForm(F) {
   h += _ssfInput('furigana', 'フリガナ', F.furigana);
   h += '<div style="display:flex;gap:8px;">' + _ssfInput('sex', '性別', F.sex, 1) + _ssfInput('age', '年齢', F.age, 1) + _ssfBirthBox() + '</div>';
   h += '<div style="display:flex;gap:8px;">' + _ssfNatBox() + _ssfInput('no', 'ID', F.no, 1) + _ssfInput('marital', '配偶者', F.marital, 1) + _ssfInput('commute', '通勤手段', F.commute, 1) + '</div>';
+  if (_ssfAttachments && _ssfAttachments.length) {
+    h += '<button type="button" onclick="skillsheetShowIdDocs()" style="width:100%;margin:-2px 0 10px;padding:9px 0;border:1.5px solid #fdba74;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:13px;font-weight:800;cursor:pointer;">🪪 在留カード・免許証を見る（' + _ssfAttachments.length + '枚）</button>';
+  }
   h += _ssfInput('addr', '住所', F.addr);
   h += _ssfInput('edu', '最終学歴（例: 高校卒業）', F.edu);
   h += '<div style="display:flex;gap:8px;">' + _ssfInput('zangyo', '残業', F.zangyo, 1) + _ssfInput('sat', '土曜日（休日出勤）', F.sat, 1) + _ssfInput('kotai', '交代勤務', F.kotai, 1) + '</div>';
@@ -35388,9 +35442,13 @@ function skillsheetRenderForm(F) {
   h += '<div style="display:flex;gap:8px;">' + _ssfInput('uwagi', '作業服 上着', F.uwagi, 1) + _ssfInput('pants', 'ズボン', F.pants, 1) + _ssfInput('shoes', '靴', F.shoes, 1) + '</div>';
   var jobs = F.jobs || [];
   h += '<div style="font-size:12.5px;font-weight:800;color:#5e35b1;margin:12px 0 6px;">職歴（会社名もここで日本語に直せます）</div>';
+  var anyJobAtAll = (jobs || []).some(function(x) { return x && (x.company || x.naiyou || x.kikan || x.jikyu || x.haken); });
   for (var i = 0; i < 5; i++) {
     var jb = jobs[i] || {};
-    h += '<div style="background:#fff;border:1.5px solid #d9ccf5;border-left:5px solid #6a3fb5;border-radius:12px;padding:0 10px 2px;margin-bottom:14px;overflow:hidden;">'
+    // 空の職歴カードは非表示 (「＋職歴を追加」で表示できる)。全部空なら1枚目だけ表示
+    var hasJob = !!(jb.company || jb.naiyou || jb.kikan || jb.jikyu || jb.haken);
+    var visible = hasJob || (i === 0 && !anyJobAtAll);
+    h += '<div class="ssfJobCard" id="ssfJobCard' + i + '" style="' + (visible ? '' : 'display:none;') + 'background:#fff;border:1.5px solid #d9ccf5;border-left:5px solid #6a3fb5;border-radius:12px;padding:0 10px 2px;margin-bottom:14px;overflow:hidden;">'
       + '<div style="display:flex;align-items:center;gap:8px;background:#f3effc;margin:0 -10px 8px;padding:6px 10px;">'
       + '<span style="background:#6a3fb5;color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;">' + (i + 1) + '</span>'
       + '<span style="font-size:13px;font-weight:800;color:#5e35b1;">職歴 ' + (i + 1) + '</span></div>'
@@ -35400,6 +35458,7 @@ function skillsheetRenderForm(F) {
       + '<div style="flex:1;min-width:0;">' + _ssfInput('jj' + i, '時給（社内参考）', jb.jikyu, 0) + '</div></div>'
       + '</div>';
   }
+  h += '<button type="button" id="ssfAddJobBtn" onclick="skillsheetAddJobCard()" style="width:100%;margin:-4px 0 12px;padding:9px 0;border:1.5px dashed #b39ddb;border-radius:10px;background:#faf8ff;color:#5e35b1;font-size:13px;font-weight:800;cursor:pointer;">＋ 職歴を追加</button>';
   h += _ssfInput('jp', '日本語能力', F.jp);
   box.innerHTML = h;
   skillsheetPaintStatus();
