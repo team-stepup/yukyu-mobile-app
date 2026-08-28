@@ -39608,7 +39608,7 @@ async function loadMaebariApproved() {
   try {
     const token = await getToken();
     if (!token) { showToast('認証エラー', 'error'); return; }
-    const select = encodeURIComponent(['Id', MS.shainNo, MS.amount, MS.kiboubi, MS.hakensaki, MS.tantou, MS.status, MS.approvedAt, MS.approver, 'Created'].join(','));
+    const select = encodeURIComponent(['Id', MS.shainNo, MS.amount, MS.kiboubi, MS.riyuu, MS.hakensaki, MS.tantou, MS.status, MS.approvedAt, MS.approver, MS.existingListItemId, 'Created'].join(','));
     const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items?$filter="
       + encodeURIComponent("Status eq 'approved'") + "&$select=" + select + "&$orderby=Id desc&$top=200";
     const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
@@ -39648,18 +39648,24 @@ function renderMaebariApprovedFiltered() {
       || String(it[MS.tantou] || '').toLowerCase().indexOf(q) >= 0;
   });
   if (!rows.length) { listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">該当する承認済みの申請はありません</div>'; return; }
+  var kanri = isMaebariKanri();   // 承認取消・修正は役員のみ
   listEl.innerHTML = rows.map(function (r) {
     var it = r.it;
     var done = it[MS.approvedAt] ? new Date(it[MS.approvedAt]) : (it.Created ? new Date(it.Created) : null);
     var doneStr = done ? (done.getFullYear() + '/' + String(done.getMonth() + 1).padStart(2, '0') + '/' + String(done.getDate()).padStart(2, '0')) : '―';
     var kibou = it[MS.kiboubi] ? new Date(it[MS.kiboubi]) : null;
     var kibouStr = kibou ? (kibou.getFullYear() + '/' + String(kibou.getMonth() + 1).padStart(2, '0') + '/' + String(kibou.getDate()).padStart(2, '0')) : '―';
+    var kanriBtns = !kanri ? '' : '<div style="display:flex;gap:8px;margin-top:8px;">'
+      + '<button onclick="confirmUnapproveMaebari(' + it.Id + ')" style="flex:1;background:#fff3e0;color:#e65100;border:1px solid #ffcc80;border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;">↩ 承認取消</button>'
+      + '<button onclick="modifyApprovedMaebari(' + it.Id + ')" style="flex:1;background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;">✎ 日付・金額修正</button>'
+      + '</div>';
     return '<div class="approve-done-card">'
       + '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:1.15em;font-weight:800;color:#1f3864;">¥' + Number(it[MS.amount] || 0).toLocaleString('ja-JP') + '</span>'
       + '<span class="dc-status" style="background:#e8f5e9;color:#2e7d32;">承認済</span>'
       + '<span style="margin-left:auto;font-size:11px;color:#888;">承認 ' + doneStr + '</span></div>'
       + '<div style="font-size:13px;font-weight:700;color:#333;margin-top:3px;">' + _esc(r.name || ('No.' + (it[MS.shainNo] || ''))) + ' <span style="font-weight:400;color:#999;">No.' + _esc(it[MS.shainNo] || '') + '</span></div>'
       + '<div style="font-size:12px;color:#666;margin-top:1px;">希望日: ' + kibouStr + ' ｜ ' + _esc(it[MS.hakensaki] || '―') + ' ｜ 担当: ' + _esc(it[MS.tantou] || '―') + '</div>'
+      + kanriBtns
       + '</div>';
   }).join('');
 }
@@ -39902,6 +39908,146 @@ async function rejectMaebariShinsei(shinseiId, reason) {
   } catch (e) {
     console.error('rejectMaebariShinsei error:', e);
     showToast('却下エラー: ' + e.message, 'error');
+  }
+}
+
+// ====== 役員限定: 承認取消・承認修正 (2026-08-28) ======
+// 不正防止のため ADMIN_USERS(役員2名)のみ。担当者は従来どおり承認/却下まで。
+function isMaebariKanri() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    return ADMIN_USERS.indexOf(getLoggedInEmail()) >= 0;
+  } catch (e) { return false; }
+}
+
+async function _fetchMaebariShinsei(shinseiId, token) {
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items(" + shinseiId + ")";
+  const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!r.ok) throw new Error('申請取得失敗 ' + r.status);
+  return (await r.json()).d;
+}
+
+function _fmtYmdSlash(d) { return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); }
+
+// 承認取消: 前払いListの自動追加行を削除し、申請を「承認待ち」に差し戻す
+async function confirmUnapproveMaebari(shinseiId) {
+  if (!isMaebariKanri()) { showToast('この操作は役員のみ可能です', 'error'); return; }
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    const shinsei = await _fetchMaebariShinsei(shinseiId, token);
+    if (shinsei.Status !== 'approved') { showToast('承認済みの申請ではありません', 'error'); return; }
+    const oldId = shinsei[MS.existingListItemId];
+    // 振込側(前払いList)の行を確認 (手数料入力済み=振込処理済みの可能性を警告)
+    let oldRow = null;
+    if (oldId) {
+      try {
+        const r = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + oldId + ")",
+          { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+        if (r.ok) oldRow = (await r.json()).d;
+      } catch (e) { }
+    }
+    const kibou = shinsei[MS.kiboubi] ? _fmtYmdSlash(new Date(shinsei[MS.kiboubi])) : '―';
+    let msg = 'No.' + shinsei[MS.shainNo] + ' / ¥' + Number(shinsei[MS.amount] || 0).toLocaleString('ja-JP') + ' / 希望日 ' + kibou
+      + '\nこの承認を取り消して「承認待ち」に戻します。';
+    if (oldRow) {
+      msg += '\n前払いリストの行(#' + oldId + ')も削除します。';
+      if (oldRow[MF.fee] != null && String(oldRow[MF.fee]).trim() !== '') {
+        msg += '\n⚠ 手数料が入力済みです。振込処理済みの可能性があります!';
+      }
+    } else if (oldId) {
+      msg += '\n(前払いリストの行#' + oldId + ' は見つかりません=削除済み)';
+    }
+    if (!confirm(msg)) return;
+    // 1) 前払いList の自動追加行を削除
+    if (oldRow) {
+      const dr = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + oldId + ")", {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'DELETE' },
+      });
+      if (!dr.ok) throw new Error('前払いリスト行の削除失敗 ' + dr.status);
+    }
+    // 2) 申請を pending に戻す (承認情報クリア)
+    const entity = await getListItemEntityType(LIST_MAEBARI_SHINSEI_GUID);
+    const body = { '__metadata': { type: entity } };
+    body['Status'] = 'pending';
+    body[MS.approvedAt] = null;
+    body[MS.approver] = '';
+    body[MS.existingListItemId] = null;
+    const pr = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items(" + shinseiId + ")", {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+      body: JSON.stringify(body),
+    });
+    if (!pr.ok) throw new Error('申請の差し戻し失敗 ' + pr.status);
+    showToast('承認を取り消しました (承認待ちに戻しました)', 'success');
+    loadMaebariApproved(); loadMaebariPending(); updateMaebariApprovalBadge();
+  } catch (e) {
+    console.error('confirmUnapproveMaebari error:', e);
+    showToast('取消エラー: ' + e.message, 'error');
+  }
+}
+
+// 承認修正: 支払日・金額を申請Listと前払いList(自動追加行)の両方に反映。修正メモを申請理由に追記
+async function modifyApprovedMaebari(shinseiId) {
+  if (!isMaebariKanri()) { showToast('この操作は役員のみ可能です', 'error'); return; }
+  try {
+    const token = await getToken();
+    if (!token) { showToast('認証エラー', 'error'); return; }
+    const shinsei = await _fetchMaebariShinsei(shinseiId, token);
+    if (shinsei.Status !== 'approved') { showToast('承認済みの申請ではありません', 'error'); return; }
+    const curDate = shinsei[MS.kiboubi] ? new Date(shinsei[MS.kiboubi]) : null;
+    const curYmd = curDate ? (curDate.getFullYear() + '-' + String(curDate.getMonth() + 1).padStart(2, '0') + '-' + String(curDate.getDate()).padStart(2, '0')) : '';
+    const curAmt = parseInt(String(shinsei[MS.amount] || '').replace(/[^\d]/g, ''), 10) || 0;
+    const inDate = prompt('新しい支払日 (YYYY-MM-DD):', curYmd);
+    if (inDate === null) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inDate.trim())) { alert('日付は YYYY-MM-DD 形式で入力してください'); return; }
+    const nd = new Date(inDate.trim() + 'T00:00:00');
+    if (isNaN(nd.getTime())) { alert('正しい日付を入力してください'); return; }
+    const inAmt = prompt('金額 (円・数字のみ):', String(curAmt));
+    if (inAmt === null) return;
+    const amt = parseInt(String(inAmt).replace(/[^\d]/g, ''), 10);
+    if (!amt || amt <= 0) { alert('金額を正しく入力してください'); return; }
+    const youbi = ['日', '月', '火', '水', '木', '金', '土'][nd.getDay()];
+    let msg = 'No.' + shinsei[MS.shainNo] + ' の承認内容を修正します。\n'
+      + '支払日: ' + (curYmd || '―') + ' → ' + inDate.trim() + ' (' + youbi + ')\n'
+      + '金額: ¥' + curAmt.toLocaleString('ja-JP') + ' → ¥' + amt.toLocaleString('ja-JP');
+    if (nd.getDay() !== 5) msg += '\n⚠ 金曜日ではありません';
+    if (!confirm(msg)) return;
+    const iso = inDate.trim() + 'T00:00:00Z';
+    // 1) 前払いList の自動追加行を修正 (支払日/金額)
+    const oldId = shinsei[MS.existingListItemId];
+    if (oldId) {
+      const mEntity = await getListItemEntityType(LIST_MAEBARI_GUID);
+      const b1 = { '__metadata': { type: mEntity } };
+      b1[MF.payDate] = iso;
+      b1[MF.amount] = amt.toLocaleString('ja-JP');
+      const r1 = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_GUID + "')/items(" + oldId + ")", {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+        body: JSON.stringify(b1),
+      });
+      if (!r1.ok) throw new Error('前払いリスト行の修正失敗 ' + r1.status);
+    }
+    // 2) 申請の希望日/金額を修正 + 修正メモを申請理由に追記 (監査用)
+    const memo = '(役員修正 ' + _fmtYmdSlash(new Date()) + ': ' + (curYmd || '―') + '→' + inDate.trim()
+      + ' ¥' + curAmt.toLocaleString('ja-JP') + '→¥' + amt.toLocaleString('ja-JP') + ' by ' + (getLoggedInEmail() || '') + ')';
+    const entity = await getListItemEntityType(LIST_MAEBARI_SHINSEI_GUID);
+    const b2 = { '__metadata': { type: entity } };
+    b2[MS.kiboubi] = iso;
+    b2[MS.amount] = String(amt);
+    b2[MS.riyuu] = ((shinsei[MS.riyuu] || '') + '\n' + memo).trim();
+    const r2 = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + LIST_MAEBARI_SHINSEI_GUID + "')/items(" + shinseiId + ")", {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+      body: JSON.stringify(b2),
+    });
+    if (!r2.ok) throw new Error('申請の修正失敗 ' + r2.status);
+    showToast('修正しました' + (oldId ? ' (前払い#' + oldId + ' も更新)' : ''), 'success');
+    loadMaebariApproved();
+  } catch (e) {
+    console.error('modifyApprovedMaebari error:', e);
+    showToast('修正エラー: ' + e.message, 'error');
   }
 }
 
