@@ -6354,13 +6354,15 @@ select.sankyu-edit-input {
 
   <!-- 📄 スキルシート 編集フォーム (プレビュー・手修正 → PDF作成) -->
   <div class="screen" id="skillsheetFormScreen">
-    <div class="list-screen-header" style="padding:8px 12px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:30;background:var(--bg);box-shadow:0 2px 8px rgba(0,0,0,.06);">
-      <button onclick="switchScreen('skillsheetScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 一覧</button>
-      <h2 style="margin:0;font-size:1.05em;color:var(--primary);flex:1;">📄 スキルシート 編集</h2>
-      <button onclick="skillsheetShowRaw()" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap;">📋 応募内容</button>
+    <div class="list-screen-header" style="padding:8px 12px 0;position:sticky;top:0;z-index:30;background:var(--bg);box-shadow:0 2px 8px rgba(0,0,0,.06);">
+      <div style="display:flex;align-items:center;gap:10px;padding-bottom:8px;">
+        <button onclick="switchScreen('skillsheetScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;">← 一覧</button>
+        <h2 style="margin:0;font-size:1.05em;color:var(--primary);flex:1;">📄 スキルシート 編集</h2>
+        <button onclick="skillsheetShowRaw()" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap;">📋 応募内容</button>
+      </div>
+      <div id="ssfStickyName" style="display:none;margin:0 -12px;padding:5px 14px 6px;background:#f3effc;border-top:1px solid #e6ddf7;font-size:13px;font-weight:800;color:#4a2f8f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
     </div>
     <div style="padding:10px 12px 40px;max-width:520px;margin:0 auto;">
-      <div style="font-size:11.5px;color:var(--text-light);margin-bottom:6px;">内容を確認・修正して「PDF作成」を押してください。外国語表記は自動で日本語化済みです（氏名・会社名のカタカナ化はここで手入力）。空欄はシートに印字されません。</div>
       <div id="ssfSavedNote" style="display:none;font-size:11.5px;font-weight:700;color:#2e7d32;background:#e8f5e9;border-radius:8px;padding:6px 10px;margin-bottom:8px;">✅ 保存済みの修正内容を表示しています</div>
       <div id="skillsheetFormBody"></div>
       <div style="position:sticky;bottom:0;z-index:30;display:flex;gap:10px;margin-top:14px;padding:10px 0 12px;background:var(--bg);box-shadow:0 -6px 12px -6px rgba(0,0,0,.12);">
@@ -35462,6 +35464,23 @@ function skillsheetRenderForm(F) {
   h += _ssfInput('jp', '日本語能力', F.jp);
   box.innerHTML = h;
   skillsheetPaintStatus();
+  // ヘッダー下に氏名（フリガナ）を常時表示 (スクロールしても誰のシートか分かるように)
+  skillsheetUpdateStickyName();
+  ['ssf_name', 'ssf_furigana'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('input', skillsheetUpdateStickyName);
+  });
+}
+
+function skillsheetUpdateStickyName() {
+  var bar = document.getElementById('ssfStickyName');
+  if (!bar) return;
+  var nm = _ssfVal('name');
+  var fu = _ssfVal('furigana');
+  var idTxt = (_ssfId1 != null && _ssfId1 !== '') ? 'ID ' + _ssfId1 + '　' : '';
+  if (!nm && !fu) { bar.style.display = 'none'; return; }
+  bar.style.display = 'block';
+  bar.textContent = '✏️ ' + idTxt + nm + (fu ? '（' + fu + '）' : '');
 }
 
 // フォーム値を収集
