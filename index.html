@@ -35229,6 +35229,7 @@ var _ssfId1 = null;
 var _ssfStatus = '';
 var _ssfRaw = [];
 var _ssfAttachments = [];
+var _ssfTantou = '';
 
 // 応募シート(Forms回答)の原文ビュー。フォームの入力値は画面を切り替えても保持される
 // 職歴(会社①〜④)はセクション見出しで区切って表示する
@@ -35316,6 +35317,30 @@ async function skillsheetOpenForm(id1, btn) {
     _ssfId1 = id1;
     _ssfStatus = data.status || '';
     _ssfRaw = data.raw || [];
+    // 面接担当者: 面接表のTitle「担当者名　ID」から抽出。
+    // List1(ルート・<5000件)は$filterで直接、無ければList2(面接表2000件。5000件超で$filter不可)を直近1200件スキャン
+    _ssfTantou = '';
+    try {
+      var tHdr = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=nometadata' };
+      var tTitle = '';
+      var tResp = await fetch("https://teamstepupcom774.sharepoint.com/_api/web/lists(guid'40344733-500d-4d73-902f-dafca65ff24c')/items?$filter=OData__x0049_D1%20eq%20" + Number(id1) + "&$select=Title&$top=1", { headers: tHdr });
+      if (tResp.ok) {
+        var tj = await tResp.json();
+        if (tj.value && tj.value[0]) tTitle = tj.value[0].Title || '';
+      }
+      if (!tTitle) {
+        var t2 = await fetch("https://teamstepupcom774.sharepoint.com/sites/PowerApps/_api/web/lists(guid'a81b8fb8-eb1c-4712-be2f-10978bd9e015')/items?$orderby=Id%20desc&$top=1200&$select=Title,OData__x0049_D1", { headers: tHdr });
+        if (t2.ok) {
+          var t2j = await t2.json();
+          var hit = (t2j.value || []).find(function(it) {
+            var v = it.OData__x0049_D1;
+            return v != null && Math.round(Number(v)) === Number(id1);
+          });
+          if (hit) tTitle = hit.Title || '';
+        }
+      }
+      _ssfTantou = String(tTitle).replace(/[\s　]*\d+[\s　]*$/, '').trim();
+    } catch (te) { console.warn('tantou load failed', te); }
     _ssfAttachments = data.attachments || [];
     _ssfBirth = data.birth || '';
     _ssfNat = data.nationality || '';
@@ -35454,16 +35479,8 @@ function skillsheetRenderForm(F) {
         return '<button id="ssfStatus_' + s + '" onclick="skillsheetSetStatus(\'' + s + '\')" style="flex:1;border:2px solid #ccc;background:#fff;border-radius:10px;padding:8px 0;font-size:14px;font-weight:800;cursor:pointer;">' + s + '</button>';
       }).join('')
     + '</div></div>';
-  // 面接担当者 (面接表のTitle=「担当者名　ID」から抽出・表示のみ / mensetsu.htmlの「7.面接担当者」の選択値)
-  var _tantouDisp = '';
-  for (var ti = 0; ti < _ssfRaw.length; ti++) {
-    var te = _ssfRaw[ti];
-    var tv = String(te.value || '');
-    if (te.label === 'タイトル' || te.label === 'Title' || (_ssfId1 != null && new RegExp('[\\s　]' + _ssfId1 + '\\s*$').test(tv))) {
-      _tantouDisp = tv.replace(/[\s　]*\d+[\s　]*$/, '').trim();
-      break;
-    }
-  }
+  // 面接担当者 (面接表のTitle=「担当者名　ID」から抽出・表示のみ / mensetsu.htmlの「面接担当者」の選択値)
+  var _tantouDisp = _ssfTantou || '';
   h += '<div style="background:#eef6ff;border:1px solid #bfdbfe;border-radius:12px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;">'
     + '<span style="font-size:11px;color:#1d4ed8;font-weight:800;white-space:nowrap;">🧑‍💼 面接担当者</span>'
     + '<span style="font-size:14.5px;font-weight:800;color:#1e293b;">' + _esc(_tantouDisp || '―') + '</span>'
