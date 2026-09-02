@@ -7279,6 +7279,11 @@ function handleSessionLost() {
 function initMsal() {
   // 起動時はデフォルト「未ログイン」見た目に。ログイン完了したら updateAuthIndicator(true) で上書きされる。
   updateAuthIndicator(false);
+  // ディープリンク: Teams通知等の ?open=skillsheet をMSALリダイレクト前に退避
+  try {
+    var _dl = new URLSearchParams(location.search).get('open');
+    if (_dl) sessionStorage.setItem('yk_deeplink', _dl);
+  } catch (e) {}
   try {
     msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
     msalInstance.initialize().then(() => {
@@ -7288,7 +7293,7 @@ function initMsal() {
           const accounts = msalInstance.getAllAccounts();
           if (accounts.length > 0) {
             acquireToken().then(token => {
-              if (token) { populateHakenDropdown(); applyAdminVisibility(); }
+              if (token) { populateHakenDropdown(); applyAdminVisibility(); runDeepLink(); }
               // token === null の場合は acquireToken 内の acquireTokenRedirect が走るが、
               // A2HS で外部Safari に飛んで戻らないことがあるので見た目を未ログインに保つ。
               else { updateAuthIndicator(false); }
@@ -7332,6 +7337,18 @@ async function handleAuth() {
   }
 }
 
+// Teams通知等からのディープリンク (?open=skillsheet → スキルシート一覧を開く)
+function runDeepLink() {
+  try {
+    var d = sessionStorage.getItem('yk_deeplink');
+    if (!d) return;
+    sessionStorage.removeItem('yk_deeplink');
+    if (d === 'skillsheet' && typeof openSkillsheetScreen === 'function') {
+      setTimeout(openSkillsheetScreen, 350);
+    }
+  } catch (e) {}
+}
+
 async function onLoginSuccess(resp) {
   if (resp && resp.accessToken) {
     _setSpToken(resp);
@@ -7348,6 +7365,7 @@ async function onLoginSuccess(resp) {
   }
   updateAuthIndicator(true);
   switchScreen('searchScreen');
+  runDeepLink();
   showToast('ログインしました', 'success');
   populateHakenDropdown();
   applyAdminVisibility();
