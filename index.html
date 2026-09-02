@@ -35214,12 +35214,11 @@ function skillsheetRenderRows(cands) {
       + (isBlack ? 'opacity:.7;' : 'box-shadow:0 2px 6px rgba(0,0,0,.05);');
     var nameStyle = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;' + (isBlack ? 'color:#666;' : '');
     var chips = comChip + empChip + kmChip + chip;
-    var chipsRow = chips
-      ? '<span style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 0;margin-top:5px;">' + chips + '</span>' : '';
+    var dateChip = '<span style="font-size:11px;color:#94a3b8;margin-left:auto;flex-shrink:0;font-weight:400;">' + _esc(c.date || '') + '</span>';
+    var chipsRow = '<span style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 0;margin-top:5px;">' + chips + dateChip + '</span>';
     return '<button onclick="skillsheetOpenForm(' + Number(c.id1) + ', this)" style="' + rowStyle + '">'
       + '<span style="display:flex;align-items:center;min-width:0;font-weight:700;">' + idBadge
-      + '<span style="' + nameStyle + '">' + _esc(c.name) + '</span>' + sexChip
-      + '<span style="font-size:11px;color:#94a3b8;margin-left:8px;flex-shrink:0;font-weight:400;">' + _esc(c.date || '') + '</span></span>'
+      + '<span style="' + nameStyle + '">' + _esc(c.name) + '</span>' + sexChip + '</span>'
       + chipsRow + '</button>';
   }).join('');
 }
@@ -35379,7 +35378,7 @@ var _ssfNat = '';
 function _ssfViewBox(label, val, flex) {
   if (!val) return '';
   return '<div style="flex:' + (flex || 1) + ';min-width:0;margin-bottom:8px;">'
-    + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;">' + label + '（表示のみ）</div>'
+    + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + label + '（表示のみ）">' + label + '（表示のみ）</div>'
     + '<div style="width:100%;box-sizing:border-box;padding:9px 10px;font-size:15px;border:1.5px dashed #cbd5e1;border-radius:10px;background:#f8fafc;color:#475569;">' + _esc(val) + '</div>'
     + '</div>';
 }
@@ -35389,9 +35388,9 @@ function _ssfNatBox() { return _ssfViewBox('国籍', _ssfNat, 1); }
 function _ssfTelBox() {
   if (!_ssfTel) return '';
   var digits = _ssfTel.replace(/[^0-9+]/g, '');
-  return '<div style="flex:1;min-width:0;margin-bottom:8px;">'
-    + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;">電話番号（タップで発信）</div>'
-    + '<a href="tel:' + digits + '" style="display:block;box-sizing:border-box;padding:9px 10px;font-size:15px;border:1.5px solid #90caf9;border-radius:10px;background:#f0f9ff;color:#1565c0;font-weight:800;text-decoration:none;">📞 ' + _esc(_ssfTel) + '</a>'
+  return '<div style="margin-bottom:8px;">'
+    + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;white-space:nowrap;">電話番号（タップで発信）</div>'
+    + '<a href="tel:' + digits + '" style="display:block;box-sizing:border-box;max-width:340px;padding:9px 10px;font-size:15px;border:1.5px solid #90caf9;border-radius:10px;background:#f0f9ff;color:#1565c0;font-weight:800;text-decoration:none;white-space:nowrap;">📞 ' + _esc(_ssfTel) + '</a>'
     + '</div>';
 }
 
@@ -35481,15 +35480,15 @@ function skillsheetRenderForm(F) {
     + '</div></div>';
   // 面接担当者 (面接表のTitle=「担当者名　ID」から抽出・表示のみ / mensetsu.htmlの「面接担当者」の選択値)
   var _tantouDisp = _ssfTantou || '';
-  h += '<div style="background:#eef6ff;border:1px solid #bfdbfe;border-radius:12px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;">'
-    + '<span style="font-size:11px;color:#1d4ed8;font-weight:800;white-space:nowrap;">🧑‍💼 面接担当者</span>'
-    + '<span style="font-size:14.5px;font-weight:800;color:#1e293b;">' + _esc(_tantouDisp || '―') + '</span>'
-    + '<span style="font-size:10.5px;color:#64748b;font-weight:700;margin-left:auto;white-space:nowrap;">社内用・PDFには印字されません</span></div>';
+  h += '<div style="background:#eef6ff;border:1px solid #bfdbfe;border-radius:12px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:8px;">'
+    + '<span style="font-size:11px;color:#1d4ed8;font-weight:800;white-space:nowrap;flex-shrink:0;">🧑‍💼 面接担当者</span>'
+    + '<span style="font-size:14.5px;font-weight:800;color:#1e293b;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _esc(_tantouDisp || '―') + '</span>'
+    + '<span style="font-size:10px;color:#94a3b8;font-weight:700;white-space:nowrap;flex-shrink:0;">PDF非印字</span></div>';
   h += _ssfInput('name', '氏名（カタカナ推奨）', F.name);
   h += _ssfInput('furigana', 'フリガナ', F.furigana);
   h += '<div style="display:flex;gap:8px;">' + _ssfInput('sex', '性別', F.sex, 1) + _ssfInput('age', '年齢', F.age, 1) + _ssfBirthBox() + '</div>';
   h += '<div style="display:flex;gap:8px;">' + _ssfNatBox() + _ssfInput('no', 'ID', F.no, 1) + _ssfInput('marital', '配偶者', F.marital, 1) + _ssfInput('commute', '通勤手段', F.commute, 1) + '</div>';
-  if (_ssfTel) h += '<div style="display:flex;gap:8px;">' + _ssfTelBox() + '<div style="flex:1.6;"></div></div>';
+  if (_ssfTel) h += _ssfTelBox();
   h += _ssfInput('jp', '日本語能力（理解・会話・レベル）', F.jp);
   h += _ssfInput('jpKana', '読める・書ける（ひらがな/カタカナ/漢字）', F.jpKana);
   if (_ssfAttachments && _ssfAttachments.length) {
