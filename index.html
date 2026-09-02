@@ -34938,7 +34938,8 @@ async function skillsheetLoadEmpStatus() {
   (rows || []).forEach(function(r) {
     var sx = String(r[SEXK] || '').trim();
     sx = sx.indexOf('男') >= 0 ? '男' : (sx.indexOf('女') >= 0 ? '女' : '');
-    if (!sx) return;
+    // 性別未入力の社員は両方のキーに登録 (未入力だと突合から漏れる問題の対策・実例=50767西脇)
+    var sexKeys = sx ? [sx] : ['男', '女'];
     var active = !(r[F.yukyuTaisha] || r[F.hakenTaisha]);
     var bango = _bangoNorm(r[F.syainNo]);
     var haken = _ssShortHaken(r[BKK]);
@@ -34954,15 +34955,19 @@ async function skillsheetLoadEmpStatus() {
       else if (active && !cur.active) m[key] = ent;
     }
     var nm = _ssNormName(r.Title);
-    if (nm) reg(nmap, nm + '|' + sx);
+    sexKeys.forEach(function(sk) {
+      if (nm) reg(nmap, nm + '|' + sk);
+    });
     var bv = r[BDK];
     if (!bv) return;
     var d = new Date(bv);
     if (isNaN(d.getTime())) return;
     var jst = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
     var utc = String(bv).slice(0, 10);
-    reg(map, jst + '|' + sx);
-    reg(map, utc + '|' + sx);
+    sexKeys.forEach(function(sk) {
+      reg(map, jst + '|' + sk);
+      reg(map, utc + '|' + sk);
+    });
   });
   _ssEmpStatus = map;
   _ssEmpNameMap = nmap;
