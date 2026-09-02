@@ -6307,6 +6307,7 @@ select.sankyu-edit-input {
     <div class="list-screen-header" style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
       <button onclick="switchScreen('searchScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 9px;font-size:12.5px;cursor:pointer;white-space:nowrap;flex-shrink:0;">← 戻る</button>
       <h2 style="margin:0;font-size:clamp(13px,4vw,1.05em);color:var(--primary);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📄 スキルシート</h2>
+      <button onclick="skillsheetRefresh(this)" title="データ更新" style="background:#fff;border:1.5px solid #cbd5e1;color:#475569;border-radius:8px;padding:6px 8px;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;">↻</button>
       <button onclick="skillsheetCreateManual()" style="background:#f0fdf4;border:1.5px solid #16a34a;color:#15803d;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;">✍️ 手入力</button>
       <button onclick="skillsheetOpenFolder()" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;">📁 フォルダ</button>
     </div>
@@ -34853,6 +34854,23 @@ function skillsheetSearchDebounced() {
   clearTimeout(_skillsheetTimer);
   _skillsheetTimer = setTimeout(function() { skillsheetApplyFilters(); }, 250);
 }
+// ↻データ更新: 候補一覧・社員突合・派遣先をキャッシュごと再取得 (アプリ再読み込み不要)
+async function skillsheetRefresh(btn) {
+  var orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    _ssEmpStatus = null;
+    _ssEmpNameMap = null;
+    _ssSitesLoaded = false;
+    var box = document.getElementById('skillsheetList');
+    if (box) box.dataset.loaded = '';
+    await skillsheetLoadList('');
+    if (typeof showToast === 'function') showToast('データを更新しました', 'success');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig || '↻'; }
+  }
+}
+
 async function skillsheetLoadList(query) {
   var box = document.getElementById('skillsheetList');
   if (!box) return;
