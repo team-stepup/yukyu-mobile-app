@@ -12894,21 +12894,7 @@ async function _maicarTryFillRoute(emp, opts) {
     window._maicarLastEmp = emp;
     var storedKm = _maicarStoredKm(emp);
     var useKm = (storedKm != null && !opts.force) ? storedKm : r.distKm;
-    var noteEl = document.getElementById('maicarRouteNote');
-    if (noteEl) {
-      var btnStyle = 'background:#fff;border:1px solid #1565c0;color:#1565c0;border-radius:5px;padding:2px 8px;font-size:8pt;cursor:pointer;';
-      if (storedKm != null && !opts.force) {
-        noteEl.innerHTML = '📌 通勤距離は社員データの保存値 <b>' + storedKm.toFixed(1) + ' km</b>（通勤手当計算時の実測）を使用。今回の実測 ' + r.distKm.toFixed(1) + ' km' +
-          (Math.abs(storedKm - r.distKm) >= 0.05 ? '<span style="color:#e65100;">（差あり）</span>' : '') +
-          ' <button type="button" onclick="_maicarTryFillRoute(window._maicarLastEmp,{force:true})" style="' + btnStyle + '">🔄 実測値で表示</button>';
-      } else if (storedKm != null) {
-        noteEl.innerHTML = '🔄 今回の実測値 <b>' + r.distKm.toFixed(1) + ' km</b> を表示中（保存値 ' + storedKm.toFixed(1) + ' km）' +
-          ' <button type="button" onclick="_maicarTryFillRoute(window._maicarLastEmp,{})" style="' + btnStyle + '">📌 保存値に戻す</button>';
-      } else {
-        noteEl.innerHTML = '📏 実測 <b>' + r.distKm.toFixed(1) + ' km</b>（社員データに保存値なし。社員詳細の通勤手当「📍 距離から自動計算」→💾保存で記録され、以後はその値を使います）';
-      }
-    }
-    r.distKm = useKm;
+    r.distKm = useKm;   // 表示・注記なし(お客様向け書類のため出所は表示しない)
     // 画像差し替え
     box.innerHTML =
       '<img src="' + r.dataUrl + '" alt="通勤経路" style="width:100%;height:100%;object-fit:cover;display:block;">' +
@@ -13477,8 +13463,6 @@ function renderMaicarTsukinASTI(emp, opts) {
       '<div id="maicarRouteMapBox" style="border:0.6pt solid #000;height:110mm;background:#fafafa;position:relative;overflow:hidden;">' +
         '<div id="maicarRouteStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9.5pt;color:#888;">⌛ 経路図を準備中…</div>' +
       '</div>' +
-      // 通勤距離の出所(社員データ保存値 / 実測)の注記 — 画面のみ・印刷/PDFには出ない
-      '<div id="maicarRouteNote" class="no-print" style="font-size:8pt;color:#1565c0;margin:2px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"></div>' +
 
       // 通勤方法 + 通勤距離・通勤時間 - 枠付きコンパクトテーブル
       '<table style="width:100%;border-collapse:collapse;margin-top:3px;font-size:8.5pt;border:0.5pt solid #000;">' +
