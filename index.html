@@ -11513,8 +11513,10 @@ async function generateHaisenDocAsPdf(containerEl) {
     });
   }
   _findTransformTargets(scope);
-  // レイアウト確定待ち (transform解除後の reflow)
-  await new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(r); }); });
+  // レイアウト確定待ち (transform解除後の reflow)。バックグラウンド等で rAF が止まっても 400ms で先へ進む
+  await new Promise(function(r){ var done = false; function fin() { if (!done) { done = true; r(); } }
+    try { requestAnimationFrame(function(){ requestAnimationFrame(fin); }); } catch (_) {}
+    setTimeout(fin, 400); });
   // フォント読込待ち (Yu Gothic等の Web フォントが遅れているとキャプチャで重複描画になる)
   if (document.fonts && document.fonts.ready) {
     try { await document.fonts.ready; } catch (_) {}
