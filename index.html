@@ -38560,6 +38560,7 @@ async function renderAddEmployeeForm() {
       if (field.key === 'syokusyu') return;        // → 基本必須に移動
       if (field.key === 'nationality') return;     // → 基本必須に移動 (書類カード連動)
       if (field.key === 'tsukinHouhou') return;    // → 基本必須に移動 (書類カード連動)
+      if (field.key === 'trexId') return;          // T-REX ID は入社時点では未発番 → 新規登録では非表示(社員詳細で後から入力)
       // 新規登録では退社日/退職理由/次回採用は不要
       if (field.key === 'hakenTaisha' || field.key === 'yukyuTaisha') return;
       if (field.showOnlyResigned) return;          // 退職理由・次回採用 等
@@ -38601,7 +38602,7 @@ async function renderAddEmployeeForm() {
           '<span id="addField_tsukinCalcStatus" style="display:block;flex-basis:100%;width:100%;font-size:11px;color:#666;line-height:1.6;word-break:break-word;margin-top:2px;">通勤方法が車/バイクのとき、住所→就業場所の片道距離から自動計算します（片道km×往復×12円・切上げ）</span>' +
           '</div>';
       }
-      html += '<tr><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
+      html += '<tr id="addRow_' + escHtml(field.key) + '"><th>' + escHtml(field.label) + '</th><td>' + addInput + '</td></tr>';
     });
     // 勤務情報の末尾に 雇用保険番号 + 雇用保険氏名 を追加表示
     if (cat.id === 'work') {
@@ -38687,6 +38688,13 @@ function onAddTsukinChange() {
     const el = document.querySelector('.add-cat-section[data-cat-id="' + id + '"]');
     if (el) el.style.display = isCar ? '' : 'none';
   });
+  // 通勤手当: 送迎・自転車・徒歩は支給なし → 行ごと非表示(値もクリア)。車/バイク/電車/未選択は表示
+  const noTeate = /^(送迎|自転車|徒歩)/.test(String(val).replace(/[\s　]/g, ''));
+  const teateRow = document.getElementById('addRow_tsukinTeate');
+  if (teateRow) {
+    teateRow.style.display = noTeate ? 'none' : '';
+    if (noTeate) { const teateEl = document.getElementById('addField_tsukinTeate'); if (teateEl) teateEl.value = ''; }
+  }
   _updateDocCardVisibility();
   // 車/バイクへ切り替わり、住所+派遣先も埋まっていれば自動で距離計算を発火
   if (isCar) {
