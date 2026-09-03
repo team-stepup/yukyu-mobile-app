@@ -491,7 +491,15 @@ body {
 .dattai-fuyou-fields input:focus { border-color:var(--primary); outline:none; }
 /* Document capture styles */
 .doc-capture-card { border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; background:#fff; }
-.doc-capture-card.has-image { border-color: var(--success); background:#f6fff6; }
+.doc-capture-card.has-image { border-color: var(--success); background:#f6fff6; border-left:5px solid #2e7d32; }
+.doc-capture-card:not(.has-image) { border-left:5px solid #cfd8dc; }
+.doc-status { font-size:10.5px; font-weight:800; border-radius:12px; padding:3px 9px; white-space:nowrap; flex-shrink:0; letter-spacing:0.02em; }
+.doc-status.none { background:#eceff1; color:#78909c; }
+.doc-status.done { background:#2e7d32; color:#fff; box-shadow:0 1px 4px rgba(46,125,50,0.35); }
+.doc-summary { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11.5px; font-weight:700; border-radius:9px; padding:8px 10px; margin-bottom:8px; }
+.doc-summary.partial { background:#fff8e1; color:#e65100; border:1px solid #ffe0b2; }
+.doc-summary.complete { background:#e8f5e9; color:#1b5e20; border:1px solid #c8e6c9; }
+.doc-summary.empty { background:#eceff1; color:#546e7a; border:1px solid #cfd8dc; }
 /* 常時 2段構成: 上段=アイコン+ラベル+件数 / 下段=ボタン群 → ラベル長に関わらず崩れない */
 .doc-capture-header { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
 .doc-capture-header .doc-icon { font-size:20px; flex-shrink:0; }
@@ -34775,12 +34783,16 @@ function renderDocPreview(docId) {
     card.classList.remove('has-image');
     preview.style.display = 'none';
     preview.innerHTML = '';
-    countEl.textContent = '';
+    countEl.textContent = '未';
+    countEl.className = 'doc-count doc-status none';
+    _updateDocSummary();
     return;
   }
 
   card.classList.add('has-image');
-  countEl.textContent = imgs.length + '枚';
+  countEl.textContent = '✅ ' + imgs.length + '枚 済';
+  countEl.className = 'doc-count doc-status done';
+  _updateDocSummary();
   preview.style.display = 'block';
 
   let html = '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
@@ -34813,6 +34825,28 @@ function removeDocPage(docId, idx) {
 function removeDocCapture(docId) {
   delete capturedDocs[docId];
   renderDocPreview(docId);
+}
+
+// 書類撮影セクション上部の「取込済 N/8 ・ 未: …」サマリを更新
+function _updateDocSummary() {
+  var bar = document.getElementById('docSummaryBar');
+  if (!bar) return;
+  var done = [], missing = [];
+  DOC_TYPES.forEach(function(d) {
+    if ((capturedDocs[d.id] || []).length > 0) done.push(d); else missing.push(d);
+  });
+  var total = DOC_TYPES.length;
+  if (!done.length) {
+    bar.className = 'doc-summary empty';
+    bar.innerHTML = '📂 書類 取込済 0/' + total + '　<span style="font-weight:500;">まだ書類がありません</span>';
+  } else if (!missing.length) {
+    bar.className = 'doc-summary complete';
+    bar.innerHTML = '✅ 書類 取込済 ' + total + '/' + total + '　<span style="font-weight:500;">すべて揃いました</span>';
+  } else {
+    bar.className = 'doc-summary partial';
+    bar.innerHTML = '📂 書類 取込済 ' + done.length + '/' + total +
+      '　<span style="font-weight:500;">未: ' + missing.map(function(d) { return d.icon + d.label; }).join('・') + '</span>';
+  }
 }
 
 // ============================================================
@@ -38451,13 +38485,15 @@ async function renderAddEmployeeForm() {
   html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
   html += '<div class="section-title">📷 書類撮影</div>';
   html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:8px;">📷 カメラで撮影、または 📁 既存の画像・PDFファイルを選択できます（複数選択可・PDFはページ毎に画像化）。SharePointに自動保存され、テキスト抽出でコピペも可能です。</div>';
+  // 取込状況サマリ(何が入っていて何が未かを一目で) — renderDocPreview から _updateDocSummary で更新
+  html += '<div class="doc-summary empty" id="docSummaryBar">📂 書類 取込済 0/' + DOC_TYPES.length + '　<span style="font-weight:500;">まだ書類がありません</span></div>';
   DOC_TYPES.forEach(doc => {
     html += '<div class="doc-capture-card" id="docCard_' + doc.id + '">';
     // 上段: アイコン + ラベル + 件数
     html += '<div class="doc-capture-header">';
     html += '<span class="doc-icon">' + doc.icon + '</span>';
     html += '<span class="doc-label">' + doc.label + (doc.hint ? ' <span style="font-size:10px;color:var(--text-light);font-weight:400;">(' + doc.hint + ')</span>' : '') + '</span>';
-    html += '<span class="doc-count" id="docCount_' + doc.id + '"></span>';
+    html += '<span class="doc-count doc-status none" id="docCount_' + doc.id + '">未</span>';
     html += '</div>';
     // 下段: ボタン群
     html += '<div class="doc-capture-buttons">';
