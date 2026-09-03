@@ -11645,12 +11645,12 @@ async function generateHaisenDocAsPdf(containerEl) {
         canvas.toBlob(function(blob) {
           if (!blob) { resolve(null); return; }
           blob.arrayBuffer().then(resolve).catch(function(){ resolve(null); });
-        }, 'image/png');
+        }, 'image/jpeg', 0.86);   // JPEG(0.86): PNG比で約1/4〜1/5・メール添付(2.5MB)に収まりやすい
       } catch (e) { resolve(null); }
     });
     if (bytes) return bytes;
     try {
-      var dataUrl = canvas.toDataURL('image/png');
+      var dataUrl = canvas.toDataURL('image/jpeg', 0.86);
       if (!dataUrl) return null;
       var b64 = dataUrl.split(',')[1];
       if (!b64) return null;
@@ -11702,7 +11702,7 @@ async function generateHaisenDocAsPdf(containerEl) {
           if (!pngBytes) throw new Error('PDF画像変換失敗 (canvas.toBlob/toDataURL いずれも null)');
         }
       }
-      var img = await pdfDoc.embedPng(pngBytes);
+      var img = await pdfDoc.embedJpg(pngBytes);   // JPEG 埋め込み (変数名は従来のまま)
       // A4 幅 (595pt) いっぱいに描画し、ページ高さは内容のアスペクト比に合わせる
       // canvas は fallback で再生成されている可能性があるため img のサイズを使う
       var pageW = 595;
