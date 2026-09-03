@@ -10499,7 +10499,8 @@ async function appendKalendarPage(hkName, secondaryHints) {
 }
 
 // 確認事項 兼 電磁的方法による書類交付の希望確認ページ (JP + PT) を wrapper 末尾に追加
-function appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt) {
+function appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt, opts) {
+  opts = opts || {};
   var body = document.getElementById('haisenDocBody');
   if (!body) return;
   var wrapper = body.querySelector('.haisen-doc-wrapper');
@@ -10536,7 +10537,8 @@ function appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt)
         '<div class="hd-footer-sign-line">氏名：<span style="margin-left:14px;border-bottom:0.5pt solid #555;display:inline-block;min-width:260px;">　' + escHtml(name || '') + '　</span></div>' +
       '</div>' +
     '</div>' +
-    // ポルトガル語版
+    // ポルトガル語版 (<!--PT--> は日本人向け jpOnly で切り落とすためのマーカー)
+    '<!--PT-->' +
     '<div class="haisen-doc-page" style="page-break-before:always;margin-top:14mm;">' +
       '<div style="text-align:right;font-size:9pt;color:#1976d2;font-weight:600;letter-spacing:1px;margin-bottom:2px;">[ Português ]</div>' +
       '<h1 style="font-size:13pt;letter-spacing:0.5px;">【Itens de Confirmação e Verificação do Desejo de Entrega de Documentos por Meio Eletrônico】</h1>' +
@@ -10548,6 +10550,7 @@ function appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt)
       '</div>' +
     '</div>';
 
+  if (opts.jpOnly) html = html.split('<!--PT-->')[0].replace(/>\[ 日本語 \]</g, '><');   // 日本人: 日本語ページのみ
   var tmp = document.createElement('div');
   tmp.innerHTML = html;
   while (tmp.firstChild) wrapper.appendChild(tmp.firstChild);
@@ -15835,9 +15838,12 @@ function renderRoudouKeiyakushoSan(emp, h, mode, opt) {
 
   // 日本語版 + ポルトガル語版 + 就業条件明示書(JP+PT) を単一の wrapper で包む
   // 未入力フィールド通知 (no-print) を wrapper の外に配置 → スケーリング非対象 & 印刷時は非表示
+  // 国籍が「日本」の社員: 日本語版のみ (ポルトガル語版・[ 日本語 ] タグを付けない)
+  var jpOnly = _empIsJapanese(emp);
+  var docHtml = jpOnly ? (html + htmlShikJp).replace(/>\[ 日本語 \]</g, '><') : (html + htmlPt + htmlShikJp + htmlShikPt);
   document.getElementById('haisenDocBody').innerHTML =
     '<div id="haisenDocMissingNotice" class="no-print"></div>' +
-    '<div class="haisen-doc-wrapper">' + html + htmlPt + htmlShikJp + htmlShikPt + '</div>';
+    '<div class="haisen-doc-wrapper">' + docHtml + '</div>';
   // 未入力検出 → 通知 UI 描画
   renderMissingFieldsNotice(h);
   // 新規 (mode='new') のみ: 取引先カレンダー + 確認事項ページを追加
@@ -15849,8 +15855,18 @@ function renderRoudouKeiyakushoSan(emp, h, mode, opt) {
     appendKalendarPage(hkName, [hkBuka, hkSoshiki, gyoumu]);
     // カレンダーの後に「確認事項 兼 電磁的方法による書類交付の希望確認」ページを追加
     // (appendKalendarPage がプレースホルダを同期で append 済みなので、その後ろに来る)
-    appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt);
+    appendConfirmationPage(name, romajiName, syainNo, todayStr, todayStrPt, { jpOnly: jpOnly });
   }
+}
+
+// 社員の国籍(本(国)籍)が「日本」か。空欄は外国籍扱い(従来どおり2言語で作成)
+function _empIsJapanese(emp) {
+  try {
+    if (!emp) return false;
+    var v = '';
+    for (var k in emp) { if (k.indexOf('x672c__x0028__x56fd') >= 0) { v = String(emp[k] || '').trim(); break; } }
+    return !!v && /日本|JAPAN/i.test(v);
+  } catch (_) { return false; }
 }
 
 // ============================================================
