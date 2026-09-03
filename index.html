@@ -34724,24 +34724,45 @@ const capturedDocs = {};
 
 function onDocCapture(docId, input) {
   const files = Array.from(input.files || []);
+  // Reset input so same file(s) can be re-selected
+  input.value = '';
   if (files.length === 0) return;
   if (!capturedDocs[docId]) capturedDocs[docId] = [];
 
-  files.forEach(function(file) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      capturedDocs[docId].push({ file: file, dataUrl: e.target.result });
+  (async function() {
+    for (let fi = 0; fi < files.length; fi++) {
+      const file = files[fi];
+      const wasEmpty = capturedDocs[docId].length === 0;
+      const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+      try {
+        if (isPdf) {
+          // スキャンPDF: pdf.js でページ毎に画像化して取り込む(表/裏=1p/2p)
+          _empOcrProg('📄 ' + file.name + ' を画像化中…');
+          const imgs = await _localPdfToPageImages(file, 10);
+          _empOcrProg(null);
+          const stem = file.name.replace(/\.pdf$/i, '');
+          imgs.forEach(function(du, p) {
+            const nm = stem + (imgs.length > 1 ? '_p' + (p + 1) : '') + '.jpg';
+            capturedDocs[docId].push({ file: _dataUrlToFile(du, nm), dataUrl: du });
+          });
+        } else {
+          const du = await _readFileAsDataUrl(file);
+          capturedDocs[docId].push({ file: file, dataUrl: du });
+        }
+      } catch (e) {
+        _empOcrProg(null);
+        console.warn('onDocCapture 読込失敗:', file.name, e);
+        showToast('読込失敗: ' + file.name + ' ' + (e.message || e), 'error');
+        continue;
+      }
       renderDocPreview(docId);
       // 在留カード・免許証は撮影/選択したら自動でOCR→フォーム自動入力(プレビュー付き)
-      //   (1枚目だけ自動。複数枚は手動の🔍ボタンで)
-      if ((docId === 'zairyu' || docId === 'license') && capturedDocs[docId].length === 1) {
+      //   (最初の1枚だけ自動。複数枚は手動の🔍ボタンで)
+      if ((docId === 'zairyu' || docId === 'license') && wasEmpty && capturedDocs[docId].length > 0) {
         setTimeout(function() { runOcr(docId, 0, true); }, 200);
       }
-    };
-    reader.readAsDataURL(file);
-  });
-  // Reset input so same file(s) can be re-selected
-  input.value = '';
+    }
+  })();
 }
 
 function renderDocPreview(docId) {
@@ -37524,6 +37545,191 @@ async function ocrAllForNewReg() {
   }
 }
 
+// ============================================================
+// 新規社員登録: スキャン済み書類(PDF/画像)をまとめて or 個別に取り込み → 種別振り分け → OCR転記
+//   ・複合機/ScanSnap等で作った PDF(複数ページ可)・画像を複数選択
+//   ・PDF は pdf.js でページ毎に画像化
+//   ・各ページの書類種別をファイル名 → AI(classify) の順で自動判定し、確認画面で修正可
+//   ・「振り分け+OCR転記」= capturedDocs に登録(登録時にSPへ保存される)してから ocrAllForNewReg
+//   ・「振り分けのみ」= capturedDocs に登録だけ(個別の🔍ボタンで後からOCR可)
+// ============================================================
+var SCAN_BULK_MAX_PAGES = 30;   // 1回の取り込みで扱う最大ページ数(PDF展開後)
+
+// dataURL → File (PDFページ等、元ファイルが無い画像をSP保存できる形にする)
+function _dataUrlToFile(dataUrl, name) {
+  var arr = String(dataUrl).split(',');
+  var mime = (arr[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
+  var bin = atob(arr[1] || '');
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new File([u8], name, { type: mime });
+}
+
+// ローカル PDF(File) → 各ページを JPEG dataURL で返す(長辺 ~2000px)
+async function _localPdfToPageImages(file, maxPages, onProgress) {
+  maxPages = maxPages || SCAN_BULK_MAX_PAGES;
+  var pdfjsLib = await loadPdfJsIfNeeded();
+  var buf = await file.arrayBuffer();
+  var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  var out = [];
+  var n = Math.min(pdf.numPages, maxPages);
+  for (var p = 1; p <= n; p++) {
+    if (onProgress) onProgress(p, n);
+    var page = await pdf.getPage(p);
+    var base = page.getViewport({ scale: 1 });
+    var scale = Math.min(2.5, Math.max(1, 2000 / base.width));
+    var vp = page.getViewport({ scale: scale });
+    var cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+    var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    out.push(cv.toDataURL('image/jpeg', 0.85));
+    cv.width = cv.height = 0;
+  }
+  return out;
+}
+
+function _readFileAsDataUrl(file) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload = function(e) { resolve(e.target.result); };
+    r.onerror = function() { reject(new Error('読込失敗: ' + file.name)); };
+    r.readAsDataURL(file);
+  });
+}
+
+// 選択ファイル群 → [{name, dataUrl, file}] (PDFはページ展開)
+async function _expandScanFiles(files) {
+  var pages = [];
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    if (isPdf) {
+      _empOcrProg('📄 ' + f.name + ' を画像化中…');
+      var imgs = await _localPdfToPageImages(f, SCAN_BULK_MAX_PAGES - pages.length, function(p, n) {
+        _empOcrProg('📄 ' + f.name + ' を画像化中… (' + p + '/' + n + ')');
+      });
+      var stem = f.name.replace(/\.pdf$/i, '');
+      for (var p = 0; p < imgs.length; p++) {
+        var nm = stem + (imgs.length > 1 ? '_p' + (p + 1) : '') + '.jpg';
+        pages.push({ name: nm, dataUrl: imgs[p], file: _dataUrlToFile(imgs[p], nm) });
+      }
+    } else {
+      var du = await _readFileAsDataUrl(f);
+      pages.push({ name: f.name, dataUrl: du, file: f });
+    }
+    if (pages.length >= SCAN_BULK_MAX_PAGES) { showToast('取り込みは最大 ' + SCAN_BULK_MAX_PAGES + ' ページまでです。超過分は省きました', 'error'); break; }
+  }
+  return pages;
+}
+
+// 「📂 スキャン書類をまとめて読込」の input onchange
+async function onScanBulkSelect(input) {
+  var files = Array.from(input.files || []);
+  input.value = '';
+  if (!files.length) return;
+  try {
+    var pages = await _expandScanFiles(files);
+    _empOcrProg(null);
+    if (!pages.length) { showToast('読み込めるページがありません', 'error'); return; }
+    _showScanAssignOverlay(pages);
+  } catch (e) {
+    _empOcrProg(null);
+    console.error('onScanBulkSelect error:', e);
+    showToast('取り込みに失敗: ' + (e.message || e), 'error');
+  }
+}
+
+// ページ毎に書類種別を割り当てる確認画面(ファイル名で推定 → AIで自動判定 → 手動修正可)
+function _showScanAssignOverlay(pages) {
+  window._scanAssignPages = pages;
+  window._empAssignThumbSrcs = pages.map(function(p) { return p.dataUrl; });   // タップ拡大は既存ビューアを流用
+  var opts = [['', '― 対象外 ―']].concat(DOC_TYPES.map(function(d) { return [d.id, d.icon + ' ' + d.label]; }));
+  function guess(name) { for (var i = 0; i < OCR_DOC_CLASSIFY.length; i++) { var c = OCR_DOC_CLASSIFY[i]; if (c.re.test(name || '')) return c.docType; } return ''; }
+  var rows = pages.map(function(p, i) {
+    var g = guess(p.name);
+    var selOpts = opts.map(function(o) { return '<option value="' + o[0] + '"' + (o[0] === g ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
+    return '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0;">' +
+        '<img src="' + p.dataUrl + '" onclick="_openEmpAssignThumb(' + i + ')" style="width:52px;height:52px;object-fit:cover;border-radius:6px;background:#f0f0f0;border:1px solid #ddd;cursor:zoom-in;flex:0 0 auto;" alt="">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:11px;color:#555;word-break:break-all;">' + escHtml(p.name) + '</div>' +
+          '<div id="scanAssignStatus_' + i + '" style="font-size:10px;color:#00897b;margin-top:1px;">' + (g ? '📄 ファイル名から判定' : '🔎 AIで判定中…') + '</div>' +
+        '</div>' +
+        '<select id="scanAssignSel_' + i + '" style="flex:0 0 auto;max-width:150px;padding:5px 6px;border:1.5px solid #cfd8dc;border-radius:7px;font-size:12px;background:#fff;">' + selOpts + '</select>' +
+      '</div>';
+  }).join('');
+  var old = document.getElementById('scanAssignOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'scanAssignOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:13px 16px;border-bottom:1px solid #eee;background:#e0f2f1;border-radius:12px 12px 0 0;">' +
+        '<h3 style="margin:0;font-size:14.5px;color:#00695c;">📂 スキャン書類の種別を確認してください</h3>' +
+        '<div style="font-size:10.5px;color:#777;margin-top:3px;">' + pages.length + 'ページを取り込みました。AIが各ページの書類種別を判定します。間違いはプルダウンで直し、不要なページは「対象外」にしてください（画像タップで拡大）。</div>' +
+      '</div>' +
+      '<div style="padding:12px 16px;">' + rows + '</div>' +
+      '<div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">' +
+        '<button onclick="document.getElementById(\'scanAssignOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+        '<button onclick="_applyScanAssign(false)" style="background:#455a64;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer;">📎 振り分けのみ</button>' +
+        '<button id="scanAssignRunBtn" onclick="_applyScanAssign(true)" style="background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;">🤖 振り分け＋OCR転記</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  _autoClassifyScanPages(pages);
+}
+
+// AI(classify)で各ページの種別を判定してプルダウンへ反映(ファイル名で判定済みは尊重)
+async function _autoClassifyScanPages(pages) {
+  var labelOf = {};
+  DOC_TYPES.forEach(function(d) { labelOf[d.id] = d.label; });
+  for (var i = 0; i < pages.length; i++) {
+    var sel = document.getElementById('scanAssignSel_' + i);
+    var st = document.getElementById('scanAssignStatus_' + i);
+    if (!sel) return;                       // 画面が閉じられた
+    if (sel.value) continue;                // ファイル名で判定済み
+    try {
+      var img = await _resizeForCloud(pages[i].dataUrl);
+      var res = await cloudDocOcr('classify', { images: [img] });
+      var dt = res && (res.docType || res.doctype || '');
+      var selEl = document.getElementById('scanAssignSel_' + i);
+      var stEl = document.getElementById('scanAssignStatus_' + i);
+      if (!selEl) return;
+      if (dt && labelOf[dt]) {
+        if (!selEl.value) selEl.value = dt;   // ユーザーが先に選んでいたら上書きしない
+        if (stEl) { stEl.textContent = '🤖 AI判定: ' + labelOf[dt]; stEl.style.color = '#1b5e20'; }
+      } else {
+        if (stEl) { stEl.textContent = '🤖 AI判定: 不明 → 手動で選択'; stEl.style.color = '#999'; }
+      }
+    } catch (e) {
+      console.warn('[scan classify] 失敗', pages[i].name, e);
+      var stEl2 = document.getElementById('scanAssignStatus_' + i);
+      if (stEl2) { stEl2.textContent = '判定できず → 手動で選択'; stEl2.style.color = '#c62828'; }
+    }
+  }
+}
+
+// 振り分け確定: capturedDocs へ登録(=各書類カードに表示・登録時にSP保存) → 必要ならまとめてOCR
+function _applyScanAssign(runOcr) {
+  var pages = window._scanAssignPages || [];
+  var touched = {}, cnt = 0;
+  pages.forEach(function(p, i) {
+    var sel = document.getElementById('scanAssignSel_' + i);
+    var dt = sel ? sel.value : '';
+    if (!dt) return;
+    if (!capturedDocs[dt]) capturedDocs[dt] = [];
+    capturedDocs[dt].push({ file: p.file, dataUrl: p.dataUrl });
+    touched[dt] = 1; cnt++;
+  });
+  if (!cnt) { showToast('振り分ける書類を1つ以上選んでください', 'error'); return; }
+  var ov = document.getElementById('scanAssignOverlay'); if (ov) ov.remove();
+  Object.keys(touched).forEach(function(dt) { try { renderDocPreview(dt); } catch (_) {} });
+  var labels = Object.keys(touched).map(function(dt) { var d = DOC_TYPES.find(function(t) { return t.id === dt; }); return (d ? d.label : dt) + '(' + capturedDocs[dt].length + ')'; });
+  showToast(cnt + 'ページを振り分けました: ' + labels.join('、'), 'success');
+  window._scanAssignPages = null;
+  if (runOcr) setTimeout(function() { ocrAllForNewReg(); }, 150);
+}
+
 // 撮影画像(dataUrl)を上部固定・1枚ずつ見ながら確認できるビューア
 function _newRegThumbsHtml() {
   var srcs = [], caps = [];
@@ -38244,7 +38450,7 @@ async function renderAddEmployeeForm() {
   // Document capture section
   html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
   html += '<div class="section-title">📷 書類撮影</div>';
-  html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:8px;">📷 カメラで撮影、または 📁 既存の画像ファイルを選択できます（複数選択可）。SharePointに自動保存され、テキスト抽出でコピペも可能です。</div>';
+  html += '<div style="font-size:11px;color:var(--text-light);margin-bottom:8px;">📷 カメラで撮影、または 📁 既存の画像・PDFファイルを選択できます（複数選択可・PDFはページ毎に画像化）。SharePointに自動保存され、テキスト抽出でコピペも可能です。</div>';
   DOC_TYPES.forEach(doc => {
     html += '<div class="doc-capture-card" id="docCard_' + doc.id + '">';
     // 上段: アイコン + ラベル + 件数
@@ -38256,7 +38462,7 @@ async function renderAddEmployeeForm() {
     // 下段: ボタン群
     html += '<div class="doc-capture-buttons">';
     html +=   '<label class="doc-capture-btn"><input type="file" accept="image/*" capture="environment" style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📷 カメラ</label>';
-    html +=   '<label class="doc-capture-btn" style="background:#455a64;"><input type="file" accept="image/*" multiple style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📁 ファイル</label>';
+    html +=   '<label class="doc-capture-btn" style="background:#455a64;"><input type="file" accept="image/*,application/pdf" multiple style="display:none;" onchange="onDocCapture(\'' + doc.id + '\',this)">📁 ファイル</label>';
     html += '</div>';
     html += '<div class="doc-preview" id="docPreview_' + doc.id + '" style="display:none;"></div>';
     html += '</div>';
@@ -38264,6 +38470,10 @@ async function renderAddEmployeeForm() {
   // 撮影した全書類をまとめてAI(Claude)でOCR → 入社時に必要なSP項目を抽出してフォームへ転記
   html += '<button type="button" id="newRegOcrBtn" onclick="ocrAllForNewReg()" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#00897b,#00695c);color:#fff;border:none;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(0,105,92,0.25);">🤖 撮影した書類をまとめてOCR読込 → フォームへ転記</button>';
   html += '<div style="font-size:10.5px;color:var(--text-light);margin-top:5px;line-height:1.5;">在留カード・免許証・車検証・保険・通帳などを撮影してからこのボタンを押すと、高精度AI(Claude)が氏名・生年月日・在留情報・口座・車両・保険などを読み取り、確認画面でチェックして一括転記できます。</div>';
+  // 複合機/ScanSnap等でスキャン済みの PDF/画像 をまとめて取り込み → AIで種別振り分け → OCR転記
+  html += '<label style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box;margin-top:10px;background:linear-gradient(135deg,#5c6bc0,#3949ab);color:#fff;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(57,73,171,0.25);">' +
+            '<input type="file" accept="image/*,application/pdf" multiple style="display:none;" onchange="onScanBulkSelect(this)">📂 スキャン書類(PDF/画像)をまとめて読込 → 振り分け → 転記</label>';
+  html += '<div style="font-size:10.5px;color:var(--text-light);margin-top:5px;line-height:1.5;">複合機やScanSnapでスキャンしたPDF(複数ページ可)や画像を複数まとめて選ぶと、AIがページ毎に「在留カード/免許証/通帳…」の種別を判定します。確認画面で直してから、そのままOCR転記 または 振り分けだけ(各書類の🔍で個別OCR)を選べます。</div>';
   html += '</div>';
 
   // Other categories
