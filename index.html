@@ -34150,7 +34150,11 @@ function openDatePickerFor(id) {
 function syncDateFromPicker(id) {
   var p = document.getElementById(id + '_picker');
   var t = document.getElementById(id);
-  if (p && t && p.value) { t.value = p.value; t.style.borderColor = ''; }
+  if (p && t && p.value) {
+    t.value = p.value; t.style.borderColor = '';
+    // テキスト欄側の onchange(入社日→起算日連動 等)をカレンダー選択でも発火させる
+    try { t.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+  }
 }
 // カレンダーを開く前にテキスト欄の値をピッカーへ反映 (選択開始位置を現在値に)
 function syncPickerFromText(id) {
@@ -38582,6 +38586,9 @@ async function renderAddEmployeeForm() {
       if (field.key === 'nyushaDate') {
         addInput = addInput.replace('id="addField_nyushaDate"', 'id="addField_nyushaDate" onchange="onAddNyushaChange()"');
       }
+      if (field.key === 'kisanDate' || field.key === 'koyoStart') {
+        addInput += '<div style="font-size:10.5px;color:#888;margin-top:2px;">入社日を入力すると同じ日付が自動で入ります（変更可）。</div>';
+      }
       // 郵便番号 → 住所 自動取得 (zipcloud)
       if (field.key === 'yubin') {
         addInput = addInput.replace('id="addField_yubin"', 'id="addField_yubin" onchange="onAddYubinChange()" placeholder="例: 4350006 → 住所自動取得"');
@@ -38631,6 +38638,7 @@ async function renderAddEmployeeForm() {
 
   container.innerHTML = html;
   // 国籍・通勤方法の初期値(未選択)に応じて 書類カード/セクション の表示を整える
+  window._addNyushaAuto = '';   // 入社日→起算日/契約開始日 自動セットの追跡をリセット
   try { onAddNationalityChange(); onAddTsukinChange(); } catch (e) { console.warn('add form visibility init:', e); }
 }
 
@@ -39085,12 +39093,23 @@ function onAddSoshikiChange() {
 
 // 入社日 → 有給付与起算日 自動連動 (起算日が空欄のときのみ)
 function onAddNyushaChange() {
-  const ny = (document.getElementById('addField_nyushaDate') || {}).value || '';
-  if (!ny) return;
-  const ki = document.getElementById('addField_kisanDate');
-  if (ki && !ki.value) {
-    ki.value = ny;
-  }
+  const nyEl = document.getElementById('addField_nyushaDate');
+  if (!nyEl) return;
+  // 注入した onchange が normalizeDateText を上書きするため、ここで正規化(2026/9/1 → 2026-09-01)
+  try { normalizeDateText(nyEl); } catch (_) {}
+  const ny = String(nyEl.value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ny)) return;
+  // 有休付与起算日・雇用契約開始日: 空欄 or 前回自動セットした値のまま → 入社日に追従(手で変えた値は触らない)
+  const prev = window._addNyushaAuto || '';
+  ['kisanDate', 'koyoStart'].forEach(function(k) {
+    const el = document.getElementById('addField_' + k);
+    if (!el) return;
+    if (!el.value || el.value === prev) {
+      el.value = ny; el.style.borderColor = '';
+      const p = document.getElementById('addField_' + k + '_picker'); if (p) p.value = ny;
+    }
+  });
+  window._addNyushaAuto = ny;
 }
 
 // 郵便番号 → 住所 自動取得 (zipcloud API、無料・CORS対応)
