@@ -6621,6 +6621,7 @@ select.sankyu-edit-input {
       <button id="tsukinSaveBtn" onclick="saveTsukinTodokeToSyainFolder(this)" style="display:none;background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">💾 社員フォルダに保存 (通勤届)</button>
       <button id="tsukinMailBtn" onclick="draftTsukinTodokeEmail(this)" style="display:none;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">📧 寺田様へ下書き作成 (Outlook)</button>
       <button id="haisenEsignBtn" onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
+      <button id="haisenEsignLinkBtn" onclick="openEsignLinkPanel()" class="btn" style="background:linear-gradient(135deg,#7b1fa2,#4a148c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📲 本人へ署名リンクを送る (WhatsApp / LINE / メール / QR)</button>
       <button id="adobeSignBtn" onclick="sendNewHireToAdobeSign()" class="btn" style="display:none;background:linear-gradient(135deg,#d32f2f,#b71c1c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📤 Adobe Sign 署名へ送信</button>
       <button class="koyou-undo-btn" onclick="undoKoyouChanges(this)" style="display:none;background:#fff;color:#e65100;border:1.5px solid #e65100;border-radius:8px;padding:10px;font-weight:700;font-size:13px;">↩ 給与・雇用期間の変更を元に戻す</button>
     </div>
@@ -10829,6 +10830,25 @@ async function saveHaisenDocFinal() {
       return;
     }
 
+    var html = _buildEsignPageHtml(emp, docHtml, styles, 'opener');
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  } catch (e) {
+    console.error('[esign] saveHaisenDocFinal exception:', e);
+    if (typeof showToast === 'function') showToast('エラー: ' + (e.message || String(e)), 'error');
+    else alert('エラー: ' + (e.message || String(e)));
+  }
+}
+
+// 署名ページ HTML を組み立てる
+//   mode 'opener' = 別タブで署名→元タブ(yukyu-app)へ postMessage して保存 (従来)
+//   mode 'remote' = 本人のスマホ用 (ログイン不要): 自前でPDF化して /api/esign/submit へ送信
+function _buildEsignPageHtml(emp, docHtml, styles, mode) {
+  var name = emp.Title || '';
+  var sn = emp[F.syainNo] || '';
+  var remote = (mode === 'remote');
     var pageTitle = '電子サイン - ' + name + ' (No.' + sn + ')';
     var html = [
       '<!doctype html><html lang="ja"><head><meta charset="utf-8">',
@@ -10877,13 +10897,13 @@ async function saveHaisenDocFinal() {
       '</style></head><body>',
       '<div class="esh">',
       '  <h1>✍ 電子サイン: 労働契約書 兼 労働条件通知書 (派遣) ／ 就業条件明示書</h1>',
-      '  <div class="sub"><span class="esh-pill">№' + escHtml(String(sn)) + '</span><b>' + escHtml(name) + '</b> 様 — 上から内容をご確認のうえ、ページ最下部のキャンバスにサインしてください</div>',
+      '  <div class="sub"><span class="esh-pill">№' + escHtml(String(sn)) + '</span><b>' + escHtml(name) + '</b> 様 — ' + (remote ? '内容をご確認のうえ、最下部の欄にサインして送信してください / Confira o conteúdo e assine no campo ao final' : '上から内容をご確認のうえ、ページ最下部のキャンバスにサインしてください') + '</div>',
       '</div>',
-      '<div id="dupNote">🔁 <b>両面印刷の設定</b>：印刷ダイアログで両面を <b>「長辺とじ」(長い辺で綴じる)</b> にすると、裏面が表面と同じ向きで印刷されます。「短辺とじ」だと裏面が上下逆になります。（この案内は印刷されません）</div>',
+      (remote ? '' : '<div id="dupNote">🔁 <b>両面印刷の設定</b>：印刷ダイアログで両面を <b>「長辺とじ」(長い辺で綴じる)</b> にすると、裏面が表面と同じ向きで印刷されます。「短辺とじ」だと裏面が上下逆になります。（この案内は印刷されません）</div>'),
       '<div class="doc-area">' + docHtml + '</div>',
       '<div class="sign-section" id="signSection">',
       '  <h2>✍ 電子サイン</h2>',
-      '  <div class="sign-intro">上記の労働契約書 兼 労働条件通知書 (派遣) および就業条件明示書の内容を確認しました。<br>同意のうえ、下のキャンバスにサインしてください。</div>',
+      (remote ? '  <div class="sign-intro">上記の書類の内容を確認しました。同意のうえ、下の欄に指でサインしてください。<br><span style="color:#777;">Li o conteúdo acima. Se concorda, assine com o dedo no campo abaixo.</span></div><label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:#2e7d32;margin:6px 0 12px;"><input type="checkbox" id="agreeChk" style="width:20px;height:20px;"> 内容を確認し、同意します / Li e concordo</label>' : '  <div class="sign-intro">上記の労働契約書 兼 労働条件通知書 (派遣) および就業条件明示書の内容を確認しました。<br>同意のうえ、下のキャンバスにサインしてください。</div>'),
       '  <div class="sign-row">',
       '    <div class="sign-canvas-wrap">',
       '      <canvas id="signCanvas"></canvas>',
@@ -10891,13 +10911,14 @@ async function saveHaisenDocFinal() {
       '    </div>',
       '    <div class="sign-actions">',
       '      <button class="sign-clear" onclick="clearSig()">🗑 クリア</button>',
-      '      <button class="sign-save" id="signSaveBtn" onclick="doSave()">✓ 保存して SharePoint へ</button>',
+      '      <button class="sign-save" id="signSaveBtn" onclick="doSave()">' + (remote ? '✓ 署名して送信 / Assinar e enviar' : '✓ 保存して SharePoint へ') + '</button>',
       '      <div id="signProgress" class="sign-progress"></div>',
       '    </div>',
       '  </div>',
       '</div>',
       '<button id="toBottomFab" onclick="scrollToSign()">⬇ サイン欄へ移動</button>',
       '<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"><\/script>',
+      (remote ? '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script><script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"><\/script>' : ''),
       '<script>',
       '  var pad = null;',
       '  function initPad() {',
@@ -10986,6 +11007,7 @@ async function saveHaisenDocFinal() {
       '    obs.observe(sec);',
       '  });',
       '  function clearSig() { if (pad) pad.clear(); }',
+      (remote ? _esignRemoteScriptJs() : [
       '  function doSave() {',
       '    if (!pad || pad.isEmpty()) { alert("サインしてください"); return; }',
       '    var btn = document.getElementById("signSaveBtn");',
@@ -11013,18 +11035,274 @@ async function saveHaisenDocFinal() {
       '    window.addEventListener("message", onMsg);',
       '    window.opener.postMessage({ type:"esign-signed", dataUrl: dataUrl }, "*");',
       '  }',
+      ].join('')),
       '<\/script>',
       '</body></html>'
     ].join('');
+  return html;
+}
 
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
+// ============================================================
+// 📲 本人へ署名リンクを送る (遠隔電子署名) — 2026-09-03
+//   書類HTML(署名UI付き・自己完結)を Functions(esign) に預けて使い捨てリンク(7日・1回限り)を発行。
+//   本人はスマホ/iPad/PC でリンクを開き(ログイン不要)、内容確認→サイン→送信。署名ページ自身が
+//   html2canvas+pdf-lib でPDF化して /api/esign/submit へ送り、バックエンド(MI)が社員フォルダ
+//   (+新規雇用契約書 集約フォルダ)へ保存 → 発行者へメール通知。
+//   送付手段: WhatsApp(wa.me) / LINE / 共有シート / メール(mailto) / 事務所iPad(jimusyo1へメール) / QR / コピー
+//   作成した端末(PC)と送る端末(会社スマホ)が違っても、同じ社員を開けば「署名待ちリンク」を再表示できる。
+// ============================================================
+var _esignLinkCurrent = null;   // 表示中の依頼 {token,url,expiresAt,...}
+
+function _esignEmpField(emp, hexPart) {
+  for (var k in emp) { if (k.indexOf(hexPart) >= 0) { var v = emp[k]; if (v != null && String(v).trim()) return String(v).trim(); } }
+  return '';
+}
+function _esignEmpEmail(emp) { var v = _esignEmpField(emp, 'xff25__x30e1__x30fc__x30eb'); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : ''; }
+function _esignEmpPhone(emp) { return _esignEmpField(emp, 'x643a__x5e2f__x96fb__x8a71'); }
+// 携帯番号 → wa.me 用国際形式 (090-xxxx → 8190xxxx)
+function _esignPhoneIntl(p) {
+  var d = String(p || '').replace(/[^\d]/g, '');
+  if (!d) return '';
+  if (d.indexOf('81') === 0 && d.length >= 11) return d;
+  if (d.charAt(0) === '0') return '81' + d.substring(1);
+  return d;
+}
+function _esignDocLabel() { return (window._currentHaisenDocMode === 'renewal') ? '更新用就業条件通知書' : '新規雇用契約書兼就業条件通知書'; }
+function _esignFmtJst(iso) {
+  if (!iso) return '';
+  var d = new Date(iso); if (isNaN(d)) return iso;
+  return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function _esignShareText(rec, emp) {
+  var name = (emp && emp.Title) || rec.name || '';
+  var exp = _esignFmtJst(rec.expiresAt);
+  return '【有限会社ステップ・アップ】' + name + ' 様\n' + (rec.docLabel || '労働契約書') + ' の電子署名をお願いします。下のリンクを開いて内容を確認し、最下部の欄にサインして送信してください。\n' +
+    '（有効期限 ' + exp + '・1回限り）\n' + rec.url + '\n\n' +
+    'Sr(a). ' + name + ', por favor abra o link, confira o contrato e assine com o dedo no campo ao final (válido até ' + exp + ').';
+}
+
+async function _esignApi(path, method, body) {
+  var token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  var resp = await fetch(FUNC_OCR_BASE + path, {
+    method: method || 'GET',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  var j = {}; try { j = await resp.json(); } catch (_) {}
+  if (!resp.ok) throw new Error(j.error ? (j.error + (j.detail ? ' ' + j.detail : '')) : ('HTTP ' + resp.status));
+  return j;
+}
+
+// 入口: 既存の署名待ちリンクがあれば再表示、無ければ発行してパネル表示
+async function openEsignLinkPanel() {
+  try {
+    if (typeof currentEmployee === 'undefined' || !currentEmployee) { showToast('社員データが見つかりません', 'error'); return; }
+    var body = document.getElementById('haisenDocBody');
+    if (!body || !body.querySelector('.haisen-doc-page')) { showToast('書類を先に作成してください', 'error'); return; }
+    var emp = currentEmployee;
+    var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+    _empOcrProg('📲 署名依頼の状態を確認中…');
+    var pend;
+    try { pend = await _esignApi('/esign/pending?syainNo=' + encodeURIComponent(sn), 'GET'); } finally { _empOcrProg(null); }
+    var items = (pend && pend.items) || [];
+    var label = _esignDocLabel();
+    var active = items.find(function(r) { return r.status === 'pending' && !r.expired && r.docLabel === label; });
+    var signed = items.find(function(r) { return r.status === 'signed' && r.docLabel === label; });
+    if (active) { _esignShowLinkPanel(active, emp, signed); return; }
+    if (signed && !confirm('この書類は ' + _esignFmtJst(signed.signedAt) + ' に署名済みです。\n新しい署名リンクを発行しますか？')) return;
+    var rec = await _esignCreateLink(emp);
+    _esignShowLinkPanel(rec, emp, signed);
   } catch (e) {
-    console.error('[esign] saveHaisenDocFinal exception:', e);
-    if (typeof showToast === 'function') showToast('エラー: ' + (e.message || String(e)), 'error');
-    else alert('エラー: ' + (e.message || String(e)));
+    console.error('openEsignLinkPanel error:', e);
+    showToast('署名リンクの発行に失敗: ' + (e.message || e), 'error');
   }
+}
+
+// 書類HTML(署名UI付き)を組み立てて Functions に預け、リンクを発行
+async function _esignCreateLink(emp) {
+  var body = document.getElementById('haisenDocBody');
+  var wrapper = body.querySelector('.haisen-doc-wrapper');
+  var docHtml = wrapper ? wrapper.outerHTML : body.innerHTML;
+  var styles = '';
+  try {
+    styles = Array.from(document.styleSheets).map(function(ss) {
+      try { return Array.from(ss.cssRules).map(function(r) { return r.cssText; }).join('\n'); } catch (e) { return ''; }
+    }).filter(function(s) { return s.length > 0; }).join('\n');
+  } catch (e) { console.warn('[esign] CSS extract:', e); }
+  _empOcrProg('📲 署名リンクを発行中…');
+  try {
+    var html = _buildEsignPageHtml(emp, docHtml, styles, 'remote');
+    var folderPath = await getEmpFolderPath(emp);
+    if (!folderPath) throw new Error('社員フォルダのパス特定に失敗 (部課/社員番号/氏名を確認してください)');
+    try { await ensureSpFolder(folderPath); } catch (e1) { console.warn('ensureSpFolder warn:', e1); }
+    var nm = (emp.Title || '').replace(/[\s　\/\\:*?"<>|]/g, '');
+    var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+    var stamp = (new Date()).toISOString().substring(0, 10).replace(/-/g, '');
+    var docLabel = _esignDocLabel();
+    var fileName = docLabel + '_' + sn + '_' + nm + '_' + stamp + '_署名済.pdf';
+    // 新規雇用契約書は 集約フォルダ (社員ファイル/新規雇用契約書作成/{操作者}/{派遣先}/) にも保存 (アプリ内署名と同じ)
+    var aggFolder = '', aggName = '';
+    if (window._currentHaisenDocMode !== 'renewal') {
+      try {
+        var hkNm = (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(getBukaValue(emp)) : (getBukaValue(emp) || '');
+        var safeHk = String(hkNm || '不明').replace(/[:*?"<>|#%~&{}\/\\]/g, '-').trim() || '不明';
+        var opName = (typeof getLoggedInName === 'function' ? getLoggedInName() : '').replace(/[\s　\/\\:*?"<>|#%~&{}\(\)\[\]'"`,;+=@.]/g, '').trim();
+        var aggP = SP_DOC_LIB_PATH + '/新規雇用契約書作成';
+        try { await ensureSpFolder(aggP); } catch (_) {}
+        aggFolder = aggP + '/' + safeHk;
+        if (opName) { var aggOp = aggP + '/' + opName; try { await ensureSpFolder(aggOp); aggFolder = aggOp + '/' + safeHk; } catch (_) {} }
+        try { await ensureSpFolder(aggFolder); } catch (_) {}
+        aggName = '新規雇用契約書兼就業条件通知書_' + sn + '_' + nm + '_' + _koyouKikanForFilename(emp) + '.pdf';
+      } catch (eAgg) { console.warn('agg folder warn:', eAgg); aggFolder = ''; aggName = ''; }
+    }
+    var res = await _esignApi('/esign/request', 'POST', {
+      syainNo: sn, name: emp.Title || '', docLabel: docLabel, folderPath: folderPath, fileName: fileName,
+      aggFolderPath: aggFolder, aggFileName: aggName, html: html,
+      empEmail: _esignEmpEmail(emp), empPhone: _esignEmpPhone(emp)
+    });
+    _empOcrProg(null);
+    showToast('✓ 署名リンクを発行しました（' + _esignFmtJst(res.request.expiresAt) + ' まで有効）', 'success');
+    return res.request;
+  } catch (e) { _empOcrProg(null); throw e; }
+}
+
+// 送付パネル (QR / WhatsApp / LINE / 共有 / メール / 事務所iPad / コピー)
+function _esignShowLinkPanel(rec, emp, signedRec) {
+  _esignLinkCurrent = rec;
+  emp = emp || {};
+  var name = emp.Title || rec.name || '';
+  var phone = _esignPhoneIntl(rec.empPhone || _esignEmpPhone(emp));
+  var email = rec.empEmail || _esignEmpEmail(emp);
+  var text = _esignShareText(rec, emp);
+  var enc = encodeURIComponent(text).replace(/'/g, '%27');
+  var canShare = !!(navigator.share);
+  function btn(label, onclick, bg, disabled, title) {
+    return '<button type="button" ' + (disabled ? 'disabled ' : '') + 'onclick="' + onclick + '" title="' + escHtml(title || '') + '" ' +
+      'style="flex:1 1 46%;min-width:140px;background:' + bg + ';color:#fff;border:none;border-radius:9px;padding:11px 8px;font-size:12.5px;font-weight:700;cursor:pointer;' + (disabled ? 'opacity:0.45;cursor:not-allowed;' : '') + '">' + label + '</button>';
+  }
+  var old = document.getElementById('esignLinkOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'esignLinkOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:14px;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+      '<div style="padding:13px 16px;background:linear-gradient(135deg,#7b1fa2,#4a148c);color:#fff;border-radius:14px 14px 0 0;">' +
+        '<div style="font-size:15px;font-weight:800;">📲 本人へ署名リンクを送る</div>' +
+        '<div style="font-size:11.5px;opacity:0.9;margin-top:2px;">' + escHtml(name) + ' 様 — ' + escHtml(rec.docLabel || '') + '</div>' +
+      '</div>' +
+      '<div style="padding:12px 16px;">' +
+        '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">' +
+          '<div id="esignQr" style="width:132px;height:132px;flex:0 0 auto;background:#fff;border:1px solid #ddd;border-radius:8px;padding:4px;box-sizing:border-box;"></div>' +
+          '<div style="flex:1;min-width:180px;font-size:11.5px;color:#444;line-height:1.6;">' +
+            '<div>📷 本人が目の前にいれば、このQRをスマホで読んでその場で署名できます。担当者が会社スマホで読めば LINE 等へ転送できます。</div>' +
+            '<div style="margin-top:4px;color:#7b1fa2;font-weight:700;">有効期限: ' + escHtml(_esignFmtJst(rec.expiresAt)) + '（1回限り）</div>' +
+            (signedRec ? '<div style="margin-top:4px;color:#2e7d32;">✅ 前回署名済: ' + escHtml(_esignFmtJst(signedRec.signedAt)) + '</div>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div id="esignLinkUrl" style="margin-top:10px;font-size:10.5px;color:#666;word-break:break-all;background:#f5f5f5;border-radius:7px;padding:7px 9px;">' + escHtml(rec.url) + '</div>' +
+        '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;">' +
+          btn('📱 WhatsApp' + (phone ? '' : '（携帯未登録）'), "window.open('https://wa.me/" + phone + "?text=" + enc + "','_blank')", '#25d366', false, phone ? '本人の携帯宛に WhatsApp を開く' : '宛先を選んで送る') +
+          btn('💚 LINE', "window.open('https://line.me/R/share?text=" + enc + "','_blank')", '#06c755', false, 'LINE の送信先選択を開く') +
+          btn('📨 共有 (Messenger等)', '_esignShare()', '#0084ff', !canShare, canShare ? 'スマホの共有シートから送る' : 'この端末は共有シート非対応 (コピーを使ってください)') +
+          btn('📧 メール' + (email ? '' : '（本人メール未登録）'), "location.href='mailto:" + encodeURIComponent(email) + "?subject=" + encodeURIComponent('【電子署名のお願い】' + (rec.docLabel || '労働契約書')) + "&body=" + enc + "'", '#ef6c00', false, '自分のメールアプリで送る') +
+          btn('💬 事務所iPad (jimusyo1)', "_esignSendMail('ipad')", '#1565c0', false, 'jimusyo1 のメールへリンクを送る (来所時に iPad で署名)') +
+          btn('📋 リンクをコピー', '_esignCopy()', '#455a64', false, '案内文とリンクをコピー') +
+        '</div>' +
+        '<div id="esignPanelStatus" style="font-size:11px;color:#1565c0;margin-top:8px;min-height:14px;"></div>' +
+      '</div>' +
+      '<div style="padding:10px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;">' +
+        '<button type="button" onclick="_esignReissue()" style="background:#fff;color:#7b1fa2;border:1.5px solid #7b1fa2;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;">🔄 新しいリンクを発行</button>' +
+        '<button type="button" onclick="document.getElementById(\'esignLinkOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;">閉じる</button>' +
+      '</div>' +
+    '</div>';
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  _esignRenderQr(rec.url);
+}
+
+async function _esignRenderQr(url) {
+  var el = document.getElementById('esignQr'); if (!el) return;
+  try {
+    if (!window.QRCode) await _loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js');
+    el.innerHTML = '';
+    new QRCode(el, { text: url, width: 122, height: 122, correctLevel: QRCode.CorrectLevel.M });
+  } catch (e) { el.innerHTML = '<div style="font-size:10px;color:#999;padding:8px;">QR生成不可</div>'; }
+}
+async function _esignShare() {
+  var rec = _esignLinkCurrent; if (!rec) return;
+  try { await navigator.share({ title: '電子署名のお願い', text: _esignShareText(rec, currentEmployee || {}) }); }
+  catch (e) { if (e && e.name !== 'AbortError') showToast('共有できませんでした: ' + (e.message || e), 'error'); }
+}
+async function _esignCopy() {
+  var rec = _esignLinkCurrent; if (!rec) return;
+  var text = _esignShareText(rec, currentEmployee || {});
+  try { await navigator.clipboard.writeText(text); showToast('✓ 案内文とリンクをコピーしました', 'success'); }
+  catch (e) { window.prompt('コピーしてください', rec.url); }
+}
+async function _esignSendMail(kind) {
+  var rec = _esignLinkCurrent; if (!rec) return;
+  var st = document.getElementById('esignPanelStatus');
+  if (st) st.textContent = '📧 送信中…';
+  try {
+    var r = await _esignApi('/esign/send', 'POST', { t: rec.token, to: kind });
+    if (st) st.textContent = '✓ ' + r.to + ' へ送信しました';
+    showToast('✓ ' + r.to + ' へ送信しました', 'success');
+  } catch (e) {
+    if (st) st.textContent = '❌ ' + (e.message || e);
+    showToast('送信失敗: ' + (e.message || e), 'error');
+  }
+}
+async function _esignReissue() {
+  if (!confirm('新しい署名リンクを発行しますか？\n（書類を修正した場合は、新しいリンクを本人へ送り直してください）')) return;
+  try { var rec = await _esignCreateLink(currentEmployee); _esignShowLinkPanel(rec, currentEmployee, null); }
+  catch (e) { showToast('発行失敗: ' + (e.message || e), 'error'); }
+}
+
+// 本人向け署名ページに埋め込むスクリプト (自己完結: 署名→PDF化→/api/esign/submit)
+//   アプリ内の escHtml / injectSignatureIntoHaisenDoc / generateHaisenDocAsPdf をソースごと埋め込む
+function _esignRemoteScriptJs() {
+  var fnSrc = [escHtml, injectSignatureIntoHaisenDoc, generateHaisenDocAsPdf].map(function(f) { return f.toString(); }).join('\n');
+  var js = [
+    '  function _b64(blob) { return new Promise(function(res, rej) { var r = new FileReader(); r.onload = function() { res(String(r.result).split(",")[1] || ""); }; r.onerror = rej; r.readAsDataURL(blob); }); }',
+    '  async function doSave() {',
+    '    if (!pad || pad.isEmpty()) { alert("サインしてください / Assine, por favor"); return; }',
+    '    var agree = document.getElementById("agreeChk");',
+    '    if (agree && !agree.checked) { alert("「内容を確認し、同意します」にチェックを入れてください / Marque a confirmação"); return; }',
+    '    var btn = document.getElementById("signSaveBtn");',
+    '    var prog = document.getElementById("signProgress");',
+    '    btn.disabled = true; prog.className = "sign-progress";',
+    '    try {',
+    '      if (!window.html2canvas || !window.PDFLib) throw new Error("PDFライブラリを読込中です。数秒後にもう一度押してください / Aguarde alguns segundos e tente novamente");',
+    '      prog.textContent = "① 署名を書類に反映中… / Aplicando assinatura";',
+    '      var dataUrl = pad.toDataURL("image/png");',
+    '      var d = new Date(); var todayStr = d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();',
+    '      injectSignatureIntoHaisenDoc(dataUrl, todayStr);',
+    '      var docArea = document.querySelector(".doc-area");',
+    '      docArea.querySelectorAll(".haisen-doc-page").forEach(function(p) { p.style.transform = ""; p.style.marginBottom = ""; p.style.marginRight = ""; });',
+    '      prog.textContent = "② PDFを作成中… (30秒ほどかかります) / Gerando PDF";',
+    '      await new Promise(function(r) { setTimeout(r, 80); });',
+    '      var pdfBlob = await generateHaisenDocAsPdf(docArea);',
+    '      prog.textContent = "③ 送信中… / Enviando";',
+    '      var t = new URLSearchParams(location.search).get("t");',
+    '      var resp = await fetch("/api/esign/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ t: t, pdf: await _b64(pdfBlob) }) });',
+    '      var j = {}; try { j = await resp.json(); } catch (_) {}',
+    '      if (!resp.ok) throw new Error(j.error === "already_signed" ? "この書類は既に署名済みです / Já assinado" : j.error === "expired" ? "リンクの有効期限が切れています / Link expirado" : (j.error || ("HTTP " + resp.status)));',
+    '      prog.className = "sign-progress success";',
+    '      prog.innerHTML = "✅ 署名を受け付けました。ありがとうございました。<br>Assinatura recebida. Obrigado!<br><a href=\\"/api/esign/signed?t=" + encodeURIComponent(t) + "\\" target=\\"_blank\\" style=\\"display:inline-block;margin-top:8px;color:#1565c0;font-weight:700;\\">📄 署名済PDFを保存する / Salvar o PDF assinado</a>";',
+    '      btn.style.display = "none";',
+    '      var clr = document.querySelector(".sign-clear"); if (clr) clr.style.display = "none";',
+    '      try { pad.off(); } catch (_) {}',
+    '      setTimeout(function() { try { fitDocPages(); } catch (_) {} }, 100);',
+    '    } catch (e) {',
+    '      prog.className = "sign-progress error"; prog.textContent = "❌ " + (e.message || e);',
+    '      btn.disabled = false;',
+    '      document.querySelectorAll(".esign-injected").forEach(function(n) { n.remove(); });',
+    '      setTimeout(function() { try { fitDocPages(); } catch (_) {} }, 100);',
+    '    }',
+    '  }'
+  ].join('\n');
+  return fnSrc + '\n' + js;
 }
 
 // メインウィンドウ側: 新規ウィンドウからの署名 dataURL を受け取って PDF 生成 + アップロード
@@ -11875,7 +12153,7 @@ function renderTsukinTodoke(emp, todokeDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12075,7 +12353,7 @@ function renderSagyoushaBarcode(emp) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page1 + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -12568,7 +12846,7 @@ function renderNyushaKyouikuASTI(emp, opts) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page1 + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -13498,7 +13776,7 @@ function renderMaicarTsukinASTI(emp, opts) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page1 + page2 + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -14023,6 +14301,8 @@ async function openHaisenDocScreen(docType) {
     // 電子サインボタンを再表示 (派遣契約書表示時に非表示にされている場合があるため)
     var esignBtn = document.getElementById('haisenEsignBtn');
     if (esignBtn) esignBtn.style.display = '';
+    var esignLinkBtn = document.getElementById('haisenEsignLinkBtn');
+    if (esignLinkBtn) esignLinkBtn.style.display = '';
     // Adobe Sign 送信ボタン: 新規雇用契約書 (roudouKeiyaku) のときのみ表示
     var adobeBtn = document.getElementById('adobeSignBtn');
     if (adobeBtn) adobeBtn.style.display = (docType === 'roudouKeiyaku') ? 'block' : 'none';
@@ -16366,7 +16646,7 @@ function renderHakenKobetsuKeiyakusho(h, opts) {
   // 操作ボタン: ズーム + 印刷のみ (電子サイン/Adobe/元に戻す は非表示)
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -16580,7 +16860,7 @@ function renderHakenSakiKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -16713,7 +16993,7 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -16797,7 +17077,7 @@ function renderHakenTsuuchisho(h, emps, opts) {
   document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + page + '</div>';
   var actions = document.getElementById('haisenDocActions');
   if (actions) actions.style.display = 'flex';
-  ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
     var b = document.getElementById(id); if (b) b.style.display = 'none';
   });
   document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -17614,7 +17894,7 @@ async function _submitHakenIsshiki() {
     document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + allPagesHtml + '</div>';
     var actions = document.getElementById('haisenDocActions');
     if (actions) actions.style.display = 'flex';
-    ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+    ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
       var b = document.getElementById(id); if (b) b.style.display = 'none';
     });
     document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
@@ -20390,7 +20670,7 @@ function openHakensakiKakuninDoc(includeName) {
       '<div class="haisen-doc-wrapper">' + bannerHtml + allHtml + '</div>';
     var actions = document.getElementById('haisenDocActions');
     if (actions) actions.style.display = 'flex';
-    ['haisenEsignBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
+    ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) {
       var b = document.getElementById(id); if (b) b.style.display = 'none';
     });
     document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
