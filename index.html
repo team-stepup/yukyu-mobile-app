@@ -12889,6 +12889,26 @@ async function _maicarTryFillRoute(emp, opts) {
   try {
     if (status) status.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;font-size:10pt;color:#1565c0;"><div>🗺️ 経路図を生成中…</div><div style="font-size:8pt;color:#888;">国土地理院タイル + OSRM</div></div>';
     var r = await _maicarBuildRouteForEmployee(emp);
+    // 通勤距離: 社員データの保存値(通勤手当計算時の実測・小数1位)があればそれを優先 → 手当・契約書と必ず一致
+    //   opts.force=true なら今回の実測値を表示 (注記バーの🔄ボタン)
+    window._maicarLastEmp = emp;
+    var storedKm = _maicarStoredKm(emp);
+    var useKm = (storedKm != null && !opts.force) ? storedKm : r.distKm;
+    var noteEl = document.getElementById('maicarRouteNote');
+    if (noteEl) {
+      var btnStyle = 'background:#fff;border:1px solid #1565c0;color:#1565c0;border-radius:5px;padding:2px 8px;font-size:8pt;cursor:pointer;';
+      if (storedKm != null && !opts.force) {
+        noteEl.innerHTML = '📌 通勤距離は社員データの保存値 <b>' + storedKm.toFixed(1) + ' km</b>（通勤手当計算時の実測）を使用。今回の実測 ' + r.distKm.toFixed(1) + ' km' +
+          (Math.abs(storedKm - r.distKm) >= 0.05 ? '<span style="color:#e65100;">（差あり）</span>' : '') +
+          ' <button type="button" onclick="_maicarTryFillRoute(window._maicarLastEmp,{force:true})" style="' + btnStyle + '">🔄 実測値で表示</button>';
+      } else if (storedKm != null) {
+        noteEl.innerHTML = '🔄 今回の実測値 <b>' + r.distKm.toFixed(1) + ' km</b> を表示中（保存値 ' + storedKm.toFixed(1) + ' km）' +
+          ' <button type="button" onclick="_maicarTryFillRoute(window._maicarLastEmp,{})" style="' + btnStyle + '">📌 保存値に戻す</button>';
+      } else {
+        noteEl.innerHTML = '📏 実測 <b>' + r.distKm.toFixed(1) + ' km</b>（社員データに保存値なし。社員詳細の通勤手当「📍 距離から自動計算」→💾保存で記録され、以後はその値を使います）';
+      }
+    }
+    r.distKm = useKm;
     // 画像差し替え
     box.innerHTML =
       '<img src="' + r.dataUrl + '" alt="通勤経路" style="width:100%;height:100%;object-fit:cover;display:block;">' +
@@ -12913,6 +12933,18 @@ async function _maicarTryFillRoute(emp, opts) {
         '</div>';
     }
   }
+}
+
+// 社員データの「通勤距離km」(通勤手当自動計算時に保存した片道km) を取得。無ければ null
+function _maicarStoredKm(emp) {
+  try {
+    if (!emp) return null;
+    var key = (typeof hakenKeyMap !== 'undefined' && hakenKeyMap && hakenKeyMap['tsukinKyori']) ? hakenKeyMap['tsukinKyori'] : null;
+    var v = key ? emp[key] : null;
+    if (v == null || v === '') { for (var k in emp) { if (k.indexOf('x901a__x52e4__x8ddd__x96e2') >= 0) { v = emp[k]; break; } } }
+    var n = parseFloat(v);
+    return isNaN(n) ? null : Math.round(n * 10) / 10;
+  } catch (_) { return null; }
 }
 
 function renderMaicarTsukinASTI(emp, opts) {
@@ -13443,6 +13475,8 @@ function renderMaicarTsukinASTI(emp, opts) {
       '<div id="maicarRouteMapBox" style="border:0.6pt solid #000;height:110mm;background:#fafafa;position:relative;overflow:hidden;">' +
         '<div id="maicarRouteStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9.5pt;color:#888;">⌛ 経路図を準備中…</div>' +
       '</div>' +
+      // 通勤距離の出所(社員データ保存値 / 実測)の注記 — 画面のみ・印刷/PDFには出ない
+      '<div id="maicarRouteNote" class="no-print" style="font-size:8pt;color:#1565c0;margin:2px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"></div>' +
 
       // 通勤方法 + 通勤距離・通勤時間 - 枠付きコンパクトテーブル
       '<table style="width:100%;border-collapse:collapse;margin-top:3px;font-size:8.5pt;border:0.5pt solid #000;">' +
@@ -14864,7 +14898,12 @@ function renderRoudouKeiyakushoSan(emp, h, mode, opt) {
   for (var k5 in emp) {
     if (k5.indexOf('x901a__x52e4__x624b__x5f53') >= 0) { tsukin1day = Number(emp[k5]) || 0; break; }
   }
-  var katamichiKm = tsukin1day ? Math.round((tsukin1day / 12 / 2) * 10) / 10 : 0;  // 1km=12円・往復
+  // 片道km: 社員データの保存値(通勤手当計算時の実測)を優先 → 無ければ手当から逆算 (1km=12円・往復)
+  var katamichiKm = 0;
+  for (var k6 in emp) {
+    if (k6.indexOf('x901a__x52e4__x8ddd__x96e2') >= 0 && emp[k6] != null && emp[k6] !== '') { katamichiKm = Math.round((parseFloat(emp[k6]) || 0) * 10) / 10; break; }
+  }
+  if (!katamichiKm) katamichiKm = tsukin1day ? Math.round((tsukin1day / 12 / 2) * 10) / 10 : 0;
   var tsukin21day = tsukin1day ? tsukin1day * 21 : 0;
   // 在留カードのローマ字氏名 (社員リストの「特記事項１」フィールドに格納)
   // 例: "TAIRA DA CRUZ LOMBARDO BRUNO", "KASHIYAMA FERREIRA LETICIA MARY"
@@ -18318,6 +18357,8 @@ const PROFILE_CATEGORIES = [
       // ── 🚃 通勤 ── (通勤方法を先に。方法が車/バイクのとき通勤手当の距離自動計算が効く)
       { key: 'tsukinHouhou', label: '通勤方法', group: 'commute' },
       { key: 'tsukinTeate', label: '通勤手当', format: 'currency', group: 'commute' },
+      { key: 'tsukinKyori', label: '通勤距離 (片道km)', group: 'commute' },
+      { key: 'tsukinWorkAddr', label: '通勤 就業場所 (計測基準)', group: 'commute' },
     ]
   },
   {
@@ -18585,6 +18626,8 @@ function buildFieldKeyMap(fieldsMeta) {
     taisyokuRiyuu: '退職理由',
     taisyokuRiyuuDetail: '退職理由詳細',
     nihongoLevel: '日本語レベル',
+    tsukinKyori: '通勤距離km',          // 片道km(小数1位)。通勤手当「距離から自動計算」時に保存 → 通勤届/契約書で使用 (2026-09-03)
+    tsukinWorkAddr: '通勤就業場所',      // 上記の計測基準になった就業場所住所
     jikaiSaiyou: '次回採用',  // 実フィールド名は「次回採用」(の ナシ)
     shahoKanyuubi: '加入日kanyuubi',
     shahoHuyou: '扶養huyou',
@@ -34529,6 +34572,12 @@ async function saveEditField(catId, fieldKey) {
   try {
     const body = {};
     body[internalName] = newVal;
+    // 通勤手当を「距離から自動計算」した値のまま保存 → 片道km・就業場所も一緒に保存 (通勤届/契約書と整合)
+    if (field.key === 'tsukinTeate' && window._lastCommuteCalc && newVal != null && Number(newVal) === Number(window._lastCommuteCalc.teate)) {
+      var _kK = editKeyMap['tsukinKyori'], _kW = editKeyMap['tsukinWorkAddr'];
+      if (_kK && window._lastCommuteCalc.km != null) body[odataKeyToInternal(_kK)] = window._lastCommuteCalc.km;
+      if (_kW) body[odataKeyToInternal(_kW)] = window._lastCommuteCalc.workAddr || '';
+    }
     await spPatchEmployee(emp.Id, body);
 
     // 「総務-社保」を ✓取得完了 にした場合は List9 (社会保険加入申請リスト) も同期
@@ -38622,6 +38671,11 @@ async function renderAddEmployeeForm() {
       if (field.key === 'nyushaDate') {
         addInput = addInput.replace('id="addField_nyushaDate"', 'id="addField_nyushaDate" onchange="onAddNyushaChange()"');
       }
+      // 通勤距離(片道km)・就業場所: 通勤手当「📍 距離から自動計算」で自動入力 (手入力は想定しない)
+      if (field.key === 'tsukinKyori' || field.key === 'tsukinWorkAddr') {
+        addInput = addInput.replace('class="edit-input"', 'class="edit-input" readonly style="background:#f5f5f5;color:#666;"');
+        if (field.key === 'tsukinKyori') addInput += '<div style="font-size:10.5px;color:#888;margin-top:2px;">通勤手当の「📍 距離から自動計算」で自動入力されます。マイカー通勤届・契約書の片道kmにこの値を使います。</div>';
+      }
       if (field.key === 'kisanDate' || field.key === 'koyoStart') {
         addInput += '<div style="font-size:10.5px;color:#888;margin-top:2px;">入社日を入力すると同じ日付が自動で入ります（変更可）。</div>';
       }
@@ -38744,11 +38798,12 @@ function onAddTsukinChange() {
   });
   // 通勤手当: 送迎・自転車・徒歩は支給なし → 行ごと非表示(値もクリア)。車/バイク/電車/未選択は表示
   const noTeate = /^(送迎|自転車|徒歩)/.test(String(val).replace(/[\s　]/g, ''));
-  const teateRow = document.getElementById('addRow_tsukinTeate');
-  if (teateRow) {
-    teateRow.style.display = noTeate ? 'none' : '';
-    if (noTeate) { const teateEl = document.getElementById('addField_tsukinTeate'); if (teateEl) teateEl.value = ''; }
-  }
+  ['tsukinTeate', 'tsukinKyori', 'tsukinWorkAddr'].forEach(function(k) {
+    const row = document.getElementById('addRow_' + k);
+    if (!row) return;
+    row.style.display = noTeate ? 'none' : '';
+    if (noTeate) { const el = document.getElementById('addField_' + k); if (el) el.value = ''; }
+  });
   _updateDocCardVisibility();
   // 車/バイクへ切り替わり、住所+派遣先も埋まっていれば自動で距離計算を発火
   if (isCar) {
@@ -38908,6 +38963,20 @@ function resolveCommuteWorkAddress(bukaVal, soshikiVal) {
   return '';
 }
 
+// 通勤手当の自動計算結果(片道km・就業場所)を入力欄へ反映し、保存用に控える
+//   prefix: 'addField_' / 'editField_' / 'idou_'  (欄が無い画面では控えだけ残す)
+//   → 新規登録: addField_tsukinKyori/WorkAddr がそのまま保存される
+//   → 社員詳細: saveEditField(通勤手当) で控えの km/就業場所 も一緒に保存
+//   → 移動入社: submitIdou で同様
+function _setCommuteCalcFields(prefix, r, workAddr) {
+  var km1 = (r && typeof r.km === 'number' && !isNaN(r.km)) ? Math.round(r.km * 10) / 10 : null;
+  var kmEl = document.getElementById(prefix + 'tsukinKyori');
+  if (kmEl && km1 != null) kmEl.value = km1;
+  var waEl = document.getElementById(prefix + 'tsukinWorkAddr');
+  if (waEl) waEl.value = workAddr || '';
+  window._lastCommuteCalc = { teate: r ? r.teate : null, km: km1, workAddr: workAddr || '', at: Date.now() };
+}
+
 // 計算結果: { km, teate, error, homeFound, workFound }
 async function computeCommuteAllowance(homeAddress, workAddress) {
   if (!homeAddress || !homeAddress.trim()) return { error: '自宅住所が空です' };
@@ -38982,6 +39051,7 @@ async function autoCalcCommuteForAddForm() {
   if (r.error) { st('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
+  _setCommuteCalcFields('addField_', r, workAddr);
   st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">就業場所: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>'));
 }
 
@@ -39033,6 +39103,7 @@ async function autoCalcCommuteForDetailEdit() {
   if (r.error) { st('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
+  _setCommuteCalcFields('editField_', r, workAddr);
   st('ok', null, _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">就業場所: ' + escHtml(workAddr) + (soshikiVal ? '（' + escHtml(soshikiVal) + '）' : '') + '　→ 💾保存で確定</span>'));
 }
 
@@ -39075,6 +39146,7 @@ async function autoCalcCommuteForIdouForm() {
   if (r.error) { if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('err', '❌ ' + r.error); return; }
 
   teateEl.value = r.teate;
+  _setCommuteCalcFields('idou_', r, workAddr);
   if (statusEl) statusEl.innerHTML = _tsukinCalcStatusHtml('ok', '✓ ' + escHtml(r.note) + '<br><span style="font-weight:400;color:#558b2f;font-size:10.5px;">就業場所: ' + escHtml(workAddr) + '（通勤届の片道距離と同じ計測方法）</span>');
 }
 
@@ -48635,6 +48707,11 @@ async function executeIdouSubmit(p) {
       setField(newBody, 'kyuyoTaikei', isNaN(kyuyoNum) ? p.kyuyo : kyuyoNum);
     }
     if (p.tsukin) setField(newBody, 'tsukinTeate', parseFloat(p.tsukin));
+    // 自動計算値のままなら 片道km・就業場所 も新レコードへ (旧レコードの値は派遣先が変わるので引き継がない)
+    if (p.tsukin && window._lastCommuteCalc && Number(p.tsukin) === Number(window._lastCommuteCalc.teate)) {
+      if (window._lastCommuteCalc.km != null) setField(newBody, 'tsukinKyori', window._lastCommuteCalc.km);
+      setField(newBody, 'tsukinWorkAddr', window._lastCommuteCalc.workAddr || '');
+    }
     if (p.sagyou) setField(newBody, 'sagyouFuku', p.sagyou);
     if (p.yuukimuki) setField(newBody, 'yuukiMuki', p.yuukimuki);
     if (p.koyouKaisi) setField(newBody, 'koyouKaisi', p.koyouKaisi + 'T00:00:00Z');
