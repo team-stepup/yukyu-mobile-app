@@ -38656,6 +38656,15 @@ function onAddNationalityChange() {
   // 在留・国籍セクション: 日本なら非表示
   var el = document.querySelector('.add-cat-section[data-cat-id="residence"]');
   if (el) el.style.display = isJapan ? 'none' : '';
+  // 外国籍のみのフィールド(日本語レベル 等 showOnlyIfForeign)の行も 日本なら非表示(値もクリア)
+  PROFILE_CATEGORIES.forEach(function(c) {
+    (c.fields || []).forEach(function(f) {
+      if (!f.showOnlyIfForeign) return;
+      var row = document.getElementById('addRow_' + f.key);
+      if (row) row.style.display = isJapan ? 'none' : '';
+      if (isJapan) { var inp = document.getElementById('addField_' + f.key); if (inp) inp.value = ''; }
+    });
+  });
   _updateDocCardVisibility();
 }
 
