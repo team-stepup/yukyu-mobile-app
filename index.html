@@ -34785,11 +34785,12 @@ function renderDocPreview(docId) {
     preview.innerHTML = '';
     countEl.textContent = '未';
     countEl.className = 'doc-count doc-status none';
-    _updateDocSummary();
+    if (typeof _updateDocCardVisibility === 'function') _updateDocCardVisibility(); else _updateDocSummary();
     return;
   }
 
   card.classList.add('has-image');
+  card.style.display = '';   // 条件で非表示中でも、画像が入ったら見えるようにする
   countEl.textContent = '✅ ' + imgs.length + '枚 済';
   countEl.className = 'doc-count doc-status done';
   _updateDocSummary();
@@ -34831,21 +34832,24 @@ function removeDocCapture(docId) {
 function _updateDocSummary() {
   var bar = document.getElementById('docSummaryBar');
   if (!bar) return;
-  var done = [], missing = [];
+  var done = [], missing = [], skipped = [];
   DOC_TYPES.forEach(function(d) {
-    if ((capturedDocs[d.id] || []).length > 0) done.push(d); else missing.push(d);
+    if ((capturedDocs[d.id] || []).length > 0) done.push(d);
+    else if (typeof _docCardApplicable === 'function' && !_docCardApplicable(d.id)) skipped.push(d);   // 国籍/通勤方法で対象外
+    else missing.push(d);
   });
-  var total = DOC_TYPES.length;
+  var total = done.length + missing.length;
+  var skipNote = skipped.length ? '<span style="flex-basis:100%;font-weight:500;font-size:10.5px;color:#90a4ae;">対象外(国籍/通勤方法により非表示): ' + skipped.map(function(d) { return d.icon + d.label; }).join('・') + '</span>' : '';
   if (!done.length) {
     bar.className = 'doc-summary empty';
-    bar.innerHTML = '📂 書類 取込済 0/' + total + '　<span style="font-weight:500;">まだ書類がありません</span>';
+    bar.innerHTML = '📂 書類 取込済 0/' + total + '　<span style="font-weight:500;">まだ書類がありません</span>' + skipNote;
   } else if (!missing.length) {
     bar.className = 'doc-summary complete';
-    bar.innerHTML = '✅ 書類 取込済 ' + total + '/' + total + '　<span style="font-weight:500;">すべて揃いました</span>';
+    bar.innerHTML = '✅ 書類 取込済 ' + total + '/' + total + '　<span style="font-weight:500;">すべて揃いました</span>' + skipNote;
   } else {
     bar.className = 'doc-summary partial';
     bar.innerHTML = '📂 書類 取込済 ' + done.length + '/' + total +
-      '　<span style="font-weight:500;">未: ' + missing.map(function(d) { return d.icon + d.label; }).join('・') + '</span>';
+      '　<span style="font-weight:500;">未: ' + missing.map(function(d) { return d.icon + d.label; }).join('・') + '</span>' + skipNote;
   }
 }
 
@@ -38423,6 +38427,26 @@ async function renderAddEmployeeForm() {
   html += '<tr><th>社会保険 加入日 <span style="font-size:10px;color:var(--text-light);font-weight:400;">(任意)</span></th>' +
           '<td><input type="date" class="edit-input" id="addField_kenpoShutoku" data-format="date">' +
           '<div style="font-size:10.5px;color:#888;margin-top:2px;">健保・厚年の資格取得日。後から入力でもOK（総務の社保画面でも確認・編集できます）。</div></td></tr>';
+  // 国籍・通勤方法 (在留・通勤セクションから基本必須へ移動)
+  //   → 下の「書類撮影」カード(在留カード / 免許証・車検証・自賠責・任意保険)と
+  //     在留・車両・保険の入力セクションの表示/非表示を自動で切り替える
+  html += '<tr><th>国籍</th><td>' +
+          buildDropdownNewHtml('nationality', '', 'addField_nationality')
+            .replace('onchange="toggleEditDropdownNew(\'addField_nationality\')"', 'onchange="toggleEditDropdownNew(\'addField_nationality\');onAddNationalityChange()"')
+            .replace('id="addField_nationality_custom"', 'id="addField_nationality_custom" oninput="onAddNationalityChange()"') +
+          '<div style="font-size:10.5px;color:#888;margin-top:2px;">「日本」以外を選ぶと 🌏在留カード の撮影欄と在留情報の入力欄が表示されます。</div></td></tr>';
+  (function() {
+    var tsField = null;
+    PROFILE_CATEGORIES.forEach(function(c) { (c.fields || []).forEach(function(f) { if (f.key === 'tsukinHouhou') tsField = f; }); });
+    var tsHtml = '';
+    try { tsHtml = tsField ? (getEditInputHtml(tsField, '', getFieldType('tsukinHouhou', keyMap), getFieldChoices('tsukinHouhou', keyMap)) || '') : ''; } catch (_) { tsHtml = ''; }
+    tsHtml = tsHtml.replace(/editField_/g, 'addField_')
+      .replace('onchange="_applySelectStatusStyle(this)"', '')
+      .replace('id="addField_tsukinHouhou"', 'id="addField_tsukinHouhou" onchange="onAddTsukinChange()"');
+    if (!tsHtml) tsHtml = '<input type="text" class="edit-input" id="addField_tsukinHouhou" data-field="tsukinHouhou" onchange="onAddTsukinChange()" placeholder="例: 車kuruma">';
+    html += '<tr><th>通勤方法</th><td>' + tsHtml +
+            '<div style="font-size:10.5px;color:#888;margin-top:2px;">車/バイクを選ぶと 🪪免許証・🚗車検証・🛡自賠責・📋任意保険 の撮影欄と、車両・免許・保険の入力欄が表示されます。</div></td></tr>';
+  })();
   html += '</table></div>';
 
   // 派遣先×組織×職種 連動マップを社員データから構築 (移動入社フォームと同じロジック)
@@ -38534,6 +38558,8 @@ async function renderAddEmployeeForm() {
       if (field.key === 'hakensaki') return;
       if (field.key === 'soshikiTani') return;     // → 基本必須に移動
       if (field.key === 'syokusyu') return;        // → 基本必須に移動
+      if (field.key === 'nationality') return;     // → 基本必須に移動 (書類カード連動)
+      if (field.key === 'tsukinHouhou') return;    // → 基本必須に移動 (書類カード連動)
       // 新規登録では退社日/退職理由/次回採用は不要
       if (field.key === 'hakenTaisha' || field.key === 'yukyuTaisha') return;
       if (field.showOnlyResigned) return;          // 退職理由・次回採用 等
@@ -38603,16 +38629,65 @@ async function renderAddEmployeeForm() {
   html += '</div>';
 
   container.innerHTML = html;
+  // 国籍・通勤方法の初期値(未選択)に応じて 書類カード/セクション の表示を整える
+  try { onAddNationalityChange(); onAddTsukinChange(); } catch (e) { console.warn('add form visibility init:', e); }
+}
+
+// 通勤方法の値が 車/バイク か (「自転車、徒歩」「電車、送迎」の「車」は除外)
+function _isCarCommuteValue(val) {
+  var v = String(val || '').replace(/[\s　]/g, '');
+  if (!v) return false;
+  if (/^(自転車|電車|徒歩|送迎)/.test(v)) return false;
+  return /車|バイク|原付|マイカー/.test(v);
+}
+
+// 国籍の入力値 (ドロップダウン or ＋新規入力)
+function _addNationalityValue() {
+  var sel = document.getElementById('addField_nationality');
+  if (!sel) return '';
+  if (sel.value === '__new__') { var c = document.getElementById('addField_nationality_custom'); return c ? String(c.value || '').trim() : ''; }
+  return String(sel.value || '').trim();
+}
+
+function onAddNationalityChange() {
+  var nat = _addNationalityValue();
+  var isJapan = !!nat && /日本|JAPAN/i.test(nat);
+  // 在留・国籍セクション: 日本なら非表示
+  var el = document.querySelector('.add-cat-section[data-cat-id="residence"]');
+  if (el) el.style.display = isJapan ? 'none' : '';
+  _updateDocCardVisibility();
+}
+
+// 書類撮影カードの表示/非表示
+//   在留カード: 国籍が「日本」以外(未選択含む)のとき表示
+//   免許証・車検証・自賠責・任意保険: 通勤方法が 車/バイク のとき表示
+//   ※画像が既に入っているカードは条件に関わらず表示(取り込んだものが見えなくならないように)
+var DOC_NEEDS_FOREIGN = { zairyu: 1 };
+var DOC_NEEDS_CAR = { license: 1, shaken: 1, jibaiseki: 1, nini: 1 };
+function _docCardApplicable(docId) {
+  if ((capturedDocs[docId] || []).length > 0) return true;
+  if (DOC_NEEDS_FOREIGN[docId]) { var nat = _addNationalityValue(); return !(nat && /日本|JAPAN/i.test(nat)); }
+  if (DOC_NEEDS_CAR[docId]) return _isCarCommuteValue((document.getElementById('addField_tsukinHouhou') || {}).value);
+  return true;
+}
+function _updateDocCardVisibility() {
+  if (!document.getElementById('docSummaryBar')) return;   // 新規登録画面以外では何もしない
+  DOC_TYPES.forEach(function(d) {
+    var card = document.getElementById('docCard_' + d.id);
+    if (card) card.style.display = _docCardApplicable(d.id) ? '' : 'none';
+  });
+  _updateDocSummary();
 }
 
 function onAddTsukinChange() {
   const val = (document.getElementById('addField_tsukinHouhou') || {}).value || '';
-  const isCar = val.indexOf('車') >= 0 || val.indexOf('バイク') >= 0 || val.indexOf('自動車') >= 0 || val.indexOf('原付') >= 0;
+  const isCar = _isCarCommuteValue(val);
   const carSections = ['vehicle', 'license', 'carInsurance'];
   carSections.forEach(id => {
     const el = document.querySelector('.add-cat-section[data-cat-id="' + id + '"]');
     if (el) el.style.display = isCar ? '' : 'none';
   });
+  _updateDocCardVisibility();
   // 車/バイクへ切り替わり、住所+派遣先も埋まっていれば自動で距離計算を発火
   if (isCar) {
     var addrEl = document.getElementById('addField_address');
