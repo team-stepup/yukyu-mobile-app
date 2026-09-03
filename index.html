@@ -11274,7 +11274,7 @@ async function _esignReissue() {
 // 本人向け署名ページに埋め込むスクリプト (自己完結: 署名→PDF化→/api/esign/submit)
 //   アプリ内の escHtml / injectSignatureIntoHaisenDoc / generateHaisenDocAsPdf をソースごと埋め込む
 function _esignRemoteScriptJs() {
-  var fnSrc = [escHtml, injectSignatureIntoHaisenDoc, generateHaisenDocAsPdf].map(function(f) { return f.toString(); }).join('\n');
+  var fnSrc = [escHtml, injectSignatureIntoHaisenDoc, _pdfCaptureWindowWidth, generateHaisenDocAsPdf].map(function(f) { return f.toString(); }).join('\n');
   var js = [
     '  function _b64(blob) { return new Promise(function(res, rej) { var r = new FileReader(); r.onload = function() { res(String(r.result).split(",")[1] || ""); }; r.onerror = rej; r.readAsDataURL(blob); }); }',
     '  async function doSave() {',
@@ -11487,6 +11487,14 @@ function _restoreZoom(save) {
   wrapper.style.width = save.wrapperWidth;
 }
 
+// PDF 化時の描画幅: スマホ/iPad で署名・保存しても PC と同じレイアウト(書類ページ固定幅 820px の
+// @media min-width:701px 側)で描画されるよう、html2canvas に渡す仮想ウィンドウ幅は最低 1024px にする。
+// (端末幅のままだと ≤700px のスマホ用レイアウト(720px幅・余白8mm)で描画され、PDF の見た目が端末で変わる)
+function _pdfCaptureWindowWidth() {
+  var w = (document.documentElement && document.documentElement.clientWidth) || 0;
+  return Math.max(1024, w);
+}
+
 // 派遣書類の各 .haisen-doc-page を html2canvas で画像化 → pdf-lib で結合
 async function generateHaisenDocAsPdf(containerEl) {
   if (!window.PDFLib || !window.html2canvas) throw new Error('PDF生成ライブラリが未ロード');
@@ -11567,7 +11575,7 @@ async function generateHaisenDocAsPdf(containerEl) {
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
-        windowWidth: document.documentElement.clientWidth
+        windowWidth: _pdfCaptureWindowWidth()
       });
       var pngBytes = await _canvasToPng(canvas);
       if (!pngBytes) {
@@ -11579,7 +11587,7 @@ async function generateHaisenDocAsPdf(containerEl) {
           useCORS: true,
           backgroundColor: '#ffffff',
           logging: false,
-          windowWidth: document.documentElement.clientWidth
+          windowWidth: _pdfCaptureWindowWidth()
         });
         pngBytes = await _canvasToPng(canvas2);
         canvas2 = null;
@@ -11591,7 +11599,7 @@ async function generateHaisenDocAsPdf(containerEl) {
             useCORS: true,
             backgroundColor: '#ffffff',
             logging: false,
-            windowWidth: document.documentElement.clientWidth
+            windowWidth: _pdfCaptureWindowWidth()
           });
           pngBytes = await _canvasToPng(canvas3);
           canvas3 = null;
