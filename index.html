@@ -11279,7 +11279,8 @@ async function _esignCreateLink(emp) {
     var res = await _esignApi('/esign/request', 'POST', {
       syainNo: sn, name: emp.Title || '', docLabel: docLabel, folderPath: folderPath, fileName: fileName,
       aggFolderPath: aggFolder, aggFileName: aggName, html: html,
-      empEmail: _esignEmpEmail(emp), empPhone: _esignEmpPhone(emp)
+      empEmail: _esignEmpEmail(emp), empPhone: _esignEmpPhone(emp),
+      requesterName: (typeof getLoggedInName === 'function' ? getLoggedInName() : '')
     });
     _empOcrProg(null);
     showToast('✓ 署名リンクを発行しました（' + _esignFmtJst(res.request.expiresAt) + ' まで有効）', 'success');
@@ -11382,7 +11383,7 @@ async function _esignReissue() {
 // 本人向け署名ページに埋め込むスクリプト (自己完結: 署名→PDF化→/api/esign/submit)
 //   アプリ内の escHtml / injectSignatureIntoHaisenDoc / generateHaisenDocAsPdf をソースごと埋め込む
 function _esignRemoteScriptJs() {
-  var fnSrc = [escHtml, injectSignatureIntoHaisenDoc, _pdfCaptureWindowWidth, generateHaisenDocAsPdf].map(function(f) { return f.toString(); }).join('\n');
+  var fnSrc = [escHtml, injectSignatureIntoHaisenDoc, buildEsignAuditPageHtml, esignDeviceLabel, _pdfCaptureWindowWidth, generateHaisenDocAsPdf].map(function(f) { return f.toString(); }).join('\n');
   var js = [
     '  function _b64(blob) { return new Promise(function(res, rej) { var r = new FileReader(); r.onload = function() { res(String(r.result).split(",")[1] || ""); }; r.onerror = rej; r.readAsDataURL(blob); }); }',
     '  async function doSave() {',
@@ -11397,8 +11398,18 @@ function _esignRemoteScriptJs() {
     '      prog.textContent = "① 署名を書類に反映中… / Aplicando assinatura";',
     '      var dataUrl = pad.toDataURL("image/png");',
     '      var d = new Date(); var todayStr = d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();',
-    '      injectSignatureIntoHaisenDoc(dataUrl, todayStr);',
+    '      var meta = window.ESIGN_META || {};',
+    '      var tkn = new URLSearchParams(location.search).get("t") || meta.token || "";',
+    '      var nowIso = new Date().toISOString();',
+    '      injectSignatureIntoHaisenDoc(dataUrl, todayStr, { id: String(tkn).substring(0, 10).toUpperCase() });',
     '      var docArea = document.querySelector(".doc-area");',
+    '      // 最終監査レポートページを末尾に追加 (作成→送付→閲覧→署名→完了・トランザクションID)',
+    '      try {',
+    '        var wrapEl = docArea.querySelector(".haisen-doc-wrapper") || docArea;',
+    '        var tmpA = document.createElement("div");',
+    '        tmpA.innerHTML = buildEsignAuditPageHtml(Object.assign({}, meta, { signedAt: nowIso, signerName: meta.name || "", method: "本人の端末で署名 / " + esignDeviceLabel(), transactionId: meta.token || tkn, ua: navigator.userAgent }));',
+    '        wrapEl.appendChild(tmpA.firstChild);',
+    '      } catch (eA) { console.warn("audit page:", eA); }',
     '      docArea.querySelectorAll(".haisen-doc-page").forEach(function(p) { p.style.removeProperty("transform"); p.style.marginBottom = ""; p.style.marginRight = ""; p.style.marginLeft = ""; });',
     '      docArea.querySelectorAll(".hd-scalebox").forEach(function(b) { b.style.height = ""; });',
     '      prog.textContent = "② PDFを作成中… (30秒ほどかかります) / Gerando PDF";',
@@ -11419,7 +11430,7 @@ function _esignRemoteScriptJs() {
     '    } catch (e) {',
     '      prog.className = "sign-progress error"; prog.textContent = "❌ " + (e.message || e);',
     '      btn.disabled = false;',
-    '      document.querySelectorAll(".esign-injected").forEach(function(n) { n.remove(); });',
+    '      document.querySelectorAll(".esign-injected, .esign-audit-page").forEach(function(n) { n.remove(); });',
     '      setTimeout(function() { try { fitDocPages(); } catch (_) {} }, 100);',
     '    }',
     '  }'
@@ -11438,11 +11449,30 @@ if (!window._esignMessageInstalled) {
       await loadEsignLibsIfNeeded();
       var sigDataUrl = e.data.dataUrl;
       var todayStr = (new Date()).getFullYear() + '/' + ((new Date()).getMonth()+1) + '/' + (new Date()).getDate();
-      var injectedNodes = injectSignatureIntoHaisenDoc(sigDataUrl, todayStr);
+      // Adobe Sign 風: 署名スタンプ(日時・ID) + 最終監査レポートページ (対面署名)
+      var nowIso = new Date().toISOString();
+      var txId = (function() { var s = ''; var cs = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; for (var i = 0; i < 20; i++) s += cs.charAt(Math.floor(Math.random() * cs.length)); return s; })();
+      var injectedNodes = injectSignatureIntoHaisenDoc(sigDataUrl, todayStr, { id: txId.substring(0, 10) });
+      var auditNode = null;
+      try {
+        var wrapEl = document.querySelector('#haisenDocBody .haisen-doc-wrapper');
+        if (wrapEl && typeof buildEsignAuditPageHtml === 'function') {
+          var tmpA = document.createElement('div');
+          tmpA.innerHTML = buildEsignAuditPageHtml({
+            docLabel: (window._currentHaisenDocMode === 'renewal') ? '更新用就業条件通知書' : '新規雇用契約書兼就業条件通知書',
+            name: _esignCurrentEmp.Title || '', syainNo: String(_esignCurrentEmp[F.syainNo] || '').replace(/\.0+$/, ''),
+            requesterName: (typeof getLoggedInName === 'function' ? getLoggedInName() : ''), requester: (typeof getLoggedInEmail === 'function' ? getLoggedInEmail() : ''),
+            createdAt: nowIso, signedAt: nowIso, signerName: _esignCurrentEmp.Title || '',
+            method: '担当者の端末で対面署名 / ' + esignDeviceLabel(), transactionId: txId, ua: navigator.userAgent
+          });
+          auditNode = tmpA.firstChild; wrapEl.appendChild(auditNode);
+        }
+      } catch (eA) { console.warn('audit page warn:', eA); }
       var prevTransform = _captureAndResetZoom();
       var pdfBlob = await generateHaisenDocAsPdf();
       _restoreZoom(prevTransform);
       injectedNodes.forEach(function(n){ if (n && n.parentNode) n.parentNode.removeChild(n); });
+      if (auditNode && auditNode.parentNode) auditNode.parentNode.removeChild(auditNode);
       var folderPath = await getEmpFolderPath(_esignCurrentEmp);
       if (!folderPath) throw new Error('社員フォルダのパス特定失敗');
       try { await ensureSpFolder(folderPath); } catch (eFolder) { console.warn('ensureSpFolder warn:', eFolder); }
@@ -11553,23 +11583,99 @@ async function confirmEsignAndSavePdf() {
 }
 
 // 派遣書類内の「氏名」サイン欄に署名画像を挿入し、挿入した要素配列を返す
-function injectSignatureIntoHaisenDoc(dataUrl, dateStr) {
+function injectSignatureIntoHaisenDoc(dataUrl, dateStr, meta) {
+  meta = meta || {};
   var nodes = [];
-  // .hd-footer-sign-line (氏名サイン行) を全て探す
-  var lines = document.querySelectorAll('.hd-footer-sign-line, .hd-footer');
+  function h(s) { return escHtml(String(s == null ? '' : s)); }
+  // 日時 (meta.time 優先。無ければ dateStr + 現在時刻)
+  var timeStr = meta.time;
+  if (!timeStr) {
+    var d = new Date(); function p(n) { return String(n).padStart(2, '0'); }
+    timeStr = (dateStr || (d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate())) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ' JST';
+  }
+  // 氏名サイン行 (.hd-footer-sign-line) にのみ挿入。無い書類は .hd-footer に挿入 (旧: 両方に入り2重になっていた)
+  var lines = Array.from(document.querySelectorAll('.hd-footer-sign-line'));
+  if (!lines.length) lines = Array.from(document.querySelectorAll('.hd-footer'));
   lines.forEach(function(line) {
-    // 既に挿入済みならスキップ
-    if (line.querySelector('.esign-injected')) return;
-    var wrap = document.createElement('div');
+    if (line.querySelector('.esign-injected')) return;   // 既に挿入済み
+    var wrap = document.createElement('span');
     wrap.className = 'esign-injected';
-    wrap.style.cssText = 'display:inline-block;vertical-align:middle;margin-left:8px;';
-    wrap.innerHTML = '<img src="' + dataUrl + '" alt="signature" style="height:34px;vertical-align:middle;">' +
-                     '<span style="font-size:9pt;color:#1565c0;margin-left:6px;">(' + escHtml(dateStr) + ' 電子サイン)</span>';
+    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:8px;vertical-align:middle;margin-left:8px;white-space:nowrap;';
+    // Adobe Sign 風スタンプ: 署名画像 + 青枠に「電子署名済 / 日時 / ID」
+    wrap.innerHTML = '<img src="' + dataUrl + '" alt="signature" style="height:36px;vertical-align:middle;">' +
+      '<span class="esign-stamp" style="display:inline-block;border:1.2pt solid #1565c0;border-radius:4px;padding:2px 7px;font-size:7.3pt;line-height:1.35;color:#1565c0;text-align:left;font-family:\'Yu Gothic UI\',\'Yu Gothic\',Meiryo,sans-serif;">' +
+        '<span style="display:block;font-weight:700;">✔ 電子署名済 / Assinado eletronicamente</span>' +
+        '<span style="display:block;">' + h(timeStr) + '</span>' +
+        (meta.id ? '<span style="display:block;color:#546e7a;letter-spacing:0.3px;">ID: ' + h(meta.id) + '</span>' : '') +
+      '</span>';
     line.appendChild(wrap);
     nodes.push(wrap);
   });
-  // .hd-footer-date があれば日付も埋める (空なら入れる)
   return nodes;
+}
+
+// 最終監査レポート ページ (Adobe Sign の「最終監査レポート」風・PDF末尾に追加)
+//   m: { docLabel, name, syainNo, requesterName, requester, createdAt, sentTo:[{to,at}], viewedAt, viewerIp,
+//        signedAt, signerName, method, transactionId, ua }
+function buildEsignAuditPageHtml(m) {
+  m = m || {};
+  function h(s) { return escHtml(String(s == null ? '' : s)); }
+  function fmt(iso) {
+    if (!iso) return '';
+    var d = new Date(iso); if (isNaN(d)) return String(iso);
+    function p(n) { return String(n).padStart(2, '0'); }
+    return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + ' JST';
+  }
+  var who = m.requesterName ? (m.requesterName + (m.requester ? ' (' + m.requester + ')' : '')) : (m.requester || '担当者');
+  var ev = [];
+  ev.push({ icon: '📄', t: m.createdAt, jp: h(who) + ' が文書を作成しました', pt: 'Documento criado' });
+  (m.sentTo || []).forEach(function(s) { ev.push({ icon: '✉️', t: s.at, jp: '署名依頼のリンクを ' + h(s.to) + ' へ送信しました', pt: 'Link para assinatura enviado' }); });
+  if (m.viewedAt) ev.push({ icon: '👁', t: m.viewedAt, jp: '署名者が文書を閲覧しました' + (m.viewerIp ? '（IP: ' + h(m.viewerIp) + '）' : ''), pt: 'Documento visualizado' });
+  if (m.signedAt) ev.push({ icon: '✍️', t: m.signedAt, jp: '署名者 ' + h(m.signerName || m.name || '') + ' が電子サインしました' + (m.method ? '（' + h(m.method) + '）' : ''), pt: 'Assinado eletronicamente' });
+  if (m.signedAt) ev.push({ icon: '✅', t: m.signedAt, jp: 'すべてのプロセスが完了しました', pt: 'Todo o processo foi concluído' });
+  var rows = ev.map(function(e) {
+    return '<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 4px;border-bottom:0.6pt solid #e3e3e3;">' +
+      '<div style="font-size:15pt;line-height:1;width:28px;text-align:center;flex:0 0 auto;">' + e.icon + '</div>' +
+      '<div style="flex:1;min-width:0;"><div style="font-size:10.5pt;color:#111;line-height:1.5;">' + e.jp + '</div>' +
+      '<div style="font-size:8.5pt;color:#888;">' + e.pt + '</div>' +
+      '<div style="font-size:9pt;color:#444;margin-top:2px;">' + h(fmt(e.t)) + '</div></div></div>';
+  }).join('');
+  var tid = m.transactionId || m.token || '';
+  var tr = function(k, v) { return '<tr><td style="padding:4px 10px 4px 0;color:#666;font-size:9pt;white-space:nowrap;vertical-align:top;">' + k + '</td><td style="padding:4px 0;font-size:9.5pt;color:#111;word-break:break-all;">' + v + '</td></tr>'; };
+  return '<div class="haisen-doc-page esign-audit-page" style="font-family:\'Yu Gothic UI\',\'Yu Gothic\',Meiryo,\'Hiragino Kaku Gothic ProN\',sans-serif;color:#111;">' +
+    '<div style="border:2.5pt solid #1565c0;border-radius:8px;padding:16px 20px;margin-bottom:16px;background:#fff;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">' +
+        '<div><div style="font-size:17pt;font-weight:700;letter-spacing:0.5px;">' + h(m.docLabel || '労働契約書') + '</div>' +
+        '<div style="font-size:11.5pt;color:#333;margin-top:3px;">' + h(m.syainNo ? (m.syainNo + '　') : '') + h(m.name || '') + '</div></div>' +
+        '<div style="font-size:9pt;color:#555;text-align:right;white-space:nowrap;">' + h(fmt(m.signedAt || m.viewedAt || m.createdAt)).substring(0, 10) + '</div>' +
+      '</div>' +
+      '<div style="font-size:10.5pt;font-weight:700;color:#1565c0;margin:12px 0 6px;">最終監査レポート / Relatório final de auditoria</div>' +
+      '<table style="border-collapse:collapse;width:100%;">' +
+        tr('作成日 / Criado em', h(fmt(m.createdAt))) +
+        tr('ユーザー名 / Usuário', h(who)) +
+        tr('署名者 / Signatário', h(m.signerName || m.name || '')) +
+        tr('ステータス / Status', '<span style="color:#2e7d32;font-weight:700;">署名済み / Assinado</span>') +
+        tr('トランザクションID', '<span style="font-family:Consolas,Menlo,monospace;font-size:9pt;">' + h(tid) + '</span>') +
+      '</table>' +
+    '</div>' +
+    '<div style="font-size:12.5pt;font-weight:700;margin:4px 0 4px;">履歴 / Histórico</div>' + rows +
+    (m.ua ? '<div style="font-size:8pt;color:#999;margin-top:10px;word-break:break-all;">署名端末 / Dispositivo: ' + h(m.ua) + '</div>' : '') +
+    '<div style="margin-top:26px;padding-top:8px;border-top:0.8pt solid #1565c0;display:flex;justify-content:space-between;align-items:center;font-size:8.5pt;color:#555;">' +
+      '<div><b style="color:#1565c0;">Step Up e-Sign</b>　有限会社ステップ・アップ 電子署名システム</div>' +
+      '<div>' + h(fmt(m.signedAt || new Date().toISOString())) + '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+// 署名端末の表示名 (監査レポート用)
+function esignDeviceLabel(ua) {
+  ua = ua || navigator.userAgent || '';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document)) return 'iPad';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Windows/.test(ua)) return 'Windows PC';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  return '端末';
 }
 
 // ズーム解除 / 復元 (キャプチャ時に印刷レイアウトに戻す)
