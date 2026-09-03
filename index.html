@@ -5397,7 +5397,7 @@ select.sankyu-edit-input {
   <button class="back-btn" id="backBtn" onclick="goBack()" style="display:none;" title="戻る">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
   </button>
-  <button class="home-btn" id="homeBtn" onclick="screenHistory.length=0;resetSearch();switchScreen('searchScreen')" style="display:none;" title="ホーム">
+  <button class="home-btn" id="homeBtn" onclick="goHomeGuarded()" style="display:none;" title="ホーム">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
   </button>
   <img src="logo.png" alt="STEP UP" class="header-logo" id="headerLogo" style="cursor:pointer;" onclick="goToHomeFromLogo()" title="ホームへ戻る">
@@ -8036,7 +8036,43 @@ function goToHomeFromLogo() {
   } catch (e) { console.warn('goToHomeFromLogo error:', e); }
 }
 
+// 戻る/ホームで「入力中の新規社員登録」「進行中の入社ウィザード」を誤って離れないための確認
+//   true = 離れてよい / false = とどまる
+function _confirmLeaveGuard() {
+  try {
+    // 新規社員登録: 未登録で何か入力・書類取込済みなら確認
+    if (currentScreenId === 'addEmployeeScreen' && !window._addFormSaved && _addFormDirty()) {
+      return confirm('⚠ 新規社員登録の入力内容がまだ登録されていません。\n画面を離れると入力した内容と取り込んだ書類は消えます。\n\n登録せずに離れますか？');
+    }
+    // ASTI入社ウィザード進行中
+    if (typeof _astiWizard === 'object' && _astiWizard && _astiWizard.active) {
+      var ok = confirm('⚠ ASTI入社書類ウィザードが進行中です。\n中断してこの画面を離れますか？\n（あとで 社員詳細 → 書類メニュー → 入社ウィザード から再開できます）');
+      if (ok) { _astiWizard.active = false; try { _astiWizardHideBars(); } catch (_) {} }
+      return ok;
+    }
+  } catch (e) { console.warn('leave guard:', e); }
+  return true;
+}
+function _addFormDirty() {
+  try {
+    if (Object.keys(capturedDocs || {}).length) return true;
+    var inputs = document.querySelectorAll('#addEmployeeScreen [id^="addField_"]');
+    for (var i = 0; i < inputs.length; i++) {
+      var el = inputs[i];
+      if (!el || el.type === 'hidden' || el.type === 'file') continue;
+      if (/_picker$/.test(el.id)) continue;
+      if (String(el.value || '').trim()) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+function goHomeGuarded() {
+  if (!_confirmLeaveGuard()) return;
+  screenHistory.length = 0; resetSearch(); switchScreen('searchScreen');
+}
+
 function goBack() {
+  if (!_confirmLeaveGuard()) return;
   if (screenHistory.length === 0) { resetSearch(); switchScreen('searchScreen'); return; }
   const prev = screenHistory.pop();
   switchScreen(prev, true);
@@ -38639,6 +38675,7 @@ async function renderAddEmployeeForm() {
   container.innerHTML = html;
   // 国籍・通勤方法の初期値(未選択)に応じて 書類カード/セクション の表示を整える
   window._addNyushaAuto = '';   // 入社日→起算日/契約開始日 自動セットの追跡をリセット
+  window._addFormSaved = false; // 未登録(戻る/ホームで離れる時に確認する)
   try { onAddNationalityChange(); onAddTsukinChange(); } catch (e) { console.warn('add form visibility init:', e); }
 }
 
@@ -39339,6 +39376,7 @@ async function saveNewEmployee() {
     }
 
     showToast(nameVal + ' を登録しました', 'success');
+    window._addFormSaved = true;   // 登録済み → 離脱確認は不要
     Object.keys(capturedDocs).forEach(k => delete capturedDocs[k]);
     resetSearch();
     // 続けて入社書類を作成するか
