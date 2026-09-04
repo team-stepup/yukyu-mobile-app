@@ -39097,7 +39097,12 @@ async function renderAddEmployeeForm() {
   html += '<div class="card" style="padding:12px;margin-bottom:8px;">';
   html += '<div class="section-title">👤 基本必須項目</div>';
   html += '<table class="acc-table">';
-  html += '<tr><th>社員氏名 <span style="color:var(--danger);">*</span></th><td><input type="text" class="edit-input" id="addField_Title" placeholder="例: ヤマダ タロウ"></td></tr>';
+  html += '<tr><th>社員氏名 <span style="color:var(--danger);">*</span></th><td><input type="text" class="edit-input" id="addField_Title" placeholder="例: ヤマダ タロウ" oninput="onAddNameChange()" onchange="onAddNameChange()"></td></tr>';
+  // フリガナ: 氏名に漢字が含まれるときだけ表示 (保存先=既存列「社保名前フリガナ」)。カタカナ表記の氏名は自動で同じ値を入れる。
+  //   hmc スタッフ登録の「カナ」(全角カタカナ必須)・社保届出・振込先氏名フリガナ(半角カナ自動生成) に使う
+  html += '<tr id="addRow_furigana" style="display:none;"><th>フリガナ <span style="color:var(--danger);">*</span><br><span style="font-size:10px;color:var(--text-light);font-weight:400;">(全角カタカナ)</span></th>' +
+          '<td><input type="text" class="edit-input" id="addField_shahoNamaeFurigana" placeholder="例: ヤマダ タロウ" oninput="onAddFuriganaInput(this)" onchange="onAddFuriganaChange()">' +
+          '<div style="font-size:10.5px;color:#888;margin-top:2px;">漢字の氏名はフリガナが必要です（hmcスタッフ登録・社会保険の届出・振込データに使います）。ひらがな・半角で入れても自動でカタカナに直します。</div></td></tr>';
   // 派遣先（部課）ドロップダウン
   //   ① 既存社員由来 (#hakenSelect) + ② 派遣先情報リスト由来 を統合。
   //   ② により「契約は始まったが社員がまだ居ない新規派遣先」も選択肢に出る。
@@ -39362,7 +39367,7 @@ async function renderAddEmployeeForm() {
   // 国籍・通勤方法の初期値(未選択)に応じて 書類カード/セクション の表示を整える
   window._addNyushaAuto = '';   // 入社日→起算日/契約開始日 自動セットの追跡をリセット
   window._addFormSaved = false; // 未登録(戻る/ホームで離れる時に確認する)
-  try { onAddNationalityChange(); onAddTsukinChange(); } catch (e) { console.warn('add form visibility init:', e); }
+  try { onAddNationalityChange(); onAddTsukinChange(); onAddNameChange(); } catch (e) { console.warn('add form visibility init:', e); }
 }
 
 // 通勤方法の値が 車/バイク か (「自転車、徒歩」「電車、送迎」の「車」は除外)
@@ -39379,6 +39384,47 @@ function _addNationalityValue() {
   if (!sel) return '';
   if (sel.value === '__new__') { var c = document.getElementById('addField_nationality_custom'); return c ? String(c.value || '').trim() : ''; }
   return String(sel.value || '').trim();
+}
+
+// 氏名に漢字が含まれるか (CJK統合漢字・拡張A・互換漢字・々)
+function _nameHasKanji(s) { return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3005]/.test(String(s || '')); }
+// ひらがな/半角カナ → 全角カタカナ (それ以外はそのまま)。空白は全角に統一
+function _toZenkakuKatakana(s) {
+  var t = String(s || '').normalize('NFKC');
+  t = t.replace(/[\u3041-\u3096]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) + 0x60); });
+  return t.replace(/ +/g, '　').replace(/^　+|　+$/g, '');
+}
+function _isKatakanaName(s) { return !!s && /^[\u30a0-\u30ff　 ー・]+$/.test(s); }
+
+// 氏名の入力に応じてフリガナ欄を出す/隠す。カタカナ表記の氏名なら自動コピー
+function onAddNameChange() {
+  var nameEl = document.getElementById('addField_Title');
+  var row = document.getElementById('addRow_furigana');
+  var fEl = document.getElementById('addField_shahoNamaeFurigana');
+  if (!nameEl || !row || !fEl) return;
+  var name = String(nameEl.value || '').trim();
+  if (_nameHasKanji(name)) {
+    row.style.display = '';
+    if (fEl.dataset.auto === '1') { fEl.value = ''; fEl.dataset.auto = ''; }   // 以前の自動コピー値は消す
+  } else {
+    var kana = _toZenkakuKatakana(name);
+    if (_isKatakanaName(kana)) {   // カタカナ表記(外国籍など) → 自動で同じ値
+      if (!fEl.value.trim() || fEl.dataset.auto === '1') { fEl.value = kana; fEl.dataset.auto = '1'; onAddFuriganaChange(); }
+      row.style.display = 'none';
+    } else {
+      row.style.display = name ? '' : 'none';   // ローマ字等は手入力
+    }
+  }
+}
+function onAddFuriganaInput(el) { el.dataset.auto = ''; }
+// フリガナ確定: 全角カタカナに正規化 → 振込先氏名フリガナ(半角カナ)が空なら自動生成
+function onAddFuriganaChange() {
+  var fEl = document.getElementById('addField_shahoNamaeFurigana');
+  if (!fEl) return;
+  var kana = _toZenkakuKatakana(fEl.value);
+  if (kana !== fEl.value) fEl.value = kana;
+  var mEl = document.getElementById('addField_bankMeigi');
+  if (mEl && !String(mEl.value || '').trim() && kana && typeof toHankakuKana === 'function') mEl.value = toHankakuKana(kana).trim();
 }
 
 function onAddNationalityChange() {
@@ -39996,6 +40042,17 @@ async function saveNewEmployee() {
     if (!nameVal) { showToast('社員氏名を入力してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
     if (!bukaSelVal) { showToast('派遣先(部課)を選択してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
     if (!noVal) { showToast('社員番号を入力してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return; }
+    // フリガナ (漢字氏名は必須扱い: hmcスタッフ登録のカナはカタカナ必須・社保届出にも使用)
+    var furiEl = document.getElementById('addField_shahoNamaeFurigana');
+    if (furiEl) {
+      if (typeof onAddFuriganaChange === 'function') onAddFuriganaChange();
+      var furi = String(furiEl.value || '').trim();
+      if (_nameHasKanji(nameVal) && !furi) {
+        if (!confirm('フリガナが未入力です。\nhmc のスタッフ登録・社会保険の届出・振込データで必要になります。\n\nこのまま登録しますか？（あとから社員詳細で入力できます）')) { btn.disabled = false; btn.textContent = '➕ 登録'; return; }
+      } else if (furi && !_isKatakanaName(furi)) {
+        showToast('フリガナは全角カタカナで入力してください', 'error'); btn.disabled = false; btn.textContent = '➕ 登録'; return;
+      }
+    }
 
     // Check duplicate
     const existing = await spGet(LIST_EMPLOYEES_GUID, '$filter=' + F.syainNo + ' eq ' + noVal + '&$top=1');
