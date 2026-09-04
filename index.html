@@ -6271,8 +6271,11 @@ select.sankyu-edit-input {
           <input type="date" id="maebariListDate" class="date-hidden-input" style="pointer-events:none;" onchange="onMaebariListDateChange()">
         </div>
         <button type="button" onclick="shiftMaebariListDate(7)" title="次週の金曜" style="background:#eef2ff;color:#3949ab;border:1px solid #c5cae9;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;line-height:1;">次週 →</button>
-        <button type="button" onclick="resetMaebariListDate()" title="次の金曜日に戻す" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">📅 今週</button>
+        <button type="button" id="maebariListBtnWeek" onclick="resetMaebariListDate()" title="次の金曜日に戻す" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">📅 今週</button>
+        <button type="button" id="maebariListBtnMonth" onclick="setMaebariListMonth(0)" title="社員情報の「今月分」と同じ期間 (第2金曜〜翌月第1金曜)" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">🗓 今月</button>
+        <button type="button" id="maebariListBtnPrevMonth" onclick="setMaebariListMonth(-1)" title="先月分の期間" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">🗓 先月</button>
       </div>
+      <div id="maebariListRangeNote" style="display:none;font-size:11px;color:#3949ab;margin:6px 2px 0;"></div>
     </div>
     <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:2px 8px;"><span id="maebariListCount" style="font-size:13px;color:var(--text-light);"></span></div>
     <div id="maebariListBody"></div>
@@ -32233,9 +32236,53 @@ function initMaebariListDate() {
 }
 
 function onMaebariListDateChange() {
+  _clearMaebariListRange();
   const inp = document.getElementById('maebariListDate');
   onDateInputChange('maebariListDate', 'maebariListDateDisplay');
   loadMaebariList();
+}
+
+// ============================================================
+// 前払い一覧 「🗓 今月」「🗓 先月」— 社員情報の「今月分」と同じ期間 (getMaebariPeriod: 第2金曜〜翌月第1金曜、
+//   役員が変更した期間末日も反映) で 前払日 を範囲検索する。単日操作(前週/次週/今週/カレンダー)で解除。
+// ============================================================
+window._maebariListRange = null;   // { start: Date, end: Date, label: string } | null
+
+function _clearMaebariListRange() {
+  window._maebariListRange = null;
+  var note = document.getElementById('maebariListRangeNote');
+  if (note) { note.style.display = 'none'; note.textContent = ''; }
+  ['maebariListBtnMonth', 'maebariListBtnPrevMonth'].forEach(function(id) {
+    var b = document.getElementById(id); if (b) { b.style.background = '#fff'; b.style.color = '#666'; b.style.borderColor = '#ddd'; }
+  });
+}
+
+async function setMaebariListMonth(rel) {
+  try {
+    // 役員が変更した期間末日(_sharedConfig)を期間計算に反映させるため、未取得なら読み込む
+    if (typeof _sharedConfigLoaded !== 'undefined' && !_sharedConfigLoaded && typeof loadSharedConfig === 'function') { try { await loadSharedConfig(); } catch (_) {} }
+    var offset = getTodayMaebariOffset() + rel;
+    var p = getMaebariPeriod(offset);
+    var label = (rel === 0 ? '今月分' : '先月分');
+    window._maebariListRange = { start: p.start, end: p.end, label: label };
+    // 表示: 期間末日を日付欄に、範囲は注記に
+    var inp = document.getElementById('maebariListDate');
+    if (inp) { inp.value = toLocalDateStr(p.end); onDateInputChange('maebariListDate', 'maebariListDateDisplay'); }
+    var note = document.getElementById('maebariListRangeNote');
+    if (note) {
+      note.style.display = 'block';
+      note.textContent = '🗓 ' + label + '（' + formatDateShort(p.start) + ' 〜 ' + formatDateShort(p.end) + ' の前払日を集計・社員情報と同じ期間）';
+    }
+    ['maebariListBtnMonth', 'maebariListBtnPrevMonth'].forEach(function(id) {
+      var b = document.getElementById(id); if (!b) return;
+      var on = (id === 'maebariListBtnMonth') === (rel === 0);
+      b.style.background = on ? '#3949ab' : '#fff'; b.style.color = on ? '#fff' : '#666'; b.style.borderColor = on ? '#3949ab' : '#ddd';
+    });
+    loadMaebariList();
+  } catch (e) {
+    console.error('setMaebariListMonth error:', e);
+    showToast('期間の計算に失敗: ' + (e.message || e), 'error');
+  }
 }
 
 // 前払い一覧の日付欄タップ → カレンダーを開く (PCはshowPicker、非対応端末はfocus/clickフォールバック)
@@ -32250,6 +32297,7 @@ function openMaebariListPicker() {
 
 // 前払一覧 — 「← 前週」「次週 →」ボタン: N 日シフトしてリロード
 function shiftMaebariListDate(days) {
+  _clearMaebariListRange();
   const inp = document.getElementById('maebariListDate');
   if (!inp || !inp.value) return;
   const d = new Date(inp.value + 'T00:00:00');
@@ -32262,6 +32310,7 @@ function shiftMaebariListDate(days) {
 
 // 「📅 今週」ボタン — 次の金曜日 (今日含む) にリセット
 function resetMaebariListDate() {
+  _clearMaebariListRange();
   const inp = document.getElementById('maebariListDate');
   if (!inp) return;
   const fri = getNextFriday();
@@ -32280,8 +32329,9 @@ async function loadMaebariList() {
   footer.style.display = 'none';
 
   try {
-    const ds = new Date(dateVal); ds.setHours(0,0,0,0);
-    const de = new Date(dateVal); de.setHours(23,59,59,999);
+    const rng = window._maebariListRange;
+    const ds = new Date(rng ? rng.start : dateVal); ds.setHours(0,0,0,0);
+    const de = new Date(rng ? rng.end : dateVal); de.setHours(23,59,59,999);
     const filter = "$filter=" + MF.payDate + " ge datetime'" + ds.toISOString() + "' and " +
       MF.payDate + " le datetime'" + de.toISOString() + "'" +
       "&$orderby=" + MF.hakensaki + " asc," + MF.syainNo +
@@ -32292,7 +32342,7 @@ async function loadMaebariList() {
     countEl.textContent = records.length + '件';
 
     if (records.length === 0) {
-      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">この日の前払いデータはありません</div>';
+      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">' + (rng ? 'この期間の前払いデータはありません' : 'この日の前払いデータはありません') + '</div>';
       return;
     }
 
