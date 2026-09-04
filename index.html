@@ -12491,10 +12491,20 @@ function renderSagyoushaBarcode(emp) {
   window._currentHaisenDocMode = 'sagyoushaBarcode';
   window._isshikiGroups = null;
 
-  // 氏名 (カタカナ)
+  // 氏名 (カタカナ。日本人等は漢字)
   var name = emp.Title || '';
   // 社員番号
   var sn = emp[F.syainNo] || '';
+  // 漢字氏名 (日本人など): 読みは「社保名前フリガナ」列から取る。
+  //   中段=漢字氏名のまま / 下段+QR=フリガナ→ローマ字。特記事項１(在留カード氏名)は使わない
+  //   (旧: kanaToRomaji(漢字) がそのまま漢字を返し、下段・QRに漢字が入っていた 2026-09-04 修正)
+  var nameIsKanji = (typeof _nameHasKanji === 'function') && _nameHasKanji(name);
+  var kanaReading = '';
+  if (nameIsKanji) {
+    var _fk = emp['OData__x793e__x4fdd__x540d__x524d__x30'];
+    if (_fk == null) { for (var _kf in emp) { if (_kf.indexOf('x793e__x4fdd__x540d__x524d__x30') >= 0) { _fk = emp[_kf]; break; } } }
+    kanaReading = (typeof _toZenkakuKatakana === 'function') ? _toZenkakuKatakana(_fk || '') : String(_fk || '').trim();
+  }
   // ローマ字氏名: 在留カード氏名 (特記事項１) から「姓+名」だけを抽出
   //   例: "DA SILVA NAGAO CARLA ROBERTA" + "ナガオ カルラ" → "NAGAO CARLA"
   //   無ければ kanaToRomaji() で機械的に変換 + ユーザーに警告
@@ -12505,8 +12515,10 @@ function renderSagyoushaBarcode(emp) {
       if (v && typeof v === 'string' && v.trim()) { fullRomaji = v.trim(); break; }
     }
   }
-  // 在留カード氏名が未登録の警告フラグ (描画後にトースト表示)
-  var _romajiMissing = !fullRomaji;
+  if (nameIsKanji) fullRomaji = '';   // 漢字氏名の特記事項１は在留カード氏名ではない
+  // 未登録の警告フラグ (描画後に入力モーダル表示): 外国籍=在留カード氏名 / 漢字氏名=フリガナ
+  var _romajiMissing = !nameIsKanji && !fullRomaji;
+  var _furiganaMissing = nameIsKanji && !kanaReading;
   function _simplifyRomaji(katakanaName, fullRom) {
     if (!fullRom) return '';
     var kanaParts = String(katakanaName).split(/[\s　]+/).filter(Boolean);
@@ -12538,10 +12550,12 @@ function renderSagyoushaBarcode(emp) {
     return result.join(' ');
   }
   var romajiName = '';
-  if (fullRomaji) {
+  if (nameIsKanji) {
+    romajiName = (kanaReading && typeof kanaToRomaji === 'function') ? kanaToRomaji(kanaReading) : '';
+  } else if (fullRomaji) {
     romajiName = _simplifyRomaji(name, fullRomaji);
   }
-  if (!romajiName && typeof kanaToRomaji === 'function') {
+  if (!romajiName && !nameIsKanji && typeof kanaToRomaji === 'function') {
     romajiName = kanaToRomaji(name);
   }
   romajiName = String(romajiName || '').toUpperCase();
@@ -12743,7 +12757,9 @@ function renderSagyoushaBarcode(emp) {
   // (カタカナから機械変換された値はフォールバックとして既に描画済み)
   window._sagyoushaBarcodeEmp = emp;
   if (_romajiMissing) {
-    setTimeout(function() { _promptInputRomajiName(emp); }, 500);
+    setTimeout(function() { _promptInputRomajiName(emp, 'romaji'); }, 500);
+  } else if (_furiganaMissing) {
+    setTimeout(function() { _promptInputRomajiName(emp, 'furigana'); }, 500);
   }
 }
 
@@ -12752,8 +12768,23 @@ function renderSagyoushaBarcode(emp) {
 //   未登録時に表示。入力値はそのまま SharePoint 社員リストの
 //   「特記事項１」フィールドに PATCH (MERGE) で保存し、名札を再描画。
 // ============================================================
-function _promptInputRomajiName(emp) {
+function _promptInputRomajiName(emp, mode) {
   if (!emp) return;
+  mode = (mode === 'furigana') ? 'furigana' : 'romaji';
+  window._romajiInputMode = mode;
+  var isFuri = (mode === 'furigana');
+  var mTitle = isFuri ? '⚠ フリガナ 未登録' : '⚠ 在留カードのローマ字氏名 未登録';
+  var mHelp = isFuri
+    ? ('漢字氏名の<b>フリガナ（全角カタカナ）</b>を入力してください。名札の下段・QRコードのローマ字はここから作ります。<br>' +
+       '・例: <code style="background:#fff;padding:1px 4px;border-radius:3px;">イワサキ カズエ</code><br>' +
+       '・姓と名の間はスペース。ひらがな・半角で入れても自動でカタカナに直します<br>' +
+       '・SharePoint「社員」リストの<b>「社保名前フリガナ」</b>に保存されます（hmcスタッフ登録・社保届出と共用）')
+    : ('在留カードに記載されている<b>正式なローマ字氏名</b>を入力してください。<br>' +
+       '・例: <code style="background:#fff;padding:1px 4px;border-radius:3px;">NAGAO CARLA</code>　<code style="background:#fff;padding:1px 4px;border-radius:3px;">DA SILVA NAGAO CARLA ROBERTA</code><br>' +
+       '・すべて大文字、スペース区切り<br>' +
+       '・SharePoint「社員」リストの<b>「特記事項１」</b>に保存されます');
+  var mPlaceholder = isFuri ? '例: イワサキ カズエ' : '例: NAGAO CARLA';
+  var mInputStyle = isFuri ? 'font-family:inherit;letter-spacing:1px;font-weight:600;' : 'font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;';
   var old = document.getElementById('romajiInputOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
   ov.id = 'romajiInputOverlay';
@@ -12762,7 +12793,7 @@ function _promptInputRomajiName(emp) {
   ov.innerHTML =
     '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
       '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#fff8e1;border-radius:12px 12px 0 0;">' +
-        '<h3 style="margin:0;font-size:15px;color:#e65100;">⚠ 在留カードのローマ字氏名 未登録</h3>' +
+        '<h3 style="margin:0;font-size:15px;color:#e65100;">' + mTitle + '</h3>' +
         '<button onclick="document.getElementById(\'romajiInputOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button>' +
       '</div>' +
       '<div style="padding:16px 18px;">' +
@@ -12770,13 +12801,10 @@ function _promptInputRomajiName(emp) {
           '<b>' + escHtml(emp.Title || '') + '</b>　<span style="color:#888;">(' + escHtml(emp[F.syainNo] || '') + ')</span>' +
         '</div>' +
         '<div style="font-size:11.5px;color:#666;margin-bottom:10px;line-height:1.55;background:#f5f5f5;padding:8px 10px;border-radius:6px;">' +
-          '在留カードに記載されている<b>正式なローマ字氏名</b>を入力してください。<br>' +
-          '・例: <code style="background:#fff;padding:1px 4px;border-radius:3px;">NAGAO CARLA</code>　<code style="background:#fff;padding:1px 4px;border-radius:3px;">DA SILVA NAGAO CARLA ROBERTA</code><br>' +
-          '・すべて大文字、スペース区切り<br>' +
-          '・SharePoint「社員」リストの<b>「特記事項１」</b>に保存されます' +
+          mHelp +
         '</div>' +
-        '<input type="text" id="romajiInputField" placeholder="例: NAGAO CARLA" autocomplete="off" ' +
-              'style="width:100%;padding:10px 12px;border:1.5px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">' +
+        '<input type="text" id="romajiInputField" placeholder="' + mPlaceholder + '" autocomplete="off" ' +
+              'style="width:100%;padding:10px 12px;border:1.5px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box;' + mInputStyle + '">' +
       '</div>' +
       '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">' +
         '<button onclick="document.getElementById(\'romajiInputOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">後で入力</button>' +
@@ -12802,8 +12830,17 @@ async function _saveRomajiNameToSP() {
   if (!emp || !emp.Id) { showToast('社員データが見つかりません', 'error'); return; }
   var inputEl = document.getElementById('romajiInputField');
   if (!inputEl) return;
-  var newVal = String(inputEl.value || '').trim().toUpperCase();
-  if (!newVal) { showToast('ローマ字氏名を入力してください', 'error'); return; }
+  var isFuri = (window._romajiInputMode === 'furigana');
+  var targetTitle = isFuri ? '社保名前フリガナ' : '特記事項１';
+  var newVal;
+  if (isFuri) {
+    newVal = (typeof _toZenkakuKatakana === 'function') ? _toZenkakuKatakana(inputEl.value) : String(inputEl.value || '').trim();
+    if (!newVal) { showToast('フリガナを入力してください', 'error'); return; }
+    if (typeof _isKatakanaName === 'function' && !_isKatakanaName(newVal)) { showToast('フリガナは全角カタカナで入力してください', 'error'); return; }
+  } else {
+    newVal = String(inputEl.value || '').trim().toUpperCase();
+    if (!newVal) { showToast('ローマ字氏名を入力してください', 'error'); return; }
+  }
 
   var saveBtn = document.getElementById('romajiInputSaveBtn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 保存中…'; }
@@ -12814,14 +12851,14 @@ async function _saveRomajiNameToSP() {
     var tokki1Internal = null;
     if (typeof employeeFieldsCache !== 'undefined' && employeeFieldsCache) {
       for (var fk in employeeFieldsCache) {
-        if (employeeFieldsCache[fk] && employeeFieldsCache[fk].title === '特記事項１') {
+        if (employeeFieldsCache[fk] && employeeFieldsCache[fk].title === targetTitle) {
           tokki1Internal = fk;
           break;
         }
       }
     }
     if (!tokki1Internal) {
-      showToast('「特記事項１」フィールドが見つかりません', 'error');
+      showToast('「' + targetTitle + '」フィールドが見つかりません', 'error');
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 保存して再描画'; }
       return;
     }
