@@ -6376,6 +6376,7 @@ select.sankyu-edit-input {
       <div style="display:flex;align-items:center;gap:6px;padding-bottom:8px;">
         <button onclick="switchScreen('skillsheetScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 9px;font-size:12.5px;cursor:pointer;white-space:nowrap;flex-shrink:0;">← 一覧</button>
         <h2 style="margin:0;font-size:clamp(13px,4vw,1.05em);color:var(--primary);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📄 スキルシート編集</h2>
+<button onclick="ssfStartNyusha(this)" title="この応募シートの内容と添付画像で新規社員登録フォームを開く" style="background:linear-gradient(135deg,#00897b,#00695c);border:none;color:#fff;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;box-shadow:0 1px 4px rgba(0,105,92,.3);">🧑‍💼 入社登録へ</button>
         <button onclick="skillsheetShowRaw()" style="background:#eef2ff;border:1.5px solid #6a3fb5;color:#5e35b1;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;">📋 応募内容</button>
       </div>
       <div id="ssfStickyName" style="display:none;margin:0 -12px;padding:5px 14px 6px;background:#f3effc;border-top:1px solid #e6ddf7;font-size:13px;font-weight:800;color:#4a2f8f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
@@ -36097,6 +36098,125 @@ var _ssfTantou = '';
 
 // 応募シート(Forms回答)の原文ビュー。フォームの入力値は画面を切り替えても保持される
 // 職歴(会社①〜④)はセクション見出しで区切って表示する
+// ============================================================
+// 🧑‍💼 応募シート → 新規社員登録 (転記 + 添付画像の取り込み)
+//   _ssfRaw(ラベル/値)・_ssfFields・生年月日/国籍/電話 から window._addPrefill を組み立てて
+//   新規社員登録フォームを開き、生成後に _applyAddPrefill() で入力欄へ転記。
+//   添付(在留カード zairyu_*.jpg / 免許証 menkyosho_*.jpg)は capturedDocs に取り込み → 撮影と同じ扱い
+//   (登録時に社員フォルダへ保存)。画像があれば まとめてOCR を自動で起動して在留カード番号・期限等を読み取る。
+// ============================================================
+function _ssRawVal(re) {
+  var hit = (_ssfRaw || []).find(function(e) { return re.test(String(e.label || '')); });
+  return hit ? String(hit.value || '').trim() : '';
+}
+function _ssNormDate(s) {   // 2026/9/7, 2026-09-07, 2026年9月7日, 1967-01-05T15:00:00Z → YYYY-MM-DD
+  s = String(s || '').trim(); if (!s) return '';
+  var m = s.match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  if (m) return m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0');
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) { var d = new Date(s); if (!isNaN(d)) { d = new Date(d.getTime() + 9 * 3600000); return d.toISOString().substring(0, 10); } }
+  return '';
+}
+function _ssMapCommute(s) {   // 応募の通勤方法 → SP Choice
+  s = String(s || '');
+  if (/自転車|徒歩|Bicicleta|pé/i.test(s)) return '自転車、徒歩jitensya toho';
+  if (/電車|バス|Trem|Ônibus/i.test(s)) return '電車、送迎densya';
+  if (/バイク|原付|Moto/i.test(s)) return 'バイクbaiku';
+  if (/送迎|Transporte da empresa/i.test(s)) return '送迎sougei';
+  if (/車|Carro/i.test(s)) return '車kuruma';
+  return '';
+}
+async function ssfStartNyusha(btn) {
+  if (!_ssfRaw || !_ssfRaw.length) { showToast('応募内容を先に読み込んでください', 'error'); return; }
+  var f = _ssfFields || {};
+  var name = (f.name || _ssRawVal(/^名前|氏名|Nome/)).trim();
+  var p = {
+    id1: _ssfId1,
+    name: name,
+    furigana: (f.furigana || '').trim(),
+    sex: (f.sex || _ssRawVal(/性別|Sexo/)).trim(),
+    birthday: _ssNormDate(_ssfBirth || _ssRawVal(/生年月日|NASCIMENTO/)),
+    nationality: (_ssfNat || _ssRawVal(/国籍|Nacionalidade/)).replace(/国籍$/, '').trim(),
+    address: _ssRawVal(/^住所|ENDEREÇO/),
+    tel: (_ssfTel || _ssRawVal(/電話番号|TELEFONE/)).trim(),
+    email: _ssRawVal(/メールアドレス|e-mail/i),
+    zairyu: _ssRawVal(/在留資格|ZAIRYU/),
+    commute: _ssMapCommute(_ssRawVal(/通勤方法|通勤手段|Transporte/)),
+    license: _ssRawVal(/運転免許/),
+    licenseExpiry: _ssNormDate(_ssRawVal(/免許証有効期限|validade da carta/)),
+    attachments: (_ssfAttachments || []).slice()
+  };
+  var lines = ['この応募シートの内容で新規社員登録フォームを開きます。', '', '氏名: ' + (p.name || '—'), '生年月日: ' + (p.birthday || '—') + '　国籍: ' + (p.nationality || '—'), '住所: ' + (p.address || '—'), '携帯: ' + (p.tel || '—') + '　メール: ' + (p.email || '—')];
+  if (p.attachments.length) lines.push('添付画像 ' + p.attachments.length + '枚（在留カード/免許証）を取り込み、AI-OCRで読み取ります');
+  lines.push('', '開きますか？（派遣先・社員番号などは開いた後に入力）');
+  if (!confirm(lines.join('\n'))) return;
+  window._addPrefill = p;
+  await showAddEmployeeForm();
+}
+// 新規登録フォームへ転記 (フォーム生成後に呼ばれる)
+async function _applyAddPrefill(p) {
+  function setV(id, v) { var el = document.getElementById(id); if (el && v) { el.value = v; return true; } return false; }
+  function fire(id, ev) { var el = document.getElementById(id); if (el) el.dispatchEvent(new Event(ev, { bubbles: true })); }
+  setV('addField_Title', p.name); fire('addField_Title', 'input');
+  if (p.furigana) { setV('addField_shahoNamaeFurigana', p.furigana); fire('addField_shahoNamaeFurigana', 'change'); }
+  if (p.birthday) { setV('addField_birthday', p.birthday); fire('addField_birthday', 'change'); }
+  // 性別 (Choice select: 男性/女性)
+  var sexEl = document.getElementById('addField_sex');
+  if (sexEl && p.sex) { var sv = /女/.test(p.sex) ? '女性' : (/男/.test(p.sex) ? '男性' : ''); if (sv) { sexEl.value = sv; fire('addField_sex', 'change'); } }
+  // 国籍 (dropdown_new: 選択肢にあれば選択、無ければ「＋新規入力」)
+  var natEl = document.getElementById('addField_nationality');
+  if (natEl && p.nationality) {
+    var opt = Array.from(natEl.options).find(function(o) { return o.value && (o.value === p.nationality || o.value.replace(/\s/g, '') === p.nationality.replace(/\s/g, '')); });
+    if (opt) { natEl.value = opt.value; }
+    else { natEl.value = '__new__'; var c = document.getElementById('addField_nationality_custom'); if (c) { c.value = p.nationality; c.style.display = 'block'; } }
+    fire('addField_nationality', 'change');
+  }
+  setV('addField_address', p.address);
+  setV('addField_keitai', p.tel);
+  setV('addField_email', p.email);
+  // 在留資格 (dropdown_new)
+  var zEl = document.getElementById('addField_zairyuShikaku');
+  if (zEl && p.zairyu) {
+    var zo = Array.from(zEl.options).find(function(o) { return o.value && p.zairyu.indexOf(o.value) >= 0; });
+    if (zo) zEl.value = zo.value; else { zEl.value = '__new__'; var zc = document.getElementById('addField_zairyuShikaku_custom'); if (zc) { zc.value = p.zairyu; zc.style.display = 'block'; } }
+  }
+  if (p.commute) { setV('addField_tsukinHouhou', p.commute); fire('addField_tsukinHouhou', 'change'); }
+  if (p.licenseExpiry) setV('addField_licenseExpiry', p.licenseExpiry);
+  if (p.license && /普通|準中型|中型|原付/.test(p.license)) { var lt = document.getElementById('addField_licenseType'); if (lt) { var m = p.license.match(/準中型|中型|普通|原付/); if (m) lt.value = m[0]; } }
+  // 転記元の表示
+  var head = document.querySelector('#addEmployeeScreen .card');
+  if (head) {
+    var note = document.createElement('div');
+    note.style.cssText = 'background:#e0f2f1;border:1px solid #80cbc4;color:#00695c;border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;margin-bottom:8px;';
+    note.textContent = '🧑‍💼 応募シート No.' + (p.id1 || '') + '（' + (p.name || '') + '）から転記しました。派遣先・社員番号・入社日などを入力して登録してください。';
+    head.parentNode.insertBefore(note, head);
+  }
+  // 添付画像 → capturedDocs (在留カード/免許証) → まとめてOCR
+  var got = 0;
+  if (p.attachments && p.attachments.length) {
+    _empOcrProg('📎 応募シートの添付画像を取り込み中…');
+    try {
+      var token = await getToken();
+      for (var i = 0; i < p.attachments.length; i++) {
+        var a = p.attachments[i]; var nm = String(a.name || '');
+        var docId = /zairyu|在留/i.test(nm) ? 'zairyu' : (/menkyo|免許|license/i.test(nm) ? 'license' : '');
+        if (!docId) continue;
+        try {
+          var r = await fetch(a.url, { headers: { 'Authorization': 'Bearer ' + token } });
+          if (!r.ok) continue;
+          var blob = await r.blob();
+          var du = await new Promise(function(res, rej) { var fr = new FileReader(); fr.onload = function() { res(fr.result); }; fr.onerror = rej; fr.readAsDataURL(blob); });
+          if (!capturedDocs[docId]) capturedDocs[docId] = [];
+          capturedDocs[docId].push({ file: new File([blob], nm, { type: blob.type || 'image/jpeg' }), dataUrl: du });
+          got++;
+        } catch (e1) { console.warn('attachment import failed', nm, e1); }
+      }
+    } finally { _empOcrProg(null); }
+    Object.keys(capturedDocs).forEach(function(k) { try { renderDocPreview(k); } catch (_) {} });
+  }
+  showToast('✓ 応募シートから転記しました' + (got ? '（添付画像 ' + got + '枚を取り込み・AI-OCRを開始）' : ''), 'success');
+  if (got) setTimeout(function() { try { ocrAllForNewReg(); } catch (e) { console.warn('auto ocr:', e); } }, 400);
+}
+
 function skillsheetShowRaw() {
   var box = document.getElementById('skillsheetRawBody');
   if (!box) return;
@@ -36138,6 +36258,8 @@ function skillsheetShowRaw() {
         + '<div style="font-size:14.5px;color:#1e293b;word-break:break-word;">' + _esc(e.value) + '</div>'
         + '</div>';
     });
+    // 🧑‍💼 入社登録へ: この応募内容と添付画像で新規社員登録フォームを開く
+    html += '<div style="margin:14px 0 4px;display:flex;justify-content:flex-end;">' + '<button onclick="ssfStartNyusha(this)" title="この応募シートの内容と添付画像で新規社員登録フォームを開く" style="background:linear-gradient(135deg,#00897b,#00695c);border:none;color:#fff;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;box-shadow:0 1px 4px rgba(0,105,92,.3);">🧑‍💼 入社登録へ</button>' + '</div>';
     // 📎 添付ファイル (在留カード画像など) — SPから認証付きで取得して表示
     if (_ssfAttachments.length) {
       html += secHeader('📎 添付（在留カードなど）', '#92400e', '#fef3c7', '#fde68a');
@@ -36206,6 +36328,7 @@ async function skillsheetOpenForm(id1, btn) {
       _ssfTantou = String(tTitle).replace(/[\s　]*\d+[\s　]*$/, '').trim();
     } catch (te) { console.warn('tantou load failed', te); }
     _ssfAttachments = data.attachments || [];
+    _ssfFields = data.fields || {};
     _ssfBirth = data.birth || '';
     _ssfNat = data.nationality || '';
     _ssfTel = data.tel || '';
@@ -36239,6 +36362,7 @@ function skillsheetPaintStatus() {
 
 var _ssfBirth = '';
 var _ssfNat = '';
+var _ssfFields = {};
 // 生年月日/国籍は表示のみ(保存/PDF印字なし)。データが無ければ非表示
 function _ssfViewBox(label, val, flex) {
   if (!val) return '';
@@ -39368,6 +39492,8 @@ async function renderAddEmployeeForm() {
   window._addNyushaAuto = '';   // 入社日→起算日/契約開始日 自動セットの追跡をリセット
   window._addFormSaved = false; // 未登録(戻る/ホームで離れる時に確認する)
   try { onAddNationalityChange(); onAddTsukinChange(); onAddNameChange(); } catch (e) { console.warn('add form visibility init:', e); }
+  // 応募シートからの転記 (ssfStartNyusha が window._addPrefill をセットして開いた場合)
+  if (window._addPrefill) { try { await _applyAddPrefill(window._addPrefill); } catch (e) { console.warn('prefill:', e); } window._addPrefill = null; }
 }
 
 // 通勤方法の値が 車/バイク か (「自転車、徒歩」「電車、送迎」の「車」は除外)
