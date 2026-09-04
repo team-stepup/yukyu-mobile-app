@@ -6719,6 +6719,10 @@ select.sankyu-edit-input {
             <span class="asi-card-icon" style="background:#e1f5fe;color:#0277bd;">📝</span>
             <span class="asi-card-label">派遣契約書<br>(hmc下書き)</span>
           </button>
+          <button class="asi-card" id="docCardHmcStaff" onclick="hmcRegisterStaffOnly()">
+            <span class="asi-card-icon" style="background:#e8eaf6;color:#3949ab;">👤</span>
+            <span class="asi-card-label">hmcスタッフ登録<br>(契約なし)</span>
+          </button>
           <button class="asi-card" onclick="startProcedure('zaishoku')">
             <span class="asi-card-icon" style="background:#e0f7fa;color:#00838f;">📄</span>
             <span class="asi-card-label">在職証明書</span>
@@ -51139,6 +51143,65 @@ function _hmcCalcPeriodTo(joinDate) {   // 近い四半期末。ただし1ヶ月
   return q;
 }
 function _hmcDateStr(d) { if (!d) return ''; var x = new Date(d); if (isNaN(x.getTime())) return ''; return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+// ============================================================
+// 👤 hmcスタッフ登録のみ (契約を作らずに hmc-goodjob の /staff/create へ登録)
+//   契約作成と同じキュー(HMC_KEIYAKU_QUEUE_GUID)に MatterId='STAFF_ONLY' のジョブを1件書く。
+//   PCの hmc_keiyaku_processor.py(--batch) が拾い、SP社員データでスタッフ登録フォームを埋めて「一時保存」する
+//   (既に hmc にいる社員は重複チェックでスキップ)。結果は派遣先担当者へ Teams 通知。
+// ============================================================
+async function hmcRegisterStaffOnly() {
+  if (typeof closeActionSheet === 'function') closeActionSheet();
+  if (typeof currentEmployee === 'undefined' || !currentEmployee) { showToast('社員を選択してください', 'error'); return; }
+  var emp = currentEmployee;
+  var sn = String(emp[F.syainNo] != null ? emp[F.syainNo] : '').replace(/\.0+$/, '');
+  var name = emp.Title || '';
+  if (!sn) { showToast('社員番号が取得できません', 'error'); return; }
+  // 登録に使う主な項目の充足チェック (hmc側の必須: 氏名・フリガナ・メール有無・所属事業所)
+  function val(k) { var key = (typeof editKeyMap !== 'undefined' && editKeyMap && editKeyMap[k]) || null; return key ? String(emp[key] || '').trim() : ''; }
+  var miss = [];
+  if (!val('kenpoFurigana') && !val('shahoNamaeFurigana')) miss.push('フリガナ(社保名前フリガナ)');
+  if (!val('birthday')) miss.push('生年月日');
+  if (!val('address')) miss.push('住所');
+  if (!val('keitai')) miss.push('携帯電話');
+  if (!val('nyushaDate')) miss.push('入社日');
+  var msg = name + '（No.' + sn + '）を hmc-goodjob にスタッフ登録します（契約は作りません）。\n\n' +
+    'PCの自動処理が、社員データをもとに hmc のスタッフ登録フォームを埋めて「一時保存」します。\n' +
+    'すでに hmc に登録済みなら自動でスキップされます。\n' +
+    (miss.length ? '\n⚠ 社員データで未入力: ' + miss.join('・') + '\n（hmc側で空欄になります。あとから hmc で補完してください）\n' : '') +
+    '\n送信しますか？';
+  if (!confirm(msg)) return;
+  showSpinner();
+  try {
+    var token = await getToken();
+    // 同じ社員の未処理ジョブがあれば二重送信しない
+    var pend = await spGet(HMC_KEIYAKU_QUEUE_GUID, "$filter=ShainNo eq '" + sn.replace(/'/g, "''") + "' and JobStatus eq 'pending'&$top=5&$select=Id,MatterId");
+    if (pend && pend.length) { hideSpinner(); showToast('この社員の未処理ジョブが既にあります（PCの処理待ち）', 'error'); return; }
+    var dj = await (await fetch(SP_SITE_URL + '/_api/contextinfo', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } })).json();
+    var digest = (dj.d && dj.d.GetContextWebInformation && dj.d.GetContextWebInformation.FormDigestValue) || dj.FormDigestValue;
+    var lj = await (await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + HMC_KEIYAKU_QUEUE_GUID + "')/RootFolder?$select=ServerRelativeUrl", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } })).json();
+    var listUrl = lj.d.ServerRelativeUrl;
+    var today = new Date(); var ymd = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+    var fv = [
+      { FieldName: 'Title', FieldValue: name + ' スタッフ登録 ' + ymd }, { FieldName: 'ShainNo', FieldValue: sn },
+      { FieldName: 'EmpName', FieldValue: name }, { FieldName: 'MatterId', FieldValue: 'STAFF_ONLY' },
+      { FieldName: 'MatterLabel', FieldValue: 'hmcスタッフ登録のみ（契約なし）' },
+      { FieldName: 'PeriodFrom', FieldValue: ymd }, { FieldName: 'PeriodTo', FieldValue: '' },
+      { FieldName: 'DoStaffRegister', FieldValue: '1' }, { FieldName: 'JobStatus', FieldValue: 'pending' },
+      { FieldName: 'RequestedBy', FieldValue: (typeof getLoggedInEmail === 'function' && getLoggedInEmail()) || '' }
+    ];
+    var resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + HMC_KEIYAKU_QUEUE_GUID + "')/AddValidateUpdateItemUsingPath", {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=nometadata', 'Content-Type': 'application/json;odata=nometadata', 'X-RequestDigest': digest },
+      body: JSON.stringify({ listItemCreateInfo: { FolderPath: { DecodedUrl: listUrl }, UnderlyingObjectType: 0 }, formValues: fv, bNewDocumentUpdate: false })
+    });
+    hideSpinner();
+    if (!resp.ok) { var t = await resp.text(); throw new Error('HTTP ' + resp.status + ' ' + t.slice(0, 150)); }
+    var rj = await resp.json();
+    var errs = (rj.value || []).filter(function(v) { return v.HasException; });
+    if (errs.length) throw new Error('項目エラー: ' + errs.map(function(v) { return v.FieldName; }).join(','));
+    showToast('✓ hmcスタッフ登録を送信しました。PCの自動処理（平日9時/13時/17時）が登録します', 'success');
+  } catch (e) { hideSpinner(); showToast('送信失敗: ' + (e.message || e), 'error'); }
+}
+
 function openHmcKeiyakuFromDetail() {   // 社員詳細「📝書類作成」から現在の社員で開く(既存社員の契約作成・更新用)
   if (typeof currentEmployee === 'undefined' || !currentEmployee) { showToast('社員を選択してください', 'error'); return; }
   var sn = String(currentEmployee[F.syainNo] != null ? currentEmployee[F.syainNo] : '').replace(/\.0+$/, '');
