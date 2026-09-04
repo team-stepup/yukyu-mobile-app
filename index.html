@@ -6806,6 +6806,17 @@ select.sankyu-edit-input {
           </button>
         </div>
       </div>
+
+      <!-- 🗑 社員データの削除 (SUPER_ADMIN_USERS=社長のみ表示。_applyDocMenuVisibility で制御) -->
+      <div class="asi-section" id="asiDangerSection" style="display:none;">
+        <div class="asi-section-title"><span class="asi-section-bar" style="background:#b71c1c;"></span>🗑 社員データの削除 <span style="font-size:10px;color:#b71c1c;font-weight:600;margin-left:4px;">社長のみ</span></div>
+        <div class="asi-grid">
+          <button class="asi-card" onclick="deleteEmployee()" style="border-color:#ef9a9a;">
+            <span class="asi-card-icon" style="background:#ffebee;color:#b71c1c;">🗑</span>
+            <span class="asi-card-label">この社員を削除<br>(テスト登録の取消)</span>
+          </button>
+        </div>
+      </div>
     </div>
     <button class="action-sheet-cancel" onclick="closeActionSheet()">閉じる</button>
   </div>
@@ -7820,26 +7831,25 @@ async function spPatchEmployee(itemId, body) {
   throw new Error('更新失敗: リトライ上限');
 }
 
-// Delete employee record
-async function spDeleteEmployee(itemId) {
+// リストアイテムを SharePoint のごみ箱へ移動 (recycle。完全削除ではないので復元可)
+async function spRecycleListItem(listGuid, itemId) {
   const token = await getToken();
   if (!token) { showToast('認証エラー', 'error'); throw new Error('No token'); }
-  const url = SP_SITE_URL + "/_api/web/lists(guid'" + LIST_EMPLOYEES_GUID + "')/items(" + itemId + ")";
+  const url = SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')/items(" + itemId + ")/recycle()";
   const resp = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json;odata=verbose',
-      'IF-MATCH': '*',
-      'X-HTTP-Method': 'DELETE',
-    },
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'IF-MATCH': '*' },
   });
   if (!resp.ok) {
     const errText = await resp.text();
-    console.error('SP DELETE Employee Error:', errText);
+    console.error('SP recycle item error:', listGuid, itemId, errText);
     throw new Error('削除失敗: ' + resp.status);
   }
   return true;
+}
+// Delete employee record (ごみ箱へ)
+async function spDeleteEmployee(itemId) {
+  return spRecycleListItem(LIST_EMPLOYEES_GUID, itemId);
 }
 
 // Create new employee record (robust)
@@ -35445,28 +35455,97 @@ async function saveEditSection(catId) {
   }
 }
 
+// 社員データの削除 (社長のみ。手続きメニュー末尾の「🗑 この社員を削除」)
+//   テスト登録の取消用。社員リストの登録 + 有給申請 + 前払い + 社員フォルダ + 署名待ちリンク を
+//   すべて SharePoint のごみ箱へ移動する (93日以内は SP ごみ箱から復元可)。
+//   誤操作防止: 社長アカウント判定 → 削除対象一覧の確認 → 社員番号の手入力 の3段階。
 async function deleteEmployee() {
+  if (typeof closeActionSheet === 'function') closeActionSheet();
   const emp = currentEmployee;
   if (!emp || !emp.Id) { showToast('社員データが見つかりません', 'error'); return; }
+  if (typeof isSuperAdminUser !== 'function' || !isSuperAdminUser()) { showToast('この操作は社長のみ実行できます', 'error'); return; }
 
   const name = emp.Title || '';
-  const no = emp[F.syainNo] || '';
-  if (!confirm('⚠️ 社員データを完全に削除しますか？\n\n氏名: ' + name + '\n社員番号: ' + no + '\n\nこの操作は取り消せません。')) return;
-  if (!confirm('本当に削除してよろしいですか？\n「' + name + '」のデータが完全に失われます。')) return;
+  const no = String(emp[F.syainNo] || '').replace(/\.0+$/, '').trim();
+  if (!no) { showToast('社員番号が無いため削除できません', 'error'); return; }
+
+  // ① 関連データを収集
+  showSpinner();
+  var leave = [], mae = [], esignFiles = [], folderPath = null;
+  try {
+    try { leave = await spGet(LIST_LEAVE_GUID, "$filter=" + F.syainNo + " eq " + Number(no) + "&$select=Id&$top=500") || []; } catch (e) { console.warn('leave lookup:', e); }
+    try { mae = await spGet(LIST_MAEBARI_GUID, "$filter=" + MF.syainNo + " eq '" + no + "'&$select=Id&$top=500") || []; } catch (e) { console.warn('maebari lookup:', e); }
+    try {
+      folderPath = await getEmpFolderPath(emp);
+      // 社員番号を含まないパス / 実在しないパス(フォールバック構築) は対象外
+      if (folderPath && folderPath.indexOf(no) < 0) folderPath = null;
+      if (folderPath && !(await _spFolderExists(folderPath))) folderPath = null;
+    } catch (e) { console.warn('folder lookup:', e); folderPath = null; }
+    try { esignFiles = await _listEsignPendingFiles(no); } catch (e) { console.warn('esign lookup:', e); }
+  } finally { hideSpinner(); }
+
+  // ② 対象一覧を見せて確認
+  var summary =
+    '⚠️ 社員データを削除します（SharePoint のごみ箱へ移動・93日以内は復元可）\n\n' +
+    '氏名: ' + name + '\n社員番号: ' + no + '\n\n削除対象:\n' +
+    '・社員リストの登録 1件\n' +
+    '・有給申請 ' + leave.length + '件\n' +
+    '・前払い ' + mae.length + '件\n' +
+    '・社員フォルダ: ' + (folderPath ? folderPath.split('/').slice(-2).join('/') : 'なし') + '\n' +
+    '・署名待ちリンク ' + esignFiles.length + '件\n\n' +
+    '続けますか？';
+  if (!confirm(summary)) return;
+  // ③ 社員番号の手入力で最終確認
+  var typed = prompt('最終確認: 削除する社員番号を入力してください', '');
+  if (typed === null) return;
+  if (String(typed).trim() !== no) { showToast('社員番号が一致しません。削除を中止しました', 'error'); return; }
 
   showSpinner();
+  var done = [];
   try {
+    for (var i = 0; i < leave.length; i++) await spRecycleListItem(LIST_LEAVE_GUID, leave[i].Id);
+    if (leave.length) done.push('有給申請 ' + leave.length + '件');
+    for (var j = 0; j < mae.length; j++) await spRecycleListItem(LIST_MAEBARI_GUID, mae[j].Id);
+    if (mae.length) done.push('前払い ' + mae.length + '件');
+    for (var k = 0; k < esignFiles.length; k++) { try { await deleteSpFile(esignFiles[k]); } catch (e) { console.warn('esign file:', e); } }
+    if (esignFiles.length) done.push('署名待ち ' + esignFiles.length + '件');
+    if (folderPath) { await deleteSpFolder(folderPath); done.push('社員フォルダ'); }
     await spDeleteEmployee(emp.Id);
-    showToast(name + ' を削除しました', 'success');
+    done.push('社員リスト');
+    console.log('[deleteEmployee] ' + no + ' ' + name + ' by ' + (typeof getLoggedInEmail === 'function' ? getLoggedInEmail() : '') + ' :', done.join(', '));
+    showToast(name + ' を削除しました（' + done.join('・') + '）', 'success');
     currentEmployee = null;
     resetSearch();
     switchScreen('searchScreen');
   } catch (e) {
     console.error('Delete employee error:', e);
-    showToast('削除エラー: ' + e.message, 'error');
+    showToast('削除エラー: ' + e.message + (done.length ? '（完了済: ' + done.join('・') + '）' : ''), 'error');
   } finally {
     hideSpinner();
   }
+}
+
+// フォルダの実在確認 (Exists)
+async function _spFolderExists(folderPath) {
+  var token = await getToken();
+  var ep = encodeURIComponent(folderPath).replace(/%2F/g, '/');
+  var r = await fetch(_spApiBase(folderPath) + "/_api/web/GetFolderByServerRelativeUrl('" + ep + "')?$select=Exists",
+    { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!r.ok) return false;
+  var j = await r.json();
+  return !!(j.d && j.d.Exists === true);
+}
+
+// 電子署名待ちフォルダ内の {社員番号}__*.json/.html (遠隔署名リンク) を列挙
+async function _listEsignPendingFiles(no) {
+  var token = await getToken();
+  var base = '/sites/TeamStepup/Shared Documents/電子署名待ち';
+  var ep = encodeURIComponent(base).replace(/%2F/g, '/');
+  var r = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + ep + "')/Files?$select=Name,ServerRelativeUrl&$filter=startswith(Name,'" + no + "__')&$top=200",
+    { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+  if (!r.ok) return [];
+  var j = await r.json();
+  return (((j.d || {}).results) || []).map(function(f) { return f.ServerRelativeUrl; });
 }
 
 // ============================================================
@@ -40696,6 +40775,15 @@ async function _loadCurrentSankyuCounts(allEmps) {
 // 役員専用ダッシュボード（派遣先別在職者分析）
 // ============================================================
 const ADMIN_USERS = ['h.yamashita@team-stepup.com', 'a.yamashita@team-stepup.com'];
+// 社員データの削除など取り消しにくい操作を許可するアカウント (社長のみ)
+const SUPER_ADMIN_USERS = ['h.yamashita@team-stepup.com'];
+function isSuperAdminUser() {
+  try {
+    if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
+    const email = (typeof getLoggedInEmail === 'function') ? getLoggedInEmail() : '';
+    return !!email && SUPER_ADMIN_USERS.indexOf(email) >= 0;
+  } catch (e) { return false; }
+}
 
 // ===== ダーク/ライト切替ボタンは 2026-08-19 に廃止(ユーザー指示)。CSS の html[data-theme="dark"] 定義は将来のダーク化用に温存 =====
 // 以前のテストで端末に保存された 'dark' が残っていてもライトに戻す
@@ -47431,6 +47519,7 @@ function _applyDocMenuVisibility(){
   show('docGrpAstiGrid',  k.asti && k.zaishoku);
   show('docGrpSanwaLabel', k.sanwa && k.zaishoku);              // 三和電子 書類: 三和在職者のみ
   show('docGrpSanwaGrid',  k.sanwa && k.zaishoku);
+  show('asiDangerSection', typeof isSuperAdminUser === 'function' && isSuperAdminUser());   // 社員データの削除: 社長のみ
 }
 function toggleActionSheet() {
   const overlay = document.getElementById('actionSheetOverlay');
