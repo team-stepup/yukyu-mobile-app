@@ -12573,8 +12573,9 @@ function renderSagyoushaBarcode(emp) {
   //   QR の中身はどちらもローマ字 (工場のスキャナで日本語が表示できない機種があるため)
   var bottomText = nameIsKanji ? kanaReading : romajiName;
 
-  // QR コードに埋め込む値: ローマ字氏名 (スキャナで読むと氏名が表示される)
-  var qrPayload = romajiName || String(sn || '') || 'STEP-UP';
+  // QR コードに埋め込む値: 漢字氏名はそのまま漢字 (2026-09-04 ユーザー指示)、カタカナ氏名はローマ字
+  //   (スキャナで読むと氏名が表示される)。漢字は UTF-8 で符号化 (_drawQRImg 側で設定)
+  var qrPayload = (nameIsKanji ? name : romajiName) || String(sn || '') || 'STEP-UP';
 
   // ID (QR を後で描画する img + 画面表示用カードの id)
   var qrId = 'sagyoushaQR_' + (Date.now() % 100000);
@@ -12589,6 +12590,7 @@ function renderSagyoushaBarcode(emp) {
   //   └─────────────────────────────────┘
   //   ロゴの文字高さがカタカナと同等になるよう logo height 7.5mm に拡大。
   //   QR は右上隅の角丸オーバーレイ (3.6mm) で控えめに。
+  //   下段: 漢字氏名=フリガナ(カタカナ) / カタカナ氏名=ローマ字。QR: 漢字氏名=漢字 / カタカナ氏名=ローマ字
   var cardHtml =
     '<div class="sagyousha-barcode-card" style="' +
       'width:45mm;height:22mm;border:0.5pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
@@ -12701,8 +12703,13 @@ function renderSagyoushaBarcode(emp) {
     if (!el) { console.warn('QR target not found:', targetId); return; }
 
     // ① qrcode-generator (推奨、シンプルで確実)
-    if (typeof qrcode === 'function') {
+    //    既定の stringToBytes は下位1バイトしか使わず日本語が壊れるため UTF-8 に切替。
+    //    UTF-8 関数が無いビルドで非ASCIIを含む場合は ② (soldair/qrcode・UTF-8対応) へ回す
+    var _nonAscii = /[^\x00-\x7f]/.test(String(payload || ''));
+    var _utf8Ok = (typeof qrcode === 'function' && qrcode.stringToBytesFuncs && qrcode.stringToBytesFuncs['UTF-8']);
+    if (typeof qrcode === 'function' && (!_nonAscii || _utf8Ok)) {
       try {
+        if (_utf8Ok) qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
         var qr = qrcode(0, 'M');
         qr.addData(String(payload || ' '));
         qr.make();
