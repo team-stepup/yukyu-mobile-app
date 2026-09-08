@@ -6301,6 +6301,16 @@ select.sankyu-edit-input {
   </div>
 
   <!-- Screen: 送迎記録 承認 (employee-portal 運転手の実績を担当者が日次承認) -->
+  <style>
+    .sg-trex { display:inline-block; margin-top:4px; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:700; line-height:1.5; word-break:break-word; white-space:normal; }
+    .sg-trex-green { background:#e6f6ec; color:#1b7a3d; border:1px solid #b7e1c4; }
+    .sg-trex-yellow { background:#fff3cd; color:#8a6d1a; border:1px solid #e8d48a; }
+    .sg-trex-red { background:#fde8e8; color:#c0392b; border:1px solid #f3b8b8; }
+    .sg-trex-gray { background:#f0f0f0; color:#777; border:1px solid #ddd; }
+    .sg-trex-wait { background:#eef2f7; color:#5b6b82; border:1px dashed #b8c4d6; }
+    .sg-trex-sum { font-size:11px; color:#666; font-weight:600; margin:-2px 0 6px; line-height:1.5; }
+    .sg-rec-wait { opacity:0.6; }
+  </style>
   <div class="screen" id="sougeiApprovalScreen">
     <div class="list-screen-header" style="padding:8px 10px;display:flex;align-items:center;gap:8px;">
       <button onclick="switchScreen('approveHubScreen')" style="background:none;border:1px solid #ddd;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;white-space:nowrap;flex-shrink:0;">← 戻る</button>
@@ -6878,6 +6888,9 @@ const SG = {
   approvedBy: 'ApprovedBy', approvedAt: 'ApprovedAt'
 };
 const SOUGEI_APPROVE_CAT_ICON = { '行き': '🌅', '帰り': '🌇', '遅刻': '⏰', '早退': '🏃', '病院対応': '🏥', 'その他（休業）': '📋' };
+// T-REX照合 List (PC日次ジョブ trex_sougei_check.py が毎稼働日9:02に 日付×送迎先 の出勤人数・遅刻/早退者を書込)
+// 承認画面はこれを参照して「申請件数 > T-REX遅刻早退者数」「出勤者0の日に申請」を警告し、未照合の日は承認を翌稼働日9:15まで待たせる
+const LIST_TREX_CHECK_GUID = '98b0f7f4-2b86-4913-a007-a06224ee98d7';
 
 // 前払い申請 field names (新規 List) — POST 時は OData_ プレフィックスを外す
 const MS = {
@@ -41706,6 +41719,110 @@ async function _sougeiFetchByStatus(status, top) {
   return out;
 }
 
+// ===== T-REX照合 (送迎申請 × 打刻実態) =====
+var _trexCheckCache = { from: null, to: null, map: null, at: 0 };
+async function _sougeiFetchTrexCheck(dateFrom, dateTo) {
+  if (!dateFrom || !dateTo) return {};
+  const now = Date.now();
+  if (_trexCheckCache.map && _trexCheckCache.from <= dateFrom && _trexCheckCache.to >= dateTo && (now - _trexCheckCache.at) < 60000) return _trexCheckCache.map;
+  const q = "$filter=" + encodeURIComponent("CheckDate ge '" + dateFrom + "' and CheckDate le '" + dateTo + "'")
+    + "&$select=Id,CheckDate,Dest,Shukkin,NoPunch,Early,EarlyAll,Late,LateAll,EarlyNames,LateNames,CheckedAt&$top=2000";
+  const rows = await spGetAll(LIST_TREX_CHECK_GUID, q);
+  const map = {};
+  rows.forEach(r => { map[String(r.CheckDate || '') + '|' + String(r.Dest || '').trim()] = r; });
+  _trexCheckCache = { from: dateFrom, to: dateTo, map: map, at: now };
+  return map;
+}
+function _trexNum(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+function _sougeiDateStr(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// 承認ゲート: checked=照合済み / waiting=翌稼働日9:15まで承認不可 / unchecked=PC未実行等で照合なし(灰色・承認は可)
+function _sougeiTrexState(rec, chk) {
+  if (chk) return 'checked';
+  const today = _sougeiTodayStr();
+  if (!rec.date || rec.date >= today) return 'waiting';          // 当日分は翌稼働日 9:15 以降
+  const n = new Date();
+  const before915 = (n.getHours() * 60 + n.getMinutes()) < (9 * 60 + 15);
+  const d3 = new Date(); d3.setDate(d3.getDate() - 3);           // 週末跨ぎを含め直近3日は当朝9:15まで待つ
+  if (before915 && rec.date >= _sougeiDateStr(d3)) return 'waiting';
+  return 'unchecked';
+}
+// 同日×送迎先×区分 の申請件数 (承認待ち+承認済・取消除く) を数える
+function _sougeiCountByKey(rowsA, rowsB) {
+  const m = {};
+  [].concat(rowsA || [], rowsB || []).forEach(r => { const k = r.date + '|' + r.dest + '|' + r.cat; m[k] = (m[k] || 0) + 1; });
+  return m;
+}
+// 記録1件分のバッジ HTML。level: 'red' | 'yellow' | 'green' | 'gray' | 'wait' | '' を .trexLevel に返す
+function _sougeiTrexBadge(rec, chk, state, counts) {
+  const out = { html: '', level: '' };
+  if (state === 'waiting') {
+    out.level = 'wait';
+    out.html = '<span class="sg-trex sg-trex-wait">⏳ T-REX照合待ち — 翌稼働日 9:15 以降に承認できます</span>';
+    return out;
+  }
+  if (state === 'unchecked') {
+    out.level = 'gray';
+    out.html = '<span class="sg-trex sg-trex-gray">T-REX照合なし（PC未実行の可能性）— 承認は可能</span>';
+    return out;
+  }
+  const shukkin = _trexNum(chk.Shukkin);
+  if (shukkin === 0) {
+    out.level = 'red';
+    out.html = '<span class="sg-trex sg-trex-red">❌ T-REX: この日は ' + _esc(rec.dest) + ' の出勤者 0名</span>';
+    return out;
+  }
+  if (rec.cat === '早退' || rec.cat === '遅刻') {
+    const isE = rec.cat === '早退';
+    const n = _trexNum(isE ? chk.Early : chk.Late);
+    const nAll = _trexNum(isE ? chk.EarlyAll : chk.LateAll);
+    const names = String((isE ? chk.EarlyNames : chk.LateNames) || '').trim();
+    const applied = counts[rec.date + '|' + rec.dest + '|' + rec.cat] || 0;
+    if (n === 0) {
+      out.level = 'red';
+      out.html = '<span class="sg-trex sg-trex-red">❌ T-REX: この日の' + _esc(rec.cat) + '者なし'
+        + (nAll > 0 ? '（車通勤 ' + nAll + '名のみ: ' + _esc(names) + '）' : '') + '</span>';
+      return out;
+    }
+    if (applied > n) {
+      out.level = 'yellow';
+      out.html = '<span class="sg-trex sg-trex-yellow">⚠ ' + _esc(rec.cat) + '申請 ' + applied + '件 ＞ T-REX' + _esc(rec.cat) + '者 ' + n + '名: ' + _esc(names) + '</span>';
+      return out;
+    }
+    out.level = 'green';
+    out.html = '<span class="sg-trex sg-trex-green">✅ T-REX' + _esc(rec.cat) + '者 ' + n + '名: ' + _esc(names) + '</span>';
+    return out;
+  }
+  return out;   // 行き/帰り・出勤者あり → バッジなし
+}
+// 日付グループ見出し下の T-REX サマリー (送迎先ごと)
+function _sougeiTrexSummaryHtml(dateStr, dests, chkMap) {
+  const parts = [];
+  dests.forEach(dest => {
+    const c = chkMap[dateStr + '|' + dest];
+    if (!c) return;
+    const sh = _trexNum(c.Shukkin);
+    parts.push('🕒 ' + _esc(dest) + ': 出勤' + sh + '名'
+      + (sh > 0 ? '・遅刻' + _trexNum(c.Late) + '・早退' + _trexNum(c.Early) + (( _trexNum(c.LateAll) + _trexNum(c.EarlyAll)) > (_trexNum(c.Late) + _trexNum(c.Early)) ? '（車通勤除く）' : '') : ''));
+  });
+  return parts.length ? '<div class="sg-trex-sum">' + parts.join('<br>') + '</div>' : '';
+}
+// 記録配列に T-REX 情報を付与 (rec.trexState / rec.trexLevel / rec.trexHtml)。chkMap も返す
+async function _sougeiAttachTrex(rows, extraRowsForCount) {
+  if (!rows || !rows.length) return {};
+  const dates = rows.map(r => r.date).filter(Boolean).sort();
+  let chkMap = {};
+  try { chkMap = await _sougeiFetchTrexCheck(dates[0], dates[dates.length - 1]); }
+  catch (e) { console.warn('T-REX照合 取得失敗 (照合なし扱い):', e); }
+  const counts = _sougeiCountByKey(rows, extraRowsForCount);
+  rows.forEach(r => {
+    const chk = chkMap[r.date + '|' + r.dest] || null;
+    const st = _sougeiTrexState(r, chk);
+    const b = _sougeiTrexBadge(r, chk, st, counts);
+    r.trexState = st; r.trexLevel = b.level; r.trexHtml = b.html;
+  });
+  return chkMap;
+}
+
 async function openSougeiApprovalScreen() {
   if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return; }
   switchScreen('sougeiApprovalScreen');
@@ -42424,7 +42541,14 @@ async function loadSougeiPending() {
     const rows = (await _sougeiFetchByStatus('active')).filter(r => r.date && r.date <= today);
     window._pendSougei = rows.length;
     _setSougeiTabBadge();
-    renderSougeiPending(rows);
+    // T-REX照合: 同日の承認済み分も件数に含めて「申請 > 実態」を判定
+    let approvedSame = [];
+    if (rows.length) {
+      const dts = rows.map(r => r.date).sort();
+      try { approvedSame = (await _sougeiFetchByStatus('approved', 2000)).filter(r => r.date >= dts[0] && r.date <= dts[dts.length - 1]); } catch (e) { /* 件数補助のみ */ }
+    }
+    const chkMap = await _sougeiAttachTrex(rows, approvedSame);
+    renderSougeiPending(rows, chkMap);
     _updateApproveAppBadge();
   } catch (e) {
     console.error('loadSougeiPending error:', e);
@@ -42436,12 +42560,17 @@ function _sougeiRecLabel(r) {
   return (SOUGEI_APPROVE_CAT_ICON[r.cat] || '') + ' ' + _esc(r.dest) + '　' + _esc(r.cat) + (r.slot ? ' ' + _esc(r.slot) : '')
     + (r.backdated ? ' <span style="background:#fff3cd;color:#8a6d1a;border:1px solid #e8d48a;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:700;white-space:nowrap;">⏰ 遡り入力</span>' : '');
 }
-function renderSougeiPending(rows) {
+function renderSougeiPending(rows, chkMap) {
   const listEl = document.getElementById('sougeiPendingList');
+  chkMap = chkMap || {};
   if (!rows || rows.length === 0) {
     listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">承認待ちの送迎記録はありません</div>';
     return;
   }
+  window._sougeiTrexStateById = {};
+  window._sougeiTrexLevelById = {};
+  const nWait = rows.filter(r => r.trexState === 'waiting').length;
+  const nWarn = rows.filter(r => r.trexLevel === 'red' || r.trexLevel === 'yellow').length;
   // 日付ごとにグループ (新しい日付が上)
   const byDate = {};
   rows.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
@@ -42452,33 +42581,45 @@ function renderSougeiPending(rows) {
     const recs = byDate[d];
     const dt = new Date(d + 'T00:00:00');
     const dLabel = (d && d.length >= 10) ? (Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) + ' (' + wk[dt.getDay()] + ')') : _esc(d);
+    const destsInDay = Array.from(new Set(recs.map(r => r.dest)));
     html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:10px 12px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.05);">'
-      + '<div style="font-weight:800;color:#04604a;margin-bottom:6px;">📅 ' + dLabel + '　<span style="font-weight:700;color:#888;font-size:12px;">' + recs.length + '件</span></div>';
+      + '<div style="font-weight:800;color:#04604a;margin-bottom:6px;">📅 ' + dLabel + '　<span style="font-weight:700;color:#888;font-size:12px;">' + recs.length + '件</span></div>'
+      + _sougeiTrexSummaryHtml(d, destsInDay, chkMap);
     recs.forEach(r => {
       const nm = String(r.name || '');
+      const waiting = r.trexState === 'waiting';
+      window._sougeiTrexStateById[r.id] = r.trexState || '';
+      window._sougeiTrexLevelById[r.id] = r.trexLevel || '';
       // スマホで横に詰め込まない2段組: 上段=チェック+内容(送迎先/区分/時刻)を全幅、下段=氏名+ボタン3つ
-      html += '<div style="padding:8px 0 9px;border-top:1px solid #f0f0f0;">'
+      html += '<div class="' + (waiting ? 'sg-rec-wait' : '') + '" style="padding:8px 0 9px;border-top:1px solid #f0f0f0;">'
         + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">'
-        + '<input type="checkbox" class="sg-apr-chk" value="' + r.id + '" onchange="updateSougeiBulkBar()" style="width:18px;height:18px;flex-shrink:0;">'
+        + '<input type="checkbox" class="sg-apr-chk" value="' + r.id + '" onchange="updateSougeiBulkBar()"' + (waiting ? ' disabled' : '') + ' style="width:18px;height:18px;flex-shrink:0;">'
         + '<div style="flex:1;min-width:0;font-size:13px;font-weight:700;color:#333;">' + _sougeiRecLabel(r) + '</div>'
         + '</label>'
+        + (r.trexHtml ? '<div style="padding-left:26px;">' + r.trexHtml + '</div>' : '')
         + '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-left:26px;">'
         + '<div style="flex:1;min-width:0;font-size:11.5px;color:#777;line-height:1.45;word-break:break-word;">' + _esc(nm) + (r.memo ? '　📝' + _esc(r.memo) : '') + '</div>'
         + '<button onclick="openSougeiEdit(' + r.id + ')" style="background:#e3f2fd;color:#1565c0;border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;">修正</button>'
         + '<button onclick="rejectSougeiRecord(' + r.id + ')" style="background:#fde8e8;color:#c0392b;border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;">取消</button>'
-        + '<button onclick="approveSougeiRecord(' + r.id + ')" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;">承認</button>'
+        + (waiting
+          ? '<button disabled title="翌稼働日 9:15 以降に承認できます" style="background:#cfd8dc;color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:800;cursor:not-allowed;flex-shrink:0;">⏳ 照合待ち</button>'
+          : '<button onclick="approveSougeiRecord(' + r.id + ')" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;">承認</button>')
         + '</div>'
         + '</div>';
     });
     html += '</div>';
   });
   window._sougeiPendingRows = rows;   // 修正モーダルが元データを参照する
+  // 画面上部の案内 (警告件数・照合待ち件数)
+  let notice = '';
+  if (nWarn) notice += '<div style="background:#fff3cd;color:#8a6d1a;border:1px solid #e8d48a;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;margin-bottom:8px;">⚠ T-REX打刻と合わない記録が ' + nWarn + '件あります。運転手に確認のうえ、修正・取消・承認を選んでください。</div>';
+  if (nWait) notice += '<div style="background:#eef2f7;color:#5b6b82;border:1px dashed #b8c4d6;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;margin-bottom:8px;">⏳ ' + nWait + '件は T-REX照合待ちです。翌稼働日の 9:15 以降に承認できます（照合結果はこの画面に自動表示）。</div>';
   const bar = '<div id="sougeiBulkBar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #eee;padding:8px 4px;display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
     + '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="sougeiSelectAll" onchange="toggleSougeiSelectAll(this.checked)" style="width:18px;height:18px;"> 全選択</label>'
     + '<span id="sougeiBulkCount" style="font-size:12px;color:#888;">選択 0件</span>'
     + '<button id="sougeiBulkBtn" onclick="bulkApproveSougei()" disabled style="margin-left:auto;background:#9e9e9e;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:800;cursor:not-allowed;">✅ まとめて承認</button>'
     + '</div>';
-  listEl.innerHTML = bar + html;
+  listEl.innerHTML = bar + notice + html;
 }
 function updateSougeiBulkBar() {
   const all = Array.prototype.slice.call(document.querySelectorAll('#sougeiPendingList .sg-apr-chk'));
@@ -42491,6 +42632,7 @@ function updateSougeiBulkBar() {
   if (allc) allc.checked = (all.length > 0 && checked.length === all.length);
 }
 function toggleSougeiSelectAll(on) {
+  // 照合待ち (disabled) は対象外
   document.querySelectorAll('#sougeiPendingList .sg-apr-chk').forEach(c => { c.checked = on; });
   updateSougeiBulkBar();
 }
@@ -42520,6 +42662,11 @@ async function _sougeiPatch(recId, body) {
 
 async function approveSougeiRecord(recId, bulk) {
   if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return false; }
+  if (window._sougeiTrexStateById && window._sougeiTrexStateById[recId] === 'waiting') {
+    showToast('T-REX照合待ちです。翌稼働日 9:15 以降に承認できます', 'error');
+    if (bulk) throw new Error('waiting');
+    return false;
+  }
   try {
     const body = {};
     body[SG.status] = 'approved';
@@ -42539,8 +42686,13 @@ async function bulkApproveSougei() {
   if (!isSougeiApprover()) { showToast('承認権限がありません', 'error'); return; }
   const checked = Array.prototype.slice.call(document.querySelectorAll('#sougeiPendingList .sg-apr-chk:checked'));
   if (!checked.length) return;
-  const ids = checked.map(c => c.value);
-  if (!confirm('選択した ' + ids.length + '件の送迎記録を承認します。よろしいですか？\n承認した記録が月次集計 (支払い) の対象になります。')) return;
+  const ids = checked.filter(c => !c.disabled).map(c => c.value);
+  if (!ids.length) { showToast('承認できる記録がありません (照合待ち)', 'error'); return; }
+  const lv = window._sougeiTrexLevelById || {};
+  const nWarn = ids.filter(id => lv[id] === 'red' || lv[id] === 'yellow').length;
+  let msg = '選択した ' + ids.length + '件の送迎記録を承認します。よろしいですか？\n承認した記録が月次集計 (支払い) の対象になります。';
+  if (nWarn) msg = '⚠ T-REX打刻と合わない記録が ' + nWarn + '件含まれています（赤・黄のバッジ）。\n運転手に確認済みですか？\n\n' + msg;
+  if (!confirm(msg)) return;
   const btn = document.getElementById('sougeiBulkBtn');
   let ok = 0, fail = 0;
   for (let i = 0; i < ids.length; i++) {
@@ -42688,6 +42840,11 @@ async function loadSougeiApproved() {
       listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">直近45日の承認済み記録はありません</div>';
       return;
     }
+    // 事後チェック: 承認済みにも T-REX照合バッジ (承認待ち分も件数に含める)
+    let activeSame = [];
+    try { activeSame = (await _sougeiFetchByStatus('active', 2000)).filter(r => r.date >= cutStr); } catch (e) { /* 件数補助のみ */ }
+    const chkMapA = await _sougeiAttachTrex(rows, activeSame);
+    rows.forEach(r => { if (r.trexState === 'waiting') { r.trexHtml = ''; r.trexLevel = ''; } });   // 承認済みに「待ち」表示は不要
     const byDate = {};
     rows.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
     const dates = Object.keys(byDate).sort().reverse();
@@ -42698,12 +42855,14 @@ async function loadSougeiApproved() {
       const dt = new Date(d + 'T00:00:00');
       const dLabel = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) + ' (' + wk[dt.getDay()] + ')';
       html += '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:10px 12px;margin-bottom:10px;">'
-        + '<div style="font-weight:800;color:#04604a;margin-bottom:4px;">📅 ' + dLabel + '　<span style="font-weight:700;color:#888;font-size:12px;">' + recs.length + '件</span></div>';
+        + '<div style="font-weight:800;color:#04604a;margin-bottom:4px;">📅 ' + dLabel + '　<span style="font-weight:700;color:#888;font-size:12px;">' + recs.length + '件</span></div>'
+        + _sougeiTrexSummaryHtml(d, Array.from(new Set(recs.map(r => r.dest))), chkMapA);
       recs.forEach(r => {
         const at = r.approvedAt ? new Date(r.approvedAt) : null;
         const atStr = (at && !isNaN(at.getTime())) ? ((at.getMonth() + 1) + '/' + at.getDate() + ' ' + String(at.getHours()).padStart(2, '0') + ':' + String(at.getMinutes()).padStart(2, '0')) : '';
         html += '<div style="padding:6px 0;border-top:1px solid #f0f0f0;">'
           + '<div style="font-size:12.5px;font-weight:700;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _sougeiRecLabel(r) + ' <span style="background:#e6f6ec;color:#1b7a3d;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:700;">✓ 承認済</span></div>'
+          + ((r.trexLevel === 'red' || r.trexLevel === 'yellow') ? '<div>' + r.trexHtml + '</div>' : '')
           + '<div style="font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _esc(r.name) + '　承認: ' + _esc(r.approvedBy) + (atStr ? ' (' + atStr + ')' : '') + '</div>'
           + '</div>';
       });
