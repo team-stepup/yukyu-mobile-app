@@ -5460,6 +5460,7 @@ select.sankyu-edit-input {
         <span id="maebariApprovalBadge" class="ql-badge" title="前払い 承認待ち" style="background:#e91e63;display:none;top:3px;right:3px;font-size:9px;padding:0 5px;border-radius:8px;"></span>
         <span id="approveBentoBadge" class="ql-badge" title="弁当 承認待ち" style="background:#e65100;display:none;top:23px;right:3px;font-size:9px;padding:0 5px;border-radius:8px;"></span>
         <span id="approveSougeiBadge" class="ql-badge" title="送迎記録 承認待ち" style="background:#04724a;display:none;bottom:3px;right:3px;top:auto;font-size:9px;padding:0 5px;border-radius:8px;"></span>
+        <span id="approveKintaiBadge" class="ql-badge" title="事務所 有給・欠勤 承認待ち" style="background:#5e35b1;display:none;bottom:3px;left:3px;right:auto;top:auto;font-size:9px;padding:0 5px;border-radius:8px;"></span>
       </button>
       <button class="quick-link-btn" onclick="switchScreen('yukyuListScreen')" style="position:relative;">
         <span class="ql-icon">📅</span>
@@ -6557,6 +6558,12 @@ select.sankyu-edit-input {
         <span style="font-size:30px;">📊</span>
         <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#1f3864;">送迎実績（人別）</span>
         <span style="min-width:54px;text-align:center;background:#eaf2fb;color:#1f3864;border-radius:20px;padding:6px 12px;font-size:12px;font-weight:800;">月次</span>
+        <span style="font-size:20px;color:#bbb;">›</span>
+      </button>
+      <button id="hubKintaiBtn" onclick="openKintaiAdminScreen()" style="display:none;align-items:center;gap:12px;width:100%;background:#fff;border:1.5px solid #c5b3e6;border-radius:14px;padding:18px 16px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <span style="font-size:30px;">🏢</span>
+        <span style="flex:1;text-align:left;font-size:17px;font-weight:800;color:#5e35b1;">事務所 有給・欠勤 承認</span>
+        <span id="hubKintaiCount" style="min-width:54px;text-align:center;background:#ede7f6;color:#5e35b1;border-radius:20px;padding:6px 12px;font-size:14px;font-weight:800;">0件</span>
         <span style="font-size:20px;color:#bbb;">›</span>
       </button>
       <div style="font-size:11px;color:var(--text-light);text-align:center;margin-top:4px;">各ボタンを開くと申請の詳細・承認/却下ができます</div>
@@ -40924,8 +40931,14 @@ function openApproveHub() {
   var sgjBtn = document.getElementById('hubSougeiJissekiBtn');
   if (sgjBtn) sgjBtn.style.display =
     (typeof canViewSougeiJisseki === 'function' && canViewSougeiJisseki()) ? 'flex' : 'none';
+  // 事務所スタッフの有給・欠勤申請 (事務所勤怠システム) — 役員のみ承認
+  var ktOk = (typeof isAdminUser === 'function' && isAdminUser() && typeof canUseKintai === 'function' && canUseKintai());
+  var ktBtn = document.getElementById('hubKintaiBtn');
+  if (ktBtn) ktBtn.style.display = ktOk ? 'flex' : 'none';
   function paint() {
-    var m = window._pendMaebari || 0, b = window._pendBento || 0, s = window._pendSougei || 0;
+    var m = window._pendMaebari || 0, b = window._pendBento || 0, s = window._pendSougei || 0, k = window._pendKintai || 0;
+    var ek = document.getElementById('hubKintaiCount');
+    if (ek) { ek.textContent = k + '件'; ek.style.opacity = k > 0 ? '1' : '0.45'; }
     var em = document.getElementById('hubMaebariCount');
     if (em) { em.textContent = m + '件'; em.style.opacity = m > 0 ? '1' : '0.45'; }
     var eb = document.getElementById('hubBentoCount');
@@ -40938,7 +40951,8 @@ function openApproveHub() {
   Promise.allSettled([
     (typeof isMaebariApprover === 'function' && isMaebariApprover()) ? updateMaebariApprovalBadge() : Promise.resolve(),
     (typeof canUseBento === 'function' && canUseBento()) ? updateBentoAdminBadge() : Promise.resolve(),
-    (typeof isSougeiApprover === 'function' && isSougeiApprover()) ? updateSougeiApprovalBadge() : Promise.resolve()
+    (typeof isSougeiApprover === 'function' && isSougeiApprover()) ? updateSougeiApprovalBadge() : Promise.resolve(),
+    ktOk ? updateKintaiAdminBadge() : Promise.resolve()
   ]).then(paint);
 }
 
@@ -41638,7 +41652,7 @@ async function updateMaebariApprovalBadge() {
 // アプリアイコン(PWA)バッジ = 前払い + 弁当 + 送迎記録 承認待ち の合計
 function _updateApproveAppBadge() {
   try {
-    var total = (window._pendMaebari || 0) + (window._pendBento || 0) + (window._pendSankyu || 0) + (window._pendSougei || 0);
+    var total = (window._pendMaebari || 0) + (window._pendBento || 0) + (window._pendSankyu || 0) + (window._pendSougei || 0) + (window._pendKintai || 0);
     if (navigator.setAppBadge) {
       if (total > 0) navigator.setAppBadge(total);
       else if (navigator.clearAppBadge) navigator.clearAppBadge();
@@ -44003,13 +44017,19 @@ async function kintaiApproveOne(id) {
 // ホーム🕐勤怠ボタンの承認待ちバッジ (役員のみ・90秒ポーリングの refreshApprovalBadges から呼ばれる)
 async function updateKintaiAdminBadge() {
   const el = document.getElementById('kintaiAdminBadge');
-  if (!el) return;
+  const el2 = document.getElementById('approveKintaiBadge');   // ホーム「✅承認」ボタン側 (2026-09-09 追加)
   try {
-    if (typeof isAdminUser !== 'function' || !isAdminUser() || !canUseKintai()) { el.style.display = 'none'; return; }
+    if (typeof isAdminUser !== 'function' || !isAdminUser() || !canUseKintai()) {
+      if (el) el.style.display = 'none';
+      if (el2) el2.style.display = 'none';
+      return;
+    }
     const data = await _kintaiApi('/kintai/pending');
     const n = (data.rows || []).length;
-    el.textContent = n;
-    el.style.display = n > 0 ? '' : 'none';
+    window._pendKintai = n;
+    if (el) { el.textContent = n; el.style.display = n > 0 ? '' : 'none'; }
+    if (el2) { el2.textContent = '勤怠' + n; el2.style.display = n > 0 ? '' : 'none'; }
+    if (typeof _updateApproveAppBadge === 'function') _updateApproveAppBadge();
   } catch (e) { /* 通信失敗時は前回表示を維持 */ }
 }
 
