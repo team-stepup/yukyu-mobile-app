@@ -12573,33 +12573,48 @@ function renderSagyoushaBarcode(emp) {
   // 未登録の警告フラグ (描画後に入力モーダル表示): 外国籍=在留カード氏名 / 漢字氏名=フリガナ
   var _romajiMissing = !nameIsKanji && !fullRomaji;
   var _furiganaMissing = nameIsKanji && !kanaReading;
+  // カタカナ氏名の各語に対応するローマ字を、在留カード氏名の単語から「子音の並びが最も近いもの」で選ぶ。
+  //   例: 「オオバ　サブリナ」+「SABRINA OBA DE SOUZA」→ OBA SABRINA (旧: 先頭文字だけで判定し SOUZA を誤選択)
+  //   日本語は子音の後に母音が入る (SABURINA↔SABRINA) ので、母音を除いた骨格で比較する。
+  //   十分に似た単語が無いときはカタカナからの機械変換をそのまま使う。
   function _simplifyRomaji(katakanaName, fullRom) {
     if (!fullRom) return '';
     var kanaParts = String(katakanaName).split(/[\s　]+/).filter(Boolean);
-    var words = fullRom.toUpperCase().split(/\s+/).filter(Boolean);
-    // K↔C, L↔R など発音的に近い文字の等価表
-    var equivMap = { 'K':'KC', 'C':'CK', 'L':'LR', 'R':'RL', 'F':'FPH', 'P':'PFH', 'H':'HFP', 'T':'TD', 'D':'DT', 'S':'SZ', 'Z':'SZ', 'J':'JG', 'G':'GJ', 'B':'BV', 'V':'VB' };
+    var words = fullRom.toUpperCase().split(/\s+/).filter(function(w) { return /[A-Z]/.test(w); });
+    // 発音が近い綴りを同一視: C/Q→K, L→R, V→B, W→U, Y→I, X→S, PH→F, TH→T
+    function skel(w) {
+      var s = String(w).toUpperCase().replace(/PH/g, 'F').replace(/TH/g, 'T').replace(/[^A-Z]/g, '');
+      s = s.replace(/[CQ]/g, 'K').replace(/L/g, 'R').replace(/V/g, 'B').replace(/W/g, 'U').replace(/Y/g, 'I').replace(/X/g, 'S');
+      s = s.replace(/([A-Z])\1+/g, '$1');            // 重複子音 (ROBERTTA→ROBERTA)
+      return { full: s, cons: s.replace(/[AEIOUH]/g, '') };
+    }
+    function lev(a, b) {
+      var m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+      var prev = [], cur = [], i, j;
+      for (j = 0; j <= n; j++) prev[j] = j;
+      for (i = 1; i <= m; i++) {
+        cur[0] = i;
+        for (j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = cur.slice();
+      }
+      return prev[n];
+    }
+    function sim(a, b) { var L = Math.max(a.length, b.length); return L ? 1 - lev(a, b) / L : 1; }
     var result = [];
     var used = new Set();
     for (var i = 0; i < kanaParts.length; i++) {
-      var mech = (typeof kanaToRomaji === 'function' ? kanaToRomaji(kanaParts[i]) : kanaParts[i]).toUpperCase();
-      var firstC = mech.charAt(0);
-      var validFirst = equivMap[firstC] || firstC;
-      // ① 完全一致
-      var hit = -1;
+      var mech = (typeof kanaToRomaji === 'function' ? kanaToRomaji(kanaParts[i]) : kanaParts[i]).toUpperCase().replace(/[^A-Z]/g, '');
+      var ms = skel(mech);
+      var best = -1, bestScore = 0;
       for (var j = 0; j < words.length; j++) {
         if (used.has(j)) continue;
-        if (words[j] === mech) { hit = j; break; }
+        var ws = skel(words[j]);
+        // 子音骨格の類似 (主) + 綴り全体の類似 (副) + 先頭文字一致ボーナス
+        var score = 0.7 * sim(ms.cons, ws.cons) + 0.3 * sim(ms.full, ws.full) + (ms.full.charAt(0) === ws.full.charAt(0) ? 0.1 : 0);
+        if (score > bestScore) { bestScore = score; best = j; }
       }
-      // ② 先頭文字が等価で長さ ≥ 2
-      if (hit < 0) {
-        for (var j2 = 0; j2 < words.length; j2++) {
-          if (used.has(j2)) continue;
-          if (validFirst.indexOf(words[j2].charAt(0)) >= 0 && words[j2].length >= 2) { hit = j2; break; }
-        }
-      }
-      if (hit >= 0) { result.push(words[hit]); used.add(hit); }
-      else { result.push(mech); }
+      if (best >= 0 && bestScore >= 0.6) { result.push(words[best]); used.add(best); }
+      else { result.push(mech || kanaParts[i]); }
     }
     return result.join(' ');
   }
@@ -12624,7 +12639,7 @@ function renderSagyoushaBarcode(emp) {
   // ID (QR を後で描画する img + 画面表示用カードの id)
   var qrId = 'sagyoushaQR_' + (Date.now() % 100000);
 
-  // ---- 名札本体: 縦22mm × 横45mm 3 段構成 (ロゴ大型化) ----
+  // ---- 名札本体: 縦20mm × 横43mm 3 段構成 (2026-09-09 45×22→43×20 に縮小・ユーザー指示) ----
   //   ┌─────────────────────────────────┐
   //   │   [STEP・UP ロゴ 大]      [QR]    │ ← 上段 8.5mm (ロゴが主役)
   //   │─────────────────────────────────│
@@ -12637,40 +12652,40 @@ function renderSagyoushaBarcode(emp) {
   //   下段: 漢字氏名=フリガナ(カタカナ) / カタカナ氏名=ローマ字。QR: 漢字氏名=漢字 / カタカナ氏名=ローマ字
   var cardHtml =
     '<div class="sagyousha-barcode-card" style="' +
-      'width:45mm;height:22mm;border:0.5pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
+      'width:43mm;height:20mm;border:0.5pt solid #1a237e;box-sizing:border-box;margin:0 auto;background:#fff;' +
       'font-family:\'Yu Gothic\',\'Yu Gothic UI\',\'メイリオ\',sans-serif;page-break-inside:avoid;' +
       'display:flex;flex-direction:column;overflow:hidden;position:relative;">' +
 
       // 上段 8mm: ロゴ(左寄せ) + QR(右寄せ)
       //   エンブレムと "STEP·UP" の間の余白を 1.2mm → 2.2mm に広げて品よく
-      '<div style="height:8.5mm;display:flex;justify-content:space-between;align-items:center;padding:0 1mm;' +
+      '<div style="height:7.5mm;display:flex;justify-content:space-between;align-items:center;padding:0 1mm;' +
             'background:linear-gradient(to bottom,#f7f9fc,#fff);border-bottom:0.3pt solid #c5cae9;">' +
         // 左: ロゴ (エンブレム + テキスト) を1ユニットで左寄せ
         '<div style="display:flex;align-items:center;gap:2.2mm;flex-shrink:0;">' +
-          '<img src="emblem.png" alt="" style="height:6.5mm;width:auto;display:block;">' +
+          '<img src="emblem.png" alt="" style="height:5.8mm;width:auto;display:block;">' +
           '<span style="font-family:\'Trajan Pro\',\'Times New Roman\',\'Yu Mincho\',\'游明朝\',serif;' +
-                'font-size:14pt;font-weight:700;letter-spacing:1.5px;color:#3a2057;line-height:1;">' +
+                'font-size:12.5pt;font-weight:700;letter-spacing:1.3px;color:#3a2057;line-height:1;">' +
             'STEP&middot;UP' +
           '</span>' +
         '</div>' +
         // 右: QR コード
-        '<img id="' + qrId + '" alt="" style="width:7.2mm;height:7.2mm;display:block;flex-shrink:0;' +
+        '<img id="' + qrId + '" alt="" style="width:6.4mm;height:6.4mm;display:block;flex-shrink:0;' +
               'background:#fff;padding:0.2mm;border-radius:0.3mm;box-shadow:0 0 0 0.2pt #c5cae9;">' +
       '</div>' +
 
       // 中段 7mm: カタカナ氏名 (紺色) — 内部 span で自動縮小対応
       '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
             'padding:0 1.5mm;color:#1a237e;line-height:1;overflow:hidden;">' +
-        '<span class="autofit-kana" style="font-size:10pt;font-weight:700;letter-spacing:1.2px;' +
+        '<span class="autofit-kana" style="font-size:9.5pt;font-weight:700;letter-spacing:1px;' +
               'white-space:nowrap;display:inline-block;max-width:100%;">' +
           escHtml(name) +
         '</span>' +
       '</div>' +
 
       // 下段 7mm: ローマ字氏名 (青帯白文字) — 内部 span で自動縮小対応
-      '<div style="height:6.5mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
+      '<div style="height:6mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
             'display:flex;justify-content:center;align-items:center;line-height:1;padding:0 1.5mm;overflow:hidden;">' +
-        '<span class="autofit-romaji" style="font-size:9pt;font-weight:700;letter-spacing:1.2px;' +
+        '<span class="autofit-romaji" style="font-size:8.5pt;font-weight:700;letter-spacing:1px;' +
               'white-space:nowrap;display:inline-block;max-width:100%;">' +
           escHtml(bottomText) +
         '</span>' +
@@ -12692,32 +12707,32 @@ function renderSagyoushaBarcode(emp) {
     '<div class="haisen-doc-page hd-kobetsu sagyousha-barcode-page" style="font-size:9pt;">' +
       header +
       cardHtml +
-      '<div style="text-align:center;margin:6mm 0 2mm;font-size:7.5pt;color:#666;">― 予備 (同サイズ 45×22mm) ―</div>' +
+      '<div style="text-align:center;margin:6mm 0 2mm;font-size:7.5pt;color:#666;">― 予備 (同サイズ 43×20mm) ―</div>' +
       // 予備カード (同サイズ 45×22mm, 3段構成・ロゴ大型版)
-      '<div style="width:45mm;height:22mm;margin:0 auto;border:0.5pt solid #1a237e;background:#fff;' +
+      '<div style="width:43mm;height:20mm;margin:0 auto;border:0.5pt solid #1a237e;background:#fff;' +
             'box-sizing:border-box;page-break-inside:avoid;display:flex;flex-direction:column;overflow:hidden;position:relative;">' +
-        '<div style="height:8mm;display:flex;justify-content:space-between;align-items:center;padding:0 1mm;' +
+        '<div style="height:7.5mm;display:flex;justify-content:space-between;align-items:center;padding:0 1mm;' +
               'background:linear-gradient(to bottom,#f7f9fc,#fff);border-bottom:0.3pt solid #c5cae9;">' +
           '<div style="display:flex;align-items:center;gap:2.2mm;flex-shrink:0;">' +
-            '<img src="emblem.png" alt="" style="height:6.5mm;width:auto;display:block;">' +
+            '<img src="emblem.png" alt="" style="height:5.8mm;width:auto;display:block;">' +
             '<span style="font-family:\'Trajan Pro\',\'Times New Roman\',\'Yu Mincho\',\'游明朝\',serif;' +
-                  'font-size:14pt;font-weight:700;letter-spacing:1.5px;color:#3a2057;line-height:1;">' +
+                  'font-size:12.5pt;font-weight:700;letter-spacing:1.3px;color:#3a2057;line-height:1;">' +
               'STEP&middot;UP' +
             '</span>' +
           '</div>' +
-          '<img id="' + qrId2 + '" alt="" style="width:7.2mm;height:7.2mm;display:block;flex-shrink:0;' +
+          '<img id="' + qrId2 + '" alt="" style="width:6.4mm;height:6.4mm;display:block;flex-shrink:0;' +
                 'background:#fff;padding:0.2mm;border-radius:0.3mm;box-shadow:0 0 0 0.2pt #c5cae9;">' +
         '</div>' +
         '<div style="flex:1;display:flex;justify-content:center;align-items:center;' +
               'padding:0 1.5mm;color:#1a237e;line-height:1;overflow:hidden;">' +
-          '<span class="autofit-kana" style="font-size:10pt;font-weight:700;letter-spacing:1.2px;' +
+          '<span class="autofit-kana" style="font-size:9.5pt;font-weight:700;letter-spacing:1px;' +
                 'white-space:nowrap;display:inline-block;max-width:100%;">' +
             escHtml(name) +
           '</span>' +
         '</div>' +
-        '<div style="height:7mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
+        '<div style="height:6mm;background:linear-gradient(to bottom,#1a237e,#0d1659);color:#fff;' +
               'display:flex;justify-content:center;align-items:center;line-height:1;padding:0 1.5mm;overflow:hidden;">' +
-          '<span class="autofit-romaji" style="font-size:9pt;font-weight:700;letter-spacing:1.2px;' +
+          '<span class="autofit-romaji" style="font-size:8.5pt;font-weight:700;letter-spacing:1px;' +
                 'white-space:nowrap;display:inline-block;max-width:100%;">' +
             escHtml(bottomText) +
           '</span>' +
