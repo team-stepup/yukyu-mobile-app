@@ -5502,6 +5502,7 @@ select.sankyu-edit-input {
         <span class="ql-icon">🕐</span>
         <span class="ql-text">勤怠</span>
         <span id="kintaiAdminBadge" class="ql-badge" title="承認待ちの有給・欠勤申請" style="background:#5e35b1;display:none;top:4px;right:4px;"></span>
+        <span id="kintaiStaffBadge" class="ql-badge" title="申請の結果が届いています" style="background:#2e7d32;display:none;top:4px;right:4px;"></span>
       </button>
       <!-- 弁当注文ボタンは廃止: 弁当の承認は「承認」ハブ(✅)→「弁当 承認」に統合 (重複のため削除 2026-06-22) -->
       <button class="quick-link-btn" onclick="switchScreen('vehicleListScreen')" style="position:relative;">
@@ -6056,6 +6057,7 @@ select.sankyu-edit-input {
         <div style="margin-top:8px;font-size:11px;opacity:.8;">⏱ 打刻はサーバー時刻で記録されます（端末の時計は使いません）</div>
       </div>
 
+      <div id="kintaiDecisionBox"></div>
       <div class="home-search-card" id="kintaiYukyuCard" style="margin-top:14px;display:none;">
         <div onclick="kintaiYukyuToggle()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
           <div style="font-weight:700;">🏖 有給残 <span id="kintaiYukyuRemain" style="color:#1565c0;font-size:18px;">–</span> 日</div>
@@ -6860,6 +6862,27 @@ const SP_SCOPES = ['https://teamstepupcom774.sharepoint.com/AllSites.Write'];
 // Microsoft Graph スコープ(Teams 未読チャット取得用)
 // 必須: Chat.Read (Azure ADアプリに追加 + 管理者承認が必要)
 const GRAPH_SCOPES = ['https://graph.microsoft.com/Chat.Read'];
+// 勤怠申請の承認/却下を本人へ Teams 1:1 で知らせる (承認した役員のアカウントから送る・2026-09-09)
+//   初回は同意ダイアログが出る (全体管理者は「組織の代理として同意」で以後全員分OK)
+const GRAPH_TEAMS_SEND_SCOPES = ['https://graph.microsoft.com/Chat.Create', 'https://graph.microsoft.com/ChatMessage.Send'];
+async function getGraphTokenFor(scopes, interactive) {
+  if (!msalInstance) return null;
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) return null;
+  try {
+    const r = await msalInstance.acquireTokenSilent({ scopes: scopes, account: accounts[0] });
+    return r.accessToken;
+  } catch (e) {
+    if (!interactive) return null;
+    try {
+      const r2 = await msalInstance.acquireTokenPopup({ scopes: scopes, account: accounts[0] });
+      return r2.accessToken;
+    } catch (e2) {
+      console.warn('[Graph] token for', scopes, 'failed:', e2 && (e2.errorCode || e2.message));
+      return null;
+    }
+  }
+}
 const LIST_EMPLOYEES_GUID = '05a5a986-5958-4664-bb0d-7c1cfaedf845';
 const LIST_LEAVE_GUID = 'fe50ad49-5069-401d-ab2f-8d94fa826d1d';
 const LIST_MAEBARI_GUID = 'd34be315-365a-460f-976e-fb8da6977cec';
@@ -7263,6 +7286,7 @@ function refreshApprovalBadges() {
   try { if (typeof updateBentoAdminBadge === 'function') updateBentoAdminBadge(); } catch (e) {}
   try { if (typeof updateSougeiApprovalBadge === 'function') updateSougeiApprovalBadge(); } catch (e) {}
   try { if (typeof updateKintaiAdminBadge === 'function') updateKintaiAdminBadge(); } catch (e) {}
+  try { if (typeof updateKintaiStaffBadge === 'function') updateKintaiStaffBadge(); } catch (e) {}
 }
 
 // Check when user returns to the app (tab switch, phone unlock)
@@ -43527,6 +43551,117 @@ function openKintaiScreen() {
   _kintaiClockTimer = setInterval(_kintaiTickClock, 1000);
   loadKintaiMy();
   loadKintaiYukyu();
+  loadKintaiDecisionBox();
+}
+
+// ---------- スタッフ: 申請結果 (承認/却下) の表示と未読バッジ ----------
+const KINTAI_SEEN_KEY = 'kintaiDecisionSeenAt';   // localStorage: 最後に結果欄を見た時刻 'YYYY-MM-DD HH:MM'
+function _kintaiNowStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + _kintaiPad(d.getMonth() + 1) + '-' + _kintaiPad(d.getDate()) + ' ' + _kintaiPad(d.getHours()) + ':' + _kintaiPad(d.getMinutes());
+}
+function _kintaiSeenAt() { try { return localStorage.getItem(KINTAI_SEEN_KEY) || ''; } catch (e) { return ''; } }
+function _kintaiDateJa(ds) {
+  if (!ds || ds.length < 10) return ds || '';
+  const d = new Date(ds + 'T00:00:00');
+  return parseInt(ds.slice(5, 7), 10) + '/' + parseInt(ds.slice(8, 10), 10) + '(' + KINTAI_YOBI[d.getDay()] + ')';
+}
+async function loadKintaiDecisionBox() {
+  const box = document.getElementById('kintaiDecisionBox');
+  if (!box) return;
+  try {
+    const data = await _kintaiApi('/kintai/decisions');
+    const rows = data.rows || [];
+    const seen = _kintaiSeenAt();
+    // 直近14日以内に決定されたものだけ表示
+    const cutoff = new Date(Date.now() - 14 * 86400000);
+    const cutoffStr = cutoff.getFullYear() + '-' + _kintaiPad(cutoff.getMonth() + 1) + '-' + _kintaiPad(cutoff.getDate()) + ' 00:00';
+    const recent = rows.filter(function(r) { return String(r.at || '') >= cutoffStr; });
+    if (recent.length === 0) { box.innerHTML = ''; }
+    else {
+      let html = '<div class="home-search-card" style="margin-top:14px;border:1.5px solid #c8e6c9;">';
+      html += '<div style="font-weight:700;margin-bottom:4px;">📬 申請の結果</div>';
+      recent.forEach(function(r) {
+        const isNew = String(r.at || '') > seen;
+        const ok = r.decision === 'approved';
+        html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-top:1px solid #eceff1;' + (isNew ? 'background:#f1f8e9;' : '') + '">';
+        html += '<span style="font-size:18px;line-height:1.2;">' + (ok ? '✅' : '❌') + '</span>';
+        html += '<div style="flex:1;min-width:0;font-size:13px;">';
+        html += '<div><b>' + _kintaiDateJa(r.date) + '</b>　' + _kintaiKubunChip(r.kubun) + '　<span style="color:' + (ok ? '#2e7d32' : '#c62828') + ';font-weight:700;">' + (ok ? '承認されました' : '却下されました') + '</span>' + (isNew ? ' <span style="background:#2e7d32;color:#fff;border-radius:8px;padding:0 6px;font-size:10px;">NEW</span>' : '') + '</div>';
+        if (!ok && r.reason) html += '<div style="color:#c62828;font-size:12px;">理由: ' + escHtml(r.reason) + '</div>';
+        html += '<div style="color:#90a4ae;font-size:11px;">' + escHtml(r.approver || '') + '　' + String(r.at || '').slice(5).replace('-', '/') + '</div>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+      box.innerHTML = html;
+    }
+    // 見た時刻を記録して未読バッジを消す
+    try { localStorage.setItem(KINTAI_SEEN_KEY, _kintaiNowStr()); } catch (e) {}
+    const b = document.getElementById('kintaiStaffBadge');
+    if (b) b.style.display = 'none';
+  } catch (e) {
+    box.innerHTML = '';
+  }
+}
+// ホーム🕐勤怠ボタンの未読結果バッジ (スタッフのみ・refreshApprovalBadges の90秒ポーリングから)
+async function updateKintaiStaffBadge() {
+  const el = document.getElementById('kintaiStaffBadge');
+  if (!el) return;
+  try {
+    if (typeof canUseKintai !== 'function' || !canUseKintai() || (typeof isAdminUser === 'function' && isAdminUser())) { el.style.display = 'none'; return; }
+    const data = await _kintaiApi('/kintai/decisions');
+    const seen = _kintaiSeenAt();
+    const n = (data.rows || []).filter(function(r) { return String(r.at || '') > seen; }).length;
+    el.textContent = n;
+    el.style.display = n > 0 ? '' : 'none';
+  } catch (e) { /* 通信失敗時は前回表示を維持 */ }
+}
+
+// ---------- 役員: 承認/却下の結果を本人へ Teams 1:1 で送る (承認した役員の名前で届く) ----------
+async function _kintaiNotifyTeams(items) {
+  items = (items || []).filter(function(x) { return x && x.upn; });
+  if (items.length === 0) return;
+  const token = await getGraphTokenFor(GRAPH_TEAMS_SEND_SCOPES, true);
+  if (!token) {
+    showToast('Teams通知は送れませんでした（権限の同意が必要）。アプリ内の結果表示とPush通知は届きます', 'error');
+    return;
+  }
+  const me = (typeof getLoggedInEmail === 'function') ? getLoggedInEmail() : '';
+  const H = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+  let sent = 0, fail = 0;
+  for (const it of items) {
+    try {
+      if (!me || it.upn.toLowerCase() === me) continue;   // 自分自身には送らない
+      const chatResp = await fetch('https://graph.microsoft.com/v1.0/chats', { method: 'POST', headers: H, body: JSON.stringify({
+        chatType: 'oneOnOne',
+        members: [
+          { '@odata.type': '#microsoft.graph.aadUserConversationMember', roles: ['owner'], 'user@odata.bind': "https://graph.microsoft.com/v1.0/users('" + me + "')" },
+          { '@odata.type': '#microsoft.graph.aadUserConversationMember', roles: ['owner'], 'user@odata.bind': "https://graph.microsoft.com/v1.0/users('" + it.upn + "')" }
+        ]
+      }) });
+      if (!chatResp.ok) throw new Error('chat ' + chatResp.status);
+      const chat = await chatResp.json();
+      const ok = it.decision === 'approved';
+      const atS = String(it.at || '').slice(5).replace('-', '/');
+      let html = '<div>' + (ok ? '✅ <b>有給・欠勤の申請が承認されました</b>' : '❌ <b>有給・欠勤の申請が却下されました</b>') + '</div>';
+      html += '<div>日付: <b>' + _kintaiDateJa(it.date) + '</b>　区分: <b>' + escHtml(it.kubun || '') + '</b></div>';
+      if (!ok && it.reason) html += '<div>理由: ' + escHtml(it.reason) + '</div>';
+      html += '<div>' + (ok ? '承認者' : '担当') + ': ' + escHtml(it.approver || '') + '　' + atS + '</div>';
+      html += '<div style="color:#666;">ステップ・アップアプリの「🕐勤怠」で確認できます。</div>';
+      const msgResp = await fetch('https://graph.microsoft.com/v1.0/chats/' + chat.id + '/messages', { method: 'POST', headers: H, body: JSON.stringify({ body: { contentType: 'html', content: html } }) });
+      if (!msgResp.ok) throw new Error('message ' + msgResp.status);
+      sent++;
+    } catch (e) {
+      console.warn('[kintai] Teams notify failed:', it.name, e && e.message);
+      fail++;
+    }
+  }
+  if (sent) showToast('本人へ Teams で結果を送りました（' + sent + '件）', 'success');
+  if (fail) showToast('Teams送信に失敗: ' + fail + '件（アプリ内の結果表示とPushは届きます）', 'error');
+}
+function _kintaiAfterDecision(data) {
+  const items = (data && data.notified) || [];
+  if (items.length) _kintaiNotifyTeams(items);
 }
 
 // 📝 申請カードの折り畳み
@@ -43951,10 +44086,11 @@ async function kintaiApproveMember(empNo) {
   const mem = _kintaiAdminMembers.filter(function(m) { return m.empNo === empNo; })[0];
   if (!confirm((mem ? mem.name : empNo) + ' の ' + rows.length + '件を承認しますか？')) return;
   try {
-    await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
+    const data = await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
     loadKintaiPendingBox();
     loadKintaiAdmin();
     try { updateKintaiAdminBadge(); } catch (e2) {}
+    _kintaiAfterDecision(data);
   } catch (e) {
     alert('承認に失敗しました: ' + e.message);
   }
@@ -43965,10 +44101,11 @@ async function kintaiApproveAll() {
   if (rows.length === 0) return;
   if (!confirm('この週の未承認 ' + rows.length + '件をすべて承認しますか？')) return;
   try {
-    await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
+    const data = await _kintaiApi('/kintai/approve', { ids: rows.map(function(r) { return r.id; }) });
     loadKintaiPendingBox();
     loadKintaiAdmin();
     try { updateKintaiAdminBadge(); } catch (e2) {}
+    _kintaiAfterDecision(data);
   } catch (e) {
     alert('承認に失敗しました: ' + e.message);
   }
@@ -43993,6 +44130,7 @@ async function loadKintaiPendingBox() {
       if (r.memo) html += '<div style="font-size:11.5px;color:#78909c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">💬 ' + r.memo + '</div>';
       html += '</div>';
       html += '<button onclick="kintaiApproveOne(' + r.id + ')" style="border:none;border-radius:9px;background:#2e7d32;color:#fff;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;flex-shrink:0;">✅ 承認</button>';
+      html += '<button onclick="kintaiRejectOne(' + r.id + ', \'' + escHtml(r.name + ' ' + String(r.date || '').replace(/-/g, '/') + ' ' + r.kubun).replace(/'/g, '') + '\')" style="border:1.5px solid #ef9a9a;border-radius:9px;background:#fff;color:#c62828;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;">❌ 却下</button>';
       html += '</div>';
     });
     html += '</div>';
@@ -44003,14 +44141,32 @@ async function loadKintaiPendingBox() {
 }
 
 async function kintaiApproveOne(id) {
-  if (!confirm('この申請を承認しますか？')) return;
+  if (!confirm('この申請を承認しますか？\n承認すると本人へ通知（アプリ内・Push・Teams）が届きます。')) return;
   try {
-    await _kintaiApi('/kintai/approve', { ids: [id] });
+    const data = await _kintaiApi('/kintai/approve', { ids: [id] });
     loadKintaiPendingBox();
     loadKintaiAdmin();
     try { updateKintaiAdminBadge(); } catch (e2) {}
+    _kintaiAfterDecision(data);
   } catch (e) {
     alert('承認に失敗しました: ' + e.message);
+  }
+}
+
+// 却下 (理由必須)。区分は「出勤」に戻り、備考に【却下】理由が残る
+async function kintaiRejectOne(id, label) {
+  const reason = prompt('却下の理由を入力してください（本人へ通知されます）\n' + (label || ''), '');
+  if (reason === null) return;
+  if (!String(reason).trim()) { showToast('理由を入力してください', 'error'); return; }
+  try {
+    const data = await _kintaiApi('/kintai/reject', { id: id, reason: String(reason).trim() });
+    loadKintaiPendingBox();
+    loadKintaiAdmin();
+    try { updateKintaiAdminBadge(); } catch (e2) {}
+    showToast('却下しました', 'success');
+    _kintaiAfterDecision(data);
+  } catch (e) {
+    alert('却下に失敗しました: ' + e.message);
   }
 }
 
