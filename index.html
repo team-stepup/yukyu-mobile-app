@@ -31832,10 +31832,33 @@ function _uniformApplyOcr(o) {
   set('uf_PantsSummer', o.pantsSummerQty); set('uf_PantsWinter', o.pantsWinterQty); set('uf_PantsSize', o.pantsSize);
   set('uf_ShoesCm', o.shoesCm); set('uf_Others', o.others); set('uf_Handler', o.handler); set('uf_CompanyId', o.companyId);
   var emp = _uniformEmp;
-  if (o.name && emp && emp.Title && String(o.name).replace(/[\s　]/g, '') !== String(emp.Title).replace(/[\s　]/g, '')) {
+  if (o.name && emp && emp.Title && !_uniformNameMatches(o.name, emp.Title)) {
     var st = document.getElementById('uniformOcrStatus');
-    if (st) st.insertAdjacentHTML('afterend', '<div style="font-size:12px;color:#e65100;font-weight:700;margin-bottom:4px;">⚠ 同意書の氏名「' + escHtml(o.name) + '」が社員氏名と異なります。別人の書類ではないか確認してください</div>');
+    if (st) st.insertAdjacentHTML('afterend', '<div style="font-size:12px;color:#e65100;font-weight:700;margin-bottom:4px;">⚠ 同意書の氏名「' + escHtml(o.name) + '」が社員氏名「' + escHtml(emp.Title) + '」と大きく異なります。別人の書類ではないか確認してください</div>');
   }
+}
+// 手書きカタカナの読み違い(ン↔シ、ソ↔ン、長音の有無、濁点の落ち等)を許容する氏名照合。
+//   正規化(空白除去・全角カナ・濁点/半濁点除去・長音除去)後、編集距離が 長さの25% (最低2文字) 以内なら同一とみなす
+function _uniformNameMatches(a, b) {
+  function norm(s) {
+    var t = String(s || '').normalize('NFKC').replace(/[\s　・･]/g, '');
+    t = t.replace(/[ぁ-ゖ]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) + 0x60); });   // ひらがな→カタカナ
+    t = t.normalize('NFD').replace(/[゙゚]/g, '').normalize('NFC');   // 濁点・半濁点を除去
+    t = t.replace(/[ーｰ－-]/g, '').replace(/[ンソシツ]/g, 'ン');   // 長音無視・手書きで混同しやすい文字を同一視
+    return t.toUpperCase();
+  }
+  var x = norm(a), y = norm(b);
+  if (!x || !y) return true;
+  if (x === y || x.indexOf(y) >= 0 || y.indexOf(x) >= 0) return true;
+  var m = x.length, n = y.length, prev = [], cur = [], i, j;
+  for (j = 0; j <= n; j++) prev[j] = j;
+  for (i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    prev = cur.slice();
+  }
+  var dist = prev[n];
+  return dist <= Math.max(2, Math.round(Math.max(m, n) * 0.25));
 }
 function uniformCloseForm() {
   var ov = document.getElementById('uniformFormOverlay'); if (ov) ov.remove();
