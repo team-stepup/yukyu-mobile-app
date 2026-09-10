@@ -48561,6 +48561,7 @@ async function openTaishaForm() {
         '</div>' +
       '</div>' +
       '<div class="taisha-body">' +
+        '<div id="taishaUniformBox"></div>' +
         '<div class="taisha-field">' +
           '<label>退社区分</label>' +
           '<select id="taisha_kubun" onchange="onTaishaKubunChange()">' +
@@ -48623,7 +48624,51 @@ async function openTaishaForm() {
   document.body.appendChild(overlay);
   var panel = overlay.querySelector('.taisha-panel');
   if (panel) panel.scrollTop = 0;
+  // 👕 作業服(制服)が貸与中なら返却の注意を表示 (2026-09-10)
+  window._taishaUniformActive = [];
+  try { _taishaLoadUniform(currentEmployee); } catch (e) { console.warn('taisha uniform:', e); }
 
+}
+
+// 退社報告: 貸与中の作業服を警告表示し、その場で返却済にできる
+async function _taishaLoadUniform(emp) {
+  var box = document.getElementById('taishaUniformBox');
+  if (!box || !emp) return;
+  var empNo = String(emp[F.syainNo] || '').replace(/\.0+$/, '').trim();
+  if (!empNo) return;
+  var rows = [];
+  try {
+    rows = await spGet(LIST_UNIFORM_GUID,
+      "$select=Id,LoanDate,Haken,CapQty,CapSize,TopSummer,TopWinter,TopSize,PantsSummer,PantsWinter,PantsSize,ShoesCm,Others,Status" +
+      "&$filter=EmpNo eq '" + empNo + "' and Status ne '返却済'&$orderby=LoanDate desc&$top=20") || [];
+  } catch (e) { console.warn('taisha uniform load:', e); return; }
+  window._taishaUniformActive = rows;
+  if (!rows.length) { box.innerHTML = ''; return; }
+  var h = '<div style="background:#fff8e1;border:2px solid #ffb300;border-radius:12px;padding:10px 12px;margin-bottom:12px;">';
+  h += '<div style="font-weight:800;color:#e65100;font-size:13.5px;">👕 作業服（制服）が貸与中です　' + rows.length + '件</div>';
+  h += '<div style="font-size:11.5px;color:#795548;margin:3px 0 6px;line-height:1.5;">退社時に洗濯した状態で返却を受けてください。未返却・紛失は新品相当額の弁償対象です。返却を確認したら「返却済にする」を押してください。</div>';
+  rows.forEach(function(r) {
+    h += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #ffe0b2;">';
+    h += '<div style="flex:1;min-width:0;font-size:12.5px;"><b>📅 ' + escHtml(String(r.LoanDate || '').replace(/-/g, '/')) + '</b>' + (r.Haken ? ' <span style="color:#888;font-size:11px;">' + escHtml(r.Haken) + '</span>' : '') + '<br>' + escHtml(typeof _uniformSummary === 'function' ? _uniformSummary(r) : '') + '</div>';
+    h += '<button onclick="_taishaUniformReturn(' + r.Id + ')" style="border:none;border-radius:9px;background:#2e7d32;color:#fff;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;white-space:nowrap;">↩ 返却済にする</button>';
+    h += '</div>';
+  });
+  h += '</div>';
+  box.innerHTML = h;
+}
+async function _taishaUniformReturn(id) {
+  var hd = document.getElementById('taisha_hakenDate');
+  var def = (hd && hd.value) ? hd.value : ((typeof _kintaiTodayStr === 'function') ? _kintaiTodayStr() : '');
+  var d = prompt('返却日を入力してください (YYYY-MM-DD)', def);
+  if (d === null) return;
+  d = String(d).trim().replace(/\//g, '-');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { showToast('日付の形式が違います', 'error'); return; }
+  try {
+    await spMergeListItem(LIST_UNIFORM_GUID, id, { Status: '返却済', ReturnDate: d });
+    showToast('返却済にしました', 'success');
+    await _taishaLoadUniform(currentEmployee);
+    if (typeof _uniformRows !== 'undefined' && document.getElementById('uniformBody')) { try { renderEmployeeUniform(currentEmployee); } catch (e) {} }
+  } catch (e) { showToast('更新失敗: ' + (e.message || e), 'error'); }
 }
 
 function closeTaishaForm() {
@@ -48715,10 +48760,13 @@ async function submitTaishaForm() {
          '渡し方: ' + escHtml(watashi || '-') + '<br>' +
          '次回採用: ' + escHtml(jikai || '-') + '<br>' +
          '<span style="color:#c62828;font-weight:700;">→ 採用種別を「退社」に設定</span>')) +
+    ((window._taishaUniformActive || []).length
+      ? '<div style="margin-top:8px;background:#fff8e1;border:1.5px solid #ffb300;border-radius:8px;padding:6px 8px;color:#e65100;font-weight:700;">⚠ 作業服 貸与中 ' + window._taishaUniformActive.length + '件 が未返却のままです。返却を受けたら退社報告画面の「返却済にする」を押してください。</div>'
+      : '') +
     '</div>' +
     '<div class="confirm-btns">' +
     '<button class="btn-cancel" onclick="this.closest(\'.confirm-overlay\').remove()">戻る</button>' +
-    '<button class="btn-ok" id="taishaConfirmOk">送信する</button>' +
+    '<button class="btn-ok" id="taishaConfirmOk">' + ((window._taishaUniformActive || []).length ? '未返却のまま送信する' : '送信する') + '</button>' +
     '</div></div>';
   document.body.appendChild(overlay);
   overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
