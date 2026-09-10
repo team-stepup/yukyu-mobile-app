@@ -31812,7 +31812,10 @@ async function uniformShowForm(row, imageDataUrl) {
       var small = await _resizeForCloud(imageDataUrl);
       ov._imageDataUrl = small;   // 保存する画像も長辺2000pxのJPEG (容量節約)
       // 季節(夏/冬)の囲み枠の判定: gpt-4o-mini/gpt-4o は不安定(合成画像テスト gpt-4o 1/3正解)、Claude ビジョンは 3/3 正解 → この書類は model 'claude' (2026-09-10)
-      var o = await cloudDocOcr('uniform', { images: [small], model: 'claude' });
+      // 受領品目の帯 (用紙の上から 30〜85%) を元解像度から切り出して2枚目に渡す → 実写の細い囲み枠を確実に判定
+      var band = null;
+      try { band = await _uniformCropBand(imageDataUrl, 0.30, 0.85); } catch (eB) { band = null; }
+      var o = await cloudDocOcr('uniform', { images: band ? [small, band] : [small], model: 'claude' });
       _uniformApplyOcr(o);
       var st = document.getElementById('uniformOcrStatus');
       if (st) { st.textContent = '✅ 読み取り完了。内容を確認して保存してください'; st.style.color = '#2e7d32'; }
@@ -31821,6 +31824,30 @@ async function uniformShowForm(row, imageDataUrl) {
       if (st2) { st2.textContent = '⚠ AI読取に失敗しました。手入力してください（' + (e.message || e) + '）'; st2.style.color = '#c62828'; }
     }
   }
+}
+// 画像の縦方向の帯 (y0〜y1 割合) を元解像度から切り出し、幅≤2000px の JPEG dataURL で返す (受領品目の拡大用)
+function _uniformCropBand(dataUrl, y0, y1) {
+  return new Promise(function(resolve) {
+    try {
+      var img = new Image();
+      img.onload = function() {
+        try {
+          var W = img.width, H = img.height;
+          if (W > H) { resolve(null); return; }   // 横向き写真は帯の位置が読めないので全体のみ
+          var top = Math.round(H * y0), bottom = Math.round(H * y1);
+          var scale = Math.min(1.6, 2000 / W);      // 小さい写真は少し拡大 (最大1.6倍)
+          var cv = document.createElement('canvas');
+          cv.width = Math.round(W * scale); cv.height = Math.round((bottom - top) * scale);
+          var ctx = cv.getContext('2d');
+          ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, top, W, bottom - top, 0, 0, cv.width, cv.height);
+          resolve(cv.toDataURL('image/jpeg', 0.9));
+        } catch (e) { resolve(null); }
+      };
+      img.onerror = function() { resolve(null); };
+      img.src = dataUrl;
+    } catch (e) { resolve(null); }
+  });
 }
 function _uniformApplyOcr(o) {
   if (!o) return;
