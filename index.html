@@ -6887,6 +6887,7 @@ const LIST_EMPLOYEES_GUID = '05a5a986-5958-4664-bb0d-7c1cfaedf845';
 const LIST_LEAVE_GUID = 'fe50ad49-5069-401d-ab2f-8d94fa826d1d';
 const LIST_MAEBARI_GUID = 'd34be315-365a-460f-976e-fb8da6977cec';
 const LIST_SHUKKIN_GUID = '011dde26-b333-4117-ba6d-342c72a98832'; // 出勤率(★出勤率xlsxから月次同期)
+const LIST_UNIFORM_GUID = '5962252e-2ac5-45c6-85d5-6058044b6335'; // 作業服貸与 (派遣先からの制服貸与記録・2026-09-10)
 const LIST_ITEM_ENTITY = 'SP.Data.List10ListItem';
 const LIST_MAEBARI_ENTITY = 'SP.Data.List1ListItem';
 
@@ -31532,6 +31533,19 @@ async function loadEmployeeProfile() {
   html +=   '</div></div>';
   html += '</div>';
 
+  // 👕 作業服貸与 (派遣先からの制服貸与同意書: 写真/ファイル取込→AI読取→List「作業服貸与」+社員フォルダに画像保存・2026-09-10)
+  html += '<div class="accordion-section" id="acc_uniform">';
+  html +=   '<div class="accordion-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+  html +=     '<span class="acc-icon">👕</span>';
+  html +=     '<span>作業服貸与</span>';
+  html +=     '<span id="uniformCountBadge" style="margin-left:6px;background:#f5f5f5;color:#999;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap;">…</span>';
+  html +=     '<span class="acc-arrow" style="margin-left:auto;">&#9654;</span>';
+  html +=   '</div>';
+  html +=   '<div class="accordion-body"><div id="uniformBody">';
+  html +=     '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:14px 8px;">読み込み中...</div>';
+  html +=   '</div></div>';
+  html += '</div>';
+
   // 📱 従業員ポータル PIN (本人が忘れた時に総務がリセット → 初回設定やり直し)
   const _ppVal = emp[PORTAL_PIN_ODATA_KEY];
   const _pinSet = !!(_ppVal && String(_ppVal).trim());
@@ -31580,6 +31594,8 @@ async function loadEmployeeProfile() {
 
   // 月別出勤率を非同期で取得・描画
   try { renderEmployeeShukkinRate(emp[F.syainNo]); } catch (e) { console.warn('出勤率描画エラー', e); }
+  // 作業服貸与を非同期で取得・描画
+  try { renderEmployeeUniform(emp); } catch (e) { console.warn('作業服貸与描画エラー', e); }
 
   // 更新履歴を非同期で取得・描画 (役員のみ)
   if (_isAdmin) {
@@ -31588,6 +31604,361 @@ async function loadEmployeeProfile() {
       renderEmployeeUpdateHistory(_empId, fieldsMeta);
     }
   }
+}
+
+// ============================================================
+// 👕 作業服貸与 (社員詳細) — List「作業服貸与」(LIST_UNIFORM_GUID) + 画像は社員フォルダ
+//   取込: 📷カメラ / 📁ファイル(画像・PDF) / ドラッグ&ドロップ → AI読取(docType 'uniform') → 確認フォーム → 保存
+//   ASTI が 2026-09 から制服貸与に変わったため追加 (他の派遣先でも使える)
+// ============================================================
+var _uniformEmp = null;
+var _uniformRows = [];
+var _uniformQueue = [];      // 複数ファイル取込の待ち行列 (dataURL)
+var _uniformImgUrl = null;   // 画像ビューアの objectURL
+
+function _uniformEmpNo(emp) { return String((emp && emp[F.syainNo]) || '').replace(/\.0+$/, '').trim(); }
+function _uniformN(v) { var n = Number(v); return (v === null || v === undefined || v === '' || isNaN(n)) ? 0 : n; }
+function _uniformDateJa(ds) { return ds ? String(ds).replace(/-/g, '/') : ''; }
+
+// 貸与品の要約 (例: 上衣 夏2 M / ズボン 冬1 LL / 静電靴 25.5cm)
+function _uniformSummary(r) {
+  var parts = [];
+  if (_uniformN(r.CapQty)) parts.push('帽子' + _uniformN(r.CapQty) + (r.CapSize ? ' ' + r.CapSize : ''));
+  var top = [];
+  if (_uniformN(r.TopSummer)) top.push('夏' + _uniformN(r.TopSummer));
+  if (_uniformN(r.TopWinter)) top.push('冬' + _uniformN(r.TopWinter));
+  if (top.length || r.TopSize) parts.push('上衣 ' + top.join('・') + (r.TopSize ? ' ' + r.TopSize : ''));
+  var pt = [];
+  if (_uniformN(r.PantsSummer)) pt.push('夏' + _uniformN(r.PantsSummer));
+  if (_uniformN(r.PantsWinter)) pt.push('冬' + _uniformN(r.PantsWinter));
+  if (pt.length || r.PantsSize) parts.push('ズボン ' + pt.join('・') + (r.PantsSize ? ' ' + r.PantsSize : ''));
+  if (r.ShoesCm) parts.push('静電靴 ' + r.ShoesCm + 'cm');
+  if (r.Others) parts.push('その他: ' + r.Others);
+  return parts.join(' ／ ') || '(品目未入力)';
+}
+
+async function renderEmployeeUniform(emp) {
+  _uniformEmp = emp;
+  var body = document.getElementById('uniformBody');
+  if (!body) return;
+  var empNo = _uniformEmpNo(emp);
+  try {
+    _uniformRows = empNo ? (await spGet(LIST_UNIFORM_GUID,
+      "$select=Id,Title,EmpNo,Haken,LoanDate,CapQty,CapSize,TopSummer,TopWinter,TopSize,PantsSummer,PantsWinter,PantsSize,ShoesCm,Others,Handler,CompanyId,ImagePath,Status,ReturnDate,Memo" +
+      "&$filter=EmpNo eq '" + empNo + "'&$orderby=LoanDate desc&$top=50") || []) : [];
+  } catch (e) {
+    console.warn('作業服貸与 取得失敗', e);
+    body.innerHTML = '<div style="color:#c62828;font-size:12px;text-align:center;padding:10px;">読み込みに失敗しました: ' + escHtml(e.message || e) + '</div>';
+    return;
+  }
+  _uniformPaint();
+}
+
+function _uniformPaint() {
+  var body = document.getElementById('uniformBody');
+  if (!body) return;
+  var rows = _uniformRows || [];
+  var active = rows.filter(function(r) { return r.Status !== '返却済'; });
+  var badge = document.getElementById('uniformCountBadge');
+  if (badge) {
+    if (active.length) { badge.textContent = '貸与中 ' + active.length + '件'; badge.style.background = '#e8f5e9'; badge.style.color = '#2e7d32'; }
+    else if (rows.length) { badge.textContent = '返却済 ' + rows.length + '件'; badge.style.background = '#f5f5f5'; badge.style.color = '#999'; }
+    else { badge.textContent = '未登録'; badge.style.background = '#f5f5f5'; badge.style.color = '#999'; }
+  }
+  var h = '';
+  if (!rows.length) {
+    h += '<div style="color:var(--text-light);font-size:12px;text-align:center;padding:6px 8px 10px;">貸与記録はまだありません。同意書を撮影またはファイルから取り込んでください。</div>';
+  }
+  rows.forEach(function(r) {
+    var ret = r.Status === '返却済';
+    h += '<div style="border:1px solid ' + (ret ? '#e0e0e0' : '#c8e6c9') + ';border-radius:10px;padding:9px 10px;margin-bottom:8px;background:' + (ret ? '#fafafa' : '#fff') + ';' + (ret ? 'opacity:.75;' : '') + '">';
+    h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+    h += '<span style="font-weight:700;font-size:13px;">📅 ' + escHtml(_uniformDateJa(r.LoanDate) || '日付未入力') + '</span>';
+    h += '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;' + (ret ? 'background:#eeeeee;color:#777;">返却済 ' + escHtml(_uniformDateJa(r.ReturnDate)) : 'background:#e8f5e9;color:#2e7d32;">貸与中') + '</span>';
+    if (r.Haken) h += '<span style="font-size:10.5px;color:#888;">' + escHtml(r.Haken) + '</span>';
+    h += '</div>';
+    h += '<div style="font-size:12.5px;margin-top:4px;line-height:1.5;">' + escHtml(_uniformSummary(r)) + '</div>';
+    if (r.Handler) h += '<div style="font-size:11px;color:#888;margin-top:2px;">引渡担当: ' + escHtml(r.Handler) + (r.CompanyId ? '　ID ' + escHtml(r.CompanyId) : '') + '</div>';
+    if (r.Memo) h += '<div style="font-size:11px;color:#888;margin-top:2px;">💬 ' + escHtml(r.Memo) + '</div>';
+    h += '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap;">';
+    if (r.ImagePath) h += '<button onclick="uniformOpenImage(' + r.Id + ')" style="border:1px solid #90caf9;background:#e3f2fd;color:#1565c0;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:700;cursor:pointer;">🖼 画像を見る</button>';
+    else h += '<span style="font-size:11px;color:#bbb;align-self:center;">画像なし</span>';
+    h += '<button onclick="uniformEdit(' + r.Id + ')" style="border:1px solid #ddd;background:#fff;color:#555;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:700;cursor:pointer;">✏️ 編集</button>';
+    if (!ret) h += '<button onclick="uniformReturn(' + r.Id + ')" style="border:1px solid #ffcc80;background:#fff8e1;color:#e65100;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:700;cursor:pointer;">↩ 返却済にする</button>';
+    h += '<button onclick="uniformDelete(' + r.Id + ')" style="border:1px solid #ef9a9a;background:#fff;color:#c62828;border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:700;cursor:pointer;margin-left:auto;">🗑</button>';
+    h += '</div>';
+    h += '</div>';
+  });
+  // 取込エリア (カメラ / ファイル / ドラッグ&ドロップ)
+  h += '<div id="uniformDrop" ondragover="uniformDragOver(event)" ondragleave="uniformDragLeave(event)" ondrop="uniformDrop(event)" ' +
+       'style="border:2px dashed #90caf9;border-radius:12px;padding:12px 10px;text-align:center;background:#f7fbff;margin-top:4px;">';
+  h += '<div style="font-size:12px;color:#1565c0;font-weight:700;margin-bottom:8px;">➕ 貸与同意書を取り込む（AIが品目・サイズを読み取ります）</div>';
+  h += '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">';
+  h += '<label style="background:linear-gradient(135deg,#1565c0,#42a5f5);color:#fff;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">📷 カメラで撮影<input type="file" accept="image/*" capture="environment" style="display:none;" onchange="uniformFilesSelected(this.files);this.value=\'\';"></label>';
+  h += '<label style="background:#fff;border:1.5px solid #1565c0;color:#1565c0;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">📁 ファイルを選ぶ<input type="file" accept="image/*,application/pdf" multiple style="display:none;" onchange="uniformFilesSelected(this.files);this.value=\'\';"></label>';
+  h += '</div>';
+  h += '<div style="font-size:10.5px;color:#888;margin-top:8px;">PCでは画像やPDFをここにドラッグ＆ドロップでも取り込めます（複数可）</div>';
+  h += '<div id="uniformProg" style="font-size:12px;color:#1565c0;margin-top:6px;display:none;"></div>';
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+function uniformDragOver(e) { e.preventDefault(); e.stopPropagation(); var z = document.getElementById('uniformDrop'); if (z) { z.style.background = '#e3f2fd'; z.style.borderColor = '#1565c0'; } }
+function uniformDragLeave(e) { e.preventDefault(); var z = document.getElementById('uniformDrop'); if (z) { z.style.background = '#f7fbff'; z.style.borderColor = '#90caf9'; } }
+function uniformDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  uniformDragLeave(e);
+  var files = (e.dataTransfer && e.dataTransfer.files) ? e.dataTransfer.files : null;
+  if (files && files.length) uniformFilesSelected(files);
+}
+function _uniformProg(msg) { var p = document.getElementById('uniformProg'); if (!p) return; if (msg) { p.textContent = msg; p.style.display = ''; } else { p.style.display = 'none'; } }
+
+// 選択/撮影/ドロップされたファイル → 画像(dataURL)に展開して順に確認フォームへ
+async function uniformFilesSelected(fileList) {
+  if (!_uniformEmp) { showToast('社員を選択してください', 'error'); return; }
+  var files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  try {
+    _uniformProg('📄 画像を準備中…');
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+      if (isPdf) {
+        var pages = await _localPdfToPageImages(f, 3);
+        pages.forEach(function(p) { _uniformQueue.push(p); });
+      } else if (/^image\//.test(f.type) || /\.(jpe?g|png|heic|webp)$/i.test(f.name)) {
+        _uniformQueue.push(await _readFileAsDataUrl(f));
+      } else {
+        showToast(f.name + ' は画像/PDFではありません', 'error');
+      }
+    }
+  } catch (e) {
+    showToast('読込失敗: ' + (e.message || e), 'error');
+  } finally { _uniformProg(''); }
+  _uniformNextFromQueue();
+}
+
+function _uniformNextFromQueue() {
+  if (!_uniformQueue.length) return;
+  if (document.getElementById('uniformFormOverlay')) return;   // フォーム表示中は保存/閉じるの後に続く
+  var du = _uniformQueue.shift();
+  uniformShowForm(null, du);
+}
+
+function _uniformField(id, label, value, opt) {
+  opt = opt || {};
+  var w = opt.width || '100%';
+  var s = '<label style="display:block;font-size:11px;color:#666;font-weight:700;margin-top:8px;">' + label + '</label>';
+  s += '<input type="' + (opt.type || 'text') + '" id="' + id + '" value="' + escHtml(value === null || value === undefined ? '' : String(value)) + '" ' + (opt.placeholder ? 'placeholder="' + opt.placeholder + '" ' : '') +
+       (opt.inputmode ? 'inputmode="' + opt.inputmode + '" ' : '') +
+       'style="width:' + w + ';padding:8px 10px;border:1.5px solid #ccc;border-radius:8px;font-size:14px;box-sizing:border-box;">';
+  return s;
+}
+
+// 確認/編集フォーム。row=既存行(編集) / imageDataUrl=新規取込の画像
+async function uniformShowForm(row, imageDataUrl) {
+  var emp = _uniformEmp;
+  if (!emp) return;
+  var old = document.getElementById('uniformFormOverlay'); if (old) old.remove();
+  var isNew = !row;
+  var v = row ? Object.assign({}, row) : {
+    Title: emp.Title || '', EmpNo: _uniformEmpNo(emp),
+    Haken: (typeof stripBukaPrefix === 'function' && typeof getBukaValue === 'function') ? stripBukaPrefix(getBukaValue(emp)) : '',
+    LoanDate: _kintaiTodayStr ? _kintaiTodayStr() : '', Status: '貸与中'
+  };
+  var ov = document.createElement('div');
+  ov.id = 'uniformFormOverlay';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto;';
+  var h = '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);margin:auto;">';
+  h += '<div style="padding:12px 16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#e3f2fd;border-radius:12px 12px 0 0;">';
+  h += '<h3 style="margin:0;font-size:15px;color:#1565c0;">👕 作業服貸与 ' + (isNew ? '取込' : '編集') + '</h3>';
+  h += '<button onclick="uniformCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">×</button></div>';
+  h += '<div style="padding:12px 16px;">';
+  h += '<div style="font-size:13px;margin-bottom:6px;"><b>' + escHtml(emp.Title || '') + '</b> <span style="color:#888;">(' + escHtml(_uniformEmpNo(emp)) + ')</span></div>';
+  if (imageDataUrl) {
+    h += '<div style="text-align:center;background:#f5f5f5;border-radius:8px;padding:6px;"><img id="uniformFormImg" src="' + imageDataUrl + '" style="max-width:100%;max-height:220px;border-radius:6px;object-fit:contain;"></div>';
+    h += '<div id="uniformOcrStatus" style="font-size:12px;color:#1565c0;font-weight:700;margin:6px 0;">🔎 AIが読み取り中…（10〜20秒）</div>';
+  }
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;">';
+  h += '<div>' + _uniformField('uf_LoanDate', '貸与日', v.LoanDate, { type: 'date' }) + '</div>';
+  h += '<div>' + _uniformField('uf_Haken', '派遣先', v.Haken) + '</div>';
+  h += '<div>' + _uniformField('uf_CapQty', '帽子 (個)', v.CapQty, { inputmode: 'numeric' }) + '</div>';
+  h += '<div>' + _uniformField('uf_CapSize', '帽子サイズ', v.CapSize) + '</div>';
+  h += '<div>' + _uniformField('uf_TopSummer', '上衣 夏 (枚)', v.TopSummer, { inputmode: 'numeric' }) + '</div>';
+  h += '<div>' + _uniformField('uf_TopWinter', '上衣 冬 (枚)', v.TopWinter, { inputmode: 'numeric' }) + '</div>';
+  h += '<div>' + _uniformField('uf_TopSize', '上衣サイズ', v.TopSize, { placeholder: 'M / L / LL' }) + '</div>';
+  h += '<div>' + _uniformField('uf_ShoesCm', '静電靴 (cm)', v.ShoesCm, { inputmode: 'decimal' }) + '</div>';
+  h += '<div>' + _uniformField('uf_PantsSummer', 'ズボン 夏 (枚)', v.PantsSummer, { inputmode: 'numeric' }) + '</div>';
+  h += '<div>' + _uniformField('uf_PantsWinter', 'ズボン 冬 (枚)', v.PantsWinter, { inputmode: 'numeric' }) + '</div>';
+  h += '<div>' + _uniformField('uf_PantsSize', 'ズボンサイズ', v.PantsSize) + '</div>';
+  h += '<div>' + _uniformField('uf_Handler', '引渡担当者', v.Handler) + '</div>';
+  h += '</div>';
+  h += _uniformField('uf_Others', 'その他', v.Others);
+  h += _uniformField('uf_CompanyId', '派遣会社ID', v.CompanyId, { placeholder: '1000000131' });
+  h += _uniformField('uf_Memo', '備考', v.Memo);
+  h += '</div>';
+  h += '<div style="padding:10px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;">';
+  h += '<button onclick="uniformCloseForm()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer;">キャンセル</button>';
+  h += '<button id="uniformSaveBtn" onclick="uniformSave()" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">💾 保存</button>';
+  h += '</div></div>';
+  ov.innerHTML = h;
+  ov.addEventListener('click', function(e) { if (e.target === ov) uniformCloseForm(); });
+  document.body.appendChild(ov);
+  ov._row = row || null;
+  ov._imageDataUrl = imageDataUrl || null;
+  if (imageDataUrl) {
+    try {
+      var small = await _resizeForCloud(imageDataUrl);
+      ov._imageDataUrl = small;   // 保存する画像も長辺2000pxのJPEG (容量節約)
+      var o = await cloudDocOcr('uniform', { images: [small] });
+      _uniformApplyOcr(o);
+      var st = document.getElementById('uniformOcrStatus');
+      if (st) { st.textContent = '✅ 読み取り完了。内容を確認して保存してください'; st.style.color = '#2e7d32'; }
+    } catch (e) {
+      var st2 = document.getElementById('uniformOcrStatus');
+      if (st2) { st2.textContent = '⚠ AI読取に失敗しました。手入力してください（' + (e.message || e) + '）'; st2.style.color = '#c62828'; }
+    }
+  }
+}
+function _uniformApplyOcr(o) {
+  if (!o) return;
+  function set(id, val) { var el = document.getElementById(id); if (el && val !== null && val !== undefined && val !== '' && !el.value) el.value = String(val); }
+  var d = String(o.date || '').replace(/\//g, '-');
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(d)) { var p = d.split('-'); d = p[0] + '-' + p[1].padStart(2, '0') + '-' + p[2].padStart(2, '0'); set('uf_LoanDate', d); }
+  set('uf_CapQty', o.capQty); set('uf_CapSize', o.capSize);
+  set('uf_TopSummer', o.topSummerQty); set('uf_TopWinter', o.topWinterQty); set('uf_TopSize', o.topSize);
+  set('uf_PantsSummer', o.pantsSummerQty); set('uf_PantsWinter', o.pantsWinterQty); set('uf_PantsSize', o.pantsSize);
+  set('uf_ShoesCm', o.shoesCm); set('uf_Others', o.others); set('uf_Handler', o.handler); set('uf_CompanyId', o.companyId);
+  var emp = _uniformEmp;
+  if (o.name && emp && emp.Title && String(o.name).replace(/[\s　]/g, '') !== String(emp.Title).replace(/[\s　]/g, '')) {
+    var st = document.getElementById('uniformOcrStatus');
+    if (st) st.insertAdjacentHTML('afterend', '<div style="font-size:12px;color:#e65100;font-weight:700;margin-bottom:4px;">⚠ 同意書の氏名「' + escHtml(o.name) + '」が社員氏名と異なります。別人の書類ではないか確認してください</div>');
+  }
+}
+function uniformCloseForm() {
+  var ov = document.getElementById('uniformFormOverlay'); if (ov) ov.remove();
+  setTimeout(_uniformNextFromQueue, 100);
+}
+
+async function uniformSave() {
+  var ov = document.getElementById('uniformFormOverlay'); if (!ov) return;
+  var emp = _uniformEmp; if (!emp) return;
+  function g(id) { var el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; }
+  function num(id) { var s = g(id); if (!s) return null; var n = Number(s); return isNaN(n) ? null : n; }
+  var loanDate = g('uf_LoanDate');
+  if (!loanDate) { showToast('貸与日を入力してください', 'error'); return; }
+  var btn = document.getElementById('uniformSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
+  try {
+    var body = {
+      Title: emp.Title || '', EmpNo: _uniformEmpNo(emp), Haken: g('uf_Haken'), LoanDate: loanDate,
+      CapQty: num('uf_CapQty'), CapSize: g('uf_CapSize').toUpperCase(),
+      TopSummer: num('uf_TopSummer'), TopWinter: num('uf_TopWinter'), TopSize: g('uf_TopSize').toUpperCase(),
+      PantsSummer: num('uf_PantsSummer'), PantsWinter: num('uf_PantsWinter'), PantsSize: g('uf_PantsSize').toUpperCase(),
+      ShoesCm: g('uf_ShoesCm'), Others: g('uf_Others'), Handler: g('uf_Handler'), CompanyId: g('uf_CompanyId'), Memo: g('uf_Memo')
+    };
+    // 画像 → 社員フォルダへ (新規取込時)
+    if (ov._imageDataUrl) {
+      var folder = await getEmpFolderPath(emp);
+      if (!folder) throw new Error('社員フォルダのパスを決められません（派遣先・氏名を確認）');
+      try { await ensureSpFolder(folder); } catch (e1) { console.warn('ensureSpFolder warn:', e1); }
+      var fname = '作業服貸与_' + _uniformEmpNo(emp) + '_' + loanDate.replace(/-/g, '') + '_' + Date.now().toString(36).slice(-4) + '.jpg';
+      await uploadFileToSp(folder, fname, _dataUrlToFile(ov._imageDataUrl, fname));
+      body.ImagePath = folder + '/' + fname;
+    }
+    if (ov._row) {
+      await spMergeListItem(LIST_UNIFORM_GUID, ov._row.Id, body);
+      showToast('作業服貸与を更新しました', 'success');
+    } else {
+      body.Status = '貸与中';
+      await spPost(LIST_UNIFORM_GUID, body);
+      showToast('作業服貸与を登録しました' + (body.ImagePath ? '（画像を社員フォルダに保存）' : ''), 'success');
+    }
+    ov.remove();
+    await renderEmployeeUniform(emp);
+    setTimeout(_uniformNextFromQueue, 100);
+  } catch (e) {
+    console.error('uniform save error', e);
+    showToast('保存失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+  }
+}
+
+function uniformEdit(id) {
+  var r = (_uniformRows || []).find(function(x) { return x.Id === id; });
+  if (r) uniformShowForm(r, null);
+}
+async function uniformReturn(id) {
+  var r = (_uniformRows || []).find(function(x) { return x.Id === id; });
+  if (!r) return;
+  var d = prompt('返却日を入力してください (YYYY-MM-DD)', (typeof _kintaiTodayStr === 'function') ? _kintaiTodayStr() : '');
+  if (d === null) return;
+  d = String(d).trim().replace(/\//g, '-');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { showToast('日付の形式が違います', 'error'); return; }
+  try {
+    await spMergeListItem(LIST_UNIFORM_GUID, id, { Status: '返却済', ReturnDate: d });
+    showToast('返却済にしました', 'success');
+    await renderEmployeeUniform(_uniformEmp);
+  } catch (e) { showToast('更新失敗: ' + (e.message || e), 'error'); }
+}
+async function uniformDelete(id) {
+  var r = (_uniformRows || []).find(function(x) { return x.Id === id; });
+  if (!r) return;
+  if (!confirm('この貸与記録（' + _uniformDateJa(r.LoanDate) + '）を削除しますか？\n記録はごみ箱へ移動します。社員フォルダの画像はそのまま残ります。')) return;
+  try {
+    await spRecycleListItem(LIST_UNIFORM_GUID, id);
+    showToast('削除しました', 'success');
+    await renderEmployeeUniform(_uniformEmp);
+  } catch (e) { showToast('削除失敗: ' + (e.message || e), 'error'); }
+}
+
+// 画像ビューア (社員フォルダの画像をトークン付きで取得して表示)
+async function uniformOpenImage(id) {
+  var r = (_uniformRows || []).find(function(x) { return x.Id === id; });
+  if (!r || !r.ImagePath) return;
+  showSpinner();
+  try {
+    var token = await getToken();
+    var enc = encodeURIComponent(r.ImagePath).replace(/%2F/g, '/');
+    var resp = await fetch(_spApiBase(r.ImagePath) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!resp.ok) throw new Error('画像を取得できません (' + resp.status + ')');
+    var blob = await resp.blob();
+    if (_uniformImgUrl) { try { URL.revokeObjectURL(_uniformImgUrl); } catch (_) {} }
+    _uniformImgUrl = URL.createObjectURL(blob);
+    var old = document.getElementById('uniformImgOverlay'); if (old) old.remove();
+    var ov = document.createElement('div');
+    ov.id = 'uniformImgOverlay';
+    ov.className = 'no-print';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;display:flex;flex-direction:column;';
+    ov.innerHTML =
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;color:#fff;font-size:13px;">' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">👕 ' + escHtml(_uniformEmp ? _uniformEmp.Title || '' : '') + '　' + escHtml(_uniformDateJa(r.LoanDate)) + '</span>' +
+        '<a href="' + _uniformImgUrl + '" download="' + escHtml(r.ImagePath.split('/').pop()) + '" style="color:#fff;border:1px solid #fff;border-radius:8px;padding:5px 10px;text-decoration:none;font-size:12px;">⬇ 保存</a>' +
+        '<button onclick="document.getElementById(\'uniformImgOverlay\').remove()" style="background:#fff;color:#333;border:none;border-radius:50%;width:34px;height:34px;font-size:18px;font-weight:700;cursor:pointer;">×</button>' +
+      '</div>' +
+      '<div style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:6px;">' +
+        '<img src="' + _uniformImgUrl + '" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;">' +
+      '</div>';
+    document.body.appendChild(ov);
+  } catch (e) {
+    showToast(e.message || String(e), 'error');
+  } finally { hideSpinner(); }
+}
+
+// 汎用: List アイテムの MERGE 更新 (作業服貸与ほか)
+async function spMergeListItem(listGuid, itemId, body) {
+  const token = await getToken();
+  if (!token) throw new Error('認証エラー');
+  const t = await getListItemEntityType(listGuid);
+  const payload = Object.assign({ __metadata: { type: t } }, body);
+  const resp = await fetch(SP_SITE_URL + "/_api/web/lists(guid'" + listGuid + "')/items(" + itemId + ")", {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose', 'Content-Type': 'application/json;odata=verbose', 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+    body: JSON.stringify(payload)
+  });
+  if (!resp.ok) { const et = await resp.text(); console.error('SP MERGE error:', et); throw new Error('更新失敗: ' + resp.status); }
+  return true;
 }
 
 // 出勤率の表示年月: List の YM は支給年月なので、勤怠月(支給月の前月)に変換して表示する
