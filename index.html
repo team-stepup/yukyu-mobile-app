@@ -31777,7 +31777,8 @@ async function uniformShowForm(row, imageDataUrl) {
   h += '<div style="padding:12px 16px;">';
   h += '<div style="font-size:13px;margin-bottom:6px;"><b>' + escHtml(emp.Title || '') + '</b> <span style="color:#888;">(' + escHtml(_uniformEmpNo(emp)) + ')</span></div>';
   if (imageDataUrl) {
-    h += '<div style="text-align:center;background:#f5f5f5;border-radius:8px;padding:6px;"><img id="uniformFormImg" src="' + imageDataUrl + '" style="max-width:100%;max-height:220px;border-radius:6px;object-fit:contain;"></div>';
+    h += '<div style="text-align:center;background:#f5f5f5;border-radius:8px;padding:6px;"><img id="uniformFormImg" src="' + imageDataUrl + '" onclick="_uniformZoom(this.src, \'同意書 全体\')" style="max-width:100%;max-height:200px;border-radius:6px;object-fit:contain;cursor:zoom-in;"><div style="font-size:10.5px;color:#888;margin-top:2px;">タップで拡大（＋−ボタン・ダブルタップで拡大縮小）</div></div>';
+    h += '<div id="uniformBandBox"></div>';
     h += '<div id="uniformOcrStatus" style="font-size:12px;color:#1565c0;font-weight:700;margin:6px 0;">🔎 AIが読み取り中…（10〜20秒）</div>';
   }
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;">';
@@ -31815,6 +31816,12 @@ async function uniformShowForm(row, imageDataUrl) {
       // 受領品目の帯 (用紙の上から 30〜85%) を元解像度から切り出して2枚目に渡す → 実写の細い囲み枠を確実に判定
       var band = null;
       try { band = await _uniformCropBand(imageDataUrl, 0.30, 0.85); } catch (eB) { band = null; }
+      var bandBox = document.getElementById('uniformBandBox');
+      if (bandBox && band) {
+        bandBox.innerHTML = '<div style="font-size:11.5px;color:#1565c0;font-weight:700;margin-top:8px;">🔍 受領品目の部分（拡大）— 四角で囲まれた季節・枚数・サイズを入力欄と見比べてください</div>' +
+          '<div style="overflow-x:auto;border:1.5px solid #90caf9;border-radius:8px;background:#fff;"><img src="' + band + '" onclick="_uniformZoom(this.src, \'受領品目 拡大\')" style="display:block;width:100%;min-width:100%;cursor:zoom-in;"></div>' +
+          '<div style="font-size:10.5px;color:#888;margin-top:2px;">タップでさらに拡大</div>';
+      }
       var o = await cloudDocOcr('uniform', { images: band ? [small, band] : [small], model: 'claude' });
       _uniformApplyOcr(o);
       var st = document.getElementById('uniformOcrStatus');
@@ -31849,6 +31856,52 @@ function _uniformCropBand(dataUrl, y0, y1) {
     } catch (e) { resolve(null); }
   });
 }
+// 画像の拡大ビューア: ＋/－ボタンとダブルタップで倍率変更、指/マウスでスクロール。取込フォーム・記録の画像表示で共用
+var _uniformZoomScale = 1;
+function _uniformZoom(src, title) {
+  var old = document.getElementById('uniformZoomOverlay'); if (old) old.remove();
+  _uniformZoomScale = 1;
+  var ov = document.createElement('div');
+  ov.id = 'uniformZoomOverlay';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:10000;display:flex;flex-direction:column;';
+  ov.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;color:#fff;font-size:13px;">' +
+      '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🔍 ' + escHtml(title || '') + '</span>' +
+      '<button onclick="_uniformZoomBy(-0.5)" style="background:#fff;color:#333;border:none;border-radius:8px;width:40px;height:34px;font-size:18px;font-weight:700;cursor:pointer;">−</button>' +
+      '<span id="uniformZoomPct" style="min-width:44px;text-align:center;font-weight:700;">100%</span>' +
+      '<button onclick="_uniformZoomBy(0.5)" style="background:#fff;color:#333;border:none;border-radius:8px;width:40px;height:34px;font-size:18px;font-weight:700;cursor:pointer;">＋</button>' +
+      '<button onclick="document.getElementById(\'uniformZoomOverlay\').remove()" style="background:#fff;color:#333;border:none;border-radius:50%;width:34px;height:34px;font-size:18px;font-weight:700;cursor:pointer;margin-left:4px;">×</button>' +
+    '</div>' +
+    '<div id="uniformZoomPane" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:4px;">' +
+      '<img id="uniformZoomImg" src="' + src + '" style="display:block;width:100%;max-width:none;user-select:none;-webkit-user-drag:none;">' +
+    '</div>' +
+    '<div style="color:#bbb;font-size:11px;text-align:center;padding:4px 0 8px;">ダブルタップで 100% ⇄ 250%　／　指でなぞって移動</div>';
+  document.body.appendChild(ov);
+  var img = document.getElementById('uniformZoomImg');
+  var pane = document.getElementById('uniformZoomPane');
+  img.addEventListener('dblclick', function() { _uniformZoomSet(_uniformZoomScale > 1 ? 1 : 2.5); });
+  var lastTap = 0;
+  img.addEventListener('touchend', function(e) { var now = Date.now(); if (now - lastTap < 300) { e.preventDefault(); _uniformZoomSet(_uniformZoomScale > 1 ? 1 : 2.5); } lastTap = now; });
+  // マウスのドラッグでスクロール (PC)
+  var drag = null;
+  pane.addEventListener('mousedown', function(e) { drag = { x: e.clientX, y: e.clientY, l: pane.scrollLeft, t: pane.scrollTop }; e.preventDefault(); });
+  window.addEventListener('mousemove', function(e) { if (!drag) return; pane.scrollLeft = drag.l - (e.clientX - drag.x); pane.scrollTop = drag.t - (e.clientY - drag.y); });
+  window.addEventListener('mouseup', function() { drag = null; });
+}
+function _uniformZoomSet(s) {
+  _uniformZoomScale = Math.max(1, Math.min(5, s));
+  var img = document.getElementById('uniformZoomImg'), pct = document.getElementById('uniformZoomPct'), pane = document.getElementById('uniformZoomPane');
+  if (!img || !pane) return;
+  var cx = (pane.scrollLeft + pane.clientWidth / 2) / Math.max(1, img.clientWidth);
+  var cy = (pane.scrollTop + pane.clientHeight / 2) / Math.max(1, img.clientHeight);
+  img.style.width = (_uniformZoomScale * 100) + '%';
+  if (pct) pct.textContent = Math.round(_uniformZoomScale * 100) + '%';
+  pane.scrollLeft = cx * img.clientWidth - pane.clientWidth / 2;
+  pane.scrollTop = cy * img.clientHeight - pane.clientHeight / 2;
+}
+function _uniformZoomBy(d) { _uniformZoomSet(_uniformZoomScale + d); }
+
 function _uniformApplyOcr(o) {
   if (!o) return;
   function set(id, val) { var el = document.getElementById(id); if (el && val !== null && val !== undefined && val !== '' && !el.value) el.value = String(val); }
@@ -31977,6 +32030,10 @@ async function uniformOpenImage(id) {
     var blob = await resp.blob();
     if (_uniformImgUrl) { try { URL.revokeObjectURL(_uniformImgUrl); } catch (_) {} }
     _uniformImgUrl = URL.createObjectURL(blob);
+    _uniformZoom(_uniformImgUrl, (_uniformEmp ? _uniformEmp.Title || '' : '') + '　' + _uniformDateJa(r.LoanDate));
+    var zh = document.querySelector('#uniformZoomOverlay > div');
+    if (zh) zh.insertAdjacentHTML('beforeend', '<a href="' + _uniformImgUrl + '" download="' + escHtml(r.ImagePath.split('/').pop()) + '" style="color:#fff;border:1px solid #fff;border-radius:8px;padding:6px 10px;text-decoration:none;font-size:12px;margin-left:4px;">⬇</a>');
+    return;
     var old = document.getElementById('uniformImgOverlay'); if (old) old.remove();
     var ov = document.createElement('div');
     ov.id = 'uniformImgOverlay';
