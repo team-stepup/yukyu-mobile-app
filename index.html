@@ -32057,6 +32057,31 @@ function uniformAttachImage(id) {
   inp.click();
 }
 
+// 同意書画像をメッセージで送る: 共有シート(ファイル共有対応端末) → 無ければダウンロードして添付してもらう
+async function uniformShareImage(id) {
+  var r = _uniformFindRow(id);
+  if (!r || !_uniformImgBlob) { showToast('先に画像を開いてください', 'error'); return; }
+  var empName = (currentEmployee && currentEmployee.Title) || (_uniformEmp ? _uniformEmp.Title || '' : '');
+  var fname = String(r.ImagePath || '').split('/').pop() || ('作業服貸与_' + _uniformDateJa(r.LoanDate).replace(/\//g, '') + '.jpg');
+  var text = '【作業服貸与 同意書】' + empName + '　貸与日 ' + _uniformDateJa(r.LoanDate) + '\n' + (typeof _uniformSummary === 'function' ? _uniformSummary(r) : '');
+  try {
+    var file = new File([_uniformImgBlob], fname, { type: _uniformImgBlob.type || 'image/jpeg' });
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: '作業服貸与 同意書', text: text });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;   // ユーザーがキャンセル
+    console.warn('share failed:', e);
+  }
+  // フォールバック: ダウンロード → メッセージに添付
+  try {
+    var a = document.createElement('a'); a.href = _uniformImgUrl; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+    try { if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text); } catch (_) {}
+    showToast('画像をダウンロードしました。メッセージに添付して送ってください（説明文はコピー済み）', 'success');
+  } catch (e2) { showToast('送れませんでした: ' + (e2.message || e2), 'error'); }
+}
+
 function uniformEdit(id) {
   var r = (_uniformRows || []).find(function(x) { return x.Id === id; });
   if (r) uniformShowForm(r, null);
@@ -32086,8 +32111,13 @@ async function uniformDelete(id) {
 }
 
 // 画像ビューア (社員フォルダの画像をトークン付きで取得して表示)
+var _uniformImgBlob = null;   // 画像ビューアで開いている画像 (📤 送る 用)
+function _uniformFindRow(id) {
+  return (_uniformRows || []).find(function(x) { return x.Id === id; })
+      || (window._taishaUniformActive || []).find(function(x) { return x.Id === id; }) || null;
+}
 async function uniformOpenImage(id) {
-  var r = (_uniformRows || []).find(function(x) { return x.Id === id; });
+  var r = _uniformFindRow(id);
   if (!r || !r.ImagePath) return;
   showSpinner();
   try {
@@ -32096,11 +32126,17 @@ async function uniformOpenImage(id) {
     var resp = await fetch(_spApiBase(r.ImagePath) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
     if (!resp.ok) throw new Error('画像を取得できません (' + resp.status + ')');
     var blob = await resp.blob();
+    _uniformImgBlob = blob;
     if (_uniformImgUrl) { try { URL.revokeObjectURL(_uniformImgUrl); } catch (_) {} }
     _uniformImgUrl = URL.createObjectURL(blob);
-    _uniformZoom(_uniformImgUrl, (_uniformEmp ? _uniformEmp.Title || '' : '') + '　' + _uniformDateJa(r.LoanDate));
+    var empName = (currentEmployee && currentEmployee.Title) || (_uniformEmp ? _uniformEmp.Title || '' : '');
+    _uniformZoom(_uniformImgUrl, empName + '　' + _uniformDateJa(r.LoanDate));
     var zh = document.querySelector('#uniformZoomOverlay > div');
-    if (zh) zh.insertAdjacentHTML('beforeend', '<a href="' + _uniformImgUrl + '" download="' + escHtml(r.ImagePath.split('/').pop()) + '" style="color:#fff;border:1px solid #fff;border-radius:8px;padding:6px 10px;text-decoration:none;font-size:12px;margin-left:4px;">⬇</a>');
+    if (zh) {
+      zh.insertAdjacentHTML('beforeend',
+        '<button onclick="uniformShareImage(' + r.Id + ')" style="background:#1565c0;color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-left:4px;white-space:nowrap;">📤 送る</button>' +
+        '<a href="' + _uniformImgUrl + '" download="' + escHtml(r.ImagePath.split('/').pop()) + '" style="color:#fff;border:1px solid #fff;border-radius:8px;padding:6px 10px;text-decoration:none;font-size:12px;margin-left:4px;">⬇</a>');
+    }
     return;
     var old = document.getElementById('uniformImgOverlay'); if (old) old.remove();
     var ov = document.createElement('div');
@@ -48707,7 +48743,7 @@ async function _taishaLoadUniform(emp) {
   var rows = [];
   try {
     rows = await spGet(LIST_UNIFORM_GUID,
-      "$select=Id,LoanDate,Haken,CapQty,CapSize,TopSummer,TopWinter,TopSize,PantsSummer,PantsWinter,PantsSize,ShoesCm,Others,Status" +
+      "$select=Id,LoanDate,Haken,CapQty,CapSize,TopSummer,TopWinter,TopSize,PantsSummer,PantsWinter,PantsSize,ShoesCm,Others,Status,ImagePath" +
       "&$filter=EmpNo eq '" + empNo + "' and Status ne '返却済'&$orderby=LoanDate desc&$top=20") || [];
   } catch (e) { console.warn('taisha uniform load:', e); return; }
   window._taishaUniformActive = rows;
@@ -48718,6 +48754,7 @@ async function _taishaLoadUniform(emp) {
   rows.forEach(function(r) {
     h += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #ffe0b2;">';
     h += '<div style="flex:1;min-width:0;font-size:12.5px;"><b>📅 ' + escHtml(String(r.LoanDate || '').replace(/-/g, '/')) + '</b>' + (r.Haken ? ' <span style="color:#888;font-size:11px;">' + escHtml(r.Haken) + '</span>' : '') + '<br>' + escHtml(typeof _uniformSummary === 'function' ? _uniformSummary(r) : '') + '</div>';
+    if (r.ImagePath) h += '<button onclick="uniformOpenImage(' + r.Id + ')" title="同意書の画像を見る・送る" style="border:1px solid #90caf9;border-radius:9px;background:#e3f2fd;color:#1565c0;padding:8px 9px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;white-space:nowrap;">🖼 画像</button>';
     h += '<button onclick="_taishaUniformReturn(' + r.Id + ')" style="border:none;border-radius:9px;background:#2e7d32;color:#fff;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;white-space:nowrap;">↩ 返却済にする</button>';
     h += '</div>';
   });
