@@ -8024,7 +8024,8 @@ function switchScreen(screenId, skipHistory) {
         var _sr = document.getElementById('searchResults'); if (_sr) _sr.innerHTML = '';
         var _sc = document.getElementById('searchClearBtn'); if (_sc) _sc.style.display = 'none';
       }
-      if (typeof renderRecentEmployees === 'function') renderRecentEmployees();
+      // 最近開いた社員は検索欄をタップしたときだけ出す (ユーザー指示 2026-09-12) → ここでは隠すだけ
+      var _rb2 = document.getElementById('recentEmpBox'); if (_rb2) { _rb2.style.display = 'none'; _rb2.innerHTML = ''; }
     } catch (_) {}
   }
 
@@ -61929,6 +61930,10 @@ document.getElementById('searchInput').addEventListener('input', function() {
 });
 document.getElementById('searchInput').addEventListener('focus', function() {
   try { renderRecentEmployees(); } catch (_) {}   // 空でタップ → 最近開いた社員 5人
+});
+document.getElementById('searchInput').addEventListener('blur', function() {
+  // 欄から離れたら隠す。行のタップ(click)が先に処理されるよう少し待つ
+  setTimeout(function() { var b = document.getElementById('recentEmpBox'); if (b) { b.style.display = 'none'; b.innerHTML = ''; } }, 200);
 });
 
 // ============================================================
