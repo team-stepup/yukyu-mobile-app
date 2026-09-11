@@ -6703,6 +6703,10 @@ select.sankyu-edit-input {
             <span class="asi-card-icon" style="background:#fff3e0;color:#e65100;">📂</span>
             <span class="asi-card-label">社員ファイル</span>
           </button>
+          <button class="asi-card" onclick="closeActionSheet();openEmpDocAddDialog()">
+            <span class="asi-card-icon" style="background:#e3f2fd;color:#1565c0;">📎</span>
+            <span class="asi-card-label">書類を追加・更新<br><span style="font-size:9.5px;font-weight:600;color:#888;">撮影/ファイル→AI読取</span></span>
+          </button>
           <button class="asi-card" onclick="quickAction('gensen')">
             <span class="asi-card-icon" style="background:#fff3e0;color:#ef6c00;">📄</span>
             <span class="asi-card-label">源泉徴収票</span>
@@ -38901,6 +38905,206 @@ async function _normalizeBankOcr(parsed) {
   return parsed;
 }
 
+// ファイル一覧から 書類タイプ×面(表/裏/その他) ごとに最新ファイルだけ残す。
+//   新しさ = ファイル名の _YYYYMMDD > TimeCreated。分類できないファイルはそのまま残す。
+function _empDocKeepNewest(files) {
+  var best = {};
+  var out = [];
+  (files || []).forEach(function(f) {
+    var dt = '';
+    for (var i = 0; i < OCR_DOC_CLASSIFY.length; i++) { if (OCR_DOC_CLASSIFY[i].re.test(f.Name || '')) { dt = OCR_DOC_CLASSIFY[i].docType; break; } }
+    if (!dt) { out.push(f); return; }
+    var side = /裏/.test(f.Name) ? 'back' : (/表/.test(f.Name) ? 'front' : ((f.Name.match(/_(\d)\./) || [])[1] || 'x'));
+    var m = f.Name.match(/_(\d{8})\./);
+    var stamp = m ? m[1] : (f.TimeCreated ? String(f.TimeCreated).replace(/[^\d]/g, '').slice(0, 8) : '00000000');
+    var key = dt + '|' + side;
+    if (!best[key] || stamp > best[key].stamp || (stamp === best[key].stamp && (f.Name > best[key].f.Name))) best[key] = { stamp: stamp, f: f };
+  });
+  Object.keys(best).forEach(function(k) { out.push(best[k].f); });
+  return out;
+}
+
+// ============================================================
+// 📎 書類を追加・更新 (既存社員) — 撮影/ファイル/ドロップ → 社員フォルダへ日付付きで保存 → AI読取 → 現在値と比較して更新
+//   WhatsApp/LINE で届いた画像は「写真に保存」してから📁で選ぶ (2026-09-11)
+// ============================================================
+var _empDocAdd = { type: '', files: [] };   // files: [{name, dataUrl, file, isPdf}]
+var EMP_DOC_ADD_TYPES = [
+  { id: 'zairyu', label: '在留カード', icon: '🌏', sides: ['表', '裏'] },
+  { id: 'license', label: '免許証', icon: '🪪', sides: ['表', '裏'] },
+  { id: 'koyou', label: '雇用保険被保険者証', icon: '📑', sides: ['表', '裏'] },
+  { id: 'bank', label: '銀行口座', icon: '🏦', sides: ['1', '2'] },
+  { id: 'mynumber', label: 'マイナンバー', icon: '🆔', sides: ['表', '裏'] },
+  { id: 'shaken', label: '車検証', icon: '🚗', sides: ['1', '2'] },
+  { id: 'jibaiseki', label: '自賠責保険証', icon: '🛡', sides: ['表', '裏'] },
+  { id: 'nini', label: '任意保険証', icon: '📋', sides: ['1', '2', '3', '4'] },
+  { id: 'other', label: 'その他', icon: '📄', sides: ['1', '2', '3', '4'] },
+  { id: 'auto', label: '🤖 自動判定', icon: '', sides: [] }
+];
+function openEmpDocAddDialog() {
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  _empDocAdd = { type: '', files: [] };
+  var old = document.getElementById('empDocAddOverlay'); if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'empDocAddOverlay';
+  ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:10px;overflow:auto;';
+  var h = '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);margin:auto;">';
+  h += '<div style="padding:12px 14px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:8px;background:#e3f2fd;border-radius:12px 12px 0 0;">';
+  h += '<div style="min-width:0;"><h3 style="margin:0;font-size:15px;color:#1565c0;">📎 書類を追加・更新</h3><div style="font-size:11.5px;color:#555;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(String(emp[F.syainNo] || '').replace(/\.0+$/, '') + ' ' + (emp.Title || '')) + '</div></div>';
+  h += '<button onclick="document.getElementById(\'empDocAddOverlay\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;flex-shrink:0;">×</button></div>';
+  h += '<div style="padding:12px 14px;">';
+  h += '<div style="font-size:12px;font-weight:700;color:#333;margin-bottom:6px;">① 書類の種類</div>';
+  h += '<div id="empDocAddTypes" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;"></div>';
+  h += '<div style="font-size:12px;font-weight:700;color:#333;margin:12px 0 6px;">② 画像を選ぶ <span style="font-weight:400;color:#888;">（表→裏の順に。複数可）</span></div>';
+  h += '<div id="empDocAddDrop" ondragover="event.preventDefault();this.style.background=\'#e3f2fd\'" ondragleave="this.style.background=\'#f7fbff\'" ondrop="empDocAddDrop(event)" style="border:2px dashed #90caf9;border-radius:12px;padding:10px;text-align:center;background:#f7fbff;">';
+  h += '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">';
+  h += '<label style="background:linear-gradient(135deg,#1565c0,#42a5f5);color:#fff;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">📷 カメラで撮影<input type="file" accept="image/*" capture="environment" style="display:none;" onchange="empDocAddFiles(this.files);this.value=\'\';"></label>';
+  h += '<label style="background:#fff;border:1.5px solid #1565c0;color:#1565c0;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">📁 写真/ファイル<input type="file" accept="image/*,application/pdf" multiple style="display:none;" onchange="empDocAddFiles(this.files);this.value=\'\';"></label>';
+  h += '</div>';
+  h += '<div style="font-size:10.5px;color:#888;margin-top:6px;line-height:1.5;">WhatsApp/LINEで届いた画像は「写真に保存」してから📁で選んでください。PCはここにドラッグ＆ドロップでも可</div>';
+  h += '<div id="empDocAddList" style="margin-top:8px;text-align:left;"></div>';
+  h += '</div>';
+  h += '<div id="empDocAddProg" style="font-size:12px;color:#1565c0;font-weight:700;margin-top:8px;display:none;"></div>';
+  h += '</div>';
+  h += '<div style="padding:10px 14px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">';
+  h += '<button onclick="document.getElementById(\'empDocAddOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;">キャンセル</button>';
+  h += '<button id="empDocAddSaveBtn" onclick="empDocAddSave()" disabled style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;opacity:.5;">☁️ 保存してAI読取</button>';
+  h += '</div></div>';
+  ov.innerHTML = h;
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  _empDocAddPaintTypes();
+}
+function _empDocAddPaintTypes() {
+  var box = document.getElementById('empDocAddTypes'); if (!box) return;
+  box.innerHTML = EMP_DOC_ADD_TYPES.map(function(t) {
+    var on = _empDocAdd.type === t.id;
+    return '<button onclick="empDocAddSetType(\'' + t.id + '\')" style="display:flex;align-items:center;gap:6px;min-height:42px;padding:6px 8px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;' +
+      (on ? 'background:#1565c0;color:#fff;border:1.5px solid #1565c0;' : 'background:#fff;color:#333;border:1.5px solid #cfd8dc;') + '">' +
+      (t.icon ? '<span style="font-size:18px;">' + t.icon + '</span>' : '') + '<span style="white-space:normal;line-height:1.25;">' + t.label + '</span></button>';
+  }).join('');
+  var btn = document.getElementById('empDocAddSaveBtn');
+  if (btn) { var ok = !!_empDocAdd.type && _empDocAdd.files.length > 0; btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.5'; }
+}
+function empDocAddSetType(id) { _empDocAdd.type = id; _empDocAddPaintTypes(); }
+function empDocAddDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  var z = document.getElementById('empDocAddDrop'); if (z) z.style.background = '#f7fbff';
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) empDocAddFiles(e.dataTransfer.files);
+}
+async function empDocAddFiles(fileList) {
+  var files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    if (!isPdf && !/^image\//.test(f.type) && !/\.(jpe?g|png|heic|webp)$/i.test(f.name)) { showToast(f.name + ' は画像/PDFではありません', 'error'); continue; }
+    var du = null;
+    if (!isPdf) { try { du = await _readFileAsDataUrl(f); } catch (e) { showToast('読込失敗: ' + f.name, 'error'); continue; } }
+    _empDocAdd.files.push({ name: f.name, dataUrl: du, file: f, isPdf: isPdf });
+  }
+  _empDocAddPaintList();
+  _empDocAddPaintTypes();
+}
+function empDocAddRemove(i) { _empDocAdd.files.splice(i, 1); _empDocAddPaintList(); _empDocAddPaintTypes(); }
+function empDocAddMove(i, d) {
+  var j = i + d; if (j < 0 || j >= _empDocAdd.files.length) return;
+  var a = _empDocAdd.files; var t = a[i]; a[i] = a[j]; a[j] = t;
+  _empDocAddPaintList();
+}
+function _empDocAddPaintList() {
+  var box = document.getElementById('empDocAddList'); if (!box) return;
+  var t = EMP_DOC_ADD_TYPES.find(function(x) { return x.id === _empDocAdd.type; });
+  box.innerHTML = _empDocAdd.files.map(function(f, i) {
+    var side = (t && t.sides[i]) ? t.sides[i] : String(i + 1);
+    var thumb = f.isPdf ? '<div style="width:52px;height:52px;border-radius:6px;background:#fce4ec;color:#c62828;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">PDF</div>'
+                        : '<img src="' + f.dataUrl + '" onclick="_uniformZoom(this.src, \'' + escHtml(f.name).replace(/'/g, '') + '\')" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #ddd;flex-shrink:0;cursor:zoom-in;">';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #eceff1;">' + thumb +
+      '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:700;color:#1565c0;">' + (t && t.id !== 'auto' ? escHtml(t.label) + ' ' + escHtml(side) : '判定待ち ' + (i + 1)) + '</div><div style="font-size:10.5px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(f.name) + '</div></div>' +
+      '<div style="display:flex;gap:4px;flex-shrink:0;">' +
+        '<button onclick="empDocAddMove(' + i + ',-1)" title="上へ" style="border:1px solid #ddd;background:#fff;border-radius:6px;width:30px;height:30px;cursor:pointer;">▲</button>' +
+        '<button onclick="empDocAddMove(' + i + ',1)" title="下へ" style="border:1px solid #ddd;background:#fff;border-radius:6px;width:30px;height:30px;cursor:pointer;">▼</button>' +
+        '<button onclick="empDocAddRemove(' + i + ')" title="削除" style="border:1px solid #ef9a9a;background:#fff;color:#c62828;border-radius:6px;width:30px;height:30px;cursor:pointer;">×</button>' +
+      '</div></div>';
+  }).join('');
+}
+function _empDocAddProg(msg) { var p = document.getElementById('empDocAddProg'); if (!p) return; if (msg) { p.textContent = msg; p.style.display = ''; } else { p.style.display = 'none'; } }
+
+// 保存 → 読み取り
+async function empDocAddSave() {
+  var emp = currentEmployee; if (!emp) return;
+  if (!_empDocAdd.type || !_empDocAdd.files.length) { showToast('書類の種類と画像を選んでください', 'error'); return; }
+  var btn = document.getElementById('empDocAddSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
+  var empNo = String(emp[F.syainNo] || '').replace(/\.0+$/, '').trim();
+  var d = new Date();
+  var stamp = d.getFullYear() + _kintaiPad(d.getMonth() + 1) + _kintaiPad(d.getDate());
+  try {
+    _empDocAddProg('📂 社員フォルダを確認中…');
+    var folder = await getEmpFolderPath(emp);
+    if (!folder) throw new Error('社員フォルダのパスを決められません（派遣先・氏名を確認）');
+    try { await ensureSpFolder(folder); } catch (e1) { console.warn('ensureSpFolder warn:', e1); }
+    // 自動判定: 画像ごとに AI で書類種別を決める
+    var items = _empDocAdd.files.map(function(f) { return { f: f, type: _empDocAdd.type }; });
+    if (_empDocAdd.type === 'auto') {
+      for (var a = 0; a < items.length; a++) {
+        _empDocAddProg('🤖 書類の種別を判定中… (' + (a + 1) + '/' + items.length + ')');
+        try {
+          var img = items[a].f.isPdf ? (await _localPdfToPageImages(items[a].f.file, 1))[0] : await _resizeForCloud(items[a].f.dataUrl);
+          var res = await cloudDocOcr('classify', { images: [img] });
+          var dt = res && (res.docType || res.doctype || '');
+          items[a].type = EMP_DOC_ADD_TYPES.some(function(x) { return x.id === dt; }) ? dt : 'other';
+        } catch (ce) { items[a].type = 'other'; }
+      }
+    }
+    var otherName = '';
+    if (items.some(function(x) { return x.type === 'other'; })) {
+      otherName = prompt('書類の名前を入力してください（例: 年金手帳、住民票）', '') || '';
+      otherName = otherName.replace(/[\\/:*?"<>|]/g, '').trim() || '書類';
+    }
+    // 保存 (種別ごとに 表/裏/連番 を振る)
+    var counters = {}, saved = [], groups = {};
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var tdef = EMP_DOC_ADD_TYPES.find(function(x) { return x.id === it.type; }) || { id: 'other', label: otherName, sides: [] };
+      var label = it.type === 'other' ? otherName : tdef.label;
+      counters[it.type] = (counters[it.type] || 0);
+      var side = tdef.sides[counters[it.type]] || String(counters[it.type] + 1);
+      counters[it.type]++;
+      _empDocAddProg('☁️ 保存中… ' + label + ' ' + side + ' (' + (i + 1) + '/' + items.length + ')');
+      var ext = it.f.isPdf ? 'pdf' : 'jpg';
+      var fname = empNo + ' ' + label + '_' + side + '_' + stamp + '.' + ext;
+      var fileObj = it.f.isPdf ? it.f.file : _dataUrlToFile(await _resizeForCloud(it.f.dataUrl), fname);
+      await uploadFileToSp(folder, fname, fileObj);
+      var srUrl = folder + '/' + fname;
+      saved.push(fname);
+      if (['zairyu', 'license', 'koyou', 'shaken', 'jibaiseki', 'nini', 'bank'].indexOf(it.type) >= 0) {
+        if (!groups[it.type]) groups[it.type] = { label: tdef.label, files: [] };
+        groups[it.type].files.push({ Name: fname, ServerRelativeUrl: srUrl });
+      }
+    }
+    _empDocAddProg(null);
+    showToast('社員フォルダに保存しました: ' + saved.join('、'), 'success');
+    var ov = document.getElementById('empDocAddOverlay'); if (ov) ov.remove();
+    // 社員ファイルURL未設定なら保存 (自己修復) — 失敗しても無視
+    try { if (typeof saveSyainFileLinkToEmp === 'function' && emp.Id) await saveSyainFileLinkToEmp(emp.Id, folder, emp.Title || ''); } catch (_) {}
+    // 読み取り → 現在値と比較して更新 (既存の一括読み取りと同じ確認画面)
+    if (Object.keys(groups).length) {
+      try { var _m = await fetchEmployeeFields(); if (_m) editKeyMap = buildFieldKeyMap(_m); } catch (_) {}
+      await _runEmpFolderOcr(groups);
+    } else {
+      showToast('この書類はAI読取の対象外です（保存のみ）', 'success');
+    }
+  } catch (e) {
+    console.error('empDocAddSave error:', e);
+    _empDocAddProg(null);
+    showToast('保存に失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '☁️ 保存してAI読取'; }
+  }
+}
+
 async function ocrAllFromEmpFolder() {
   var emp = currentEmployee;
   if (!emp) { showToast('社員を選択してください', 'error'); return; }
@@ -38911,12 +39115,13 @@ async function ocrAllFromEmpFolder() {
     if (!path) { _empOcrProg(null); showToast('社員ファイルを特定できません', 'error'); return; }
     var token = await getToken();
     var encodedPath = encodeURIComponent(path).replace(/%2F/g, '/');
-    var resp = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')/Files?$select=Name,ServerRelativeUrl", {
+    var resp = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodedPath + "')/Files?$select=Name,ServerRelativeUrl,TimeCreated", {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
     });
     if (!resp.ok) { _empOcrProg(null); showToast('社員ファイルのフォルダが見つかりません (HTTP ' + resp.status + ')', 'error'); return; }
     var files = ((await resp.json()).d || {}).results || [];
     var imgs = files.filter(function(f) { return /\.(jpe?g|png|webp|heic|pdf)$/i.test(f.Name || ''); });
+    imgs = _empDocKeepNewest(imgs);   // 同じ書類・同じ面(表/裏)は最新版だけ (書類の追加・更新で日付付きの新版が増えるため)
     if (!imgs.length) { _empOcrProg(null); showToast('フォルダに読み取れるファイルがありません', 'error'); return; }
 
     // ファイル名で書類タイプに分類。マイナンバーはSP非保存のため対象外
