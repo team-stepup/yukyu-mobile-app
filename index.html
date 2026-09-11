@@ -31635,6 +31635,8 @@ async function loadEmployeeProfile() {
   try { renderEmployeeShukkinRate(emp[F.syainNo]); } catch (e) { console.warn('出勤率描画エラー', e); }
   // 作業服貸与を非同期で取得・描画
   try { renderEmployeeUniform(emp); } catch (e) { console.warn('作業服貸与描画エラー', e); }
+  // 各セクションに社員フォルダの書類画像 (🖼 在留カード/免許証/雇用保険証/通帳/車検証/保険) を表示 (2026-09-11)
+  try { _empDocImagesInit(emp); } catch (e) { console.warn('書類画像チップ エラー', e); }
 
   // 更新履歴を非同期で取得・描画 (役員のみ)
   if (_isAdmin) {
@@ -38903,6 +38905,176 @@ async function _normalizeBankOcr(parsed) {
   }
   delete parsed.bankCode; delete parsed.branchCode;   // 一時キー(SPフィールドでない)を除去
   return parsed;
+}
+
+// ============================================================
+// 🖼 社員情報の各セクションに書類画像を表示 (社員フォルダの最新版を種類ごとに)
+//   セクション → 書類タイプの対応。マイナンバーは機微情報のため表示しない (社員ファイルからのみ)
+// ============================================================
+var EMP_DOC_IMG_SECTIONS = {
+  residence:    ['zairyu'],
+  basic:        ['zairyu'],
+  license:      ['license'],
+  insurance:    ['koyou'],
+  bank:         ['bank'],
+  vehicle:      ['shaken'],
+  carInsurance: ['jibaiseki', 'nini']
+};
+var _empDocImg = { empNo: '', byType: {}, blobs: {} };   // byType: docType → [{Name, ServerRelativeUrl, label, side, stamp}]
+
+function _empDocImgMeta(f) {
+  var dt = '', label = '';
+  for (var i = 0; i < OCR_DOC_CLASSIFY.length; i++) { if (OCR_DOC_CLASSIFY[i].re.test(f.Name || '')) { dt = OCR_DOC_CLASSIFY[i].docType; label = OCR_DOC_CLASSIFY[i].label; break; } }
+  if (!dt) return null;
+  var side = /裏/.test(f.Name) ? '裏' : (/表/.test(f.Name) ? '表' : ((f.Name.match(/_(\d)[._]/) || [])[1] || ''));
+  var m = f.Name.match(/_(\d{8})\./);
+  var stamp = m ? (m[1].slice(0, 4) + '/' + m[1].slice(4, 6) + '/' + m[1].slice(6, 8)) : (f.TimeCreated ? String(f.TimeCreated).slice(0, 10).replace(/-/g, '/') : '');
+  return { Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, docType: dt, label: label, side: side, stamp: stamp, isPdf: /\.pdf$/i.test(f.Name) };
+}
+
+async function _empDocImagesInit(emp) {
+  if (!emp) return;
+  var empNo = String(emp[F.syainNo] || '').replace(/\.0+$/, '').trim();
+  if (!empNo) return;
+  // 前回の objectURL を解放
+  Object.keys(_empDocImg.blobs || {}).forEach(function(k) { try { URL.revokeObjectURL(_empDocImg.blobs[k].url); } catch (_) {} });
+  _empDocImg = { empNo: empNo, byType: {}, blobs: {} };
+  var files = [];
+  try {
+    var path = await getEmpFolderPath(emp);
+    if (!path) return;
+    var token = await getToken();
+    var enc = encodeURIComponent(path).replace(/%2F/g, '/');
+    var resp = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + enc + "')/Files?$select=Name,ServerRelativeUrl,TimeCreated", {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' }
+    });
+    if (!resp.ok) return;
+    files = (((await resp.json()).d || {}).results || []).filter(function(f) { return /\.(jpe?g|png|webp|heic|pdf)$/i.test(f.Name || ''); });
+  } catch (e) { console.warn('書類画像 一覧取得失敗:', e); return; }
+  if (String((currentEmployee && currentEmployee[F.syainNo]) || '').replace(/\.0+$/, '').trim() !== empNo) return;   // 画面が別社員に変わった
+  var newest = (typeof _empDocKeepNewest === 'function') ? _empDocKeepNewest(files) : files;
+  newest.forEach(function(f) {
+    var m = _empDocImgMeta(f);
+    if (!m || m.docType === 'mynumber') return;
+    (_empDocImg.byType[m.docType] = _empDocImg.byType[m.docType] || []).push(m);
+  });
+  Object.keys(_empDocImg.byType).forEach(function(k) {
+    _empDocImg.byType[k].sort(function(a, b) { return (a.side === '裏' ? 1 : 0) - (b.side === '裏' ? 1 : 0) || a.Name.localeCompare(b.Name, 'ja'); });
+  });
+  // セクションへ差し込み
+  Object.keys(EMP_DOC_IMG_SECTIONS).forEach(function(secId) {
+    var list = [];
+    EMP_DOC_IMG_SECTIONS[secId].forEach(function(dt) { list = list.concat(_empDocImg.byType[dt] || []); });
+    var sec = document.getElementById('acc_' + secId);
+    if (!sec) return;
+    var hdr = sec.querySelector('.accordion-header'), body = sec.querySelector('.accordion-body');
+    var oldChip = sec.querySelector('.acc-doc-chip'); if (oldChip) oldChip.remove();
+    var oldStrip = sec.querySelector('.emp-doc-strip'); if (oldStrip) oldStrip.remove();
+    if (!list.length || !hdr || !body) return;
+    var arrow = hdr.querySelector('.acc-arrow');
+    var chip = document.createElement('span');
+    chip.className = 'acc-doc-chip';
+    chip.style.cssText = 'margin-left:6px;background:#e3f2fd;color:#1565c0;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;white-space:nowrap;cursor:pointer;';
+    chip.textContent = '🖼 ' + list.length;
+    chip.title = '書類画像を表示';
+    chip.onclick = function(e) { e.stopPropagation(); sec.classList.add('open'); _empDocImgLoadStrip(secId); setTimeout(function() { var s = sec.querySelector('.emp-doc-strip'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50); };
+    if (arrow) hdr.insertBefore(chip, arrow); else hdr.appendChild(chip);
+    var strip = document.createElement('div');
+    strip.className = 'emp-doc-strip';
+    strip.id = 'empDocStrip_' + secId;
+    strip.style.cssText = 'margin:6px 8px 4px;';
+    strip.innerHTML = '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="width:100%;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + '枚）<span style="font-weight:400;color:#888;font-size:11px;"> ' + list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・') + '</span></button>';
+    body.insertBefore(strip, body.firstChild);
+  });
+}
+
+// サムネイル一覧を読み込んで表示 (タップで拡大・📤送る)
+async function _empDocImgLoadStrip(secId) {
+  var strip = document.getElementById('empDocStrip_' + secId);
+  if (!strip) return;
+  var list = [];
+  (EMP_DOC_IMG_SECTIONS[secId] || []).forEach(function(dt) { list = list.concat(_empDocImg.byType[dt] || []); });
+  if (!list.length) return;
+  strip.innerHTML = '<div style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像 <span style="color:#888;font-weight:400;">（読み込み中…）</span></div>';
+  var h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;"><span style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像（タップで拡大・送信）</span>' +
+          '<button onclick="closeActionSheet();openEmpDocAddDialog()" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">📎 追加・更新</button></div>';
+  h += '<div style="display:flex;gap:8px;overflow-x:auto;padding:6px 0 4px;-webkit-overflow-scrolling:touch;">';
+  for (var i = 0; i < list.length; i++) {
+    var m = list[i];
+    var key = m.ServerRelativeUrl;
+    var thumb;
+    if (m.isPdf) {
+      thumb = '<div style="width:96px;height:72px;border-radius:8px;background:#fce4ec;color:#c62828;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">PDF</div>';
+    } else {
+      try {
+        if (!_empDocImg.blobs[key]) {
+          var token = await getToken();
+          var enc = encodeURIComponent(key).replace(/%2F/g, '/');
+          var r = await fetch(_spApiBase(key) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          var blob = await r.blob();
+          _empDocImg.blobs[key] = { blob: blob, url: URL.createObjectURL(blob) };
+        }
+        thumb = '<img src="' + _empDocImg.blobs[key].url + '" style="width:96px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #ddd;display:block;background:#f5f5f5;">';
+      } catch (e) {
+        thumb = '<div style="width:96px;height:72px;border-radius:8px;background:#eee;color:#999;display:flex;align-items:center;justify-content:center;font-size:11px;">取得失敗</div>';
+      }
+    }
+    h += '<div onclick="_empDocImgOpen(\'' + secId + '\',' + i + ')" style="flex:0 0 auto;width:96px;cursor:zoom-in;">' + thumb +
+         '<div style="font-size:10.5px;font-weight:700;color:#333;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(m.label + (m.side ? ' ' + m.side : '')) + '</div>' +
+         '<div style="font-size:9.5px;color:#999;">' + escHtml(m.stamp) + '</div></div>';
+  }
+  h += '</div>';
+  strip.innerHTML = h;
+}
+
+async function _empDocImgOpen(secId, i) {
+  var list = [];
+  (EMP_DOC_IMG_SECTIONS[secId] || []).forEach(function(dt) { list = list.concat(_empDocImg.byType[dt] || []); });
+  var m = list[i]; if (!m) return;
+  var key = m.ServerRelativeUrl;
+  if (m.isPdf) {
+    // PDF は社員ファイルの既存ビューアへ (トークン付きで開く)
+    try { if (typeof openSpFileWithToken === 'function') { openSpFileWithToken(key, m.Name); return; } } catch (_) {}
+    showToast('PDFは「社員ファイル」から開いてください', 'error'); return;
+  }
+  if (!_empDocImg.blobs[key]) {
+    showSpinner();
+    try {
+      var token = await getToken();
+      var enc = encodeURIComponent(key).replace(/%2F/g, '/');
+      var r = await fetch(_spApiBase(key) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
+      if (!r.ok) throw new Error('画像を取得できません (' + r.status + ')');
+      var blob = await r.blob();
+      _empDocImg.blobs[key] = { blob: blob, url: URL.createObjectURL(blob) };
+    } catch (e) { hideSpinner(); showToast(e.message || String(e), 'error'); return; }
+    hideSpinner();
+  }
+  var title = (currentEmployee && currentEmployee.Title ? currentEmployee.Title + '　' : '') + m.label + (m.side ? ' ' + m.side : '') + (m.stamp ? '　' + m.stamp : '');
+  _uniformZoom(_empDocImg.blobs[key].url, title);
+  var zh = document.querySelector('#uniformZoomOverlay > div');
+  if (zh) {
+    zh.insertAdjacentHTML('beforeend',
+      '<button onclick="_empDocImgShare(\'' + secId + '\',' + i + ')" style="background:#1565c0;color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-left:4px;white-space:nowrap;">📤 送る</button>' +
+      '<a href="' + _empDocImg.blobs[key].url + '" download="' + escHtml(m.Name) + '" style="color:#fff;border:1px solid #fff;border-radius:8px;padding:6px 10px;text-decoration:none;font-size:12px;margin-left:4px;">⬇</a>');
+  }
+}
+
+async function _empDocImgShare(secId, i) {
+  var list = [];
+  (EMP_DOC_IMG_SECTIONS[secId] || []).forEach(function(dt) { list = list.concat(_empDocImg.byType[dt] || []); });
+  var m = list[i]; if (!m) return;
+  var b = _empDocImg.blobs[m.ServerRelativeUrl]; if (!b) return;
+  var text = '【' + m.label + (m.side ? ' ' + m.side : '') + '】' + (currentEmployee && currentEmployee.Title ? currentEmployee.Title : '') + (m.stamp ? '　' + m.stamp : '');
+  try {
+    var file = new File([b.blob], m.Name, { type: b.blob.type || 'image/jpeg' });
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: m.label, text: text }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  try {
+    var a = document.createElement('a'); a.href = b.url; a.download = m.Name; document.body.appendChild(a); a.click(); a.remove();
+    try { if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text); } catch (_) {}
+    showToast('画像をダウンロードしました。メッセージに添付して送ってください', 'success');
+  } catch (e2) { showToast('送れませんでした: ' + (e2.message || e2), 'error'); }
 }
 
 // ファイル一覧から 書類タイプ×面(表/裏/その他) ごとに最新ファイルだけ残す。
