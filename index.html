@@ -33062,7 +33062,9 @@ async function loadMaebariList() {
       const colonIdx = haken.indexOf(':');
       if (colonIdx >= 0) haken = haken.substring(colonIdx + 1);
       const author = r.Author ? r.Author.Title : '';
-      const feeHtml = fee ? '<span class="fee-sub">+' + fee.toLocaleString('ja-JP') + '</span>' : '';
+      // 手数料が入力済み(0円含む)なら +N を表示。未入力だけ空欄 (0円でも処理済みと分かるように・2026-09-11)
+      const feeEntered = String(r[MF.fee] === null || r[MF.fee] === undefined ? '' : r[MF.fee]).trim() !== '';
+      const feeHtml = feeEntered ? '<span class="fee-sub">+' + fee.toLocaleString('ja-JP') + '</span>' : '';
       const createdStr = r.Created ? formatTimeShort(r.Created) : '';
       html += '<tr style="cursor:pointer;" ontouchstart="tapGuardStart(event)" ontouchmove="tapGuardMove(event)" onclick="tapGuardClick(event, function(){openMaebariEdit(' + r.Id + ')})">'
         + '<td>' + escHtml(String(r[MF.syainNo] || '')) + '</td>'
