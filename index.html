@@ -8014,6 +8014,20 @@ function switchScreen(screenId, skipHistory) {
   }
   currentScreenId = screenId;
 
+  // ホームに戻ったら検索欄の文字と検索結果を消す (ユーザー指示 2026-09-12「検索窓には残らないでほしい」)。
+  //   派遣先で絞った一覧(検索欄が空)はそのまま残す。最近開いた社員5人を代わりに表示
+  if (screenId === 'searchScreen') {
+    try {
+      var _si = document.getElementById('searchInput');
+      if (_si && String(_si.value || '').trim()) {
+        _si.value = '';
+        var _sr = document.getElementById('searchResults'); if (_sr) _sr.innerHTML = '';
+        var _sc = document.getElementById('searchClearBtn'); if (_sc) _sc.style.display = 'none';
+      }
+      if (typeof renderRecentEmployees === 'function') renderRecentEmployees();
+    } catch (_) {}
+  }
+
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
   // 画面遷移時はスクロール位置を最上部にリセット (戻るボタン等が隠れない様に)
