@@ -31335,6 +31335,7 @@ async function loadEmployeeProfile() {
 
   const isResignedEmp = isResigned(emp);
 
+  const _profileIsJp = (typeof _empIsJapanese === 'function') && _empIsJapanese(emp);   // 国籍=日本 (在留行の非表示判定)
   PROFILE_CATEGORIES.forEach(cat => {
     // Check if category has any data
     let hasData = false;
@@ -31400,6 +31401,9 @@ async function loadEmployeeProfile() {
         return;
       }
       const odataKey = keyMap[field.key];
+      // 国籍=日本: 在留資格/在留期限/在留カード番号/ローマ字氏名 は値が無ければ行ごと隠す (新規登録画面と同じ扱い 2026-09-12)
+      const _jpSkip = (cat.id === 'residence') && _profileIsJp && ['zairyuShikaku', 'zairyuKigen', 'zairyuKigenCard', 'zairyuBikou', 'tokki1'].indexOf(field.key) >= 0;
+      if (_jpSkip && odataKey) { const _jv = emp[odataKey]; if (_jv === null || _jv === undefined || String(_jv).trim() === '') return; }
       // insurance セクションの指定フィールドは odataKey が無くても表示
       const isInsuranceAlways = (cat.id === 'insurance' && INSURANCE_ALWAYS_SHOW_KEYS.indexOf(field.key) >= 0);
       // 退社者の退職理由等は odataKey が無くても空表示
@@ -31508,10 +31512,7 @@ async function loadEmployeeProfile() {
     html += '<span class="acc-arrow">&#9654;</span>';
     html += '</div>';
     html += '<div class="accordion-body">';
-    // 在留・国籍: 社員ファイルの書類画像からAIで一括読み取り→自動入力
-    if (cat.id === 'residence') {
-      html += '<button onclick="ocrAllFromEmpFolder()" style="width:calc(100% - 16px);margin:8px;background:linear-gradient(135deg,#1976d2,#0d47a1);color:#fff;border:none;border-radius:10px;padding:12px 10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(13,71,161,0.3);line-height:1.5;">🤖 社員ファイルをAIで読み取り → 自動入力<br><span style="font-size:10px;font-weight:600;opacity:0.9;">在留カード・免許証・雇用保険証・車検証・保険・通帳</span></button>';
-    }
+    // (旧) 在留・国籍の「🤖 社員ファイルをAIで読み取り」大ボタンは 2026-09-12 撤去 → 各セクションの🖼書類画像の「🤖 読み直す」と 手続きメニュー「📎 書類を追加・更新」へ
     // View mode table
     html += '<div id="view_' + cat.id + '"><table class="acc-table">';
     // 1行を描画 (✏️編集ボタン付き)
@@ -38990,7 +38991,10 @@ async function _empDocImagesInit(emp) {
     strip.className = 'emp-doc-strip';
     strip.id = 'empDocStrip_' + secId;
     strip.style.cssText = 'margin:6px 8px 4px;';
-    strip.innerHTML = '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="width:100%;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + '枚）<span style="font-weight:400;color:#888;font-size:11px;"> ' + list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・') + '</span></button>';
+    strip.innerHTML = '<div style="display:flex;gap:6px;align-items:stretch;">' +
+      '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="flex:1;min-width:0;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + '枚）<span style="font-weight:400;color:#888;font-size:11px;"> ' + list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・') + '</span></button>' +
+      '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="flex:0 0 auto;background:#fff;border:1.5px solid #90caf9;color:#1565c0;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>' +
+      '</div>';
     body.insertBefore(strip, body.firstChild);
   });
 }
@@ -39004,7 +39008,9 @@ async function _empDocImgLoadStrip(secId) {
   if (!list.length) return;
   strip.innerHTML = '<div style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像 <span style="color:#888;font-weight:400;">（読み込み中…）</span></div>';
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;"><span style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像（タップで拡大・送信）</span>' +
-          '<button onclick="closeActionSheet();openEmpDocAddDialog()" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">📎 追加・更新</button></div>';
+          '<span style="display:flex;gap:6px;">' +
+          '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>' +
+          '<button onclick="closeActionSheet();openEmpDocAddDialog()" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">📎 追加・更新</button></span></div>';
   h += '<div style="display:flex;gap:8px;overflow-x:auto;padding:6px 0 4px;-webkit-overflow-scrolling:touch;">';
   for (var i = 0; i < list.length; i++) {
     var m = list[i];
