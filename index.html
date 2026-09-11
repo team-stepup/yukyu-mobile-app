@@ -38921,6 +38921,7 @@ var EMP_DOC_IMG_SECTIONS = {
   carInsurance: ['jibaiseki', 'nini']
 };
 var _empDocImg = { empNo: '', byType: {}, blobs: {} };   // byType: docType → [{Name, ServerRelativeUrl, label, side, stamp}]
+var _empDocImgSeq = 0;   // 描画が連続して2回走ったとき、古い方の結果を捨てる (同じ画像が2枚並ぶ不具合の対策 2026-09-11)
 
 function _empDocImgMeta(f) {
   var dt = '', label = '';
@@ -38938,7 +38939,9 @@ async function _empDocImagesInit(emp) {
   if (!empNo) return;
   // 前回の objectURL を解放
   Object.keys(_empDocImg.blobs || {}).forEach(function(k) { try { URL.revokeObjectURL(_empDocImg.blobs[k].url); } catch (_) {} });
-  _empDocImg = { empNo: empNo, byType: {}, blobs: {} };
+  var mine = { empNo: empNo, byType: {}, blobs: {} };
+  _empDocImg = mine;
+  var seq = ++_empDocImgSeq;
   var files = [];
   try {
     var path = await getEmpFolderPath(emp);
@@ -38951,12 +38954,16 @@ async function _empDocImagesInit(emp) {
     if (!resp.ok) return;
     files = (((await resp.json()).d || {}).results || []).filter(function(f) { return /\.(jpe?g|png|webp|heic|pdf)$/i.test(f.Name || ''); });
   } catch (e) { console.warn('書類画像 一覧取得失敗:', e); return; }
+  if (seq !== _empDocImgSeq || _empDocImg !== mine) return;   // 後から始まった描画が優先 (二重登録防止)
   if (String((currentEmployee && currentEmployee[F.syainNo]) || '').replace(/\.0+$/, '').trim() !== empNo) return;   // 画面が別社員に変わった
   var newest = (typeof _empDocKeepNewest === 'function') ? _empDocKeepNewest(files) : files;
+  var seenUrl = {};
   newest.forEach(function(f) {
     var m = _empDocImgMeta(f);
     if (!m || m.docType === 'mynumber') return;
-    (_empDocImg.byType[m.docType] = _empDocImg.byType[m.docType] || []).push(m);
+    if (seenUrl[m.ServerRelativeUrl]) return;
+    seenUrl[m.ServerRelativeUrl] = true;
+    (mine.byType[m.docType] = mine.byType[m.docType] || []).push(m);
   });
   Object.keys(_empDocImg.byType).forEach(function(k) {
     _empDocImg.byType[k].sort(function(a, b) { return (a.side === '裏' ? 1 : 0) - (b.side === '裏' ? 1 : 0) || a.Name.localeCompare(b.Name, 'ja'); });
