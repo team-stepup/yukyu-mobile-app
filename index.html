@@ -8020,9 +8020,10 @@ function switchScreen(screenId, skipHistory) {
     try {
       var _si = document.getElementById('searchInput');
       if (_si && String(_si.value || '').trim()) {
-        _si.value = '';
-        var _sr = document.getElementById('searchResults'); if (_sr) _sr.innerHTML = '';
-        var _sc = document.getElementById('searchClearBtn'); if (_sc) _sc.style.display = 'none';
+        // 文字検索の結果を消すときは resetSearch() で 派遣先カード/クイックリンク/新規社員登録 も元どおり表示する
+        //   (旧: 文字だけ消して非表示のままだったため「戻ると社員検索だけ出る」不具合 2026-09-12)
+        if (typeof resetSearch === 'function') resetSearch();
+        else { _si.value = ''; var _sr = document.getElementById('searchResults'); if (_sr) _sr.innerHTML = ''; }
       }
       // 最近開いた社員は検索欄をタップしたときだけ出す (ユーザー指示 2026-09-12) → ここでは隠すだけ
       var _rb2 = document.getElementById('recentEmpBox'); if (_rb2) { _rb2.style.display = 'none'; _rb2.innerHTML = ''; }
