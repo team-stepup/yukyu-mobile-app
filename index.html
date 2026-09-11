@@ -9160,6 +9160,10 @@ function getRecordDays(record) {
   // 半日キーワードがどちらかのフィールドにあれば0.5日（'1'検出より優先）
   const type = (record[F.leaveType] || '').trim();
   const detail = (record[F.leaveTypeDetail] || '').trim();
+  // 数値だけの記録 (例 "8","14","20") = 旧システム/総務が一括登録した日数 (退社時の残日数消化・繰越調整など)。
+  //   旧: 1日扱いだったため残日数が過大になっていた (50294 オクヤマ 2018-12-11「8」→ 残7日と表示・実際は0日。2026-09-11 修正)
+  const numDetail = /^\d+(\.\d+)?$/.test(detail) ? parseFloat(detail) : (/^\d+(\.\d+)?$/.test(type) ? parseFloat(type) : null);
+  if (numDetail !== null && numDetail > 0) return numDetail;
   const combined = type + ' ' + detail;
   if (combined.indexOf('半日') >= 0 ||
       combined.indexOf('午前') >= 0 ||
@@ -9175,6 +9179,8 @@ function getRecordDays(record) {
 function getRecordTypeLabel(record) {
   const type = (record[F.leaveType] || '').trim();
   const detail = (record[F.leaveTypeDetail] || '').trim();
+  const numDetail = /^\d+(\.\d+)?$/.test(detail) ? parseFloat(detail) : (/^\d+(\.\d+)?$/.test(type) ? parseFloat(type) : null);
+  if (numDetail !== null && numDetail > 1) return numDetail + '日(一括)';
   const combined = type + ' ' + detail;
   if (combined.indexOf('午前') >= 0 || combined.indexOf('AM') >= 0) return 'AM有給';
   if (combined.indexOf('午後') >= 0 || combined.indexOf('PM') >= 0) return 'PM有給';
