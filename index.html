@@ -5564,6 +5564,7 @@ select.sankyu-edit-input {
         </div>
         <button class="home-search-btn" onclick="searchEmployee()" aria-label="検索">🔍</button>
       </div>
+      <div id="recentEmpBox" style="display:none;margin-top:8px;"></div>
     </div>
     <div id="searchResults"></div>
 
@@ -8078,10 +8079,61 @@ function switchScreen(screenId, skipHistory) {
   if (screenId === 'vehicleListScreen') loadVehicleList();
 }
 
+// ============================================================
+// 🕒 最近開いた社員 (端末ごと・最新5人) — 検索欄をタップして空のとき表示 (2026-09-12)
+// ============================================================
+var RECENT_EMP_KEY = 'recentEmployees_v1';
+function _recentEmpList() {
+  try { var a = JSON.parse(localStorage.getItem(RECENT_EMP_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+function _recentEmpPush(emp) {
+  if (!emp) return;
+  var no = String(emp[F.syainNo] || '').replace(/\.0+$/, '').trim();
+  if (!no) return;
+  var haken = '';
+  try { haken = (typeof stripBukaPrefix === 'function' && typeof getBukaValue === 'function') ? stripBukaPrefix(getBukaValue(emp)) : ''; } catch (_) {}
+  var list = _recentEmpList().filter(function(x) { return x && x.no !== no; });
+  list.unshift({ no: no, name: String(emp.Title || ''), haken: String(haken || ''), t: Date.now() });
+  try { localStorage.setItem(RECENT_EMP_KEY, JSON.stringify(list.slice(0, 5))); } catch (_) {}
+}
+function _recentEmpClear() {
+  try { localStorage.removeItem(RECENT_EMP_KEY); } catch (_) {}
+  var box = document.getElementById('recentEmpBox'); if (box) { box.innerHTML = ''; box.style.display = 'none'; }
+}
+function renderRecentEmployees() {
+  var box = document.getElementById('recentEmpBox'); if (!box) return;
+  var inp = document.getElementById('searchInput');
+  var list = _recentEmpList();
+  if (!list.length || (inp && String(inp.value || '').trim())) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var h = '<div style="background:#fff;border:1px solid #e0e0e8;border-radius:12px;padding:6px 8px;box-shadow:0 1px 4px rgba(0,0,0,0.05);">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;"><span style="font-size:11.5px;color:#888;font-weight:700;">🕒 最近開いた社員</span>' +
+       '<button onclick="_recentEmpClear()" style="background:none;border:none;color:#aaa;font-size:11px;cursor:pointer;padding:4px 6px;">履歴を消す ×</button></div>';
+  list.forEach(function(x) {
+    h += '<div onmousedown="event.preventDefault()" onclick="openRecentEmployee(\'' + escHtml(x.no) + '\')" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 6px;border-top:1px solid #f0f0f4;cursor:pointer;">' +
+         '<span style="font-size:12px;font-weight:700;color:#5e35b1;background:#ede7f6;border-radius:8px;padding:3px 8px;white-space:nowrap;">' + escHtml(x.no) + '</span>' +
+         '<span style="flex:1;min-width:0;font-size:14px;font-weight:700;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(x.name) + '</span>' +
+         (x.haken ? '<span style="font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38%;">' + escHtml(x.haken) + '</span>' : '') +
+         '<span style="color:#bbb;font-size:14px;">›</span></div>';
+  });
+  h += '</div>';
+  box.innerHTML = h; box.style.display = '';
+}
+async function openRecentEmployee(no) {
+  var box = document.getElementById('recentEmpBox'); if (box) box.style.display = 'none';
+  showSpinner();
+  try {
+    var emp = await fetchFullEmployee(no);
+    if (!emp) { hideSpinner(); showToast('社員 ' + no + ' が見つかりません（退社・削除済みの可能性）', 'error'); return; }
+    hideSpinner();
+    await selectEmployee(emp);
+  } catch (e) { hideSpinner(); showToast('読み込み失敗: ' + (e.message || e), 'error'); }
+}
+
 function resetSearch() {
   document.getElementById('searchInput').value = '';
   document.getElementById('searchResults').innerHTML = '';
   document.getElementById('searchClearBtn').style.display = 'none';
+  var _rb = document.getElementById('recentEmpBox'); if (_rb) { _rb.style.display = 'none'; _rb.innerHTML = ''; }
   document.getElementById('hakenSelect').value = '';
   document.getElementById('hakenIncludeRetired').checked = false;
   hakenMultiSelected = [];
@@ -8663,6 +8715,7 @@ function exitBadgeInfo(type, isPlan) {
 
 async function selectEmployee(emp) {
   currentEmployee = emp;
+  try { _recentEmpPush(emp); } catch (_) {}
   _shahoYoteiOpenedItemId = null; // 他画面からの検索で開いた場合は社保加入予定フラグをクリア
   _shahoFromSoumuDash = false;    // 同様に総務発フラグもクリア
   showSpinner();
@@ -61855,6 +61908,10 @@ document.getElementById('searchInput').addEventListener('keydown', function(e) {
 });
 document.getElementById('searchInput').addEventListener('input', function() {
   document.getElementById('searchClearBtn').style.display = this.value ? 'block' : 'none';
+  try { renderRecentEmployees(); } catch (_) {}   // 文字を入れ始めたら履歴を隠す
+});
+document.getElementById('searchInput').addEventListener('focus', function() {
+  try { renderRecentEmployees(); } catch (_) {}   // 空でタップ → 最近開いた社員 5人
 });
 
 // ============================================================
