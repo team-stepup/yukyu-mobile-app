@@ -39676,10 +39676,14 @@ function _showEmpOcrApplyPreview(parsed, fileName, opts) {
   if (!newCount && !confCount && !sameCount) rows = '<tr><td colspan="4" style="padding:14px;text-align:center;color:#888;font-size:12px;">読み取れた項目がありません</td></tr>';
   window._empOcrParsed = parsed;
   // 読み取れなかった項目の案内 (手入力の必要が一目で分かるように)
-  var ALL_KEYS = ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuBikou'];
-  var missing = opts.skipMissing ? [] : ALL_KEYS.filter(function(k) { return !(k in parsed); }).map(function(k) { return labelMap[k] || k; });
+  var ALL_KEYS = ['tokki1', 'birthday', 'sex', 'nationality', 'zairyuShikaku', 'zairyuKigen', 'zairyuBikou', 'address'];
+  var missing = opts.skipMissing ? [] : ALL_KEYS.filter(function(k) { return !(k in parsed); }).map(function(k) { return labelMap[k] || (k === 'address' ? '住所' : k); });
+  // 住所だけ読めない = 引越し後で表面の住所が二重線で消され、裏面「住居地記載欄」に新住所がある典型 (2026-09-11 エビナさんの件)
+  var addrMissing = !opts.skipMissing && !('address' in parsed);
   var missingHtml = missing.length
-    ? '<div style="font-size:11px;color:#666;background:#f5f5f5;border-radius:6px;padding:7px 10px;margin-top:8px;">📝 読み取れなかった項目（手入力してください）: <b>' + escHtml(missing.join('、')) + '</b><br><span style="font-size:10px;color:#999;">裏面しか無い・画像が不鮮明な場合に起こります。鮮明な表面の画像で再実行すると改善することがあります。</span></div>'
+    ? '<div style="font-size:11px;color:#666;background:#f5f5f5;border-radius:6px;padding:7px 10px;margin-top:8px;">📝 読み取れなかった項目（手入力してください）: <b>' + escHtml(missing.join('、')) + '</b><br><span style="font-size:10px;color:#999;">裏面しか無い・画像が不鮮明な場合に起こります。鮮明な表面の画像で再実行すると改善することがあります。</span>' +
+      (addrMissing ? '<div style="margin-top:5px;color:#e65100;font-weight:700;">🏠 住所が読めない場合: 引越し後は表面の住所が二重線で消され、<u>裏面の「住居地記載欄」</u>に新しい住所があります。在留カードの<b>裏面も撮影して</b>もう一度読み取ってください（裏面の最新の住所を使います）。</div>' : '') +
+      '</div>'
     : '';
   // ── 一括チェック操作バー（全てチェック / 必要分のみ） ──
   var hasChk = (newCount + confCount) > 0;
