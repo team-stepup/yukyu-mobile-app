@@ -39109,7 +39109,7 @@ var EMP_DOC_IMG_SECTIONS = {
   residence:    ['zairyu'],
   basic:        ['zairyu'],
   license:      ['license'],
-  insurance:    ['koyou'],
+  insurance:    ['koyou', 'shaho'],   // 雇用保険証(最新版) + 社保/雇用の通知書・年金手帳・本人の保険証・離職票など (全部 2026-09-14)
   bank:         ['bank'],
   vehicle:      ['shaken'],
   carInsurance: ['jibaiseki', 'nini'],
@@ -39134,11 +39134,23 @@ function _empDocFuyouMatch(f, emp) {
   if (/被扶養|扶養/.test(n)) return true;
   return _FUYOU_FAMILY_RE.test(n) && /保険証|資格確認|社保|異動|決定|加入|喪失|健康保険/.test(n);
 }
-function _empDocFuyouMeta(f, emp) {
+function _empDocFuyouMeta(f, emp, docType) {
   var m = f.Name.match(/_(\d{8})\./);
   var stamp = m ? (m[1].slice(0, 4) + '/' + m[1].slice(4, 6) + '/' + m[1].slice(6, 8)) : (f.TimeCreated ? String(f.TimeCreated).slice(0, 10).replace(/-/g, '/') : '');
   var label = _empDocNameCore(f.Name, emp).replace(/_\d{8}$/, '').replace(/_(\d)$/, ' $1') || f.Name;
-  return { Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, docType: 'fuyou', label: label, side: '', stamp: stamp, isPdf: /\.pdf$/i.test(f.Name), sub: f._sub || '' };
+  return { Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, docType: docType || 'fuyou', label: label, side: '', stamp: stamp, isPdf: /\.pdf$/i.test(f.Name), sub: f._sub || '' };
+}
+// 社会保険・雇用 の書類: 資格取得/喪失確認通知書・標準報酬・年金手帳/基礎年金番号・本人の健康保険証/資格確認書・離職票・雇用取得/喪失 など。
+//   扶養書類は除外(扶養セクションへ)。直下の「雇用保険…」は koyou(最新版) で表示済みなので除外、サブフォルダ内は含める
+var _SHAHO_SUB_RE = /雇用保険|社会保険|社保|年金|健康保険|雇用取得|雇用喪失|雇用加入|離職票/;
+var _DOC_SUB_RE = /扶養|雇用保険|社会保険|社保|年金|健康保険|雇用取得|雇用喪失|雇用加入|離職票/;   // 一覧取得で中を見るサブフォルダ
+function _empDocShahoMatch(f, emp) {
+  var n = _empDocNameCore(f.Name, emp);
+  if (/扶養控除|年調|年末調整|申告書/.test(n)) return false;
+  if (_empDocFuyouMatch(f, emp)) return false;
+  if (!f._sub && /雇用保険/.test(n)) return false;
+  if (f._sub && _SHAHO_SUB_RE.test(f._sub)) return true;
+  return /資格取得|資格喪失|標準報酬|年金手帳|基礎年金|健康保険|資格確認|社保|社会保険|厚生年金|被保険者|離職票|雇用取得|雇用喪失|雇用加入|雇用保険/.test(n);
 }
 var _empDocImgSeq = 0;   // 描画が連続して2回走ったとき、古い方の結果を捨てる (同じ画像が2枚並ぶ不具合の対策 2026-09-11)
 
@@ -39175,7 +39187,7 @@ async function _empDocImagesInit(emp) {
     // 扶養関係はサブフォルダ(「扶養書類」「社会保険」「e-Gov…扶養…」等)に入っている社員もいるので、その中のファイルも拾う
     try {
       var rf = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + enc + "')/Folders?$select=Name,ServerRelativeUrl&$top=200", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
-      var subs = rf.ok ? ((((await rf.json()).d || {}).results || []).filter(function(sf) { return /扶養|社会保険|社保/.test(sf.Name || ''); })) : [];
+      var subs = rf.ok ? ((((await rf.json()).d || {}).results || []).filter(function(sf) { return _DOC_SUB_RE.test(sf.Name || ''); })) : [];
       for (var si = 0; si < subs.length; si++) {
         var senc = encodeURIComponent(subs[si].ServerRelativeUrl).replace(/%2F/g, '/');
         var r2 = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + senc + "')/Files?$select=Name,ServerRelativeUrl,TimeCreated&$top=200", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
@@ -39198,15 +39210,17 @@ async function _empDocImagesInit(emp) {
   Object.keys(_empDocImg.byType).forEach(function(k) {
     _empDocImg.byType[k].sort(function(a, b) { return (a.side === '裏' ? 1 : 0) - (b.side === '裏' ? 1 : 0) || a.Name.localeCompare(b.Name, 'ja'); });
   });
-  // 扶養書類: 直下+サブフォルダの全ファイルから判定 (最新1件に絞らず全部・新しい順)
-  var fuyou = [], seenF = {};
-  files.concat(subFiles).forEach(function(f) {
-    if (seenF[f.ServerRelativeUrl] || !_empDocFuyouMatch(f, emp)) return;
-    seenF[f.ServerRelativeUrl] = true;
-    fuyou.push(_empDocFuyouMeta(f, emp));
+  // 扶養書類 / 社保・雇用書類: 直下+サブフォルダの全ファイルから判定 (最新1件に絞らず全部・新しい順)
+  [['fuyou', _empDocFuyouMatch], ['shaho', _empDocShahoMatch]].forEach(function(grp) {
+    var outList = [], seenG = {};
+    files.concat(subFiles).forEach(function(f) {
+      if (seenG[f.ServerRelativeUrl] || seenUrl[f.ServerRelativeUrl] || !grp[1](f, emp)) return;
+      seenG[f.ServerRelativeUrl] = true;
+      outList.push(_empDocFuyouMeta(f, emp, grp[0]));
+    });
+    outList.sort(function(a, b) { return (b.stamp || '').localeCompare(a.stamp || '') || a.Name.localeCompare(b.Name, 'ja'); });
+    if (outList.length) mine.byType[grp[0]] = outList;
   });
-  fuyou.sort(function(a, b) { return (b.stamp || '').localeCompare(a.stamp || '') || a.Name.localeCompare(b.Name, 'ja'); });
-  if (fuyou.length) mine.byType.fuyou = fuyou;
   // セクションへ差し込み
   Object.keys(EMP_DOC_IMG_SECTIONS).forEach(function(secId) {
     var list = [];
@@ -39230,7 +39244,7 @@ async function _empDocImagesInit(emp) {
     strip.id = 'empDocStrip_' + secId;
     strip.style.cssText = 'margin:6px 8px 4px;';
     strip.innerHTML = '<div style="display:flex;gap:6px;align-items:stretch;">' +
-      '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="flex:1;min-width:0;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + (secId === 'shahoHuyou' ? '件' : '枚') + '）<span style="font-weight:400;color:#888;font-size:11px;"> ' + (secId === 'shahoHuyou' ? '決定通知書・被扶養者の保険証など' : list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・')) + '</span></button>' +
+      '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="flex:1;min-width:0;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + ((secId === 'shahoHuyou' || secId === 'insurance') ? '件' : '枚') + '）<span style="font-weight:400;color:#888;font-size:11px;"> ' + (secId === 'shahoHuyou' ? '決定通知書・被扶養者の保険証など' : secId === 'insurance' ? '雇用保険証・社保/雇用の通知書など' : list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・')) + '</span></button>' +
       (secId === 'shahoHuyou' ? '' : '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="flex:0 0 auto;background:#fff;border:1.5px solid #90caf9;color:#1565c0;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>') +
       '</div>';
     body.insertBefore(strip, body.firstChild);
@@ -39310,7 +39324,7 @@ async function _empDocImgLoadStrip(secId) {
       thumb = '<div style="width:96px;height:72px;border-radius:8px;background:' + (m.isPdf ? '#fce4ec;color:#c62828' : '#eee;color:#999') + ';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">' + (m.isPdf ? 'PDF' : '取得失敗') + '</div>';
     }
     h += '<div onclick="_empDocImgOpen(\'' + secId + '\',' + i + ')" style="flex:0 0 auto;width:96px;cursor:zoom-in;">' + thumb +
-         (m.docType === 'fuyou'
+         ((m.docType === 'fuyou' || m.docType === 'shaho')
            ? '<div title="' + escHtml(m.Name) + '" style="font-size:10px;font-weight:700;color:#333;margin-top:3px;line-height:1.25;max-height:2.5em;overflow:hidden;word-break:break-all;">' + escHtml(m.label) + '</div>'
            : '<div style="font-size:10.5px;font-weight:700;color:#333;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(m.label + (m.side ? ' ' + m.side : '')) + '</div>') +
          '<div style="font-size:9.5px;color:#999;">' + escHtml(m.stamp) + (m.sub ? ' 📁' : '') + '</div></div>';
@@ -39391,6 +39405,9 @@ var EMP_DOC_ADD_TYPES = [
   { id: 'shaken', label: '車検証', icon: '🚗', sides: ['1', '2'] },
   { id: 'jibaiseki', label: '自賠責保険証', icon: '🛡', sides: ['表', '裏'] },
   { id: 'nini', label: '任意保険証', icon: '📋', sides: ['1', '2', '3', '4'] },
+  { id: 'shaho_tsuchi', label: '社保 資格取得・喪失通知書', icon: '🏥', sides: ['1', '2', '3', '4'] },   // 健康保険・厚生年金 資格取得確認/喪失確認/標準報酬 (2026-09-14)
+  { id: 'nenkin', label: '年金手帳・基礎年金番号', icon: '📘', sides: ['表', '裏', '3', '4'] },
+  { id: 'hokensho', label: '健康保険証・資格確認書', icon: '💳', sides: ['表', '裏', '3', '4'] },      // 本人分 (家族分は 扶養 保険証)
   { id: 'fuyou_tsuchi', label: '扶養 決定通知書', icon: '👨‍👩‍👧', sides: ['1', '2', '3', '4'] },      // 健康保険被扶養者(異動)決定通知書 (2026-09-14)
   { id: 'fuyou_hoken', label: '扶養 保険証・資格確認書', icon: '💳', sides: ['1', '2', '3', '4'] },  // 被扶養者の保険証/資格確認書
   { id: 'fuyou_other', label: '扶養 その他', icon: '📄', sides: ['1', '2', '3', '4'] },            // 続柄の書類など
