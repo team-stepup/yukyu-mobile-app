@@ -35722,27 +35722,45 @@ function _carTypeSync(prefix, force) {
       '<button type="button" onclick="_carTypeSync(\'' + prefix + '\',true)" style="background:#fff;border:1.5px solid #e65100;color:#e65100;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">排気量から選択</button>';
   }
 }
-// 閲覧画面: 対象車両が未登録 or 排気量と食い違うときに行内へヒント (✏️修正 で編集を開き自動選択)
+// 閲覧画面: 対象車両が未登録 or 排気量と食い違うときは、排気量から判定した値をそのまま SP に自動保存する
+//   (2026-09-14 ユーザー「この値で修正はいらない。そのまま書き込み。わからないときだけ表示」)
+//   判定できないとき(排気量が未登録/読めない)だけ小さな案内を出す。自転車・会社車両は触らない。
+var _carTypeAutoSaved = {};   // empId|type → true (同じ社員で二重保存しない)
 function _carTypeViewHint(rows, emp, keyMap) {
   var r = null;
   for (var i = 0; i < rows.length; i++) { if (rows[i].fkey === 'carType') { r = rows[i]; break; } }
   if (!r) return;
   var dk = keyMap.carDisplacement, tk = keyMap.carType;
-  if (!dk) return;
+  if (!dk || !tk) return;
+  var cur = String(emp[tk] || '').trim();
   var g = _carTypeFromDisplacement(emp[dk]);
-  if (!g) return;
-  var cur = tk ? String(emp[tk] || '').trim() : '';
+  if (!g) {
+    if (!cur) r.value += '<span style="display:block;font-size:10.5px;color:#999;margin-top:3px;">排気量を登録すると自動で設定されます</span>';
+    return;
+  }
   if (cur === g.type || cur === '自転車' || cur === '会社車両') return;
-  var ccTxt = g.cc.toLocaleString('ja-JP') + 'cc';
-  var msg = cur ? ('⚠ 排気量 ' + ccTxt + ' なら「' + g.type + '」') : ('排気量 ' + ccTxt + ' → 「' + g.type + '」');
-  r.value += '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10.5px;color:#e65100;font-weight:700;margin-top:3px;">' + escHtml(msg) +
-    '<button type="button" onclick="_carTypeQuickFix()" style="background:#fff;border:1px solid #e65100;color:#e65100;border-radius:6px;padding:2px 8px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap;">✏️ この値で修正</button></span>';
+  var saveKey = String(emp.Id) + '|' + g.type;
+  if (_carTypeAutoSaved[saveKey]) return;
+  _carTypeAutoSaved[saveKey] = true;
+  // 画面は先に判定値で表示し、裏で保存
+  r.value = escHtml(g.type);
+  _carTypeAutoSave(emp, tk, g, cur);
 }
-async function _carTypeQuickFix() {
+async function _carTypeAutoSave(emp, tk, g, cur) {
+  var internalName = odataKeyToInternal(tk);
+  var body = {}; body[internalName] = g.type;
   try {
-    await startEditField('vehicle', 'carType');
-    _carTypeSync('editField_', true);
-  } catch (e) { console.warn('_carTypeQuickFix', e); }
+    await spPatchEmployee(emp.Id, body);
+    emp[tk] = g.type;
+    if (typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.Id === emp.Id) currentEmployee[tk] = g.type;
+    showToast('対象車両を排気量 ' + g.cc.toLocaleString('ja-JP') + 'cc から「' + g.type + '」に' + (cur ? '修正' : '登録') + 'しました', 'success');
+  } catch (e) {
+    console.warn('対象車両 自動保存失敗:', e);
+    delete _carTypeAutoSaved[String(emp.Id) + '|' + g.type];
+    var el = document.querySelector('[data-row-fkey="carType"] .acc-row-value');
+    if (el) el.innerHTML = (cur ? escHtml(cur) : '<span style="color:#bbb;">—</span>') +
+      '<span style="display:block;font-size:10.5px;color:#e65100;font-weight:700;margin-top:3px;">⚠ 排気量 ' + escHtml(g.cc.toLocaleString('ja-JP')) + 'cc なら「' + escHtml(g.type) + '」（自動保存できませんでした: ' + escHtml(e.message || String(e)) + '）</span>';
+  }
 }
 
 function getEditInputHtml(field, currentVal, fieldType, choices) {
