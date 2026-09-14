@@ -39484,7 +39484,9 @@ async function empDocAddFiles(fileList) {
     if (!isPdf && !/^image\//.test(f.type) && !/\.(jpe?g|png|heic|webp)$/i.test(f.name)) { showToast(f.name + ' は画像/PDFではありません', 'error'); continue; }
     var du = null;
     if (!isPdf) { try { du = await _readFileAsDataUrl(f); } catch (e) { showToast('読込失敗: ' + f.name, 'error'); continue; } }
-    _empDocAdd.files.push({ name: f.name, dataUrl: du, file: f, isPdf: isPdf, type: _empDocAdd.type || '' });
+    var stem = String(f.name || '').replace(/\.[^.]+$/, '').trim();
+    if (/^(image|img|photo|scan|capture|dsc|pxl)[_\-\s\d]*$/i.test(stem) || /^\d{8,}$/.test(stem)) stem = '';   // カメラ/スキャナの自動名は初期値にしない
+    _empDocAdd.files.push({ name: f.name, dataUrl: du, file: f, isPdf: isPdf, type: _empDocAdd.type || '', docName: stem });
   }
   _empDocAddPaintList();
   _empDocAddPaintTypes();
@@ -39512,8 +39514,11 @@ function _empDocAddPaintList() {
       '<option value="">種類を選択</option>' +
       EMP_DOC_ADD_TYPES.map(function(x) { return '<option value="' + x.id + '"' + (x.id === f.type ? ' selected' : '') + '>' + (x.id === 'auto' ? '🤖 自動判定' : x.label) + '</option>'; }).join('') + '</select>';
     var sideLbl = (f.type && f.type !== 'auto') ? ' <span style="font-size:11.5px;color:#1565c0;font-weight:700;">' + escHtml(side) + '</span>' : (f.type === 'auto' ? ' <span style="font-size:11px;color:#888;">判定待ち</span>' : '');
+    var nameInp = (f.type === 'other')
+      ? '<input type="text" value="' + escHtml(f.docName || '') + '" placeholder="書類名を入力（例: 年金手帳、住民票）" oninput="_empDocAdd.files[' + i + '].docName=this.value" style="width:100%;box-sizing:border-box;margin-top:4px;padding:5px 8px;border:1.5px solid #ffb74d;border-radius:6px;font-size:12.5px;background:#fffdf7;">'
+      : '';
     return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #eceff1;">' + thumb +
-      '<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">' + sel + sideLbl + '</div><div style="font-size:10.5px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;">' + escHtml(f.name) + '</div></div>' +
+      '<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">' + sel + sideLbl + '</div>' + nameInp + '<div style="font-size:10.5px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;">' + escHtml(f.name) + '</div></div>' +
       '<div style="display:flex;gap:4px;flex-shrink:0;">' +
         '<button onclick="empDocAddMove(' + i + ',-1)" title="上へ" style="border:1px solid #ddd;background:#fff;border-radius:6px;width:30px;height:30px;cursor:pointer;">▲</button>' +
         '<button onclick="empDocAddMove(' + i + ',1)" title="下へ" style="border:1px solid #ddd;background:#fff;border-radius:6px;width:30px;height:30px;cursor:pointer;">▼</button>' +
@@ -39551,20 +39556,22 @@ async function empDocAddSave() {
         } catch (ce) { items[a].type = 'other'; }
       }
     }
+    var cleanName = function(s) { return String(s || '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim(); };
     var otherName = '';
-    if (items.some(function(x) { return x.type === 'other'; })) {
+    if (items.some(function(x) { return x.type === 'other' && !cleanName(x.f.docName); })) {
       otherName = prompt('書類の名前を入力してください（例: 年金手帳、住民票）', '') || '';
-      otherName = otherName.replace(/[\\/:*?"<>|]/g, '').trim() || '書類';
+      otherName = cleanName(otherName) || '書類';
     }
-    // 保存 (種別ごとに 表/裏/連番 を振る)
+    // 保存 (種別ごとに 表/裏/連番 を振る。「その他」は書類名ごとに連番)
     var counters = {}, saved = [], groups = {};
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       var tdef = EMP_DOC_ADD_TYPES.find(function(x) { return x.id === it.type; }) || { id: 'other', label: otherName, sides: [] };
-      var label = it.type === 'other' ? otherName : tdef.label;
-      counters[it.type] = (counters[it.type] || 0);
-      var side = tdef.sides[counters[it.type]] || String(counters[it.type] + 1);
-      counters[it.type]++;
+      var label = it.type === 'other' ? (cleanName(it.f.docName) || otherName) : tdef.label;
+      var ckey = it.type === 'other' ? ('other|' + label) : it.type;
+      counters[ckey] = (counters[ckey] || 0);
+      var side = tdef.sides[counters[ckey]] || String(counters[ckey] + 1);
+      counters[ckey]++;
       _empDocAddProg('☁️ 保存中… ' + label + ' ' + side + ' (' + (i + 1) + '/' + items.length + ')');
       var ext = it.f.isPdf ? 'pdf' : 'jpg';
       var fname = empNo + ' ' + label + '_' + side + '_' + stamp + '.' + ext;
