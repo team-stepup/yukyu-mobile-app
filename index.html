@@ -39174,6 +39174,51 @@ async function _empDocImagesInit(emp) {
   });
 }
 
+// 社員フォルダの書類ファイルを取得して blob キャッシュへ。PDF は pdf.js で先頭3ページを縦に連結した1枚のJPEGにして
+//   通常の画像と同じ拡大ビューア (_uniformZoom) で見られるようにする (2026-09-14「PDF画像が開きません」)
+async function _empDocImgFetch(m) {
+  var key = m.ServerRelativeUrl;
+  if (_empDocImg.blobs[key] && (!m.isPdf || _empDocImg.blobs[key].imgUrl)) return _empDocImg.blobs[key];
+  var token = await getToken();
+  var enc = encodeURIComponent(key).replace(/%2F/g, '/');
+  var r = await fetch(_spApiBase(key) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) throw new Error('ファイルを取得できません (' + r.status + ')');
+  var blob = await r.blob();
+  if (m.isPdf && (!blob.type || blob.type.indexOf('pdf') < 0)) blob = new Blob([blob], { type: 'application/pdf' });
+  var entry = { blob: blob, url: URL.createObjectURL(blob), imgUrl: '' };
+  if (m.isPdf) {
+    entry.imgUrl = await _empDocPdfToImage(blob, 3);
+  } else {
+    entry.imgUrl = entry.url;
+  }
+  _empDocImg.blobs[key] = entry;
+  return entry;
+}
+async function _empDocPdfToImage(blob, maxPages) {
+  var pdfjsLib = await loadPdfJsIfNeeded();
+  var buf = await blob.arrayBuffer();
+  var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  var n = Math.min(pdf.numPages, maxPages || 3);
+  var canvases = [], totalH = 0, maxW = 0;
+  for (var p = 1; p <= n; p++) {
+    var page = await pdf.getPage(p);
+    var base = page.getViewport({ scale: 1 });
+    var scale = Math.min(2.5, Math.max(1, 1600 / base.width));
+    var vp = page.getViewport({ scale: scale });
+    var cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    canvases.push(cv); totalH += cv.height + (p > 1 ? 12 : 0); maxW = Math.max(maxW, cv.width);
+  }
+  if (canvases.length === 1) { var one = canvases[0].toDataURL('image/jpeg', 0.85); canvases[0].width = canvases[0].height = 0; return one; }
+  var big = document.createElement('canvas'); big.width = maxW; big.height = totalH;
+  var bctx = big.getContext('2d'); bctx.fillStyle = '#888'; bctx.fillRect(0, 0, big.width, big.height);
+  var y = 0;
+  canvases.forEach(function(cv, i) { if (i > 0) y += 12; bctx.drawImage(cv, 0, y); y += cv.height; cv.width = cv.height = 0; });
+  var out = big.toDataURL('image/jpeg', 0.85); big.width = big.height = 0;
+  return out;
+}
+
 // サムネイル一覧を読み込んで表示 (タップで拡大・📤送る)
 async function _empDocImgLoadStrip(secId) {
   var strip = document.getElementById('empDocStrip_' + secId);
@@ -39191,22 +39236,15 @@ async function _empDocImgLoadStrip(secId) {
     var m = list[i];
     var key = m.ServerRelativeUrl;
     var thumb;
-    if (m.isPdf) {
-      thumb = '<div style="width:96px;height:72px;border-radius:8px;background:#fce4ec;color:#c62828;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">PDF</div>';
-    } else {
-      try {
-        if (!_empDocImg.blobs[key]) {
-          var token = await getToken();
-          var enc = encodeURIComponent(key).replace(/%2F/g, '/');
-          var r = await fetch(_spApiBase(key) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          var blob = await r.blob();
-          _empDocImg.blobs[key] = { blob: blob, url: URL.createObjectURL(blob) };
-        }
-        thumb = '<img src="' + _empDocImg.blobs[key].url + '" style="width:96px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #ddd;display:block;background:#f5f5f5;">';
-      } catch (e) {
-        thumb = '<div style="width:96px;height:72px;border-radius:8px;background:#eee;color:#999;display:flex;align-items:center;justify-content:center;font-size:11px;">取得失敗</div>';
-      }
+    try {
+      var ent = await _empDocImgFetch(m);
+      thumb = '<div style="position:relative;width:96px;height:72px;">' +
+              '<img src="' + ent.imgUrl + '" style="width:96px;height:72px;object-fit:cover;object-position:top;border-radius:8px;border:1px solid #ddd;display:block;background:#f5f5f5;">' +
+              (m.isPdf ? '<span style="position:absolute;top:3px;right:3px;background:#c62828;color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:5px;">PDF</span>' : '') +
+              '</div>';
+    } catch (e) {
+      console.warn('書類サムネイル失敗:', m.Name, e);
+      thumb = '<div style="width:96px;height:72px;border-radius:8px;background:' + (m.isPdf ? '#fce4ec;color:#c62828' : '#eee;color:#999') + ';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">' + (m.isPdf ? 'PDF' : '取得失敗') + '</div>';
     }
     h += '<div onclick="_empDocImgOpen(\'' + secId + '\',' + i + ')" style="flex:0 0 auto;width:96px;cursor:zoom-in;">' + thumb +
          '<div style="font-size:10.5px;font-weight:700;color:#333;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(m.label + (m.side ? ' ' + m.side : '')) + '</div>' +
@@ -39221,30 +39259,20 @@ async function _empDocImgOpen(secId, i) {
   (EMP_DOC_IMG_SECTIONS[secId] || []).forEach(function(dt) { list = list.concat(_empDocImg.byType[dt] || []); });
   var m = list[i]; if (!m) return;
   var key = m.ServerRelativeUrl;
-  if (m.isPdf) {
-    // PDF は社員ファイルの既存ビューアへ (トークン付きで開く)
-    try { if (typeof openSpFileWithToken === 'function') { openSpFileWithToken(key, m.Name); return; } } catch (_) {}
-    showToast('PDFは「社員ファイル」から開いてください', 'error'); return;
-  }
-  if (!_empDocImg.blobs[key]) {
+  var ent = _empDocImg.blobs[key];
+  if (!ent || !ent.imgUrl) {
     showSpinner();
-    try {
-      var token = await getToken();
-      var enc = encodeURIComponent(key).replace(/%2F/g, '/');
-      var r = await fetch(_spApiBase(key) + "/_api/web/GetFileByServerRelativeUrl('" + enc + "')/$value", { headers: { 'Authorization': 'Bearer ' + token } });
-      if (!r.ok) throw new Error('画像を取得できません (' + r.status + ')');
-      var blob = await r.blob();
-      _empDocImg.blobs[key] = { blob: blob, url: URL.createObjectURL(blob) };
-    } catch (e) { hideSpinner(); showToast(e.message || String(e), 'error'); return; }
+    try { ent = await _empDocImgFetch(m); }
+    catch (e) { hideSpinner(); showToast((m.isPdf ? 'PDFを開けません: ' : '画像を取得できません: ') + (e.message || String(e)), 'error'); return; }
     hideSpinner();
   }
-  var title = (currentEmployee && currentEmployee.Title ? currentEmployee.Title + '　' : '') + m.label + (m.side ? ' ' + m.side : '') + (m.stamp ? '　' + m.stamp : '');
-  _uniformZoom(_empDocImg.blobs[key].url, title);
+  var title = (currentEmployee && currentEmployee.Title ? currentEmployee.Title + '　' : '') + m.label + (m.side ? ' ' + m.side : '') + (m.stamp ? '　' + m.stamp : '') + (m.isPdf ? '　(PDF)' : '');
+  _uniformZoom(ent.imgUrl, title);
   var zh = document.querySelector('#uniformZoomOverlay > div');
   if (zh) {
     zh.insertAdjacentHTML('beforeend',
       '<button onclick="_empDocImgShare(\'' + secId + '\',' + i + ')" style="background:#1565c0;color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-left:4px;white-space:nowrap;">📤 送る</button>' +
-      '<a href="' + _empDocImg.blobs[key].url + '" download="' + escHtml(m.Name) + '" style="color:#fff;border:1px solid #fff;border-radius:8px;padding:6px 10px;text-decoration:none;font-size:12px;margin-left:4px;">⬇</a>');
+      '<a href="' + ent.url + '" download="' + escHtml(m.Name) + '" title="' + (m.isPdf ? 'PDFをダウンロード' : '画像をダウンロード') + '" style="color:#fff;border:1px solid #fff;border-radius:8px;padding:6px 10px;text-decoration:none;font-size:12px;margin-left:4px;">⬇</a>');
   }
 }
 
@@ -39255,13 +39283,13 @@ async function _empDocImgShare(secId, i) {
   var b = _empDocImg.blobs[m.ServerRelativeUrl]; if (!b) return;
   var text = '【' + m.label + (m.side ? ' ' + m.side : '') + '】' + (currentEmployee && currentEmployee.Title ? currentEmployee.Title : '') + (m.stamp ? '　' + m.stamp : '');
   try {
-    var file = new File([b.blob], m.Name, { type: b.blob.type || 'image/jpeg' });
+    var file = new File([b.blob], m.Name, { type: m.isPdf ? 'application/pdf' : (b.blob.type || 'image/jpeg') });
     if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: m.label, text: text }); return; }
   } catch (e) { if (e && e.name === 'AbortError') return; }
   try {
     var a = document.createElement('a'); a.href = b.url; a.download = m.Name; document.body.appendChild(a); a.click(); a.remove();
     try { if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text); } catch (_) {}
-    showToast('画像をダウンロードしました。メッセージに添付して送ってください', 'success');
+    showToast((m.isPdf ? 'PDF' : '画像') + 'をダウンロードしました。メッセージに添付して送ってください', 'success');
   } catch (e2) { showToast('送れませんでした: ' + (e2.message || e2), 'error'); }
 }
 
