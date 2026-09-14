@@ -13782,6 +13782,12 @@ function renderMaicarTsukinASTI(emp, opts) {
   var carDisp  = g('carDisplacement');
   var shakenExp= gd('shakenExpiry');
   var firstReg = gd('carFirstReg');
+  // 対象車両☑: 登録値を優先。未登録/会社車両なら排気量から自動判定、それも無ければ従来どおり普通自動車 (2026-09-14)
+  var _ctSel = g('carType');
+  if (['普通自動車', '軽自動車', '自動二輪車', '原動機付自転車', '自転車'].indexOf(_ctSel) < 0) {
+    var _ctg = (typeof _carTypeFromDisplacement === 'function') ? _carTypeFromDisplacement(carDisp) : null;
+    _ctSel = _ctg ? _ctg.type : '普通自動車';
+  }
 
   // ナンバープレート 分解
   //   想定する2形式:
@@ -14015,7 +14021,7 @@ function renderMaicarTsukinASTI(emp, opts) {
           ck +
           '<td style="' + TDL + '" rowspan="3">対象車両</td>' +
           '<td style="' + TD  + '" colspan="7">' +
-            chk(true) + '普通自動車　・　☐軽自動車　・　☐自動二輪車　・　☐原動機付自転車　・　☐自転車' +
+            chk(_ctSel === '普通自動車') + '普通自動車　・　' + chk(_ctSel === '軽自動車') + '軽自動車　・　' + chk(_ctSel === '自動二輪車') + '自動二輪車　・　' + chk(_ctSel === '原動機付自転車') + '原動機付自転車　・　' + chk(_ctSel === '自転車') + '自転車' +
           '</td>' +
         '</tr>' +
         // 12,13行目: 対象車両 詳細
@@ -31543,6 +31549,8 @@ async function loadEmployeeProfile() {
       const formatted = formatProfileValue(val, field.format);
       if (formatted) rows.push({ group: field.group, fkey: field.key, format: field.format, label: field.label, value: formatted });
     });
+    // 車両: 排気量から対象車両を判定し、未登録/不一致なら行内にヒント (2026-09-14)
+    if (cat.id === 'vehicle') { try { _carTypeViewHint(rows, emp, keyMap); } catch (_) {} }
 
     // Skip empty sections (especially 在留・車両)
     if (!hasData) return;
@@ -35661,6 +35669,82 @@ function syncPickerFromText(id) {
   if (p && t && /^\d{4}-\d{2}-\d{2}$/.test(String(t.value || ''))) p.value = t.value;
 }
 
+// ============================================================
+// 🚗 排気量 → 対象車両 の自動判定 (2026-09-14)
+//   "660" / "0.65" / "1.49L" / "650CC" / "2000㏄" / "50" など混在した排気量表記を cc に正規化し、
+//   125cc以下=原動機付自転車 / 550cc以下=自動二輪車 / 660cc以下=軽自動車 / それ以上=普通自動車
+//   (自転車・会社車両は排気量から判定できないので対象外)
+// ============================================================
+function _carDispToCc(disp) {
+  var s = String(disp == null ? '' : disp).trim();
+  if (!s) return null;
+  s = s.replace(/[０-９．]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }).replace(/[,，]/g, '');
+  var m = s.match(/(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  var v = parseFloat(m[1]);
+  if (!isFinite(v) || v <= 0) return null;
+  var isCc = /cc|㏄/i.test(s);
+  var isL = /[lLℓ]|リットル/.test(s) && !isCc;
+  if (isL || v < 20) v = v * 1000;   // "0.65" "1.49" "1.5L" → L表記とみなす
+  return Math.round(v);
+}
+function _carTypeFromDisplacement(disp) {
+  var cc = _carDispToCc(disp);
+  if (cc == null) return null;
+  var t = cc <= 125 ? '原動機付自転車' : cc <= 550 ? '自動二輪車' : cc <= 660 ? '軽自動車' : '普通自動車';
+  return { cc: cc, type: t };
+}
+// 編集画面: 対象車両セレクトと排気量入力を連動 (prefix = 'editField_' | 'addField_')
+//   force=true → 判定結果でセレクトを上書き / それ以外は「未選択のときだけ」自動選択し、不一致は⚠ヒント
+function _carTypeSync(prefix, force) {
+  prefix = prefix || 'editField_';
+  var sel = document.getElementById(prefix + 'carType');
+  var hint = document.getElementById(prefix + 'carType_hint');
+  if (!sel) return;
+  var dispEl = document.getElementById(prefix + 'carDisplacement');
+  var disp = dispEl ? dispEl.value
+           : ((typeof currentEmployee !== 'undefined' && currentEmployee && typeof editKeyMap !== 'undefined' && editKeyMap && editKeyMap.carDisplacement) ? currentEmployee[editKeyMap.carDisplacement] : '');
+  var g = _carTypeFromDisplacement(disp);
+  if (!g) {
+    if (hint) hint.innerHTML = '<span style="color:#999;">排気量を入れると自動判定します（125cc以下=原付・550cc以下=自動二輪・660cc以下=軽・それ以上=普通）</span>';
+    return;
+  }
+  var hasOpt = Array.prototype.some.call(sel.options, function(o) { return o.value === g.type; });
+  if (hasOpt && (force || !sel.value)) sel.value = g.type;
+  if (!hint) return;
+  var ccTxt = g.cc.toLocaleString('ja-JP') + 'cc';
+  if (sel.value === g.type) {
+    hint.innerHTML = '<span style="color:#2e7d32;font-weight:700;">✅ 排気量 ' + escHtml(ccTxt) + ' → ' + escHtml(g.type) + '（自動判定）</span>';
+  } else if (sel.value === '自転車' || sel.value === '会社車両') {
+    hint.innerHTML = '';
+  } else {
+    hint.innerHTML = '<span style="color:#e65100;font-weight:700;">⚠ 排気量 ' + escHtml(ccTxt) + ' なら「' + escHtml(g.type) + '」です</span> ' +
+      '<button type="button" onclick="_carTypeSync(\'' + prefix + '\',true)" style="background:#fff;border:1.5px solid #e65100;color:#e65100;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">排気量から選択</button>';
+  }
+}
+// 閲覧画面: 対象車両が未登録 or 排気量と食い違うときに行内へヒント (✏️修正 で編集を開き自動選択)
+function _carTypeViewHint(rows, emp, keyMap) {
+  var r = null;
+  for (var i = 0; i < rows.length; i++) { if (rows[i].fkey === 'carType') { r = rows[i]; break; } }
+  if (!r) return;
+  var dk = keyMap.carDisplacement, tk = keyMap.carType;
+  if (!dk) return;
+  var g = _carTypeFromDisplacement(emp[dk]);
+  if (!g) return;
+  var cur = tk ? String(emp[tk] || '').trim() : '';
+  if (cur === g.type || cur === '自転車' || cur === '会社車両') return;
+  var ccTxt = g.cc.toLocaleString('ja-JP') + 'cc';
+  var msg = cur ? ('⚠ 排気量 ' + ccTxt + ' なら「' + g.type + '」') : ('排気量 ' + ccTxt + ' → 「' + g.type + '」');
+  r.value += '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10.5px;color:#e65100;font-weight:700;margin-top:3px;">' + escHtml(msg) +
+    '<button type="button" onclick="_carTypeQuickFix()" style="background:#fff;border:1px solid #e65100;color:#e65100;border-radius:6px;padding:2px 8px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap;">✏️ この値で修正</button></span>';
+}
+async function _carTypeQuickFix() {
+  try {
+    await startEditField('vehicle', 'carType');
+    _carTypeSync('editField_', true);
+  } catch (e) { console.warn('_carTypeQuickFix', e); }
+}
+
 function getEditInputHtml(field, currentVal, fieldType, choices) {
   const id = 'editField_' + field.key;
   const val = (currentVal === null || currentVal === undefined) ? '' : currentVal;
@@ -35752,6 +35836,18 @@ function getEditInputHtml(field, currentVal, fieldType, choices) {
   if (field.format === 'email') {
     return '<input type="email" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="' + field.key + '">';
   }
+  // 対象車両: 排気量からの自動判定ヒント付きセレクト (2026-09-14)
+  if (field.key === 'carType' && choices && choices.length > 0) {
+    let html = '<select class="edit-select" id="' + id + '" data-field="carType" onchange="_carTypeSync(\'editField_\')">';
+    html += '<option value="">（未選択）</option>';
+    choices.forEach(c => { html += '<option value="' + escHtml(c) + '"' + (String(val) === c ? ' selected' : '') + '>' + escHtml(c) + '</option>'; });
+    html += '</select><div id="' + id + '_hint" style="font-size:11px;line-height:1.5;margin-top:3px;color:#666;"></div>';
+    return html;
+  }
+  // 排気量: 入力と同時に対象車両を自動判定 (同じ編集画面に対象車両セレクトがある場合)
+  if (field.key === 'carDisplacement') {
+    return '<input type="text" class="edit-input" id="' + id + '" value="' + escHtml(String(val)) + '" data-field="carDisplacement" inputmode="decimal" placeholder="例: 660 / 1500 / 0.65" oninput="_carTypeSync(\'editField_\')">';
+  }
   // Choice field with choices → dropdown select (状況系は色分け・アイコン付与)
   if ((fieldType === 'Choice' || field.format === 'badge') && choices && choices.length > 0) {
     const curSty = _getStatusStyle(val);
@@ -35815,6 +35911,7 @@ async function startEditSection(catId) {
   viewDiv.style.display = 'none';
   editDiv.innerHTML = html;
   editDiv.style.display = 'block';
+  if (catId === 'vehicle') { try { _carTypeSync('editField_'); } catch (_) {} }   // 排気量 → 対象車両 自動判定
 
   // 連動ドロップダウンの初期フィルタ
   Object.keys(DROPDOWN_NEW_FIELDS).forEach(function(depKey) {
@@ -35876,6 +35973,7 @@ async function startEditField(catId, fieldKey) {
       '<button onclick="cancelEditField(\'' + fieldKey + '\')" style="background:#9e9e9e;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;">×</button>' +
       extraHtml +
     '</div>';
+  if (fieldKey === 'carType') { try { _carTypeSync('editField_'); } catch (_) {} }   // 排気量 → 対象車両 自動判定
   // 連動ドロップダウン用フィルタ
   Object.keys(DROPDOWN_NEW_FIELDS).forEach(function(depKey) {
     if (DROPDOWN_NEW_FIELDS[depKey].linkedTo) refilterLinkedDropdown(depKey);
@@ -37576,6 +37674,11 @@ function mapCloudOcrToFields(docType, ocr) {
       if (docType === 'shaken' && k === 'carModel') kk = '_carModel';
       put(kk, ocr[k]);
     });
+    // 車検証: 対象車両は排気量から自動判定 (2026-09-14)
+    if (docType === 'shaken' && out.carDisplacement && !out.carType) {
+      var _ctg = (typeof _carTypeFromDisplacement === 'function') ? _carTypeFromDisplacement(out.carDisplacement) : null;
+      if (_ctg) out.carType = _ctg.type;
+    }
   }
   return out;
 }
@@ -37624,7 +37727,7 @@ var OCR_FIELD_LABELS = {
   zairyuBikou: '在留カード番号 (備考)', address: '住所', yubin: '郵便番号',
   licenseNo: '免許証番号', licenseType: '免許 種類', licenseGetDate: '免許 取得年月日', licenseExpiry: '免許 有効期限',
   koyouNo: '雇用：被保険者番号', koyouName: '雇用保険名前', koyouShutoku: '雇用：資格取得日',
-  carNumber: '登録番号', carMaker: 'メーカー', carName: '車名', carDisplacement: '排気量',
+  carType: '対象車両', carNumber: '登録番号', carMaker: 'メーカー', carName: '車名', carDisplacement: '排気量',
   carFirstReg: '初年度登録', shakenExpiry: '車検満了日',
   jibaisekiCompany: '自賠責保険会社', jibaisekiNo: '自賠責証券番号', jibaisekiExpiry: '自賠責満了日',
   niniCompany: '任意保険会社', niniNo: '任意保険証券番号', niniStartDate: '任意保険開始日', niniExpiry: '任意保険満了日',
