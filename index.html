@@ -10449,6 +10449,11 @@ function arrayBufferToDataUrl(ab, mimeType) {
 var _pdfjsLoadPromise = null;
 var PDFJS_VERSION = '3.11.174';
 var PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/build/';
+var PDFJS_PKG = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/';
+// getDocument 共通オプション: 日本語フォント未埋め込みのPDF(e-Gov届出様式のＭＳゴシック等)は cMap が無いと文字が描画されず空欄になる (2026-09-14)
+function _pdfjsDocOpts(data) {
+  return { data: data, cMapUrl: PDFJS_PKG + 'cmaps/', cMapPacked: true, standardFontDataUrl: PDFJS_PKG + 'standard_fonts/' };
+}
 function loadPdfJsIfNeeded() {
   if (_pdfjsLoadPromise) return _pdfjsLoadPromise;
   _pdfjsLoadPromise = new Promise(function(resolve, reject) {
@@ -10503,7 +10508,7 @@ async function renderPdfPagesToImages(arrayBuffer, onProgress) {
   var pdfjsLib = await loadPdfJsIfNeeded();
   // getDocument 自体に 20秒タイムアウト
   var pdf = await _withTimeout(
-    pdfjsLib.getDocument({ data: arrayBuffer }).promise,
+    pdfjsLib.getDocument(_pdfjsDocOpts(arrayBuffer)).promise,
     20000, 'PDF読み込みタイムアウト'
   );
   var images = [];
@@ -39028,7 +39033,7 @@ async function _fetchPdfAsImages(serverRelativeUrl, maxPages) {
     { headers: { 'Authorization': 'Bearer ' + token } });
   if (!r.ok) throw new Error('PDF取得失敗 ' + r.status);
   var buf = await r.arrayBuffer();
-  var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  var pdf = await pdfjsLib.getDocument(_pdfjsDocOpts(buf)).promise;
   var out = [];
   var n = Math.min(pdf.numPages, maxPages);
   for (var p = 1; p <= n; p++) {
@@ -39274,7 +39279,7 @@ async function _empDocImgFetch(m) {
 async function _empDocPdfToImage(blob, maxPages) {
   var pdfjsLib = await loadPdfJsIfNeeded();
   var buf = await blob.arrayBuffer();
-  var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  var pdf = await pdfjsLib.getDocument(_pdfjsDocOpts(buf)).promise;
   var n = Math.min(pdf.numPages, maxPages || 3);
   var canvases = [], totalH = 0, maxW = 0;
   for (var p = 1; p <= n; p++) {
@@ -39934,7 +39939,7 @@ async function _localPdfToPageImages(file, maxPages, onProgress) {
   maxPages = maxPages || SCAN_BULK_MAX_PAGES;
   var pdfjsLib = await loadPdfJsIfNeeded();
   var buf = await file.arrayBuffer();
-  var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  var pdf = await pdfjsLib.getDocument(_pdfjsDocOpts(buf)).promise;
   var out = [];
   var n = Math.min(pdf.numPages, maxPages);
   for (var p = 1; p <= n; p++) {
@@ -54781,7 +54786,7 @@ async function _loadPdfJsLib() {
 
 async function _extractPdfText(file) {
   var buf = await file.arrayBuffer();
-  var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  var pdf = await window.pdfjsLib.getDocument(_pdfjsDocOpts(buf)).promise;
   var allText = '';
   // 診断情報をグローバルに保持（失敗時に画面表示）
   window._repairPdfDiag = { numPages: pdf.numPages, pages: [], fileSize: file.size, fileName: file.name };
@@ -55293,7 +55298,7 @@ async function _onRepairPdfFileSelected(input) {
 async function _renderPdfPagesToImages(file, maxPages) {
   await _loadPdfJsLib();
   var buf = await file.arrayBuffer();
-  var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  var pdf = await window.pdfjsLib.getDocument(_pdfjsDocOpts(buf)).promise;
   var n = Math.min(pdf.numPages, maxPages || 12);
   var imgs = [];
   for (var p = 1; p <= n; p++) {
@@ -55380,7 +55385,7 @@ async function _fallbackRepairTextParse(f) {
 // フォールバック: ソートなしで items を順番通りに連結
 async function _extractPdfTextRaw(file) {
   var buf = await file.arrayBuffer();
-  var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  var pdf = await window.pdfjsLib.getDocument(_pdfjsDocOpts(buf)).promise;
   var allText = '';
   for (var p = 1; p <= pdf.numPages; p++) {
     var page = await pdf.getPage(p);
@@ -57065,7 +57070,7 @@ async function downloadSpFile(token, path) {
 async function extractMatchingPages(buffer, empNo, onProgress) {
   var pdfjsLib = window.pdfjsLib;
   if (!pdfjsLib) throw new Error('PDF.js 未読込');
-  var pdf = await pdfjsLib.getDocument({ data: buffer.slice(0) }).promise;
+  var pdf = await pdfjsLib.getDocument(_pdfjsDocOpts(buffer.slice(0))).promise;
   var matches = [];
   var totalTextLen = 0;
   var sampleText = '';
@@ -57535,7 +57540,7 @@ async function downloadSpSharingFile(token, shareUrl) {
 async function renderPdfBufferToBody(pbuf, body) {
   await loadPdfLibs();
   var pdfjsLib = window.pdfjsLib;
-  var pdf = await pdfjsLib.getDocument({ data: pbuf.slice(0) }).promise;
+  var pdf = await pdfjsLib.getDocument(_pdfjsDocOpts(pbuf.slice(0))).promise;
   body.innerHTML = '';
 
   // 全ページを縦に並べるラッパー
