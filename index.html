@@ -39112,9 +39112,34 @@ var EMP_DOC_IMG_SECTIONS = {
   insurance:    ['koyou'],
   bank:         ['bank'],
   vehicle:      ['shaken'],
-  carInsurance: ['jibaiseki', 'nini']
+  carInsurance: ['jibaiseki', 'nini'],
+  shahoHuyou:   ['fuyou']    // 扶養書類 (決定通知書・被扶養者の保険証など。家族ごとに複数あるので最新1件に絞らない 2026-09-14)
 };
 var _empDocImg = { empNo: '', byType: {}, blobs: {} };   // byType: docType → [{Name, ServerRelativeUrl, label, side, stamp}]
+
+// 扶養書類の判定: ファイル名に「被扶養/扶養」、または 家族の続柄 + 保険証/社保/異動/決定通知 など。
+//   「扶養控除申告書」(年末調整) や 限度額認定 は除外。社員本人の氏名はマッチ前に取り除く (氏名に「夫」等が含まれる誤判定防止)
+var _FUYOU_EXCLUDE_RE = /扶養控除|年調|年末調整|申告書|限度額/;
+var _FUYOU_FAMILY_RE = /配偶者|夫|妻|子供|子ども|こども|（子|\(子|子）|子\)|孫|父|母|家族|の子|人の子/;
+function _empDocNameCore(name, emp) {
+  var s = String(name || '').replace(/\.[^.]+$/, '');
+  s = s.replace(/^[\d\s　]+/, '');
+  String((emp && emp.Title) || '').split(/[\s　]+/).filter(Boolean).forEach(function(tok) { if (tok.length >= 2) s = s.split(tok).join(' '); });
+  return s.replace(/[\s　]+/g, ' ').replace(/^[\s_\-・]+|[\s_\-・]+$/g, '').trim();
+}
+function _empDocFuyouMatch(f, emp) {
+  var n = _empDocNameCore(f.Name, emp);
+  if (_FUYOU_EXCLUDE_RE.test(n)) return false;
+  if (f._sub && /扶養/.test(f._sub)) return true;
+  if (/被扶養|扶養/.test(n)) return true;
+  return _FUYOU_FAMILY_RE.test(n) && /保険証|資格確認|社保|異動|決定|加入|喪失|健康保険/.test(n);
+}
+function _empDocFuyouMeta(f, emp) {
+  var m = f.Name.match(/_(\d{8})\./);
+  var stamp = m ? (m[1].slice(0, 4) + '/' + m[1].slice(4, 6) + '/' + m[1].slice(6, 8)) : (f.TimeCreated ? String(f.TimeCreated).slice(0, 10).replace(/-/g, '/') : '');
+  var label = _empDocNameCore(f.Name, emp).replace(/_\d{8}$/, '').replace(/_(\d)$/, ' $1') || f.Name;
+  return { Name: f.Name, ServerRelativeUrl: f.ServerRelativeUrl, docType: 'fuyou', label: label, side: '', stamp: stamp, isPdf: /\.pdf$/i.test(f.Name), sub: f._sub || '' };
+}
 var _empDocImgSeq = 0;   // 描画が連続して2回走ったとき、古い方の結果を捨てる (同じ画像が2枚並ぶ不具合の対策 2026-09-11)
 
 function _empDocImgMeta(f) {
@@ -39136,7 +39161,7 @@ async function _empDocImagesInit(emp) {
   var mine = { empNo: empNo, byType: {}, blobs: {} };
   _empDocImg = mine;
   var seq = ++_empDocImgSeq;
-  var files = [];
+  var files = [], subFiles = [];
   try {
     var path = await getEmpFolderPath(emp);
     if (!path) return;
@@ -39147,6 +39172,17 @@ async function _empDocImagesInit(emp) {
     });
     if (!resp.ok) return;
     files = (((await resp.json()).d || {}).results || []).filter(function(f) { return /\.(jpe?g|png|webp|heic|pdf)$/i.test(f.Name || ''); });
+    // 扶養関係はサブフォルダ(「扶養書類」「社会保険」「e-Gov…扶養…」等)に入っている社員もいるので、その中のファイルも拾う
+    try {
+      var rf = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + enc + "')/Folders?$select=Name,ServerRelativeUrl&$top=200", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+      var subs = rf.ok ? ((((await rf.json()).d || {}).results || []).filter(function(sf) { return /扶養|社会保険|社保/.test(sf.Name || ''); })) : [];
+      for (var si = 0; si < subs.length; si++) {
+        var senc = encodeURIComponent(subs[si].ServerRelativeUrl).replace(/%2F/g, '/');
+        var r2 = await fetch(SP_DOC_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + senc + "')/Files?$select=Name,ServerRelativeUrl,TimeCreated&$top=200", { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+        if (!r2.ok) continue;
+        ((((await r2.json()).d || {}).results) || []).forEach(function(f) { if (/\.(jpe?g|png|webp|heic|pdf)$/i.test(f.Name || '')) { f._sub = subs[si].Name; subFiles.push(f); } });
+      }
+    } catch (e2) { console.warn('扶養サブフォルダ取得失敗:', e2); }
   } catch (e) { console.warn('書類画像 一覧取得失敗:', e); return; }
   if (seq !== _empDocImgSeq || _empDocImg !== mine) return;   // 後から始まった描画が優先 (二重登録防止)
   if (String((currentEmployee && currentEmployee[F.syainNo]) || '').replace(/\.0+$/, '').trim() !== empNo) return;   // 画面が別社員に変わった
@@ -39162,6 +39198,15 @@ async function _empDocImagesInit(emp) {
   Object.keys(_empDocImg.byType).forEach(function(k) {
     _empDocImg.byType[k].sort(function(a, b) { return (a.side === '裏' ? 1 : 0) - (b.side === '裏' ? 1 : 0) || a.Name.localeCompare(b.Name, 'ja'); });
   });
+  // 扶養書類: 直下+サブフォルダの全ファイルから判定 (最新1件に絞らず全部・新しい順)
+  var fuyou = [], seenF = {};
+  files.concat(subFiles).forEach(function(f) {
+    if (seenF[f.ServerRelativeUrl] || !_empDocFuyouMatch(f, emp)) return;
+    seenF[f.ServerRelativeUrl] = true;
+    fuyou.push(_empDocFuyouMeta(f, emp));
+  });
+  fuyou.sort(function(a, b) { return (b.stamp || '').localeCompare(a.stamp || '') || a.Name.localeCompare(b.Name, 'ja'); });
+  if (fuyou.length) mine.byType.fuyou = fuyou;
   // セクションへ差し込み
   Object.keys(EMP_DOC_IMG_SECTIONS).forEach(function(secId) {
     var list = [];
@@ -39185,8 +39230,8 @@ async function _empDocImagesInit(emp) {
     strip.id = 'empDocStrip_' + secId;
     strip.style.cssText = 'margin:6px 8px 4px;';
     strip.innerHTML = '<div style="display:flex;gap:6px;align-items:stretch;">' +
-      '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="flex:1;min-width:0;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + '枚）<span style="font-weight:400;color:#888;font-size:11px;"> ' + list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・') + '</span></button>' +
-      '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="flex:0 0 auto;background:#fff;border:1.5px solid #90caf9;color:#1565c0;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>' +
+      '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="flex:1;min-width:0;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + (secId === 'shahoHuyou' ? '件' : '枚') + '）<span style="font-weight:400;color:#888;font-size:11px;"> ' + (secId === 'shahoHuyou' ? '決定通知書・被扶養者の保険証など' : list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・')) + '</span></button>' +
+      (secId === 'shahoHuyou' ? '' : '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="flex:0 0 auto;background:#fff;border:1.5px solid #90caf9;color:#1565c0;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>') +
       '</div>';
     body.insertBefore(strip, body.firstChild);
   });
@@ -39247,7 +39292,7 @@ async function _empDocImgLoadStrip(secId) {
   strip.innerHTML = '<div style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像 <span style="color:#888;font-weight:400;">（読み込み中…）</span></div>';
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;"><span style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像（タップで拡大・送信）</span>' +
           '<span style="display:flex;gap:6px;">' +
-          '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>' +
+          (secId === 'shahoHuyou' ? '' : '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>') +
           '<button onclick="closeActionSheet();openEmpDocAddDialog()" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">📎 追加・更新</button></span></div>';
   h += '<div style="display:flex;gap:8px;overflow-x:auto;padding:6px 0 4px;-webkit-overflow-scrolling:touch;">';
   for (var i = 0; i < list.length; i++) {
@@ -39265,8 +39310,10 @@ async function _empDocImgLoadStrip(secId) {
       thumb = '<div style="width:96px;height:72px;border-radius:8px;background:' + (m.isPdf ? '#fce4ec;color:#c62828' : '#eee;color:#999') + ';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">' + (m.isPdf ? 'PDF' : '取得失敗') + '</div>';
     }
     h += '<div onclick="_empDocImgOpen(\'' + secId + '\',' + i + ')" style="flex:0 0 auto;width:96px;cursor:zoom-in;">' + thumb +
-         '<div style="font-size:10.5px;font-weight:700;color:#333;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(m.label + (m.side ? ' ' + m.side : '')) + '</div>' +
-         '<div style="font-size:9.5px;color:#999;">' + escHtml(m.stamp) + '</div></div>';
+         (m.docType === 'fuyou'
+           ? '<div title="' + escHtml(m.Name) + '" style="font-size:10px;font-weight:700;color:#333;margin-top:3px;line-height:1.25;max-height:2.5em;overflow:hidden;word-break:break-all;">' + escHtml(m.label) + '</div>'
+           : '<div style="font-size:10.5px;font-weight:700;color:#333;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(m.label + (m.side ? ' ' + m.side : '')) + '</div>') +
+         '<div style="font-size:9.5px;color:#999;">' + escHtml(m.stamp) + (m.sub ? ' 📁' : '') + '</div></div>';
   }
   h += '</div>';
   strip.innerHTML = h;
@@ -39344,6 +39391,9 @@ var EMP_DOC_ADD_TYPES = [
   { id: 'shaken', label: '車検証', icon: '🚗', sides: ['1', '2'] },
   { id: 'jibaiseki', label: '自賠責保険証', icon: '🛡', sides: ['表', '裏'] },
   { id: 'nini', label: '任意保険証', icon: '📋', sides: ['1', '2', '3', '4'] },
+  { id: 'fuyou_tsuchi', label: '扶養 決定通知書', icon: '👨‍👩‍👧', sides: ['1', '2', '3', '4'] },      // 健康保険被扶養者(異動)決定通知書 (2026-09-14)
+  { id: 'fuyou_hoken', label: '扶養 保険証・資格確認書', icon: '💳', sides: ['1', '2', '3', '4'] },  // 被扶養者の保険証/資格確認書
+  { id: 'fuyou_other', label: '扶養 その他', icon: '📄', sides: ['1', '2', '3', '4'] },            // 続柄の書類など
   { id: 'other', label: 'その他', icon: '📄', sides: ['1', '2', '3', '4'] },
   { id: 'auto', label: '🤖 自動判定', icon: '', sides: [] }
 ];
@@ -39513,6 +39563,7 @@ async function empDocAddSave() {
     _empDocAddProg(null);
     showToast('社員フォルダに保存しました: ' + saved.join('、'), 'success');
     var ov = document.getElementById('empDocAddOverlay'); if (ov) ov.remove();
+    try { _empDocImagesInit(emp); } catch (_) {}   // 各セクションの🖼書類画像を更新
     // 社員ファイルURL未設定なら保存 (自己修復) — 失敗しても無視
     try { if (typeof saveSyainFileLinkToEmp === 'function' && emp.Id) await saveSyainFileLinkToEmp(emp.Id, folder, emp.Title || ''); } catch (_) {}
     // 読み取り → 現在値と比較して更新 (既存の一括読み取りと同じ確認画面)
