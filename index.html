@@ -59016,7 +59016,9 @@ async function generateDattaiDocument() {
       var fn = row.querySelector('.dattai-fuyou-name').value || '';
       var fbd = row.querySelector('.dattai-fuyou-bd').value || '';
       var fso = row.querySelector('.dattai-fuyou-soushitsu').value || '';
-      if (fn) fuyouList.push({ name: fn, birthday: fbd, soushitsu: fso });
+      var fzk = (row.querySelector('.dattai-fuyou-zokugara') || {}).value || '';
+      var fka = (row.querySelector('.dattai-fuyou-shutoku') || {}).value || '';
+      if (fn) fuyouList.push({ name: fn, birthday: fbd, soushitsu: fso, zoku: fzk, kaisi: fka });
     });
     var todayW = toWareki(toLocalDateStr(new Date()));
     function wD(ds) { return ds ? toWareki(ds) : null; }
@@ -59151,28 +59153,51 @@ async function generateDattaiDocument() {
       var fy = fuyouBaseY[fi];
       var fMid = fy + 16; // vertical center of row
 
-      // Name (x=107-289)
-      txt(115, fMid + 4, f.name, 7);
+      // Name (x=107-289) — 「(R8.9.1 喪失)」などの注記は除いて印字
+      var fName = String(f.name || '').replace(/\s*[（(][^）)]*喪失[^）)]*[）)]\s*$/, '');
+      txt(115, fMid + 4, fName, 7);
 
-      // Birthday (x=289-394)
+      // Birthday (x=289-394): 印字済みの 昭和/平成/令和 (x=293.5-307.4) を〇で囲む (PyMuPDF実測: 各行のラベル上端)
+      //   ※以前は元号を文字で重ね書きしていたため〇が付かなかった (2026-09-15 修正)
+      var bdEraTop = { '昭和': [486.3, 518.7, 551.1, 583.5], '平成': [497.1, 529.5, 561.9, 594.3], '令和': [507.9, 540.3, 572.7, 605.1] };
       var fbW = wD(f.birthday);
       if (fbW && fbW.era) {
-        txt(295, fMid + 4, fbW.era, 5.5);
-        txt(318, fMid + 4, fbW.year, 6);
-        txt(348, fMid + 4, fbW.month, 6);
-        txt(377, fMid + 4, fbW.day, 6);
+        var bt = bdEraTop[fbW.era] ? bdEraTop[fbW.era][fi] : null;
+        if (bt != null) oval(291, bt - 2, 310, bt + 9, 1.0, black);
+        var bBase = bdEraTop['平成'][fi] + 6.8;   // 印字の「年 月 日」と同じ高さ
+        txt(318, bBase, fbW.year, 6);
+        txt(348, bBase, fbW.month, 6);
+        txt(377, bBase, fbW.day, 6);
       }
 
-      // Soushitsu date (x=432-538)
+      // 被保険者との続柄 (x=394-432) — 中央寄せ
+      if (f.zoku) {
+        var zw = font.widthOfTextAtSize(String(f.zoku), 7);
+        txt((394 + 432 - zw) / 2, fMid + 4, f.zoku, 7);
+      }
+
+      // 被扶養者として認定された日 (右列 上段・網掛け): 平成/令和 (x=437.6-449.5) を〇、数字は 年月日ラベルの前
+      var kaEraTop = { '平成': [485.8, 518.2, 550.6, 583.0], '令和': [493.0, 525.4, 557.8, 590.2] };
+      var fkW = wD(f.kaisi);
+      if (fkW && fkW.era && kaEraTop[fkW.era]) {
+        var kt = kaEraTop[fkW.era][fi];
+        oval(435.5, kt - 1.5, 451.5, kt + 7.5, 1.0, black);
+        var kBase = kaEraTop['令和'][fi] + 5.6;
+        txt(462, kBase, fkW.year, 6);
+        txt(490, kBase, fkW.month, 6);
+        txt(518, kBase, fkW.day, 6);
+      }
+
+      // 被扶養者認定を除外された日 (右列 下段): 平成/令和 を〇
+      var soEraTop = { '平成': [502.0, 534.4, 566.8, 599.2], '令和': [509.2, 541.6, 574.0, 606.4] };
       var fsW = wD(f.soushitsu);
-      if (fsW && fsW.era) {
-        // Era boxes in fuyou section
-        // From rects: multiple small rects at x=432-537 for each fuyou row
-        // Era labels at x=437, dates at x=473, 501, 528
-        txt(438, fMid + 4, fsW.era, 5.5);
-        txt(473, fMid + 4, fsW.year, 6);
-        txt(500, fMid + 4, fsW.month, 6);
-        txt(528, fMid + 4, fsW.day, 6);
+      if (fsW && fsW.era && soEraTop[fsW.era]) {
+        var st = soEraTop[fsW.era][fi];
+        oval(435.5, st - 1.5, 451.5, st + 7.5, 1.0, black);
+        var sBase = soEraTop['令和'][fi] + 5.6;
+        txt(462, sBase, fsW.year, 6);
+        txt(490, sBase, fsW.month, 6);
+        txt(518, sBase, fsW.day, 6);
       }
     }
 
