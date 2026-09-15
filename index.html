@@ -59083,10 +59083,14 @@ async function generateDattaiDocument() {
       var bw = font.widthOfTextAtSize(bangou, 11);
       txt((316 + 482 - bw) / 2, 355, bangou, 11);
     }
-    // 枝番 (x=505-538・本人は 00)
+    // 枝番 (x=505-538・本人は 00) — 中央に仕切り線(x=520.85)がある2マス構成なので1桁ずつ各マス中央へ
     if (edaban) {
-      var ew = font.widthOfTextAtSize(edaban, 11);
-      txt((505 + 538 - ew) / 2, 355, edaban, 11);
+      var edaStr = String(edaban).slice(0, 2);
+      var edaCx = [512.75, 528.9];
+      for (var ei = 0; ei < edaStr.length; ei++) {
+        var ech = edaStr.charAt(ei);
+        txt(edaCx[ei] - font.widthOfTextAtSize(ech, 11) / 2, 353.5, ech, 11);
+      }
     }
 
     // === 保険者番号 8桁 ===
@@ -59163,10 +59167,15 @@ async function generateDattaiDocument() {
       var fy = fuyouBaseY[fi];
       var fMid = fy + 16; // vertical center of row
 
-      // 枝番 (左列 x=73-107・中央寄せ)
+      // 枝番 (左列 x=73-107) — 中央に仕切り線(x=90.3)がある2マス構成なので1桁ずつ各マス中央へ
       if (f.edaban) {
-        var edw = font.widthOfTextAtSize(String(f.edaban), 8);
-        txt((73 + 107 - edw) / 2, fMid + 4, f.edaban, 8);
+        var fEdaStr = String(f.edaban).slice(0, 2);
+        var fRowMid = [500.4, 532.8, 565.2, 597.6][fi];
+        var fEdaCx = [82.2, 98.35];
+        for (var fei = 0; fei < fEdaStr.length; fei++) {
+          var fch = fEdaStr.charAt(fei);
+          txt(fEdaCx[fei] - font.widthOfTextAtSize(fch, 8) / 2, fRowMid + 2.9, fch, 8);
+        }
       }
       // Name (x=107-289) — 「(R8.9.1 喪失)」などの注記は除いて印字
       var fName = String(f.name || '').replace(/\s*[（(][^）)]*喪失[^）)]*[）)]\s*$/, '');
