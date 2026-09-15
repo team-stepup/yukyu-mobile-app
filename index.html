@@ -39693,14 +39693,16 @@ async function fuyouOcrCheck() {
   var docs = (_empDocImg && _empDocImg.byType && _empDocImg.byType.fuyou) || [];
   if (!docs.length) { showToast('扶養書類が社員フォルダにありません（📎 追加・更新 で決定通知書を保存してください）', 'error'); return; }
   // 決定通知書/異動届らしいものを優先 (無ければ全部)。マイナンバーは除外
-  var cand = docs.filter(function(m) { return !/マイナンバー|個人番号/.test(m.Name) && /決定|通知|異動|加入|該当|喪失|追加|届/.test(m.Name); });
-  if (!cand.length) cand = docs.filter(function(m) { return !/マイナンバー|個人番号/.test(m.Name); });
+  var pool = docs.filter(function(m) { return !/マイナンバー|個人番号|保険証|資格確認/.test(m.Name); });
+  var cand = pool.filter(function(m) { return /決定|通知|加入|該当/.test(m.Name); });          // 年金機構の決定通知書 (印字・高精度)
+  if (!cand.length) cand = pool.filter(function(m) { return /異動|届|喪失|追加/.test(m.Name); });   // 手書きの異動届 (精度低め)
+  if (!cand.length) cand = pool;
   cand = cand.slice(0, 6);
   try {
     try { var _m = await fetchEmployeeFields(); if (_m) editKeyMap = buildFieldKeyMap(_m); } catch (_) {}
     var km = editKeyMap || {};
     var found = [];   // {name,birthday,sex,relation,kaisi,soushitsu,src}
-    var okDocs = [], ngDocs = [];
+    var okDocs = [], ngDocs = [], hasKettei = false;
     for (var i = 0; i < cand.length; i++) {
       var m = cand[i];
       _empOcrProg('☁️ 扶養書類をAIで読み取り中… (' + (i + 1) + '/' + cand.length + ') ' + m.label);
@@ -39711,6 +39713,9 @@ async function fuyouOcrCheck() {
         var ocr = await cloudDocOcr('fuyou', opts);
         var deps = Array.isArray(ocr && ocr.dependents) ? ocr.dependents : [];
         var docDate = (ocr && ocr.docDate) || m.stamp.replace(/\//g, '-') || '';
+        var isKettei = (ocr && ocr.docKind === '決定通知書');
+        if (isKettei && !hasKettei) { hasKettei = true; found = []; }          // 決定通知書が出てきたら、それまでの届の結果は捨てる
+        if (!isKettei && hasKettei) { okDocs.push(m.label + '（届のため対象外）'); continue; }
         deps.forEach(function(d) {
           if (!d || !d.name) return;
           var key = _fuyouNormName(d.name) + '|' + (d.birthday || '');
