@@ -59267,10 +59267,19 @@ async function generateDattaiDocument() {
     txt(280, 728.2, '有限会社ステップ・アップ', 9.9);
     // 代表者氏名
     txt(280, 744.4, '山下　浩俊', 9.9);
-    // 電話 - white-out the existing （　）　－ template text first
-    // Template has: （ at x=243, ） at x=304, ー at x=370, y=752-762
-    page.drawRectangle({ x: 240, y: H - 764, width: 160, height: 16, color: PDFLib.rgb(1, 1, 1), borderWidth: 0 });
-    txt(280, 760.6, '0538-36-6968', 9.9);
+    // 電話 — 印字済みの「（　）　－」の枠に合わせて 市外局番/局番/番号 を分けて入れる (2026-09-15「電話番号が見にくい」)
+    //   Template: （ x=243-252, ） x=304.2-313.1, － x=370.4-379.3 (y=752.5-761.4)
+    var _tel = '0538-36-6968'.split('-');
+    if (_tel.length === 3) {
+      var _slots = [[253, 303], [314, 369], [381, 445]];
+      for (var ti = 0; ti < 3; ti++) {
+        var tw = font.widthOfTextAtSize(_tel[ti], 9.9);
+        txt((_slots[ti][0] + _slots[ti][1] - tw) / 2, 760.6, _tel[ti], 9.9);
+      }
+    } else {
+      page.drawRectangle({ x: 240, y: H - 764, width: 160, height: 16, color: PDFLib.rgb(1, 1, 1), borderWidth: 0 });
+      txt(280, 760.6, _tel.join('-'), 9.9);
+    }
 
     // 角印 (朱肉色・約22.5mm角・会社名の右。seal_shuniku.png = 角印画像を朱肉色に再着色したもの)
     //   2026-09-15 ユーザー選択。フォームの「角印を押す」チェックOFFで押印なし
