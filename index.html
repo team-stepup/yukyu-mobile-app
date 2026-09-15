@@ -58897,6 +58897,9 @@ async function openDattaiForm() {
           '<label>資格喪失年月日</label>' +
           '<input type="date" id="dattai_soushitsu" value="' + shahoSoushitsu + '"' + (shahoSoushitsu ? '' : ' style="border-color:var(--warning);"') + '>' +
         '</div>' +
+        '<div class="taisha-field" style="margin-top:12px;">' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;"><input type="checkbox" id="dattai_stamp" checked style="width:20px;height:20px;margin:0;"> 角印を押す（朱肉色）</label>' +
+        '</div>' +
         '<div class="dattai-section-title" style="margin-top:20px;">被扶養者（該当者がいる場合）</div>' +
         fuyouPresetHtml +
         '<div id="dattai_fuyou_list"></div>' +
@@ -59068,6 +59071,21 @@ async function generateDattaiDocument() {
       txt(x, py, '✓', 10, black);
     }
 
+    // 年月日の数字: 印字済みラベル(8pt)の直前に右寄せ・ラベルと同じベースライン。1年は「元」
+    //   (2026-09-15 ユーザー指示: 被扶養者氏名・年月日を大きく。座標は PyMuPDF 実測)
+    var DATE_SZ = 8.5;
+    var LBL_BD = [329.5, 357.1, 384.7];   // 生年月日欄の 年/月/日 ラベル x
+    var LBL_SO = [473.0, 500.6, 528.2];   // 資格喪失・除外日欄の 年/月/日 ラベル x
+    function eraYear(w) { return (w.year === 1) ? '元' : w.year; }
+    function dateR(w, labels, base, sz) {
+      sz = sz || DATE_SZ;
+      var vals = [eraYear(w), w.month, w.day];
+      for (var di = 0; di < 3; di++) {
+        var v = String(vals[di]);
+        txt(labels[di] - 1.5 - font.widthOfTextAtSize(v, sz), base, v, sz);
+      }
+    }
+
     // === UPPER SECTION: Checkbox ===
     // □ at x=136.3-147.3, y=74.3-85.3
     check(137, 84);
@@ -59132,9 +59150,7 @@ async function generateDattaiDocument() {
       var ey = eraMap[bdW.era];
       if (ey) oval(290, ey, 312, ey + 13, 1.2, black);
       // Numbers at fixed y=455 (aligned with 年月日 labels), before each label
-      txt(318, 455, bdW.year, 7);
-      txt(346, 455, bdW.month, 7);
-      txt(374, 455, bdW.day, 7);
+      dateR(bdW, LBL_BD, 454.8);   // ラベルのベースライン y=454.8
     }
 
     // 資格取得 (x=394-538, y=420-441) — ★網掛け欄は省略可能なので印字しない (2026-09-15 ユーザー指示)
@@ -59153,9 +59169,7 @@ async function generateDattaiDocument() {
     // Always circle 令和 ONLY (fixed)
     if (soW && soW.era) {
       oval(434, 452, 454, 463, 1.0, black); // 令和 only
-      txt(462, 460, soW.year, 7);
-      txt(490, 460, soW.month, 7);
-      txt(518, 460, soW.day, 7);
+      dateR(soW, LBL_SO, 460.2);
     }
 
     // === 被扶養者 ROWS ===
@@ -59179,7 +59193,7 @@ async function generateDattaiDocument() {
       }
       // Name (x=107-289) — 「(R8.9.1 喪失)」などの注記は除いて印字
       var fName = String(f.name || '').replace(/\s*[（(][^）)]*喪失[^）)]*[）)]\s*$/, '');
-      txt(115, fMid + 4, fName, 7);
+      txt(115, [500.4, 532.8, 565.2, 597.6][fi] + 3.3, fName, 9);   // 9pt・行の縦中央 (2026-09-15)
 
       // Birthday (x=289-394): 印字済みの 昭和/平成/令和 (x=293.5-307.4) を〇で囲む (PyMuPDF実測: 各行のラベル上端)
       //   ※以前は元号を文字で重ね書きしていたため〇が付かなかった (2026-09-15 修正)
@@ -59188,10 +59202,7 @@ async function generateDattaiDocument() {
       if (fbW && fbW.era) {
         var bt = bdEraTop[fbW.era] ? bdEraTop[fbW.era][fi] : null;
         if (bt != null) oval(291, bt - 2, 310, bt + 9, 1.0, black);
-        var bBase = bdEraTop['平成'][fi] + 6.8;   // 印字の「年 月 日」と同じ高さ
-        txt(318, bBase, fbW.year, 6);
-        txt(348, bBase, fbW.month, 6);
-        txt(377, bBase, fbW.day, 6);
+        dateR(fbW, LBL_BD, [508.8, 541.2, 573.6, 606.0][fi]);   // 生年月日ラベルのベースライン
       }
 
       // 被保険者との続柄 (x=394-432) — 中央寄せ
@@ -59218,10 +59229,7 @@ async function generateDattaiDocument() {
       if (fsW && fsW.era && soEraTop[fsW.era]) {
         var st = soEraTop[fsW.era][fi];
         oval(435.5, st - 1.5, 451.5, st + 7.5, 1.0, black);
-        var sBase = soEraTop['令和'][fi] + 5.6;
-        txt(462, sBase, fsW.year, 6);
-        txt(490, sBase, fsW.month, 6);
-        txt(518, sBase, fsW.day, 6);
+        dateR(fsW, LBL_SO, [514.2, 546.6, 579.0, 611.4][fi]);   // 除外日ラベルのベースライン
       }
     }
 
@@ -59236,9 +59244,7 @@ async function generateDattaiDocument() {
       if (taW.era === '平成') oval(232, 613, 256, 626, 1.0, black);
       else if (taW.era === '令和') oval(255, 613, 274, 626, 1.0, black);
       // 年 at x≈291, 月 at x≈319, 日 at x≈347
-      txt(281, 623, taW.year, 7);
-      txt(310, 623, taW.month, 7);
-      txt(338, 623, taW.day, 7);
+      dateR(taW, [290.9, 318.5, 346.1], 622.2);
     }
 
     // === BOTTOM CERTIFICATION SECTION ===
@@ -59250,15 +59256,29 @@ async function generateDattaiDocument() {
     }
 
     // 事業所所在地 - aligned with label end (~x=280)
-    txt(280, 711, '静岡県磐田市上本郷1006-7', 8);
+    //   4項目とも項目名ラベル(9.9pt)と同じサイズ・同じベースライン (2026-09-15 ユーザー指示)
+    txt(280, 712.0, '静岡県磐田市上本郷1006-7', 9.9);
     // 名称
-    txt(280, 728, '有限会社ステップ・アップ', 8);
+    txt(280, 728.2, '有限会社ステップ・アップ', 9.9);
     // 代表者氏名
-    txt(280, 744, '山下　浩俊', 8);
+    txt(280, 744.4, '山下　浩俊', 9.9);
     // 電話 - white-out the existing （　）　－ template text first
     // Template has: （ at x=243, ） at x=304, ー at x=370, y=752-762
     page.drawRectangle({ x: 240, y: H - 764, width: 160, height: 16, color: PDFLib.rgb(1, 1, 1), borderWidth: 0 });
-    txt(280, 760, '0538-36-6968', 8);
+    txt(280, 760.6, '0538-36-6968', 9.9);
+
+    // 角印 (朱肉色・約22.5mm角・会社名の右。seal_shuniku.png = 角印画像を朱肉色に再着色したもの)
+    //   2026-09-15 ユーザー選択。フォームの「角印を押す」チェックOFFで押印なし
+    var stampEl = document.getElementById('dattai_stamp');
+    if (!stampEl || stampEl.checked) {
+      try {
+        var sealResp = await fetch('seal_shuniku.png');
+        if (sealResp.ok) {
+          var sealImg = await pdfDoc.embedPng(new Uint8Array(await sealResp.arrayBuffer()));
+          page.drawImage(sealImg, { x: 418, y: H - 704 - 64, width: 64, height: 64 });
+        }
+      } catch (se) { console.warn('角印の読み込み失敗', se); }
+    }
 
     // Remove page 2 if exists
     var pageCount = pdfDoc.getPageCount();
