@@ -58865,6 +58865,8 @@ async function openDattaiForm() {
         '<div class="taisha-field">' +
           '<label>番号</label>' +
           '<input type="text" id="dattai_bangou" value="' + escHtml(seiriNo) + '" placeholder="整理番号" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
+          '<label>枝番 <span style="font-weight:400;color:#888;font-size:11px;">(本人は 00・被扶養者は認定順に 01, 02…)</span></label>' +
+          '<input type="text" id="dattai_edaban" value="00" inputmode="numeric" maxlength="2" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;">' +
         '</div>' +
         '<div class="taisha-field">' +
           '<label>保険者番号</label>' +
@@ -58948,6 +58950,7 @@ function addDattaiFuyouRowWithData(fname, fbd, fshutoku, fsoushitsu, fzokugara) 
     '<div class="dattai-fuyou-fields">' +
       '<input type="text" placeholder="氏名" class="dattai-fuyou-name" value="' + escHtml(fname) + '">' +
       '<input type="text" placeholder="続柄" class="dattai-fuyou-zokugara" value="' + escHtml(fzokugara) + '">' +
+      '<input type="text" placeholder="枝番 (例: 01)" class="dattai-fuyou-edaban" inputmode="numeric" maxlength="2" value="">' +
       '<input type="date" class="dattai-fuyou-bd" title="生年月日" value="' + fbd + '">' +
       '<input type="date" class="dattai-fuyou-shutoku" title="資格取得日" value="' + fshutoku + '">' +
       '<input type="date" class="dattai-fuyou-soushitsu" title="喪失日" value="' + soushitsuVal + '">' +
@@ -58994,6 +58997,7 @@ async function generateDattaiDocument() {
   try {
     var kigou = document.getElementById('dattai_kigou').value;
     var bangou = document.getElementById('dattai_bangou').value;
+    var edaban = (document.getElementById('dattai_edaban') || {}).value || '';
     var hokenshaNo = document.getElementById('dattai_hokenshaNo').value;
     var jigyousho = document.getElementById('dattai_jigyousho').value;
     var shimei = document.getElementById('dattai_shimei').value;
@@ -59018,7 +59022,8 @@ async function generateDattaiDocument() {
       var fso = row.querySelector('.dattai-fuyou-soushitsu').value || '';
       var fzk = (row.querySelector('.dattai-fuyou-zokugara') || {}).value || '';
       var fka = (row.querySelector('.dattai-fuyou-shutoku') || {}).value || '';
-      if (fn) fuyouList.push({ name: fn, birthday: fbd, soushitsu: fso, zoku: fzk, kaisi: fka });
+      var fed = (row.querySelector('.dattai-fuyou-edaban') || {}).value || '';
+      if (fn) fuyouList.push({ name: fn, birthday: fbd, soushitsu: fso, zoku: fzk, kaisi: fka, edaban: fed.trim() });
     });
     var todayW = toWareki(toLocalDateStr(new Date()));
     function wD(ds) { return ds ? toWareki(ds) : null; }
@@ -59077,6 +59082,11 @@ async function generateDattaiDocument() {
     if (bangou) {
       var bw = font.widthOfTextAtSize(bangou, 11);
       txt((316 + 482 - bw) / 2, 355, bangou, 11);
+    }
+    // 枝番 (x=505-538・本人は 00)
+    if (edaban) {
+      var ew = font.widthOfTextAtSize(edaban, 11);
+      txt((505 + 538 - ew) / 2, 355, edaban, 11);
     }
 
     // === 保険者番号 8桁 ===
@@ -59153,6 +59163,11 @@ async function generateDattaiDocument() {
       var fy = fuyouBaseY[fi];
       var fMid = fy + 16; // vertical center of row
 
+      // 枝番 (左列 x=73-107・中央寄せ)
+      if (f.edaban) {
+        var edw = font.widthOfTextAtSize(String(f.edaban), 8);
+        txt((73 + 107 - edw) / 2, fMid + 4, f.edaban, 8);
+      }
       // Name (x=107-289) — 「(R8.9.1 喪失)」などの注記は除いて印字
       var fName = String(f.name || '').replace(/\s*[（(][^）)]*喪失[^）)]*[）)]\s*$/, '');
       txt(115, fMid + 4, fName, 7);
@@ -59202,8 +59217,8 @@ async function generateDattaiDocument() {
     }
 
     // === 資格喪失原因 (y=614-657) ===
-    // Reason 1: 被保険者の退職
-    check(108, 623);
+    // Reason 1: 被保険者の退職 — 番号「1」を〇で囲む (レ点は使わない 2026-09-15)
+    oval(112, 613, 125, 625.5, 1.0, black);
 
     // 退職日 (平成・令和 年月日)
     if (taW && taW.era) {
