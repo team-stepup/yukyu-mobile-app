@@ -59054,9 +59054,12 @@ async function generateDattaiDocument() {
     // Helper: draw text (PyMuPDF coords -> pdf-lib coords)
     // PyMuPDF y = top-down baseline; pdf-lib y = bottom-up baseline
     // For pdf-lib: y = H - pymupdf_y
+    // 入力文字が細く薄く見えるため、0.35pt 右にずらして重ね書きし太らせる (疑似ボールド 2026-09-15 ユーザー「入力してもらう文字が少し薄い」)
+    var DATTAI_BOLD_DX = 0.35;
     function txt(x, py, text, sz, color) {
       if (!text && text !== 0) return;
       page.drawText(String(text), { x: x, y: H - py, size: sz || 7, font: font, color: color || black });
+      if (DATTAI_BOLD_DX) page.drawText(String(text), { x: x + DATTAI_BOLD_DX, y: H - py, size: sz || 7, font: font, color: color || black });
     }
 
     // Helper: draw ellipse (PyMuPDF rect coords)
