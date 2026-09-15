@@ -37759,7 +37759,13 @@ var OCR_FIELD_LABELS = {
 };
 // 日付として保存するキー
 var OCR_DATE_KEYS = { birthday: 1, zairyuKigen: 1, zairyuKigenCard: 1, licenseGetDate: 1, licenseExpiry: 1,
-  koyouShutoku: 1, shakenExpiry: 1, jibaisekiExpiry: 1, niniStartDate: 1, niniExpiry: 1 };
+  koyouShutoku: 1, shakenExpiry: 1, jibaisekiExpiry: 1, niniStartDate: 1, niniExpiry: 1,
+  syahoHuyou1Birthday: 1, syahoHuyou1Kaisi: 1, syahoHuyou1Soushitsu: 1, syahoHuyou2Birthday: 1, syahoHuyou2Kaisi: 1, syahoHuyou2Soushitsu: 1,
+  syahoHuyou3Birthday: 1, syahoHuyou3Kaisi: 1, syahoHuyou3Soushitsu: 1, syahoHuyou4Birthday: 1, syahoHuyou4Kaisi: 1, syahoHuyou4Soushitsu: 1 };
+// 扶養①〜④ の確認画面ラベル
+(function() { var mk = ['①', '②', '③', '④']; for (var i = 1; i <= 4; i++) { var p = '扶養' + mk[i - 1] + ' ';
+  OCR_FIELD_LABELS['syahoHuyou' + i] = p + '加入状況'; OCR_FIELD_LABELS['syahoHuyou' + i + 'Name'] = p + '氏名'; OCR_FIELD_LABELS['syahoHuyou' + i + 'Zokugara'] = p + '続柄';
+  OCR_FIELD_LABELS['syahoHuyou' + i + 'Birthday'] = p + '生年月日'; OCR_FIELD_LABELS['syahoHuyou' + i + 'Kaisi'] = p + '加入日'; OCR_FIELD_LABELS['syahoHuyou' + i + 'Soushitsu'] = p + '喪失日'; } })();
 
 // Tesseract が未ロード(CDN遅延/失敗)なら動的に読み込む
 function _ensureTesseract() {
@@ -39250,7 +39256,9 @@ async function _empDocImagesInit(emp) {
     strip.style.cssText = 'margin:6px 8px 4px;';
     strip.innerHTML = '<div style="display:flex;gap:6px;align-items:stretch;">' +
       '<button onclick="_empDocImgLoadStrip(\'' + secId + '\')" style="flex:1;min-width:0;background:#f7fbff;border:1.5px dashed #90caf9;color:#1565c0;border-radius:10px;padding:9px 10px;font-size:12.5px;font-weight:700;cursor:pointer;text-align:left;">🖼 書類画像を表示（' + list.length + ((secId === 'shahoHuyou' || secId === 'insurance') ? '件' : '枚') + '）<span style="font-weight:400;color:#888;font-size:11px;"> ' + (secId === 'shahoHuyou' ? '決定通知書・被扶養者の保険証など' : secId === 'insurance' ? '雇用保険証・社保/雇用の通知書など' : list.map(function(x) { return x.label + (x.side ? x.side : ''); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('・')) + '</span></button>' +
-      (secId === 'shahoHuyou' ? '' : '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="flex:0 0 auto;background:#fff;border:1.5px solid #90caf9;color:#1565c0;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>') +
+      (secId === 'shahoHuyou'
+        ? '<button onclick="fuyouOcrCheck()" title="決定通知書をAIで読み取り、扶養①〜④と照合" style="flex:0 0 auto;background:#fff;border:1.5px solid #90caf9;color:#1565c0;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 通知書と照合</button>'
+        : '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="flex:0 0 auto;background:#fff;border:1.5px solid #90caf9;color:#1565c0;border-radius:10px;padding:6px 9px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>') +
       '</div>';
     body.insertBefore(strip, body.firstChild);
   });
@@ -39311,7 +39319,9 @@ async function _empDocImgLoadStrip(secId) {
   strip.innerHTML = '<div style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像 <span style="color:#888;font-weight:400;">（読み込み中…）</span></div>';
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;"><span style="font-size:11.5px;color:#1565c0;font-weight:700;">🖼 書類画像（タップで拡大・送信）</span>' +
           '<span style="display:flex;gap:6px;">' +
-          (secId === 'shahoHuyou' ? '' : '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>') +
+          (secId === 'shahoHuyou'
+            ? '<button onclick="fuyouOcrCheck()" title="決定通知書をAIで読み取り、扶養①〜④と照合" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 通知書と照合</button>'
+            : '<button onclick="ocrAllFromEmpFolder()" title="社員フォルダの書類をAIで読み直して現在値と比較" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🤖 読み直す</button>') +
           '<button onclick="closeActionSheet();openEmpDocAddDialog()" style="border:1px solid #90caf9;background:#fff;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">📎 追加・更新</button></span></div>';
   h += '<div style="display:flex;gap:8px;overflow-x:auto;padding:6px 0 4px;-webkit-overflow-scrolling:touch;">';
   for (var i = 0; i < list.length; i++) {
@@ -39653,6 +39663,112 @@ async function ocrAllFromEmpFolder() {
     _empOcrProg(null);
     console.error('ocrAllFromEmpFolder error:', e);
     showToast('一括読み取りに失敗: ' + (e.message || e), 'error');
+  }
+}
+
+// ============================================================
+// 👨‍👩‍👧 扶養: 社員フォルダの決定通知書(異動届)をAIで読み取り、扶養①〜④と照合して確認画面へ (2026-09-15)
+//   docType 'fuyou' (gpt_ocr.DOC_PROMPTS) → {dependents:[{name,birthday,sex,relation,change,date}]}
+//   氏名は年金機構の登録名(決定通知書の記載)が正。既存スロットとは 氏名(語順無視・小書き無視) or 生年月日+続柄 で突合。
+//   本人が社保喪失済みなら 加入状況=なし + 氏名末尾「(R8.9.1 喪失)」+ 喪失日 (既存の運用に合わせる)
+// ============================================================
+function _fuyouNormName(s) {
+  var t = String(s || '').replace(/[（(][^）)]*喪失[^）)]*[）)]/g, '');
+  try { t = t.normalize('NFKC'); } catch (_) {}
+  t = t.replace(/[ァィゥェォッャュョヮ]/g, function(c) { return 'アイウエオツヤユヨワ'['ァィゥェォッャュョヮ'.indexOf(c)]; });
+  t = t.replace(/[゛゜・･\-ー]/g, '');
+  var toks = t.split(/[\s　]+/).filter(Boolean).sort();
+  return toks.join('');
+}
+function _fuyouWarekiShort(iso) {
+  var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return '';
+  var y = +m[1], mo = +m[2], d = +m[3];
+  if (y >= 2019) return 'R' + (y - 2018) + '.' + mo + '.' + d;
+  if (y >= 1989) return 'H' + (y - 1988) + '.' + mo + '.' + d;
+  return 'S' + (y - 1925) + '.' + mo + '.' + d;
+}
+async function fuyouOcrCheck() {
+  var emp = currentEmployee;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  var docs = (_empDocImg && _empDocImg.byType && _empDocImg.byType.fuyou) || [];
+  if (!docs.length) { showToast('扶養書類が社員フォルダにありません（📎 追加・更新 で決定通知書を保存してください）', 'error'); return; }
+  // 決定通知書/異動届らしいものを優先 (無ければ全部)。マイナンバーは除外
+  var cand = docs.filter(function(m) { return !/マイナンバー|個人番号/.test(m.Name) && /決定|通知|異動|加入|該当|喪失|追加|届/.test(m.Name); });
+  if (!cand.length) cand = docs.filter(function(m) { return !/マイナンバー|個人番号/.test(m.Name); });
+  cand = cand.slice(0, 6);
+  try {
+    try { var _m = await fetchEmployeeFields(); if (_m) editKeyMap = buildFieldKeyMap(_m); } catch (_) {}
+    var km = editKeyMap || {};
+    var found = [];   // {name,birthday,sex,relation,kaisi,soushitsu,src}
+    var okDocs = [], ngDocs = [];
+    for (var i = 0; i < cand.length; i++) {
+      var m = cand[i];
+      _empOcrProg('☁️ 扶養書類をAIで読み取り中… (' + (i + 1) + '/' + cand.length + ') ' + m.label);
+      try {
+        var opts = { model: 'claude' };
+        if (m.isPdf) opts.images = await _fetchPdfAsImages(m.ServerRelativeUrl, 2);
+        else opts.paths = [m.ServerRelativeUrl];
+        var ocr = await cloudDocOcr('fuyou', opts);
+        var deps = Array.isArray(ocr && ocr.dependents) ? ocr.dependents : [];
+        var docDate = (ocr && ocr.docDate) || m.stamp.replace(/\//g, '-') || '';
+        deps.forEach(function(d) {
+          if (!d || !d.name) return;
+          var key = _fuyouNormName(d.name) + '|' + (d.birthday || '');
+          var hit = found.find(function(x) { return x.key === key || (d.birthday && x.birthday === d.birthday && x.relation === (d.relation || x.relation)) || (_fuyouNormName(x.name) === _fuyouNormName(d.name)); });
+          if (!hit) { hit = { key: key, name: String(d.name).trim(), birthday: d.birthday || '', sex: d.sex || '', relation: d.relation || '', kaisi: '', soushitsu: '', src: [], lastDate: '' }; found.push(hit); }
+          if (!hit.birthday && d.birthday) hit.birthday = d.birthday;
+          if (!hit.relation && d.relation) hit.relation = d.relation;
+          if (d.change === '該当' && d.date && (!hit.kaisi || d.date < hit.kaisi)) hit.kaisi = d.date;
+          if (d.change === '非該当' && d.date && (!hit.soushitsu || d.date > hit.soushitsu)) hit.soushitsu = d.date;
+          // 新しい通知書の氏名表記を優先 (氏名変更後の通知書)
+          if (docDate && docDate >= (hit.lastDate || '')) { hit.lastDate = docDate; hit.name = String(d.name).trim(); }
+          hit.src.push(m.Name);
+        });
+        okDocs.push(m.label + ' (' + deps.length + '名)');
+      } catch (e) { console.warn('[扶養OCR] 失敗:', m.Name, e); ngDocs.push(m.label); }
+    }
+    _empOcrProg(null);
+    if (!found.length) { showToast('被扶養者を読み取れませんでした' + (ngDocs.length ? ' (失敗: ' + ngDocs.join('、') + ')' : ''), 'error'); return; }
+    // 本人の社保喪失日 (退社済みなら扶養も同日喪失)
+    var empSoushitsu = '';
+    var kS = km.shahoSoushitsu || km.syahoSoushitsu; if (kS && emp[kS]) empSoushitsu = String(emp[kS]).substring(0, 10);
+    // 既存スロット
+    var slots = [];
+    for (var s = 1; s <= 4; s++) {
+      var p = 'syahoHuyou' + s;
+      var nm = km[p + 'Name'] ? String(emp[km[p + 'Name']] || '').trim() : '';
+      var bd = km[p + 'Birthday'] && emp[km[p + 'Birthday']] ? String(emp[km[p + 'Birthday']]).substring(0, 10) : '';
+      var zk = km[p + 'Zokugara'] ? String(emp[km[p + 'Zokugara']] || '').trim() : '';
+      slots.push({ i: s, name: nm, birthday: bd, relation: zk, used: false });
+    }
+    var parsed = {}, notes = [];
+    found.forEach(function(f) {
+      var nn = _fuyouNormName(f.name);
+      var slot = slots.find(function(x) { return !x.used && x.name && (_fuyouNormName(x.name) === nn || (f.birthday && x.birthday === f.birthday && (!x.relation || !f.relation || x.relation === f.relation))); });
+      var isNew = false;
+      if (!slot) { slot = slots.find(function(x) { return !x.used && !x.name; }); isNew = true; }
+      if (!slot) { notes.push(f.name + '：空きスロットなし（扶養①〜④が全て使用中）'); return; }
+      slot.used = true;
+      var p = 'syahoHuyou' + slot.i;
+      var soushitsu = f.soushitsu || (empSoushitsu && (!f.kaisi || f.kaisi <= empSoushitsu) ? empSoushitsu : '');
+      var name = f.name;
+      if (soushitsu) name = name.replace(/\s*[（(][^）)]*喪失[^）)]*[）)]\s*$/, '') + ' (' + _fuyouWarekiShort(soushitsu) + ' 喪失)';
+      if (isNew || !slot.name) parsed[p + 'Name'] = name;
+      else if (soushitsu && slot.name.indexOf('喪失') < 0) parsed[p + 'Name'] = slot.name + ' (' + _fuyouWarekiShort(soushitsu) + ' 喪失)';
+      parsed[p] = soushitsu ? 'なし' : 'あり';
+      if (f.relation) parsed[p + 'Zokugara'] = f.relation;
+      if (f.birthday) parsed[p + 'Birthday'] = f.birthday;
+      if (f.kaisi) parsed[p + 'Kaisi'] = f.kaisi;
+      if (soushitsu) parsed[p + 'Soushitsu'] = soushitsu;
+      notes.push('扶養' + '①②③④'[slot.i - 1] + (isNew ? '（新規）' : '（既存と一致）') + '：' + f.name);
+    });
+    if (!Object.keys(parsed).length) { showToast(notes.join(' / ') || '照合できる項目がありません', 'error'); return; }
+    var srcFiles = cand.map(function(m) { return { label: m.label, name: m.Name, url: m.ServerRelativeUrl, isPdf: m.isPdf }; });
+    _showEmpOcrApplyPreview(parsed, okDocs.join('、') + (ngDocs.length ? '　⚠失敗: ' + ngDocs.join('、') : '') + '　｜ ' + notes.join(' / '), { skipMissing: true, files: srcFiles });
+  } catch (e) {
+    _empOcrProg(null);
+    console.error('fuyouOcrCheck error:', e);
+    showToast('扶養の照合に失敗: ' + (e.message || e), 'error');
   }
 }
 
