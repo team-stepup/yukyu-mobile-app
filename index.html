@@ -34698,7 +34698,8 @@ async function openBoshuForm(id) {
     '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:8px 0 4px;">派遣先 <span style="color:#c62828;">*</span></label>' +
     '<select id="bf_haken" onchange="_boshuOnHakenChange()" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;background:#fff;"><option value="">読み込み中…</option></select>' +
     '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:8px 0 4px;">組織単位</label>' +
-    '<select id="bf_soshiki" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;background:#fff;"><option value="">（選択しない）</option></select>' +
+    '<select id="bf_soshiki" onchange="_boshuOnSoshikiChange()" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;background:#fff;"><option value="">（選択しない）</option></select>' +
+    '<div id="bf_hakenInfo" style="display:none;font-size:11.5px;color:#555;background:#fff8f5;border:1px dashed #ffab91;border-radius:8px;padding:6px 8px;margin-top:4px;line-height:1.5;"></div>' +
     '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
       '<div style="flex:1;min-width:120px;"><label style="display:block;font-size:12px;font-weight:700;color:#555;margin:8px 0 4px;">必要人数 <span style="color:#c62828;">*</span></label>' +
         '<input type="number" id="bf_ninzu" min="1" max="99" inputmode="numeric" value="' + escHtml(String((r && r.ninzu) || 1)) + '" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:16px;"></div>' +
@@ -34712,7 +34713,7 @@ async function openBoshuForm(id) {
     '<div id="bf_nihongoWrap"><label style="display:block;font-size:12px;font-weight:700;color:#555;margin:10px 0 4px;">外国人の場合の日本語レベル（目安）</label>' +
       '<select id="bf_nihongo" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;background:#fff;"><option value="">（指定なし）</option>' +
       BOSHU_NIHONGO.map(function(l) { return '<option value="' + escHtml(l) + '"' + (r && r.nihongo === l ? ' selected' : '') + '>' + escHtml(l) + '</option>'; }).join('') + '</select></div>' +
-    '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:10px 0 4px;">備考（勤務内容・シフト・条件など）</label>' +
+    '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:10px 0 4px;">備考（勤務内容・シフト・条件など） <span style="font-weight:400;color:#999;font-size:11px;">組織単位を選ぶと派遣先情報の勤務時間・業務内容が入ります（編集可）</span></label>' +
     '<textarea id="bf_bikou" rows="3" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;">' + escHtml((r && r.bikou) || '') + '</textarea>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px;">' +
       '<button onclick="closeBoshuForm()" style="background:#eee;color:#555;border:none;border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
@@ -34730,6 +34731,7 @@ async function openBoshuForm(id) {
     if (r && r.Title) { if (keys.indexOf(r.Title) < 0) sel.insertAdjacentHTML('beforeend', '<option value="' + escHtml(r.Title) + '">' + escHtml(r.Title) + '</option>'); sel.value = r.Title; }
     _boshuOnHakenChange();
     if (r && r.soshiki) { var ss = document.getElementById('bf_soshiki'); if (ss) { if (!Array.prototype.some.call(ss.options, function(o) { return o.value === r.soshiki; })) ss.insertAdjacentHTML('beforeend', '<option value="' + escHtml(r.soshiki) + '">' + escHtml(r.soshiki) + '</option>'); ss.value = r.soshiki; } }
+    _boshuAutoBikou = ''; _boshuOnSoshikiChange();   // 編集時は既存の備考を上書きしない(空のときだけ)
   } catch (e) { console.warn('派遣先候補', e); }
 }
 function _boshuOnHakenChange() {
@@ -34737,6 +34739,26 @@ function _boshuOnHakenChange() {
   var sel = document.getElementById('bf_soshiki'); if (!sel) return;
   var units = (_jobHakenMap && _jobHakenMap[hk]) || [];
   sel.innerHTML = '<option value="">（選択しない）</option>' + units.map(function(u) { return '<option value="' + escHtml(u) + '">' + escHtml(u) + '</option>'; }).join('');
+  if (units.length === 1) sel.value = units[0];   // 組織単位が1つだけなら自動選択
+  _boshuOnSoshikiChange();
+}
+// 組織単位 → 派遣先情報(040623)の 勤務地/勤務時間/業務内容 を表示し、備考が空(または前回の自動文)なら備考に入れる (2026-09-17 ユーザー「派遣先情報から抽出できませんか」)
+var _boshuAutoBikou = '';
+function _boshuOnSoshikiChange() {
+  var hk = (document.getElementById('bf_haken') || {}).value || '';
+  var so = (document.getElementById('bf_soshiki') || {}).value || '';
+  var info = document.getElementById('bf_hakenInfo');
+  var d = (_jobHakenData && so) ? _jobHakenData[hk + '\u0000' + so] : null;
+  if (!d || (!d.basho && !d.jikan && !d.naiyo)) { if (info) { info.style.display = 'none'; info.innerHTML = ''; } return; }
+  if (info) {
+    info.innerHTML = '<b style="color:#d84315;">📋 派遣先情報</b>' +
+      (d.basho ? '<br>勤務地: ' + escHtml(d.basho) : '') + (d.jikan ? '<br>勤務時間: ' + escHtml(d.jikan) : '') + (d.naiyo ? '<br>業務内容: ' + escHtml(d.naiyo) : '');
+    info.style.display = 'block';
+  }
+  var ta = document.getElementById('bf_bikou'); if (!ta) return;
+  var cur = String(ta.value || '').trim();
+  var auto = [d.jikan ? '勤務時間: ' + d.jikan : '', d.naiyo ? '業務内容: ' + d.naiyo : ''].filter(Boolean).join('\n');
+  if (auto && (!cur || cur === _boshuAutoBikou)) { ta.value = auto; _boshuAutoBikou = auto; }
 }
 function _boshuOnTaishoChange() {
   var v = ''; var rs = document.getElementsByName('bf_taisho'); for (var i = 0; i < rs.length; i++) if (rs[i].checked) v = rs[i].value;
