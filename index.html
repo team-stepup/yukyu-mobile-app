@@ -34749,16 +34749,29 @@ function _boshuOnSoshikiChange() {
   var so = (document.getElementById('bf_soshiki') || {}).value || '';
   var info = document.getElementById('bf_hakenInfo');
   var d = (_jobHakenData && so) ? _jobHakenData[hk + '\u0000' + so] : null;
-  if (!d || (!d.basho && !d.jikan && !d.naiyo)) { if (info) { info.style.display = 'none'; info.innerHTML = ''; } return; }
+  var ta = document.getElementById('bf_bikou');
+  var cur = ta ? String(ta.value || '').trim() : '';
+  if (!d || (!d.basho && !d.jikan && !d.naiyo)) {
+    // 派遣先情報に登録が無い組織単位: 前回の自動文なら消して手入力に戻す
+    if (info) { info.innerHTML = so ? '<span style="color:#999;">📋 派遣先情報に この組織単位の勤務時間・業務内容の登録がありません（備考は手入力）</span>' : ''; info.style.display = so ? 'block' : 'none'; }
+    if (ta && cur && cur === _boshuAutoBikou) { ta.value = ''; _boshuAutoBikou = ''; }
+    return;
+  }
   if (info) {
-    info.innerHTML = '<b style="color:#d84315;">📋 派遣先情報</b>' +
+    info.innerHTML = '<b style="color:#d84315;">📋 派遣先情報（' + escHtml(so) + '）</b>' +
       (d.basho ? '<br>勤務地: ' + escHtml(d.basho) : '') + (d.jikan ? '<br>勤務時間: ' + escHtml(d.jikan) : '') + (d.naiyo ? '<br>業務内容: ' + escHtml(d.naiyo) : '');
     info.style.display = 'block';
   }
-  var ta = document.getElementById('bf_bikou'); if (!ta) return;
-  var cur = String(ta.value || '').trim();
-  var auto = [d.jikan ? '勤務時間: ' + d.jikan : '', d.naiyo ? '業務内容: ' + d.naiyo : ''].filter(Boolean).join('\n');
-  if (auto && (!cur || cur === _boshuAutoBikou)) { ta.value = auto; _boshuAutoBikou = auto; }
+  if (!ta) return;
+  // 備考の自動文: 組織単位・勤務地も入れる (同じ派遣先の別工程は勤務時間/業務内容が同一のことが多く「変わっていない」ように見えるため)
+  var auto = ['組織単位: ' + so, d.basho ? '勤務地: ' + d.basho : '', d.jikan ? '勤務時間: ' + d.jikan : '', d.naiyo ? '業務内容: ' + d.naiyo : ''].filter(Boolean).join('\n');
+  if (auto && (!cur || cur === _boshuAutoBikou)) {
+    var changed = (cur !== auto);
+    ta.value = auto; _boshuAutoBikou = auto;
+    if (changed && cur) showToast('備考を「' + so + '」の派遣先情報で更新しました', 'info');
+  } else if (auto && cur && cur !== _boshuAutoBikou) {
+    showToast('備考は手入力済みのため上書きしません（消してから組織単位を選び直すと自動入力）', 'info');
+  }
 }
 function _boshuOnTaishoChange() {
   var v = ''; var rs = document.getElementsByName('bf_taisho'); for (var i = 0; i < rs.length; i++) if (rs[i].checked) v = rs[i].value;
