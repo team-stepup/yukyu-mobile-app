@@ -5573,6 +5573,18 @@ select.sankyu-edit-input {
       <span>新規社員登録</span>
     </button>
 
+    <!-- 📣 募集依頼 (担当者が派遣先の人員募集を登録 → 全員で共有 → 役員がHP求人へ・2026-09-17) -->
+    <div id="boshuHomeCard" class="home-haken-card" onclick="openBoshuScreen()" style="cursor:pointer;">
+      <div class="home-section-head" style="margin-bottom:0;">
+        <div class="home-section-icon" style="background:linear-gradient(135deg,#ff7043,#d84315);">📣</div>
+        <div class="home-section-titles" style="flex:1;min-width:0;">
+          <div class="home-section-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">募集依頼 <span id="boshuHomeCount" style="background:#fbe9e7;color:#d84315;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:800;">…</span></div>
+          <div class="home-section-sub">派遣先の人員募集を登録して全員で共有 → 役員がHP求人へ</div>
+        </div>
+        <span style="color:#bbb;font-size:20px;">›</span>
+      </div>
+    </div>
+
     <div id="hakenSectionCard" class="home-haken-card">
       <div class="home-section-head">
         <div class="home-section-icon haken">🏭</div>
@@ -6575,6 +6587,21 @@ select.sankyu-edit-input {
     </div>
   </div>
 
+  <!-- Screen: 📣 募集依頼 (2026-09-17) -->
+  <div class="screen" id="boshuScreen">
+    <div style="max-width:640px;margin:0 auto;padding:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="font-size:17px;font-weight:800;color:#d84315;">📣 募集依頼</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="boshuShowClosed" onchange="renderBoshuList()"> 終了分も表示</label>
+          <button onclick="openBoshuForm()" style="background:linear-gradient(135deg,#ff7043,#d84315);color:#fff;border:none;border-radius:10px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(216,67,21,0.3);">＋ 募集依頼</button>
+        </div>
+      </div>
+      <div id="boshuFormWrap" style="display:none;"></div>
+      <div id="boshuList" style="color:var(--text-light);font-size:13px;">読み込み中...</div>
+    </div>
+  </div>
+
   <!-- Screen: 有給確認一覧 -->
   <div class="screen" id="yukyuListScreen">
     <div class="list-screen-header">
@@ -7293,6 +7320,7 @@ function refreshApprovalBadges() {
   try { if (typeof updateSougeiApprovalBadge === 'function') updateSougeiApprovalBadge(); } catch (e) {}
   try { if (typeof updateKintaiAdminBadge === 'function') updateKintaiAdminBadge(); } catch (e) {}
   try { if (typeof updateKintaiStaffBadge === 'function') updateKintaiStaffBadge(); } catch (e) {}
+  try { if (typeof boshuRefreshHomeBadge === 'function') boshuRefreshHomeBadge(); } catch (e) {}   // 📣 募集依頼
 }
 
 // Check when user returns to the app (tab switch, phone unlock)
@@ -34565,6 +34593,252 @@ async function submitLeaveApplication() {
 // ============================================================
 var _jobEditingId = null;
 function _jobEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+// ============================================================
+// 📣 募集依頼 (2026-09-17)
+//   担当者が「派遣先(派遣先情報040623)→組織単位・必要人数・対象区分・日本語レベル・希望開始日・備考」を登録
+//   → SP List「募集依頼」→ ホームのカードで全員に共有 → 登録時に役員+担当者全員へPush(boshu/notify)+Teams総務チャット
+//   → 役員が「📢 HPに掲載」で求人掲載フォーム(派遣先/組織単位/対象/勤務地/時間/仕事内容 自動入力)→公開でHP・Google求人枠
+// ============================================================
+var LIST_BOSHU_GUID = '708e0632-d90a-4f3d-95f2-331dde4a80b1';
+var BOSHU_TAISHO = ['日本人（日本語80%以上の外国人可）', '外国人', 'どちらでも可'];
+var BOSHU_NIHONGO = ['0～20%', '20～40%', '40～60%', '60～80%', '80～100%'];
+var BOSHU_NAMES = { 'h.yamashita@team-stepup.com': '山下浩俊', 'a.yamashita@team-stepup.com': '山下亜実', 'kaori.j@team-stepup.com': '城かおり',
+  'm.mori@team-stepup.com': '森まこと', 'm.yoshiura@team-stepup.com': '吉浦マルセロ', 'y.mori@team-stepup.com': '森ゆうじ' };
+var SOUMU_CHAT_ID = '19:0d6b879c764e4f63a2f95289ad286433@thread.v2';   // Teams 総務チャット (グループチャット)
+var _boshuRows = [], _boshuEditId = null, _boshuLinkId = null;
+function _boshuMe() { return (typeof getLoggedInEmail === 'function') ? String(getLoggedInEmail() || '').toLowerCase() : ''; }
+function _boshuMyName() { var m = _boshuMe(); return BOSHU_NAMES[m] || m.split('@')[0]; }
+function _boshuIsOpen(r) { return r.joutai === '募集中' || r.joutai === 'HP掲載中'; }
+function _boshuDate(v) { if (!v) return ''; var d = new Date(v); if (isNaN(d.getTime())) return String(v).slice(0, 10); var j = new Date(d.getTime() + 9 * 3600 * 1000); return j.getUTCFullYear() + '/' + (j.getUTCMonth() + 1) + '/' + j.getUTCDate(); }
+function _boshuTaishoShort(r) {
+  var t = String(r.taisho || '');
+  var s = t.indexOf('日本人') === 0 ? '日本人' : t;
+  if (t !== BOSHU_TAISHO[0] && r.nihongo) s += '（日本語 ' + r.nihongo + '）';
+  return s;
+}
+async function openBoshuScreen() {
+  switchScreen('boshuScreen');
+  var w = document.getElementById('boshuFormWrap'); if (w) { w.style.display = 'none'; w.innerHTML = ''; }
+  await loadBoshu();
+}
+async function loadBoshu() {
+  try {
+    var rows = await spGet(LIST_BOSHU_GUID, '$select=Id,Title,soshiki,ninzu,jusoku,taisho,nihongo,kibou,bikou,joutai,iraisha,iraishaName,jobId,Created,Modified&$orderby=Created desc&$top=300');
+    _boshuRows = rows || [];
+  } catch (e) { console.warn('募集依頼 読込失敗', e); var b = document.getElementById('boshuList'); if (b) b.innerHTML = '<div style="color:#c62828;">読み込みに失敗しました: ' + escHtml(e.message || e) + '</div>'; return; }
+  renderBoshuList();
+  _boshuPaintHome(_boshuRows.filter(_boshuIsOpen).length);
+}
+function _boshuPaintHome(n) {
+  var el = document.getElementById('boshuHomeCount'); if (!el) return;
+  el.textContent = n + '件';
+  el.style.background = n > 0 ? 'linear-gradient(135deg,#ff7043,#d84315)' : '#f1f1f1';
+  el.style.color = n > 0 ? '#fff' : '#999';
+}
+async function boshuRefreshHomeBadge() {
+  try {
+    if (typeof getLoggedInEmail === 'function' && !getLoggedInEmail()) return;
+    var rows = await spGet(LIST_BOSHU_GUID, "$select=Id,joutai&$filter=joutai eq '募集中' or joutai eq 'HP掲載中'&$top=300");
+    _boshuPaintHome((rows || []).length);
+  } catch (e) { console.warn('募集依頼 バッジ', e); }
+}
+function renderBoshuList() {
+  var box = document.getElementById('boshuList'); if (!box) return;
+  var showClosed = !!(document.getElementById('boshuShowClosed') || {}).checked;
+  var rows = _boshuRows.filter(function(r) { return showClosed || _boshuIsOpen(r); });
+  var admin = (typeof isAdminUser === 'function') && isAdminUser();
+  var me = _boshuMe();
+  if (!rows.length) { box.innerHTML = '<div style="text-align:center;color:#999;padding:28px 10px;">募集中の依頼はありません<br><span style="font-size:11.5px;">「＋ 募集依頼」から登録できます</span></div>'; return; }
+  var html = '';
+  rows.forEach(function(r) {
+    var st = r.joutai || '募集中';
+    var stSty = st === '募集中' ? 'background:#fff3e0;color:#e65100;border:1px solid #ffcc80;'
+              : st === 'HP掲載中' ? 'background:linear-gradient(135deg,#e53935,#b71c1c);color:#fff;'
+              : st === '充足' ? 'background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;' : 'background:#eeeeee;color:#777;';
+    var need = Number(r.ninzu || 0), got = Number(r.jusoku || 0);
+    var mine = me && String(r.iraisha || '').toLowerCase() === me;
+    var canEdit = admin || mine;
+    var open = _boshuIsOpen(r);
+    var btns = '';
+    if (admin && open) {
+      btns += r.jobId ? '<button onclick="openJobsAdmin()" style="background:#fff;border:1.5px solid #e53935;color:#c62828;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">📢 求人 No.' + escHtml(String(r.jobId)) + '</button>'
+                     : '<button onclick="boshuToJob(' + r.Id + ')" style="background:linear-gradient(135deg,#e53935,#b71c1c);color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">📢 HPに掲載</button>';
+    }
+    if (canEdit && open) {
+      btns += '<button onclick="openBoshuForm(' + r.Id + ')" style="background:#fff;border:1.5px solid #90a4ae;color:#455a64;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">✏️ 編集</button>';
+      btns += '<button onclick="boshuSetStatus(' + r.Id + ',\'充足\')" style="background:#fff;border:1.5px solid #66bb6a;color:#2e7d32;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">✅ 充足</button>';
+      btns += '<button onclick="boshuSetStatus(' + r.Id + ',\'取消\')" style="background:#fff;border:1.5px solid #ccc;color:#888;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">取消</button>';
+    }
+    if (canEdit && !open) btns += '<button onclick="boshuSetStatus(' + r.Id + ',\'募集中\')" style="background:#fff;border:1.5px solid #ffab91;color:#d84315;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">↺ 募集中に戻す</button>';
+    html += '<div style="background:#fff;border:1.5px solid ' + (open ? '#ffccbc' : '#e0e0e0') + ';border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.05);' + (open ? '' : 'opacity:0.75;') + '">' +
+      '<div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">' +
+        '<div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:800;color:#333;word-break:break-all;">🏭 ' + escHtml(r.Title || '') + '</div>' +
+          (r.soshiki ? '<div style="font-size:12.5px;color:#555;margin-top:2px;">' + escHtml(r.soshiki) + '</div>' : '') + '</div>' +
+        '<span style="' + stSty + 'border-radius:12px;padding:3px 10px;font-size:11.5px;font-weight:800;white-space:nowrap;">' + escHtml(st) + '</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:#333;">' +
+        '<div><span style="color:#888;font-size:11px;">人数</span><br><b style="font-size:16px;color:#d84315;">' + got + ' / ' + need + '</b> 名</div>' +
+        '<div><span style="color:#888;font-size:11px;">対象</span><br><b>' + escHtml(_boshuTaishoShort(r)) + '</b></div>' +
+        (r.kibou ? '<div><span style="color:#888;font-size:11px;">希望開始</span><br><b>' + escHtml(_boshuDate(r.kibou)) + '</b></div>' : '') +
+      '</div>' +
+      (r.bikou ? '<div style="font-size:12.5px;color:#555;margin-top:6px;white-space:pre-wrap;word-break:break-word;background:#fafafa;border-radius:8px;padding:6px 8px;">' + escHtml(r.bikou) + '</div>' : '') +
+      '<div style="font-size:11px;color:#999;margin-top:6px;">依頼: ' + escHtml(r.iraishaName || r.iraisha || '') + '　' + escHtml(_boshuDate(r.Created)) + (r.Modified && _boshuDate(r.Modified) !== _boshuDate(r.Created) ? '（更新 ' + escHtml(_boshuDate(r.Modified)) + '）' : '') + '</div>' +
+      (btns ? '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px;">' + btns + '</div>' : '') +
+    '</div>';
+  });
+  box.innerHTML = html;
+}
+async function openBoshuForm(id) {
+  _boshuEditId = (id != null) ? id : null;
+  var r = (id != null) ? _boshuRows.find(function(x) { return x.Id === id; }) : null;
+  var w = document.getElementById('boshuFormWrap'); if (!w) return;
+  var taisho = (r && r.taisho) || BOSHU_TAISHO[2];
+  var h = '<div style="background:#fff;border:1.5px solid #ffab91;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">' +
+    '<div style="font-size:15px;font-weight:800;color:#d84315;margin-bottom:10px;">' + (r ? '✏️ 募集依頼を編集' : '＋ 募集依頼を登録') + '</div>' +
+    '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:8px 0 4px;">派遣先 <span style="color:#c62828;">*</span></label>' +
+    '<select id="bf_haken" onchange="_boshuOnHakenChange()" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;background:#fff;"><option value="">読み込み中…</option></select>' +
+    '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:8px 0 4px;">組織単位</label>' +
+    '<select id="bf_soshiki" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;background:#fff;"><option value="">（選択しない）</option></select>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+      '<div style="flex:1;min-width:120px;"><label style="display:block;font-size:12px;font-weight:700;color:#555;margin:8px 0 4px;">必要人数 <span style="color:#c62828;">*</span></label>' +
+        '<input type="number" id="bf_ninzu" min="1" max="99" inputmode="numeric" value="' + escHtml(String((r && r.ninzu) || 1)) + '" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:16px;"></div>' +
+      '<div style="flex:1;min-width:140px;"><label style="display:block;font-size:12px;font-weight:700;color:#555;margin:8px 0 4px;">希望開始日</label>' +
+        '<input type="date" id="bf_kibou" value="' + escHtml(r && r.kibou ? String(r.kibou).slice(0, 10) : '') + '" style="width:100%;box-sizing:border-box;padding:9px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;"></div>' +
+    '</div>' +
+    '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:10px 0 4px;">対象 <span style="color:#c62828;">*</span></label>' +
+    '<div style="display:flex;flex-direction:column;gap:6px;">' + BOSHU_TAISHO.map(function(t) {
+      return '<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;padding:8px 10px;border:1.5px solid #eee;border-radius:10px;cursor:pointer;"><input type="radio" name="bf_taisho" value="' + escHtml(t) + '"' + (t === taisho ? ' checked' : '') + ' onchange="_boshuOnTaishoChange()" style="width:18px;height:18px;"> ' + escHtml(t) + '</label>';
+    }).join('') + '</div>' +
+    '<div id="bf_nihongoWrap"><label style="display:block;font-size:12px;font-weight:700;color:#555;margin:10px 0 4px;">外国人の場合の日本語レベル（目安）</label>' +
+      '<select id="bf_nihongo" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;background:#fff;"><option value="">（指定なし）</option>' +
+      BOSHU_NIHONGO.map(function(l) { return '<option value="' + escHtml(l) + '"' + (r && r.nihongo === l ? ' selected' : '') + '>' + escHtml(l) + '</option>'; }).join('') + '</select></div>' +
+    '<label style="display:block;font-size:12px;font-weight:700;color:#555;margin:10px 0 4px;">備考（勤務内容・シフト・条件など）</label>' +
+    '<textarea id="bf_bikou" rows="3" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;">' + escHtml((r && r.bikou) || '') + '</textarea>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px;">' +
+      '<button onclick="closeBoshuForm()" style="background:#eee;color:#555;border:none;border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer;">キャンセル</button>' +
+      '<button id="bf_saveBtn" onclick="saveBoshu()" style="background:linear-gradient(135deg,#ff7043,#d84315);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-weight:700;cursor:pointer;">' + (r ? '💾 更新' : '📣 登録して知らせる') + '</button>' +
+    '</div>' +
+  '</div>';
+  w.innerHTML = h; w.style.display = 'block';
+  _boshuOnTaishoChange();
+  try { window.scrollTo(0, 0); } catch (_) {}
+  try {
+    await _ensureJobHakenOptions();
+    var sel = document.getElementById('bf_haken'); if (!sel) return;
+    var keys = Object.keys(_jobHakenMap || {}).sort(function(a, b) { return String(a).localeCompare(String(b), 'ja'); });
+    sel.innerHTML = '<option value="">派遣先を選択…</option>' + keys.map(function(k) { return '<option value="' + escHtml(k) + '">' + escHtml(k) + '</option>'; }).join('');
+    if (r && r.Title) { if (keys.indexOf(r.Title) < 0) sel.insertAdjacentHTML('beforeend', '<option value="' + escHtml(r.Title) + '">' + escHtml(r.Title) + '</option>'); sel.value = r.Title; }
+    _boshuOnHakenChange();
+    if (r && r.soshiki) { var ss = document.getElementById('bf_soshiki'); if (ss) { if (!Array.prototype.some.call(ss.options, function(o) { return o.value === r.soshiki; })) ss.insertAdjacentHTML('beforeend', '<option value="' + escHtml(r.soshiki) + '">' + escHtml(r.soshiki) + '</option>'); ss.value = r.soshiki; } }
+  } catch (e) { console.warn('派遣先候補', e); }
+}
+function _boshuOnHakenChange() {
+  var hk = (document.getElementById('bf_haken') || {}).value || '';
+  var sel = document.getElementById('bf_soshiki'); if (!sel) return;
+  var units = (_jobHakenMap && _jobHakenMap[hk]) || [];
+  sel.innerHTML = '<option value="">（選択しない）</option>' + units.map(function(u) { return '<option value="' + escHtml(u) + '">' + escHtml(u) + '</option>'; }).join('');
+}
+function _boshuOnTaishoChange() {
+  var v = ''; var rs = document.getElementsByName('bf_taisho'); for (var i = 0; i < rs.length; i++) if (rs[i].checked) v = rs[i].value;
+  var w = document.getElementById('bf_nihongoWrap'); if (w) w.style.display = (v === BOSHU_TAISHO[0]) ? 'none' : 'block';
+}
+function closeBoshuForm() { var w = document.getElementById('boshuFormWrap'); if (w) { w.style.display = 'none'; w.innerHTML = ''; } _boshuEditId = null; }
+async function saveBoshu() {
+  var hk = (document.getElementById('bf_haken') || {}).value || '';
+  var so = (document.getElementById('bf_soshiki') || {}).value || '';
+  var n = parseInt((document.getElementById('bf_ninzu') || {}).value || '0', 10);
+  var taisho = ''; var rs = document.getElementsByName('bf_taisho'); for (var i = 0; i < rs.length; i++) if (rs[i].checked) taisho = rs[i].value;
+  var nihongo = (taisho === BOSHU_TAISHO[0]) ? '' : ((document.getElementById('bf_nihongo') || {}).value || '');
+  var kibou = (document.getElementById('bf_kibou') || {}).value || '';
+  var bikou = String((document.getElementById('bf_bikou') || {}).value || '').trim();
+  if (!hk) { showToast('派遣先を選んでください', 'error'); return; }
+  if (!(n > 0)) { showToast('必要人数を入力してください', 'error'); return; }
+  if (!taisho) { showToast('対象を選んでください', 'error'); return; }
+  var btn = document.getElementById('bf_saveBtn'); if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
+  var body = { Title: hk, soshiki: so, ninzu: n, taisho: taisho, nihongo: nihongo || null, kibou: kibou ? kibou + 'T00:00:00Z' : null, bikou: bikou };
+  try {
+    var isNew = (_boshuEditId == null);
+    if (isNew) {
+      body.jusoku = 0; body.joutai = '募集中'; body.iraisha = _boshuMe(); body.iraishaName = _boshuMyName();
+      await spPost(LIST_BOSHU_GUID, body);
+    } else {
+      await spMergeListItem(LIST_BOSHU_GUID, _boshuEditId, body);
+    }
+    closeBoshuForm();
+    await loadBoshu();
+    showToast(isNew ? '募集依頼を登録しました' : '募集依頼を更新しました', 'success');
+    if (isNew) {
+      var line = hk + (so ? '　' + so : '') + '　' + n + '名／対象: ' + _boshuTaishoShort({ taisho: taisho, nihongo: nihongo }) + (kibou ? '／希望 ' + kibou.replace(/-/g, '/') : '') + '（依頼: ' + _boshuMyName() + '）';
+      _boshuNotify('📣 募集依頼: ' + hk + ' ' + n + '名', line, bikou);
+    }
+  } catch (e) {
+    console.error('募集依頼 保存失敗', e);
+    showToast('保存に失敗: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '📣 登録して知らせる'; }
+  }
+}
+async function boshuSetStatus(id, joutai) {
+  var r = _boshuRows.find(function(x) { return x.Id === id; }); if (!r) return;
+  var label = joutai === '充足' ? '「充足」にしますか？（募集終了）' : joutai === '取消' ? '「取消」にしますか？' : '「募集中」に戻しますか？';
+  if (!confirm(r.Title + (r.soshiki ? ' ' + r.soshiki : '') + ' を' + label)) return;
+  var body = { joutai: joutai };
+  if (joutai === '充足') body.jusoku = Number(r.ninzu || 0);
+  if (joutai === '募集中' && r.jobId) body.joutai = 'HP掲載中';
+  try {
+    await spMergeListItem(LIST_BOSHU_GUID, id, body);
+    await loadBoshu();
+    showToast('更新しました', 'success');
+    if (joutai === '充足') _boshuNotify('✅ 募集充足: ' + r.Title, r.Title + (r.soshiki ? '　' + r.soshiki : '') + '　' + r.ninzu + '名の募集は充足しました（' + _boshuMyName() + '）', '');
+  } catch (e) { showToast('更新に失敗: ' + (e.message || e), 'error'); }
+}
+// 通知: ①Push(役員+担当者全員・本人除く・バックエンド boshu/notify) ②Teams 総務チャット(委任トークン・失敗しても続行)
+async function _boshuNotify(title, line, bikou) {
+  try {
+    var token = await getToken();
+    await fetch(FUNC_OCR_BASE + '/boshu/notify', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ title: title, body: line, tag: 'boshu' }) });
+  } catch (e) { console.warn('募集依頼 Push失敗', e); }
+  try {
+    var gt = await getGraphTokenFor(GRAPH_TEAMS_SEND_SCOPES, true);
+    if (!gt) return;
+    var html = '<div><b>' + escHtml(title) + '</b></div><div>' + escHtml(line) + '</div>' + (bikou ? '<div>備考: ' + escHtml(bikou) + '</div>' : '') + '<div style="color:#666;">ステップ・アップアプリ「📣 募集依頼」で確認・HP掲載できます。</div>';
+    var resp = await fetch('https://graph.microsoft.com/v1.0/chats/' + SOUMU_CHAT_ID + '/messages', { method: 'POST', headers: { 'Authorization': 'Bearer ' + gt, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: { contentType: 'html', content: html } }) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showToast('役員・担当者へ通知しました（Push＋Teams総務チャット）', 'success');
+  } catch (e) { console.warn('募集依頼 Teams失敗', e); showToast('Teams総務チャットへの投稿は失敗しました（Pushは送信済み）', 'error'); }
+}
+// 役員: 依頼から求人掲載フォームを開く (派遣先/組織単位/対象/勤務地/時間/仕事内容 を自動入力。公開したら依頼は「HP掲載中」)
+async function boshuToJob(id) {
+  var r = _boshuRows.find(function(x) { return x.Id === id; }); if (!r) return;
+  if (!(typeof isAdminUser === 'function' && isAdminUser())) { showToast('HP掲載は役員のみ操作できます', 'error'); return; }
+  _boshuLinkId = id;
+  try { await _ensureJobHakenOptions(); } catch (_) {}
+  await openJobsAdmin();
+  openJobForm(null);
+  setTimeout(function() {
+    try {
+      var hs = document.getElementById('jf_haken'); if (hs) { hs.value = r.Title || ''; _jobOnHakenChange(); }
+      var ss = document.getElementById('jf_soshiki'); if (ss) { ss.value = r.soshiki || ''; _jobOnSoshikiChange(); }
+      _jobSetRadio('jobTarget', String(r.taisho || '').indexOf('日本人') === 0 ? '日本人向け' : '外国人もOK');
+      var rm = document.getElementById('jf_remarks');
+      if (rm && !String(rm.value || '').trim()) rm.value = '募集人数: ' + (r.ninzu || 1) + '名' + (r.taisho && r.taisho !== BOSHU_TAISHO[0] && r.nihongo ? '（日本語 ' + r.nihongo + ' 目安）' : '');
+      showToast('募集依頼の内容を入れました。職種・時給・休日を入力して公開してください', 'info');
+    } catch (e) { console.warn('boshuToJob prefill', e); }
+  }, 80);
+}
+// 求人の保存/公開に連動して依頼を更新 (求人IDの紐付け・HP掲載中/募集中)
+async function _boshuLinkJob(boshuId, jobId, status) {
+  try { await spMergeListItem(LIST_BOSHU_GUID, boshuId, { jobId: jobId, joutai: (status === '公開') ? 'HP掲載中' : '募集中' }); } catch (e) { console.warn('募集依頼 紐付け失敗', e); }
+  _boshuLinkId = null;
+}
+async function _boshuOnJobToggle(jobId, status) {
+  var rows = await spGet(LIST_BOSHU_GUID, '$select=Id,joutai,jobId&$filter=jobId eq ' + Number(jobId) + '&$top=10');
+  for (var i = 0; i < (rows || []).length; i++) {
+    var r = rows[i];
+    if (r.joutai === '充足' || r.joutai === '取消') continue;
+    await spMergeListItem(LIST_BOSHU_GUID, r.Id, { joutai: (status === '公開') ? 'HP掲載中' : '募集中' });
+  }
+}
+
 async function openJobsAdmin(){ switchScreen('jobsAdminScreen'); closeJobForm(); await loadJobsAdmin(); }
 var JOBS_LIST_GUID='3b062cf9-73a0-4539-b10c-fd3edcc0e8b3';  // 求人 List
 var _jobHakenMap=null;  // {派遣先会社名: [組織単位...]}  (派遣先情報040623から)
@@ -34788,6 +35062,8 @@ async function saveJob(){
       var _hk=document.getElementById('jf_haken').value, _so=document.getElementById('jf_soshiki').value;
       if(data.id!=null) await _patchJobHakenSoshiki(data.id,_hk,_so);
     }catch(e){ console.warn('募集元保存失敗',e); }
+    // 📣 募集依頼から開いた場合は 求人ID を依頼に紐付け (公開なら「HP掲載中」)
+    if(data.id!=null && typeof _boshuLinkId!=='undefined' && _boshuLinkId!=null){ try{ await _boshuLinkJob(_boshuLinkId,data.id,payload.status); }catch(e){ console.warn('募集依頼 連携',e); } }
     closeJobForm(); await loadJobsAdmin();
   }catch(e){ alert('保存に失敗しました: '+(e.message||e)); }
   finally{ btn.disabled=false; btn.textContent=old; }
@@ -34798,6 +35074,7 @@ async function togglePublish(id,status){
     var resp=await fetch(FUNC_OCR_BASE+'/jobs/toggle',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:id,status:status})});
     var data=await resp.json().catch(function(){return {};});
     if(!resp.ok||!data.ok) throw new Error(data.detail||data.error||('HTTP '+resp.status));
+    try{ if(typeof _boshuOnJobToggle==='function') await _boshuOnJobToggle(id,status); }catch(e){ console.warn('募集依頼 連携',e); }   // 📣 依頼の状態を HP掲載中/募集中 に
     if(status==='公開'){ try{ await _patchJobKoukaibi(id,_todayJST()); }catch(e){ console.warn('公開日記録失敗',e); } }
     await loadJobsAdmin();
     if(status==='公開'){ _genIndeedCopy(id,true); }  /* 公開したらIndeed用原稿をAI自動生成して表示 */
