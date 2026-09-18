@@ -34606,6 +34606,31 @@ var BOSHU_NAMES = { 'h.yamashita@team-stepup.com': '山下浩俊', 'a.yamashita@
   'm.mori@team-stepup.com': '森まこと', 'm.yoshiura@team-stepup.com': '吉浦マルセロ', 'y.mori@team-stepup.com': '森ゆうじ' };
 var SOUMU_CHAT_ID = '19:0d6b879c764e4f63a2f95289ad286433@thread.v2';   // Teams 総務チャット (グループチャット)
 var _boshuRows = [], _boshuEditId = null, _boshuLinkId = null;
+// 在籍社員の索引 { '071': { total:n, units: { 正規化した組織単位: [氏名,...] } } } (2026-09-18 ユーザー「今いる人も出ると選択しやすい」)
+var _boshuEmpIndex = null;
+function _boshuNormUnit(s) { var t = String(s || ''); try { t = t.normalize('NFKC'); } catch (_) {} return t.replace(/[\s　]/g, '').replace(/[（(]/g, '(').replace(/[）)]/g, ')').toLowerCase(); }
+function _boshuHakenNum(s) { var m = String(s || '').match(/^\s*(\d+)/); return m ? m[1] : String(s || '').trim(); }
+async function _boshuLoadEmpIndex() {
+  if (_boshuEmpIndex) return _boshuEmpIndex;
+  var idx = {};
+  try {
+    var SOSHIKI = 'OData__x7d44__x7e54__x5358__x4f4d__xff';
+    var emps = await spGetAll(LIST_EMPLOYEES_GUID, '$top=500');
+    (emps || []).forEach(function(e) {
+      if (typeof isEmployeeRetired === 'function' && isEmployeeRetired(e)) return;
+      var buka = (typeof getBukaValue === 'function') ? getBukaValue(e) : '';
+      var num = _boshuHakenNum(buka); if (!num) return;
+      var u = _boshuNormUnit(e[SOSHIKI]);
+      if (!idx[num]) idx[num] = { total: 0, units: {} };
+      idx[num].total++;
+      if (u) { (idx[num].units[u] = idx[num].units[u] || []).push(String(e.Title || '').trim()); }
+    });
+  } catch (e) { console.warn('募集依頼 在籍索引', e); }
+  _boshuEmpIndex = idx;
+  return idx;
+}
+function _boshuUnitNames(hk, so) { var g = _boshuEmpIndex && _boshuEmpIndex[_boshuHakenNum(hk)]; return (g && g.units[_boshuNormUnit(so)]) || []; }
+function _boshuHakenTotal(hk) { var g = _boshuEmpIndex && _boshuEmpIndex[_boshuHakenNum(hk)]; return g ? g.total : 0; }
 function _boshuMe() { return (typeof getLoggedInEmail === 'function') ? String(getLoggedInEmail() || '').toLowerCase() : ''; }
 function _boshuMyName() { var m = _boshuMe(); return BOSHU_NAMES[m] || m.split('@')[0]; }
 function _boshuIsOpen(r) { return r.joutai === '募集中' || r.joutai === 'HP掲載中'; }
@@ -34726,8 +34751,9 @@ async function openBoshuForm(id) {
   try {
     await _ensureJobHakenOptions();
     var sel = document.getElementById('bf_haken'); if (!sel) return;
+    try { await _boshuLoadEmpIndex(); } catch (_) {}
     var keys = Object.keys(_jobHakenMap || {}).sort(function(a, b) { return String(a).localeCompare(String(b), 'ja'); });
-    sel.innerHTML = '<option value="">派遣先を選択…</option>' + keys.map(function(k) { return '<option value="' + escHtml(k) + '">' + escHtml(k) + '</option>'; }).join('');
+    sel.innerHTML = '<option value="">派遣先を選択…</option>' + keys.map(function(k) { var n = _boshuHakenTotal(k); return '<option value="' + escHtml(k) + '">' + escHtml(k) + (n ? '　👥' + n + '名' : '') + '</option>'; }).join('');
     if (r && r.Title) { if (keys.indexOf(r.Title) < 0) sel.insertAdjacentHTML('beforeend', '<option value="' + escHtml(r.Title) + '">' + escHtml(r.Title) + '</option>'); sel.value = r.Title; }
     _boshuOnHakenChange();
     if (r && r.soshiki) { var ss = document.getElementById('bf_soshiki'); if (ss) { if (!Array.prototype.some.call(ss.options, function(o) { return o.value === r.soshiki; })) ss.insertAdjacentHTML('beforeend', '<option value="' + escHtml(r.soshiki) + '">' + escHtml(r.soshiki) + '</option>'); ss.value = r.soshiki; } }
@@ -34738,9 +34764,24 @@ function _boshuOnHakenChange() {
   var hk = (document.getElementById('bf_haken') || {}).value || '';
   var sel = document.getElementById('bf_soshiki'); if (!sel) return;
   var units = (_jobHakenMap && _jobHakenMap[hk]) || [];
-  sel.innerHTML = '<option value="">（選択しない）</option>' + units.map(function(u) { return '<option value="' + escHtml(u) + '">' + escHtml(u) + '</option>'; }).join('');
+  sel.innerHTML = '<option value="">（選択しない）</option>' + units.map(function(u) { var n = _boshuUnitNames(hk, u).length; return '<option value="' + escHtml(u) + '">' + escHtml(u) + (n ? '　👥' + n + '名' : '') + '</option>'; }).join('');
   if (units.length === 1) sel.value = units[0];   // 組織単位が1つだけなら自動選択
   _boshuOnSoshikiChange();
+}
+// 今いる人の表示 (組織単位を選んだらその部署の在籍者、未選択なら派遣先全体の部署別人数)
+function _boshuEmpsHtml(hk, so) {
+  if (!hk) return '';
+  if (so) {
+    var names = _boshuUnitNames(hk, so);
+    if (!names.length) return '<div style="margin-top:4px;color:#999;">👥 今いる人: この組織単位の在籍者はいません</div>';
+    var shown = names.slice(0, 12).join('、') + (names.length > 12 ? '　他' + (names.length - 12) + '名' : '');
+    return '<div style="margin-top:4px;"><b style="color:#1565c0;">👥 今いる人（' + names.length + '名）</b>: ' + escHtml(shown) + '</div>';
+  }
+  var g = _boshuEmpIndex && _boshuEmpIndex[_boshuHakenNum(hk)];
+  if (!g || !g.total) return '';
+  var units = (_jobHakenMap && _jobHakenMap[hk]) || [];
+  var parts = units.map(function(u) { var n = _boshuUnitNames(hk, u).length; return n ? escHtml(u) + ' ' + n + '名' : ''; }).filter(Boolean);
+  return '<div style="margin-top:4px;"><b style="color:#1565c0;">👥 在籍 ' + g.total + '名</b>' + (parts.length ? '： ' + parts.join('・') : '') + '</div>';
 }
 // 組織単位 → 派遣先情報(040623)の 勤務地/勤務時間/業務内容 を表示し、備考が空(または前回の自動文)なら備考に入れる (2026-09-17 ユーザー「派遣先情報から抽出できませんか」)
 var _boshuAutoBikou = '';
@@ -34751,20 +34792,25 @@ function _boshuOnSoshikiChange() {
   var d = (_jobHakenData && so) ? _jobHakenData[hk + '\u0000' + so] : null;
   var ta = document.getElementById('bf_bikou');
   var cur = ta ? String(ta.value || '').trim() : '';
+  var empsHtml = _boshuEmpsHtml(hk, so);
   if (!d || (!d.basho && !d.jikan && !d.naiyo)) {
     // 派遣先情報に登録が無い組織単位: 前回の自動文なら消して手入力に戻す
-    if (info) { info.innerHTML = so ? '<span style="color:#999;">📋 派遣先情報に この組織単位の勤務時間・業務内容の登録がありません（備考は手入力）</span>' : ''; info.style.display = so ? 'block' : 'none'; }
+    if (info) { info.innerHTML = (so ? '<span style="color:#999;">📋 派遣先情報に この組織単位の勤務時間・業務内容の登録がありません（備考は手入力）</span>' : '') + empsHtml; info.style.display = (so || empsHtml) ? 'block' : 'none'; }
     if (ta && cur && cur === _boshuAutoBikou) { ta.value = ''; _boshuAutoBikou = ''; }
     return;
   }
+  var shiftsHtml = (d.shifts && d.shifts.length > 1)
+    ? '<br>勤務時間（交代勤務）: ' + d.shifts.map(function(t, i) { return '<br>　' + '①②③'[i] + ' ' + escHtml(t); }).join('')
+    : (d.jikan ? '<br>勤務時間: ' + escHtml(d.jikan) : '');
   if (info) {
     info.innerHTML = '<b style="color:#d84315;">📋 派遣先情報（' + escHtml(so) + '）</b>' +
-      (d.basho ? '<br>勤務地: ' + escHtml(d.basho) : '') + (d.jikan ? '<br>勤務時間: ' + escHtml(d.jikan) : '') + (d.naiyo ? '<br>業務内容: ' + escHtml(d.naiyo) : '');
+      (d.basho ? '<br>勤務地: ' + escHtml(d.basho) : '') + shiftsHtml + (d.naiyo ? '<br>業務内容: ' + escHtml(d.naiyo) : '') + empsHtml;
     info.style.display = 'block';
   }
   if (!ta) return;
   // 備考の自動文: 組織単位・勤務地も入れる (同じ派遣先の別工程は勤務時間/業務内容が同一のことが多く「変わっていない」ように見えるため)
-  var auto = ['組織単位: ' + so, d.basho ? '勤務地: ' + d.basho : '', d.jikan ? '勤務時間: ' + d.jikan : '', d.naiyo ? '業務内容: ' + d.naiyo : ''].filter(Boolean).join('\n');
+  var jikanLine = (d.shifts && d.shifts.length > 1) ? '勤務時間（交代）: ' + d.shifts.map(function(t, i) { return '①②③'[i] + t; }).join(' ／ ') : (d.jikan ? '勤務時間: ' + d.jikan : '');
+  var auto = ['組織単位: ' + so, d.basho ? '勤務地: ' + d.basho : '', jikanLine, d.naiyo ? '業務内容: ' + d.naiyo : ''].filter(Boolean).join('\n');
   if (auto && (!cur || cur === _boshuAutoBikou)) {
     var changed = (cur !== auto);
     ta.value = auto; _boshuAutoBikou = auto;
@@ -34894,7 +34940,9 @@ async function _ensureJobHakenOptions(){
       var token=await getToken();
       var HK1="OData__x6d3e__x9063__x5148__x4f1a__x79", HK2="OData__x6d3e__x9063__x5148__x4f1a__x790", SO="OData__x7d44__x7e54__x5358__x4f4d_";
       var BASHO="OData__x5c31__x696d__x5834__x6240__xff", JUSHO="OData__x6d3e__x9063__x5148__x000a__x4f", JIKAN="OData__x5c31__x696d__x6642__x9593__x24", JITSU="OData__x5b9f__x50cd__x6642__x9593__x24", NAIYO="OData__x696d__x52d9__x5185__x5bb9_";
-      var sels=[HK1,HK2,SO,BASHO,JUSHO,JIKAN,JITSU,NAIYO].join(",");
+      // 交代勤務: 就業時間②③・実働②③ (三和電子など 2〜3直の派遣先。2026-09-18)
+      var JIKAN2="OData__x5c31__x696d__x6642__x9593__x240", JITSU2="OData__x5b9f__x50cd__x6642__x9593__x240", JIKAN3="OData__x5c31__x696d__x6642__x9593__x241", JITSU3="OData__x5b9f__x50cd__x6642__x9593__x241";
+      var sels=[HK1,HK2,SO,BASHO,JUSHO,JIKAN,JITSU,NAIYO,JIKAN2,JITSU2,JIKAN3,JITSU3].join(",");
       var url=SP_SITE_URL+"/_api/web/GetList('/sites/PowerApps/Lists/040623')/items?$select="+sels+"&$top=500";
       var data=await (await fetch(url,{headers:{'Authorization':'Bearer '+token,'Accept':'application/json;odata=verbose'}})).json();
       var rows=(data.d&&data.d.results)||[];
@@ -34906,10 +34954,17 @@ async function _ensureJobHakenOptions(){
         if(so && _jobHakenMap[hk].indexOf(so)<0) _jobHakenMap[hk].push(so);
         // 自動入力用(組織単位ごと): 勤務地/勤務時間/仕事内容
         var basho=_jobArea(String(r[BASHO]||r[JUSHO]||'').trim());
-        var jr=String(r[JIKAN]||'').trim(), ji=String(r[JITSU]||'').trim(), jikan='';
-        if(jr && jr!=='-'){ jikan=jr.replace(/：/g,':'); if(ji && ji!=='-') jikan+='（実働'+ji+'）'; }
+        // 就業時間①②③ → 1直なら「8:15～17:15（実働8時間）」、交代勤務なら「①8:15～17:15（実働8時間）／②19:45～4:45（実働8時間）」
+        var shifts=[];
+        [[JIKAN,JITSU],[JIKAN2,JITSU2],[JIKAN3,JITSU3]].forEach(function(p){
+          var jr=String(r[p[0]]||'').trim(), ji=String(r[p[1]]||'').trim();
+          if(!jr || jr==='-') return;
+          var t=jr.replace(/：/g,':').replace(/[\s　]/g,''); if(ji && ji!=='-') t+='（実働'+ji+'）';
+          if(shifts.indexOf(t)<0) shifts.push(t);
+        });
+        var jikan = shifts.length>1 ? shifts.map(function(t,i){ return '①②③'[i]+t; }).join('／') : (shifts[0]||'');
         var naiyo=String(r[NAIYO]||'').trim(); if(naiyo==='-') naiyo='';
-        if(so) _jobHakenData[hk+'\u0000'+so]={basho:basho, jikan:jikan, naiyo:naiyo};
+        if(so) _jobHakenData[hk+'\u0000'+so]={basho:basho, jikan:jikan, naiyo:naiyo, shifts:shifts};
       });
     }catch(e){ console.warn('派遣先情報ロード失敗',e); }
   }
