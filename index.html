@@ -12239,6 +12239,14 @@ async function _openHaisenPdfForIOS(pagesHtml, fileName) {
 
 // アプリ側から window.print() を呼ばずに済む。
 async function openHaisenDocInNewWindow() {
+  // ASTIマイカー通勤申請書(お客様様式PDF方式): 生成済みPDFをそのまま開く (html2canvas を通さない=様式そのまま)
+  if (window._currentHaisenDocMode === 'maicarASTI' && window._maicarPdfBlob) {
+    var _mu = URL.createObjectURL(window._maicarPdfBlob);
+    var _mw = window.open(_mu, '_blank');
+    if (!_mw) { var _ma = document.createElement('a'); _ma.href = _mu; _ma.download = 'マイカー通勤申請書.pdf'; document.body.appendChild(_ma); _ma.click(); _ma.remove(); }
+    if (typeof showToast === 'function') showToast('PDFを開きました。共有 → プリント で印刷できます', 'success');
+    return;
+  }
   // 派遣契約書類一式: まずSharePointへPDF保存し、その後 印刷選択モーダルを表示
   //   派遣先フォルダ = 個別契約書 + 通知書・派遣先管理台帳 / 社員フォルダ = 派遣元管理台帳(各人別)
   if (window._isshikiGroups && window._isshikiGroups.length) {
@@ -13749,6 +13757,178 @@ function _maicarStoredKm(emp) {
   } catch (_) { return null; }
 }
 
+
+// ============================================================
+// 🚗 ASTI 通勤方法・駐車場使用申請書 — お客様様式PDF方式 (2026-09-18)
+//   お客様(ASTI)のExcel様式(様式－４・改訂2024.08.01)をExcelでPDF化した asti_tsukin_template.pdf を下地に、
+//   社員情報の値を各欄へ重ね書きし、該当項目は印字の文字を○で囲む(脱退連絡票と同じ方式)。
+//   ユーザー「お客さんからまったく同じ書式でないとダメと言われた」→ 見た目=Excel印刷と同一。
+//   座標は PyMuPDF で実測 (scratchpad/measure_asti.py)。裏面の経路図は従来どおり自動生成(地理院タイル/OSRM)を貼る。
+// ============================================================
+var MAICAR_ASTI_TEMPLATE_PDF = 'asti_tsukin_template.pdf';
+async function _maicarRenderTemplatePdf(emp, opts, d) {
+  try {
+    showToast('お客様様式のPDFを作成中…', 'info');
+    var PDFLib = window.PDFLib || window['pdf-lib'];
+    if (!PDFLib || !window.fontkit) throw new Error('PDFライブラリが未ロードです。ページを再読み込みしてください');
+    var tplResp = await fetch(MAICAR_ASTI_TEMPLATE_PDF);
+    if (!tplResp.ok) throw new Error('様式PDFを取得できません (' + tplResp.status + ')');
+    var pdfDoc = await PDFLib.PDFDocument.load(new Uint8Array(await tplResp.arrayBuffer()));
+    pdfDoc.registerFontkit(window.fontkit);
+    var font = await pdfDoc.embedFont(new Uint8Array(await (await fetch('font_subset.ttf')).arrayBuffer()));
+    var pages = pdfDoc.getPages(); var p1 = pages[0], p2 = pages[1] || pages[0];
+    var H = p1.getHeight(); var black = PDFLib.rgb(0, 0, 0), white = PDFLib.rgb(1, 1, 1);
+    var OFFS = [[0, 0], [0.3, 0]];   // 疑似ボールド(細字対策)
+    // 文字幅は1文字ずつ合算 (fontkit のレイアウトは英字+数字の混在で数字の送りが広がるため、描画も1文字ずつ)
+    function _norm(t) { return String(t).replace(/[‐‑‒–—―]/g, '-').replace(/[～〜]/g, '～'); }
+    function tw(t, sz) { var s = _norm(t), w = 0; for (var i = 0; i < s.length; i++) w += font.widthOfTextAtSize(s[i], sz); return w; }
+    function txt(page, x, py, text, sz, o) {
+      o = o || {}; if (text == null || text === '') return; var s = _norm(text); sz = sz || 8;
+      if (o.maxW) { while (sz > 5.5 && tw(s, sz) > o.maxW) sz -= 0.5; }
+      var w = tw(s, sz); var xx = x;
+      if (o.align === 'right') xx = x - w; else if (o.align === 'center') xx = x - w / 2;
+      var cx = xx;
+      for (var k = 0; k < s.length; k++) {
+        var ch = s[k], cw = font.widthOfTextAtSize(ch, sz);
+        if (ch !== ' ' && ch !== '　') { for (var i = 0; i < OFFS.length; i++) page.drawText(ch, { x: cx + OFFS[i][0], y: H - py + OFFS[i][1], size: sz, font: font, color: black }); }
+        cx += cw;
+      }
+    }
+    function oval(page, x0, y0, x1, y1, w) { page.drawEllipse({ x: (x0 + x1) / 2, y: H - (y0 + y1) / 2, xScale: (x1 - x0) / 2, yScale: (y1 - y0) / 2, borderColor: black, borderWidth: w || 1.0, color: undefined }); }
+    function whiteout(page, x0, y0, x1, y1) { page.drawRectangle({ x: x0, y: H - y1, width: x1 - x0, height: y1 - y0, color: white, borderWidth: 0 }); }
+    function ymd(iso, wareki) {
+      if (!iso) return null; var dt = new Date(iso); if (isNaN(dt.getTime())) return null;
+      if (wareki && typeof toWareki === 'function') { var w = toWareki(iso); if (w && w.era) return { y: w.era + (w.year === 1 ? '元' : w.year), m: String(w.month), d: String(w.day) }; }
+      return { y: String(dt.getFullYear()), m: String(dt.getMonth() + 1), d: String(dt.getDate()) };
+    }
+    // 年月日: 印字の「年」「月」「日」の手前に右寄せ (xs = 各ラベルの左端x)
+    function dateR(page, iso, xs, base, sz, wareki) { var v = ymd(iso, wareki); if (!v) return; txt(page, xs[0] - 1.5, base, v.y, sz, { align: 'right' }); txt(page, xs[1] - 1.5, base, v.m, sz, { align: 'right' }); txt(page, xs[2] - 1.5, base, v.d, sz, { align: 'right' }); }
+    // 電話: 「（市外局番）局番－番号」の印字に合わせて3分割 (分割できなければ一続き)
+    function tel3(page, s, cx1, cx2, x3, base, sz) {
+      var t = String(s || '').replace(/[‐－ー−―]/g, '-').replace(/[（）()\s　]/g, '');
+      if (!t) return;
+      var parts = t.split('-').filter(Boolean);
+      if (parts.length !== 3) { txt(page, cx1 - 10, base, t, sz); return; }
+      txt(page, cx1, base, parts[0], sz, { align: 'center' }); txt(page, cx2, base, parts[1], sz, { align: 'center' }); txt(page, x3, base, parts[2], sz);
+    }
+    function manen(s) { var str = String(s || '').replace(/,/g, ''); var m = str.match(/(\d+)\s*万/); if (m) return m[1]; var n = str.replace(/[^\d]/g, ''); if (!n) return ''; return n.length > 4 ? String(Math.round(parseInt(n, 10) / 10000)) : n; }
+
+    // ===== 1ページ目 =====
+    if (d.kubun === '変更') oval(p1, 189.5, 93.3, 213.3, 107.3); else oval(p1, 152, 93.3, 176, 107.3);
+    dateR(p1, d.kinyuDate, [317.8, 346.5, 375.1], 103.6, 8.5, false);
+    dateR(p1, d.sekoDate, [491.5, 520.2, 548.8], 103.6, 8.5, false);
+    txt(p1, 393, 124.6, d.sn, 9, { align: 'center' });
+    txt(p1, 393, 141.2, '有限会社ステップ・アップ', 8.5, { align: 'center' });
+    var tmX = d.tm.four ? [214, 237.3] : d.tm.two ? [264.2, 287.6] : d.tm.walk ? [314.4, 337.9] : d.tm.pub ? [364.7, 427] : d.tm.other ? [453.8, 486.2] : null;
+    if (tmX) oval(p1, tmX[0], 147.3, tmX[1], 161.3);
+    // 所属: 印字の「工場・部・室」を消して 派遣先＋組織単位 を記入 (「課」の手前は空欄=組織単位に含む)
+    whiteout(p1, 231, 168.8, 286, 182.5);
+    txt(p1, 138, 178.8, d.hakenName + (d.dept ? '　' + d.dept : ''), 8.5, { maxW: 238 });
+    txt(p1, 494.5, 178.8, d.kinmuChi || d.hakenName, 8, { align: 'center', maxW: 136 });
+    txt(p1, 138, 198.6, d.furigana, 8, { maxW: 250 });
+    if (d.sexText) { if (d.sexText.indexOf('女') >= 0) oval(p1, 508.5, 188.3, 523.2, 201.9); else oval(p1, 468, 188.3, 482.7, 201.9); }
+    txt(p1, 138, 218.3, d.name, 10, { maxW: 250 });
+    dateR(p1, d.birthday, [473.0, 508.6, 544.2], 218.1, 8.5, false);
+    txt(p1, 151, 243, d.address, 8.5, { maxW: 236 });
+    txt(p1, 151, 268.5, d.jyuminhyo, 8.5, { maxW: 236 });
+    tel3(p1, d.jitaku, 466.5, 493.5, 518, 243.8, 8);
+    tel3(p1, d.keitai, 466.5, 493.5, 518, 269.3, 8);
+    txt(p1, 158, 295, d.emName, 8.5, { maxW: 148 });
+    txt(p1, 350.7, 295, d.emRel, 8, { align: 'center', maxW: 30 });
+    tel3(p1, d.emTel, 463.8, 491.4, 516, 295, 8);
+    var ctX = { '普通自動車': [171.5, 224.1], '軽自動車': [250.9, 293.8], '自動二輪車': [320.6, 373.2], '原動機付自転車': [400, 472.1], '自転車': [495.4, 528.6] }[d.ctSel];
+    if (ctX) oval(p1, ctX[0], 308.2, ctX[1], 322.3);
+    txt(p1, 182.5, 364, d.carMaker, 8.5, { align: 'center', maxW: 92 });
+    txt(p1, 284.5, 364, d.carName, 8.5, { align: 'center', maxW: 100 });
+    txt(p1, 365, 364, d.cn.region, 8, { align: 'center', maxW: 50 });
+    txt(p1, 408, 364, d.cn.usage, 8, { align: 'center', maxW: 30 });
+    txt(p1, 438, 364, d.cn.symbol, 8, { align: 'center', maxW: 25 });
+    txt(p1, 480, 364, d.cn.assign, 8, { align: 'center', maxW: 54 });
+    txt(p1, 547.5, 369, String(d.carDisp || '').replace(/cc|ｃｃ|㏄/gi, '').trim(), 8.5, { align: 'right' });
+    dateR(p1, d.shakenExp, [219.6, 261.8, 303.9], 385.3, 8, true);
+    dateR(p1, d.firstReg, [477.2, 512.8, 550.0], 385.3, 8, true);
+    txt(p1, 236, 407.5, d.jbCo, 8.5, { maxW: 152 });
+    txt(p1, 455, 407.5, d.jbNo, 8.5, { maxW: 108 });
+    txt(p1, 236, 429.7, d.niCo, 8.5, { maxW: 152 });
+    txt(p1, 455, 429.7, d.niNo, 8.5, { maxW: 108 });
+    dateR(p1, d.niStart, [303.1, 338.7, 374.3], 451.6, 8, true);
+    dateR(p1, d.niExp, [465.0, 500.7, 536.3], 451.6, 8, true);
+    if (/無制限/.test(d.taijin)) oval(p1, 219.7, 463.3, 252.9, 477); else if (d.taijin) txt(p1, 351.5, 473.6, manen(d.taijin), 8.5, { align: 'right' });
+    if (/無制限/.test(d.taibutsu)) oval(p1, 219.7, 499, 252.9, 512.6); else if (d.taibutsu) txt(p1, 351.5, 509.3, manen(d.taibutsu), 8.5, { align: 'right' });
+    if (d.tojo) txt(p1, 543.2, 473.6, /無制限/.test(d.tojo) ? '無制限' : manen(d.tojo), 8.5, { align: 'right' });
+    if (d.jinshin) txt(p1, 543.2, 516.1, /無制限/.test(d.jinshin) ? '無制限' : manen(d.jinshin), 8.5, { align: 'right' });
+    if (d.carHoken) {
+      var ch = String(d.carHoken);
+      if (/なし|無し|未加入|無$/.test(ch)) txt(p1, 255, 545.3, 'なし', 8.5, { align: 'right' });
+      else { txt(p1, 255, 545.3, manen(ch), 8.5, { align: 'right' }); var mk = ch.match(/免責\s*(\d+)/); if (mk) txt(p1, 352.6, 545.3, mk[1], 8.5, { align: 'right' }); }
+    }
+    var lcX = d.lc.ogata ? [248, 269.4] : d.lc.chugata ? [281.5, 302.9] : d.lc.jun ? [315, 345] : d.lc.futsu ? [357.2, 378.6] : d.lc.ogataNi ? [390.6, 429.6] : d.lc.futsuNi ? [441.6, 480.6] : d.lc.genfu ? [492.6, 514.1] : d.lc.other ? [526.1, 555.6] : null;
+    if (lcX) oval(p1, lcX[0], 557.6, lcX[1], 570.7);
+    txt(p1, 240, 590.4, d.lcNo, 9, { maxW: 300 });
+    dateR(p1, d.lcGet, [258.5, 292.8, 327.1], 612.5, 8, true);
+    dateR(p1, d.lcExp, [471.3, 506.9, 542.5], 612.5, 8, true);
+
+    // ===== 2ページ目: 誓約書(日付のみ・氏名は本人直筆) / 私の通勤経路(地図) / 通勤方法 =====
+    dateR(p2, d.kinyuDate, [124.2, 163.2, 202.2], 195.5, 8.5, false);
+    var route = null;
+    try { route = await _maicarBuildRouteForEmployee(emp); } catch (re) { console.warn('maicar route:', re); }
+    var kmVal = d.tsuKm, minVal = d.tsuMin;
+    if (route) {
+      var stored = (typeof _maicarStoredKm === 'function') ? _maicarStoredKm(emp) : null;
+      var useKm = (stored != null) ? stored : route.distKm;   // 通勤手当計算時の実測値を優先 (手当・契約書と一致)
+      kmVal = Number(useKm).toFixed(1); minVal = String(Math.round(route.durMin));
+      if (route.dataUrl) {
+        try {
+          var b64 = route.dataUrl.split(',')[1];
+          var bytes0 = Uint8Array.from(atob(b64), function(c) { return c.charCodeAt(0); });
+          var img = /^data:image\/png/.test(route.dataUrl) ? await pdfDoc.embedPng(bytes0) : await pdfDoc.embedJpg(bytes0);
+          var box = { x0: 51, y0: 329, x1: 564, y1: 688 }; var bw = box.x1 - box.x0, bh = box.y1 - box.y0;
+          var sc = Math.min(bw / img.width, bh / img.height); var iw = img.width * sc, ih = img.height * sc;
+          p2.drawImage(img, { x: box.x0 + (bw - iw) / 2, y: H - box.y1 + (bh - ih) / 2, width: iw, height: ih });
+          txt(p2, 54, 686.5, '地理院タイル / OSRM（緑=自宅・赤=会社）　' + kmVal + ' km / 約 ' + minVal + ' 分', 6.5, {});
+        } catch (ie) { console.warn('map embed:', ie); }
+      }
+    }
+    var mX = d.tm.m1 ? [75.2, 86.5, 715.5] : d.tm.m2 ? [75.2, 86.5, 731.7] : d.tm.m3 ? [75.2, 86.5, 747.9] : d.tm.m4 ? [75.2, 86.5, 764.1] : d.tm.m5 ? [182.2, 193.5, 715.5] : d.tm.m6 ? [182.2, 193.5, 731.7] : d.tm.m7 ? [182.2, 193.5, 747.9] : null;
+    if (mX) oval(p2, mX[0], mX[2] - 1.5, mX[1], mX[2] + 12.2);
+    if (kmVal) txt(p2, 500, 708.8, String(kmVal), 9, { align: 'right' });
+    if (minVal) txt(p2, 500.5, 757.4, String(minVal), 9, { align: 'right' });
+
+    var bytes = await pdfDoc.save();
+    window._maicarPdfBlob = new Blob([bytes], { type: 'application/pdf' });
+    await _maicarShowPdfPreview(bytes, emp, opts);
+    if (route) showToast('✓ 経路図を自動生成 (' + kmVal + ' km / 約 ' + minVal + ' 分)', 'success');
+    else showToast('経路図は自動取得できませんでした（地図なしで作成）', 'error');
+  } catch (e) {
+    console.error('_maicarRenderTemplatePdf error:', e);
+    showToast('作成に失敗: ' + (e.message || e), 'error');
+  }
+}
+// 生成したPDFを画像にして書類画面へ (印刷/PDF保存・社員フォルダ保存は生成済みPDFをそのまま使う)
+async function _maicarShowPdfPreview(bytes, emp, opts) {
+  var pdfjsLib = await loadPdfJsIfNeeded();
+  var pdf = await pdfjsLib.getDocument(_pdfjsDocOpts(bytes.slice(0))).promise;
+  var html = '';
+  for (var i = 1; i <= pdf.numPages; i++) {
+    var page = await pdf.getPage(i); var vp = page.getViewport({ scale: 2 });
+    var cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+    var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    html += '<div class="haisen-doc-page maicar-asti-page" style="padding:0;"><img src="' + cv.toDataURL('image/jpeg', 0.9) + '" alt="通勤方法・駐車場使用申請書 ' + i + '/' + pdf.numPages + '" style="width:100%;display:block;"></div>';
+    cv.width = cv.height = 0;
+  }
+  switchScreen('haisenDocScreen');
+  document.getElementById('haisenDocBody').innerHTML = '<div class="haisen-doc-wrapper">' + html + '</div>';
+  var actions = document.getElementById('haisenDocActions');
+  if (actions) actions.style.display = 'flex';
+  ['haisenEsignBtn', 'haisenEsignLinkBtn', 'adobeSignBtn', 'tsukinSaveBtn', 'tsukinMailBtn'].forEach(function(id) { var b = document.getElementById(id); if (b) b.style.display = 'none'; });
+  document.querySelectorAll('.koyou-undo-btn').forEach(function(b) { b.style.display = 'none'; });
+  var tsBtn = document.getElementById('tsukinSaveBtn');
+  if (tsBtn) { tsBtn.style.display = ''; tsBtn.disabled = false; }
+  window._tsukinSaveCtx = { emp: emp, todokeDate: (opts && opts.kinyuDate) || '', formType: 'maicarASTI' };
+  if (typeof zoomHaisenDoc === 'function') zoomHaisenDoc(0, 0.5, 0.65);
+}
+
 function renderMaicarTsukinASTI(emp, opts) {
   opts = opts || {};
   window._currentHaisenDocMode = 'maicarASTI';
@@ -13906,6 +14086,24 @@ function renderMaicarTsukinASTI(emp, opts) {
 
   var tsuKm  = g('tsukinKyori');
   var tsuMin = g('tsukinJikan');
+
+  // ★ お客様(ASTI)のExcel様式PDFに値を重ね書きする方式 (2026-09-18)。従来のHTML描画は下に残す(テンプレ未設定時の保険)
+  window._maicarPdfBlob = null;
+  if (typeof MAICAR_ASTI_TEMPLATE_PDF === 'string' && MAICAR_ASTI_TEMPLATE_PDF) {
+    _maicarRenderTemplatePdf(emp, opts, {
+      name: name, furigana: furigana, sn: String(sn || '').replace(/\.0+$/, ''), hakenName: hakenName, dept: dept, kinmuChi: kinmuChi,
+      kubun: kubun, kinyuDate: opts.kinyuDate, sekoDate: opts.sekoDate, birthday: g('birthday'), sexText: sexText,
+      address: address, jyuminhyo: jyuminhyo, jitaku: jitaku, keitai: keitai, emName: emName, emRel: emRel, emTel: emTel,
+      carMaker: carMaker, carName: carName, cn: cn, carDisp: carDisp, shakenExp: g('shakenExpiry'), firstReg: g('carFirstReg'), ctSel: _ctSel,
+      jbCo: jbCo, jbNo: jbNo, niCo: niCo, niNo: niNo, niStart: g('niniStartDate'), niExp: g('niniExpiry'),
+      taijin: taijin, taibutsu: taibutsu, tojo: tojo, jinshin: jinshin, carHoken: carHoken,
+      lcNo: lcNo, lcGet: g('licenseGetDate'), lcExp: g('licenseExpiry'),
+      lc: { ogata: lcOgata, chugata: lcChugata, jun: lcJunCh, futsu: lcFutsu, ogataNi: lcOgataNi, futsuNi: lcFutsuNi, genfu: lcGenfu, other: lcOther },
+      tm: { four: tmFour, two: tmTwo, walk: tmWalk, pub: tmPublic, other: tmOther, m1: tm1Walk, m2: tm2Bike, m3: tm3Nirin, m4: tm4Kei, m5: tm5Futsu, m6: tm6Pub, m7: tm7Other },
+      tsuKm: tsuKm, tsuMin: tsuMin
+    });
+    return;
+  }
 
   // 共通 cell styles - A4×2枚に収め、かつ A4 下部まで内容を充填するため
   //   padding & line-height を増やして表全体を高さ方向に伸ばす。
@@ -14350,7 +14548,7 @@ async function saveTsukinTodokeToSyainFolder(btn) {
   try {
     if (typeof loadEsignLibsIfNeeded === 'function') await loadEsignLibsIfNeeded();
     if (btn) btn.textContent = '⏳ PDFを生成中…';
-    var pdfBlob = await generateHaisenDocAsPdf();
+    var pdfBlob = (ctx.formType === 'maicarASTI' && window._maicarPdfBlob) ? window._maicarPdfBlob : await generateHaisenDocAsPdf();
     if (btn) btn.textContent = '⏳ アップロード中…';
     var folderPath = await getEmpFolderPath(emp);
     if (!folderPath) throw new Error('社員フォルダのパスが特定できません');
