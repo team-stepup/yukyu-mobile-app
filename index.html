@@ -32268,7 +32268,7 @@ function openKirokuForm(id) {
       '<div style="padding:12px 14px;">' +
         (r ? '' :
         '<div style="background:#f3f4fb;border:1.5px dashed #9fa8da;border-radius:10px;padding:8px 10px;margin-bottom:10px;">' +
-          '<div style="font-size:12px;font-weight:700;color:#3949ab;">🤖 連絡メモを貼り付けて自動で振り分け</div>' +
+          '<div style="font-size:12px;font-weight:700;color:#3949ab;">🤖 連絡メモを貼り付けて自動で振り分け <span style="font-weight:400;color:#666;font-size:11px;">（ポルトガル語・英語で書いても日本語に翻訳して記録します／Pode colar em português）</span></div>' +
           '<textarea id="kr_memo" rows="4" placeholder="例: 9/23 9:00 母 鈴木ともこより連絡 0538-49-1813。9/19に体調不良で救急搬送…" style="width:100%;box-sizing:border-box;margin-top:5px;padding:8px;border:1.5px solid #c5cae9;border-radius:8px;font-size:13px;"></textarea>' +
           '<button onclick="_kirokuParseMemo()" style="margin-top:5px;background:#3949ab;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;">🤖 項目に振り分ける</button>' +
           '<span id="kr_parseStatus" style="font-size:11.5px;color:#666;margin-left:8px;"></span></div>') +
@@ -32315,8 +32315,11 @@ async function _kirokuParseMemo() {
     if (f.kirokuDate && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(f.kirokuDate)) set('kr_date', f.kirokuDate.slice(0, 16));
     if (KIROKU_SHUBETSU.indexOf(f.shubetsu) >= 0) set('kr_shubetsu', f.shubetsu);
     if (KIROKU_JUYODO.indexOf(f.juyodo) >= 0) set('kr_juyodo', f.juyodo);
-    set('kr_renraku', f.renrakumoto); set('kr_naiyo', f.naiyo); set('kr_taio', f.taio);
-    if (st) st.textContent = '✓ 振り分けました。内容を確認して登録してください';
+    var naiyoJa = String(f.naiyo || '');
+    if (!f.lang) f.lang = /[぀-ヿ一-鿿]/.test(memo) ? 'ja' : 'other';   // AIが lang を返さなかった時の保険: 日本語文字が無ければ外国語扱い
+    if (f.lang && f.lang !== 'ja' && naiyoJa) naiyoJa += '\n\n【原文 ' + (f.lang === 'pt' ? 'ポルトガル語' : f.lang === 'en' ? '英語' : f.lang) + '】\n' + memo;   // 翻訳の確認用に原文も残す
+    set('kr_renraku', f.renrakumoto); set('kr_naiyo', naiyoJa); set('kr_taio', f.taio);
+    if (st) st.textContent = (f.lang && f.lang !== 'ja') ? '✓ 日本語に翻訳して振り分けました（原文は内容の末尾に残しています）。確認して登録してください' : '✓ 振り分けました。内容を確認して登録してください';
   } catch (e) { if (st) st.textContent = '失敗: ' + (e.message || e) + '（手入力してください）'; }
 }
 async function saveKiroku(id) {
