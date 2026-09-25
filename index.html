@@ -54761,7 +54761,23 @@ function _hmcRenderKeiyaku() {
     + '<input id="hmcRate" type="number" value="' + (e.rate || '') + '" style="' + inp + 'margin:4px 0 10px;">'
     + '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:4px 0 12px;"><input type="checkbox" id="hmcDoStaff" checked style="width:18px;height:18px;"> 入社時（hmcスタッフ登録も行う）</label>'
     + '<button onclick="_hmcSubmitQueue()" style="width:100%;padding:14px;background:linear-gradient(135deg,#0277bd,#01579b);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;">📝 hmcに下書き作成（送信）</button>'
-    + '<div style="font-size:11px;color:#888;text-align:center;margin-top:8px;">送信後、PCの処理がhmcに下書き（一時保存）を作成します。総務が確認して提出してください。</div></div>';
+    + '<div style="font-size:11px;color:#888;text-align:center;margin-top:8px;">送信後、PCの処理がhmcに下書き（一時保存）を作成します。総務が確認して提出してください。</div></div>'
+    + '<button onclick="_hmcSkip()" style="width:100%;margin-top:10px;padding:12px;background:#fff;color:#455a64;border:1.5px solid #b0bec5;border-radius:10px;font-size:13.5px;font-weight:700;cursor:pointer;">⏭ スキップ（hmcはあとで作る）→ 社員画面へ</button>';
+}
+// ⏭ スキップ (2026-09-25): hmc下書きを作らずに、その社員の社員画面へ (新規雇用契約書などへ進む)。hmc はあとで社員画面の「派遣契約書(hmc下書き)」から作れる
+async function _hmcSkip() {
+  var sn = _hmcEmp && _hmcEmp.sn;
+  if (!sn) { switchScreen('searchScreen'); return; }
+  try {
+    var rows = await spGet(LIST_EMPLOYEES_GUID, '$filter=' + F.syainNo + ' eq ' + sn + '&$top=5&$orderby=Id desc');
+    var emp = (rows || []).find(function (r) { return !r[F.hakenTaisha]; }) || (rows || [])[0];
+    if (!emp) { switchScreen('searchScreen'); return; }
+    await selectEmployee(emp);
+    showToast('hmcの下書きは、あとで社員画面の「派遣契約書（hmc下書き）」から作れます', 'info');
+  } catch (e) {
+    showToast('社員画面を開けませんでした: ' + (e.message || e), 'error');
+    switchScreen('searchScreen');
+  }
 }
 function _hmcOnMatterChange() {
   var mid = document.getElementById('hmcMatter').value;
