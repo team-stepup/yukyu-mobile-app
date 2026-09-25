@@ -6768,6 +6768,10 @@ select.sankyu-edit-input {
             <span class="asi-card-icon" style="background:#fff3e0;color:#e65100;">🔄</span>
             <span class="asi-card-label">更新用<br>就業条件通知書</span>
           </button>
+          <button class="asi-card" onclick="openHandoverFromDetail()">
+            <span class="asi-card-icon" style="background:#e8f5e9;color:#2e7d32;">📖</span>
+            <span class="asi-card-label">お渡しする<br>書類</span>
+          </button>
           <button class="asi-card" id="docCardHmc" onclick="openHmcKeiyakuFromDetail()">
             <span class="asi-card-icon" style="background:#e1f5fe;color:#0277bd;">📝</span>
             <span class="asi-card-label">派遣契約書<br>(hmc下書き)</span>
@@ -42323,38 +42327,108 @@ async function _kyHandoverAfterSign(emp, contractPath) {
     _kyShowHandoverPanel(j.handover, emp);
   } catch (e) { showToast('書類の受け取りページを作れませんでした: ' + (e.message || e), 'error'); }
 }
+function _kyHoFmt(iso, pt) {
+  if (!iso) return '';
+  try {
+    var p = new Date(iso).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).split('/');
+    return pt ? (p[2] + '/' + p[1] + '/' + p[0]) : p.join('/');
+  } catch (_) { return String(iso); }
+}
+function _kyHoDocs(h) { return (h.docs || []).map(function (d) { return typeof d === 'string' ? { d: '', title: d } : d; }); }
+// 📖 お渡しする書類を送る (対面署名の直後 / 社員画面のカード) — 署名リンクと同じ送り方 (QR・WhatsApp・LINE・共有・メール・コピー)
 function _kyShowHandoverPanel(h, emp) {
   ['kyLinkOverlay', 'kyHoOverlay'].forEach(function (id) { var o = document.getElementById(id); if (o) o.remove(); });
-  window._kyHo = h;
+  emp = emp || {};
+  window._kyHo = h; window._kyHoEmp = emp;
+  var name = emp.Title || h.name || '';
+  var phone = (typeof _esignPhoneIntl === 'function' && typeof _esignEmpPhone === 'function') ? _esignPhoneIntl(_esignEmpPhone(emp)) : '';
+  var email = (typeof _esignEmpEmail === 'function') ? _esignEmpEmail(emp) : '';
+  var text = _kyHoText();
+  var enc = encodeURIComponent(text).replace(/'/g, '%27');
+  var expired = !!h.expired;
+  var canShare = !!navigator.share;
+  function btn(label, onclick, bg, disabled) {
+    return '<button type="button" ' + (disabled ? 'disabled ' : '') + 'onclick="' + onclick + '" style="flex:1 1 46%;min-width:130px;background:' + bg +
+      ';color:#fff;border:none;border-radius:9px;padding:11px 8px;font-size:12.5px;font-weight:700;cursor:pointer;' + (disabled ? 'opacity:0.45;cursor:not-allowed;' : '') + '">' + label + '</button>';
+  }
+  var opened = h.opened || {};
+  var docs = _kyHoDocs(h).map(function (d) {
+    var at = d.d && opened[d.d];
+    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:12.5px;">' +
+      '<span style="min-width:0;overflow-wrap:anywhere;">' + escHtml(d.title) + '</span>' +
+      '<span style="white-space:nowrap;color:' + (at ? '#2e7d32' : '#999') + ';font-weight:700;">' + (at ? '✅ 開封 ' + escHtml(_kyJst(at).replace(/^\d{4}\//, '')) : '⏳ 未開封') + '</span></div>';
+  }).join('');
   var ov = document.createElement('div');
-  ov.id = 'kyHoOverlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
-  var b = 'border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;';
-  var exp = h.expiresAt ? new Date(h.expiresAt) : null;
-  var expS = exp ? (exp.getFullYear() + '/' + (exp.getMonth() + 1) + '/' + exp.getDate()) : '';
+  ov.id = 'kyHoOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:14px;';
   ov.innerHTML =
-    '<div style="background:#fff;border-radius:14px;width:100%;max-width:420px;max-height:92vh;overflow:auto;">' +
-      '<div style="background:#2e7d32;color:#fff;padding:12px 16px;border-radius:14px 14px 0 0;font-weight:700;">📖 本人へ書類を渡す</div>' +
-      '<div style="padding:14px 16px;text-align:center;">' +
-        '<div style="font-size:14px;font-weight:700;overflow-wrap:anywhere;">' + escHtml((emp && emp.Title) || '') + ' さん</div>' +
-        '<div style="font-size:12px;color:#555;margin:4px 0 10px;">本人のスマホでQRコードを読み取ってもらい、書類を保存してもらってください。<br><span style="color:#888;">Leia o QR code e salve os documentos no celular.</span></div>' +
-        '<div id="kyQr" style="display:inline-block;background:#fff;padding:6px;border:1px solid #eee;border-radius:8px;max-width:100%;"></div>' +
-        '<ul style="text-align:left;font-size:12.5px;margin:10px 0 0 18px;padding:0;">' + (h.docs || []).map(function (d) { return '<li>' + escHtml(d) + '</li>'; }).join('') + '</ul>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:12px;">' +
-          '<button type="button" onclick="_kyHoCopy()" style="' + b + 'background:#455a64;color:#fff;">📋 リンクをコピー</button>' +
-          '<button type="button" onclick="_kyHoShare()" style="' + b + 'background:#0084ff;color:#fff;">📨 共有（WhatsApp等）</button>' +
+    '<div style="background:#fff;border-radius:14px;width:100%;max-width:520px;max-height:92vh;overflow:auto;">' +
+      '<div style="background:linear-gradient(135deg,#2e7d32,#1b5e20);color:#fff;padding:13px 16px;border-radius:14px 14px 0 0;">' +
+        '<div style="font-size:15px;font-weight:800;">📖 お渡しする書類を送る</div>' +
+        '<div style="font-size:11.5px;opacity:.9;margin-top:2px;overflow-wrap:anywhere;">' + escHtml(name) + ' 様 — ' + (h.hasContract ? '契約書の控え・' : '') + '就業規則・給料明細の見方</div></div>' +
+      '<div style="padding:14px 16px;">' +
+        '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">' +
+          '<div id="kyQr" style="background:#fff;padding:5px;border:1px solid #eee;border-radius:8px;flex:0 0 auto;max-width:100%;' + (expired ? 'opacity:.3;' : '') + '"></div>' +
+          '<div style="flex:1;min-width:170px;font-size:12px;color:#555;line-height:1.6;">📷 本人がそばにいれば、このQRを本人のスマホで読んでもらいます。離れていれば、下のボタンで送ってください。' +
+            '<div style="margin-top:6px;font-weight:700;color:' + (expired ? '#c62828' : '#2e7d32') + ';">' + (expired ? '⚠ 受け取り期限が切れています。「新しく発行」してください。' : '受け取り期限: ' + escHtml(_kyHoFmt(h.expiresAt))) + '</div></div>' +
         '</div>' +
-        '<div style="font-size:10.5px;color:#999;margin-top:8px;">' + (expS ? escHtml(expS) + ' まで受け取れます。' : '') + '</div>' +
+        '<div style="margin-top:10px;background:#f5f5f5;border-radius:8px;padding:8px 10px;font-size:11px;color:#555;word-break:break-all;">' + escHtml(h.url || '') + '</div>' +
+        '<div style="margin-top:10px;">' + docs + '</div>' +
+        '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;">' +
+          btn('📱 WhatsApp' + (phone ? '' : '（携帯未登録）'), "window.open('https://wa.me/" + phone + "?text=" + enc + "','_blank')", '#25d366', expired || !phone) +
+          btn('💚 LINE', "window.open('https://line.me/R/share?text=" + enc + "','_blank')", '#06c755', expired) +
+          btn('📨 共有 (Messenger等)', '_kyHoShare()', '#0084ff', expired || !canShare) +
+          btn('📧 メール' + (email ? '' : '（メール未登録）'), "location.href='mailto:" + encodeURIComponent(email) + "?subject=" + encodeURIComponent('【お渡しする書類 / Documentos】' + name + ' 様') + "&body=" + enc + "'", '#ef6c00', expired || !email) +
+          btn('📋 リンクをコピー', '_kyHoCopy()', '#455a64', expired) +
+        '</div>' +
       '</div>' +
-      '<div style="padding:10px 16px;border-top:1px solid #eee;text-align:right;"><button type="button" onclick="document.getElementById(\'kyHoOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:8px 18px;font-weight:600;cursor:pointer;">閉じる</button></div>' +
+      '<div style="padding:10px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;">' +
+        '<button type="button" onclick="_kyHoReissue()" style="background:#fff;color:#2e7d32;border:1.5px solid #2e7d32;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;">🔄 新しく発行</button>' +
+        '<button type="button" onclick="document.getElementById(\'kyHoOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:8px 18px;font-weight:600;cursor:pointer;">閉じる</button>' +
+      '</div>' +
     '</div>';
   ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
   _kyRenderQr(h.url);
 }
-function _kyHoText() { var h = window._kyHo || {}; return '【書類の受け取り / Documentos】\n' + (h.url || ''); }
-async function _kyHoCopy() { try { await navigator.clipboard.writeText(_kyHoText()); showToast('✓ リンクをコピーしました', 'success'); } catch (e) { window.prompt('コピーしてください', (window._kyHo || {}).url || ''); } }
-async function _kyHoShare() { if (!navigator.share) { _kyHoCopy(); return; } try { await navigator.share({ title: '書類の受け取り', text: _kyHoText() }); } catch (e) { if (e && e.name !== 'AbortError') _kyHoCopy(); } }
+function _kyHoText() {
+  var h = window._kyHo || {}, emp = window._kyHoEmp || {};
+  var name = emp.Title || h.name || '';
+  var ja = (h.hasContract ? '雇用契約書の控え・' : '') + '就業規則・給料明細の見方';
+  var pt = (h.hasContract ? 'a cópia do contrato, ' : '') + 'o regulamento interno e como ler o holerite';
+  return '【有限会社ステップ・アップ】' + name + ' 様\n' + ja + 'をお渡しします。下のリンクを開いて、スマホに保存してください（' + _kyHoFmt(h.expiresAt) + 'まで）。\n' +
+    (h.url || '') + '\n\nSr(a). ' + name + ', seguem ' + pt + '. Abra o link e salve no seu celular (até ' + _kyHoFmt(h.expiresAt, true) + ').';
+}
+async function _kyHoCopy() { try { await navigator.clipboard.writeText(_kyHoText()); showToast('✓ 案内文とリンクをコピーしました', 'success'); } catch (e) { window.prompt('コピーしてください', (window._kyHo || {}).url || ''); } }
+async function _kyHoShare() { if (!navigator.share) { _kyHoCopy(); return; } try { await navigator.share({ title: 'お渡しする書類', text: _kyHoText() }); } catch (e) { if (e && e.name !== 'AbortError') _kyHoCopy(); } }
+async function _kyHoReissue() {
+  var h = window._kyHo || {}, emp = window._kyHoEmp || {};
+  if (!confirm('新しい受け取りページを発行しますか？\n（期限は今日から30日。前のリンクもそのまま使えます）')) return;
+  try {
+    var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+    var j = await _esignApi('/kyouiku/handover', 'POST', { syainNo: sn, name: emp.Title || '', fromToken: h.token || '' });
+    _kyShowHandoverPanel(j.handover, emp);
+    showToast('✓ 新しい受け取りページを発行しました', 'success');
+  } catch (e) { showToast('発行に失敗: ' + (e.message || e), 'error'); }
+}
+// 社員画面「📖 お渡しする書類」カード
+async function openHandoverFromDetail() {
+  var emp = (typeof currentEmployee !== 'undefined') ? currentEmployee : null;
+  if (!emp) { showToast('社員を選択してください', 'error'); return; }
+  var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+  try {
+    if (typeof _empOcrProg === 'function') _empOcrProg('📖 お渡しする書類を確認中…');
+    var j;
+    try { j = await _esignApi('/kyouiku/hstatus?syainNo=' + encodeURIComponent(sn), 'GET'); }
+    finally { if (typeof _empOcrProg === 'function') _empOcrProg(null); }
+    var items = (j && j.items) || [];
+    var cur = items.find(function (x) { return !x.expired; }) || items[0];
+    if (cur) { _kyShowHandoverPanel(cur, emp); return; }
+    if (!confirm('まだ「お渡しする書類」の受け取りページがありません。\n就業規則と給料明細の見方の受け取りページを作りますか？\n\n（新規雇用契約書に署名すると、契約書の控えも入ったページが自動で作られます）')) return;
+    var r = await _esignApi('/kyouiku/handover', 'POST', { syainNo: sn, name: emp.Title || '' });
+    _kyShowHandoverPanel(r.handover, emp);
+  } catch (e) { showToast('お渡しする書類を開けませんでした: ' + (e.message || e), 'error'); }
+}
 
 // ===== 📄 入社時教育 受講記録PDF → 社員フォルダ (2026-09-25) =====
 // 契約書画面で教育が「全部完了」かつ未保存なら自動で1回だけ作成・保存 (kyouiku/recorded で保存済みを記録)。
