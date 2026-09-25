@@ -42252,6 +42252,7 @@ async function _kyContractRefresh(emp, isNew, quiet) {
   }
   _kyContractPaint();
   var r = window._kyContract.rec;
+  if (r && r.progress && r.progress.complete && !r.recordSavedAt) { _kySaveRecordPdf(r, emp, true); }   // 📄 受講記録を社員フォルダへ(1回)
   if (r && !(r.progress && r.progress.complete) && !r.expired) {
     window._kyContractTimer = setInterval(function () {
       var b = document.getElementById('kyContractBox');
@@ -42281,10 +42282,12 @@ function _kyContractPaint() {
     '🎓 入社時教育: <b>' + p.done + ' / ' + p.total + '</b> 完了' + (done ? ' ✅ 署名に進めます' : (r.firstOpenedAt ? '（本人が見ています）' : '（本人はまだ開いていません）')) +
     (r.expired && !done ? '<br><span style="color:#c62828;">リンクの期限が切れています。出し直してください。</span>' : '') +
     (!done && !r.expired ? '<div style="font-size:11px;color:#888;">20秒ごとに自動で更新します</div>' : '') +
+    (done ? '<div style="font-size:12px;margin-top:4px;">📄 受講記録: ' + (r.recordSavedAt ? '社員フォルダに保存済み（' + escHtml(_kyJst(r.recordSavedAt)) + '）' : (window._kyRecordSaving[r.token] ? '保存中…' : '<span style="color:#e65100;">未保存</span>')) + '</div>' : '') +
     '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">' +
       '<button type="button" onclick="_kyContractRefresh(window._kyContract.emp,true)" style="' + b + 'background:#eef2f7;color:#1a5fa8;">🔄 更新</button>' +
       (!done ? (r.expired ? '<button type="button" onclick="_kyContractIssue()" style="' + gold + '">🎓 リンクを出し直す</button>'
-                          : '<button type="button" onclick="_kyShowPanel(window._kyContract.rec)" style="' + b + 'background:#0d2137;color:#fff;">📱 QRを表示</button>') : '') +
+                          : '<button type="button" onclick="_kyShowPanel(window._kyContract.rec)" style="' + b + 'background:#0d2137;color:#fff;">📱 QRを表示</button>')
+             : '<button type="button" onclick="_kySaveRecordPdf(window._kyContract.rec, window._kyContract.emp, false)" style="' + b + 'background:#fff;color:#2e7d32;border:1.5px solid #2e7d32;">📄 受講記録を' + (r.recordSavedAt ? '保存し直す' : '保存') + '</button>') +
     '</div></div>';
 }
 async function _kyContractIssue() {
@@ -42352,6 +42355,90 @@ function _kyShowHandoverPanel(h, emp) {
 function _kyHoText() { var h = window._kyHo || {}; return '【書類の受け取り / Documentos】\n' + (h.url || ''); }
 async function _kyHoCopy() { try { await navigator.clipboard.writeText(_kyHoText()); showToast('✓ リンクをコピーしました', 'success'); } catch (e) { window.prompt('コピーしてください', (window._kyHo || {}).url || ''); } }
 async function _kyHoShare() { if (!navigator.share) { _kyHoCopy(); return; } try { await navigator.share({ title: '書類の受け取り', text: _kyHoText() }); } catch (e) { if (e && e.name !== 'AbortError') _kyHoCopy(); } }
+
+// ===== 📄 入社時教育 受講記録PDF → 社員フォルダ (2026-09-25) =====
+// 契約書画面で教育が「全部完了」かつ未保存なら自動で1回だけ作成・保存 (kyouiku/recorded で保存済みを記録)。
+function _kyJst(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+  catch (_) { return String(iso); }
+}
+function _kyDeviceLabel(ua) {
+  ua = String(ua || '');
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Windows/.test(ua)) return 'Windows';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  return ua ? 'その他' : '';
+}
+function _kyRecordPageHtml(r, emp) {
+  var LN = { ja: '日本語', pt: 'ポルトガル語', en: '英語', all: '3言語' };
+  var KN = { video: '動画', pdf: '資料', table: '資料' };
+  var th = 'border:1px solid #999;background:#eef1f6;padding:6px 8px;font-weight:700;text-align:left;';
+  var td = 'border:1px solid #999;padding:6px 8px;vertical-align:top;';
+  var row = function (k, v) { return '<tr><th style="' + th + 'width:30%;">' + escHtml(k) + '</th><td style="' + td + '">' + escHtml(v || '') + '</td></tr>'; };
+  var p = r.progress || { done: 0, total: 0 };
+  var buka = (typeof getBukaValue === 'function') ? (getBukaValue(emp) || '') : '';
+  var items = (r.items || []).map(function (it, i) {
+    var d = (r.done || {})[it.key];
+    var lang = d ? (d.lang || '') : '';
+    var kind = KN[it.kind] || '資料';
+    if (it.kind === 'video' && lang && (it.videoLangs || []).indexOf(lang) < 0) lang = 'ja';   // 英語動画は無いので日本語版で視聴
+    return '<tr><td style="' + td + 'text-align:center;">' + (i + 1) + '</td><td style="' + td + '">' + escHtml(it.title) + '</td>' +
+      '<td style="' + td + 'text-align:center;">' + kind + '</td><td style="' + td + 'text-align:center;">' + escHtml(LN[lang] || lang || '') + '</td>' +
+      '<td style="' + td + 'text-align:center;">' + (d ? escHtml(_kyJst(d.at)) : '<span style="color:#c62828;">未完了</span>') + '</td></tr>';
+  }).join('');
+  return '<div class="haisen-doc-page" style="width:794px;min-height:1123px;padding:56px 58px;box-sizing:border-box;background:#fff;color:#111;font-family:\'Yu Gothic\',\'YuGothic\',\'Hiragino Sans\',Meiryo,sans-serif;font-size:13px;line-height:1.55;">' +
+    '<div style="text-align:center;font-size:22px;font-weight:700;letter-spacing:4px;margin-bottom:4px;">入社時教育 受講記録</div>' +
+    '<div style="text-align:center;font-size:11.5px;color:#555;margin-bottom:18px;">有限会社ステップ・アップ</div>' +
+    '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;">' +
+      row('氏名', emp.Title || r.name) + row('社員番号', r.syainNo || String(emp[F.syainNo] || '').replace(/\.0+$/, '')) + row('派遣先', buka) +
+      row('使用言語', LN[r.lang] || r.lang) + row('通勤区分', (typeof KY_COMMUTE_NAME !== 'undefined' && KY_COMMUTE_NAME[r.commute]) || r.commute || '') +
+      row('実施方法', '本人のスマートフォンで閲覧（動画は最後まで再生で完了、資料は「読みました」で完了）') +
+      row('リンク発行', _kyJst(r.createdAt) + (r.requesterName ? '　発行者: ' + r.requesterName : '')) +
+      row('本人が開いた日時', _kyJst(r.firstOpenedAt) + (r.device ? '　端末: ' + _kyDeviceLabel(r.device) : '')) +
+      row('完了日時', r.completedAt ? _kyJst(r.completedAt) : '未完了（' + p.done + ' / ' + p.total + '）') +
+    '</table>' +
+    '<div style="font-weight:700;margin:4px 0 6px;">受講した資料（' + p.done + ' / ' + p.total + ' 完了）</div>' +
+    '<table style="width:100%;border-collapse:collapse;">' +
+      '<tr><th style="' + th + 'width:6%;text-align:center;">No</th><th style="' + th + '">資料</th><th style="' + th + 'width:9%;text-align:center;">種別</th>' +
+      '<th style="' + th + 'width:15%;text-align:center;">言語</th><th style="' + th + 'width:24%;text-align:center;">完了日時</th></tr>' + items +
+    '</table>' +
+    '<div style="margin-top:18px;font-size:11.5px;color:#444;">本記録は、入社時教育（雇入れ時の安全衛生教育を含む）の実施記録として保存する。</div>' +
+    '<div style="margin-top:4px;font-size:10.5px;color:#888;">作成: ' + escHtml(_kyJst(new Date().toISOString())) + '　yukyu-app 入社時教育リンク（記録ID: ' + escHtml(String(r.token || '').substring(0, 10)) + '）</div>' +
+  '</div>';
+}
+window._kyRecordSaving = window._kyRecordSaving || {};
+async function _kySaveRecordPdf(r, emp, auto) {
+  if (!r || !emp) return;
+  if (window._kyRecordSaving[r.token]) return;
+  window._kyRecordSaving[r.token] = true;
+  try {
+    if (!auto) showToast('📄 受講記録を作成中…', 'info');
+    await loadEsignLibsIfNeeded();
+    var blob = await _haisenHtmlToPdfBlob(_kyRecordPageHtml(r, emp));
+    var folderPath = await getEmpFolderPath(emp);
+    if (!folderPath) throw new Error('社員フォルダのパスが分かりません');
+    try { await ensureSpFolder(folderPath); } catch (_) {}
+    var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+    var nm = (emp.Title || '').replace(/[\s　\/\\:*?"<>|]/g, '');
+    var base = r.completedAt || new Date().toISOString();
+    var ymd = new Date(base).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
+    var fileName = '入社時教育受講記録_' + sn + '_' + nm + '_' + ymd + '.pdf';
+    await uploadFileToSp(folderPath, fileName, new File([blob], fileName, { type: 'application/pdf' }));
+    try {
+      var j = await _esignApi('/kyouiku/recorded', 'POST', { token: r.token, path: folderPath + '/' + fileName });
+      if (j && j.request) { r.recordSavedAt = j.request.recordSavedAt; r.recordPath = j.request.recordPath; }
+    } catch (eRec) { console.warn('kyouiku recorded:', eRec); r.recordSavedAt = new Date().toISOString(); r.recordPath = folderPath + '/' + fileName; }
+    showToast('✓ 受講記録を社員フォルダに保存しました', 'success');
+    try { _kyContractPaint(); } catch (_) {}
+  } catch (e) {
+    showToast('受講記録の保存に失敗: ' + (e.message || e), 'error');
+  } finally {
+    window._kyRecordSaving[r.token] = false;
+  }
+}
 
 // 通勤方法の値が 車/バイク か (「自転車、徒歩」「電車、送迎」の「車」は除外)
 function _isCarCommuteValue(val) {
