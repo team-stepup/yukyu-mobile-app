@@ -6675,6 +6675,7 @@ select.sankyu-edit-input {
       <div style="font-size:11.5px;color:#8a6d00;background:#fff8e1;border:1.5px solid #ffca28;border-radius:8px;padding:9px 11px;line-height:1.55;">🔁 <b>両面印刷のとき</b>：印刷設定で両面を <b>「長辺とじ」（長い辺で綴じる）</b> にすると、裏面が表面と同じ向きで印刷されます。<br><span style="color:#a98a00;">※「短辺とじ」を選ぶと裏面が上下逆になります。</span></div>
       <button id="tsukinSaveBtn" onclick="saveTsukinTodokeToSyainFolder(this)" style="display:none;background:linear-gradient(135deg,#fb8c00,#e65100);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">💾 社員フォルダに保存 (通勤届)</button>
       <button id="tsukinMailBtn" onclick="draftTsukinTodokeEmail(this)" style="display:none;background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">📧 寺田様へ下書き作成 (Outlook)</button>
+      <div id="kyContractBox" style="display:none;"></div>
       <button id="haisenEsignBtn" onclick="saveHaisenDocFinal()" class="btn" style="background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">✍ 電子サイン + SharePoint保存(最終)</button>
       <button id="haisenEsignLinkBtn" onclick="openEsignLinkPanel()" class="btn" style="background:linear-gradient(135deg,#7b1fa2,#4a148c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📲 本人へ署名リンクを送る (WhatsApp / LINE / メール / QR)</button>
       <button id="adobeSignBtn" onclick="sendNewHireToAdobeSign()" class="btn" style="display:none;background:linear-gradient(135deg,#d32f2f,#b71c1c);color:#fff;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;">📤 Adobe Sign 署名へ送信</button>
@@ -10993,6 +10994,7 @@ async function saveHaisenDocFinal() {
       if (typeof showToast === 'function') showToast('書類を先に作成してください', 'error');
       return;
     }
+    if (!_kyContractGuard()) return;   // 🎓 入社時教育が未完了なら注意 (同期・別タブを開く前)
     _esignCurrentEmp = currentEmployee;
     // ライブラリは先に読み込み開始 (バックグラウンド)
     loadEsignLibsIfNeeded().catch(function(){});
@@ -11466,6 +11468,7 @@ async function openEsignLinkPanel() {
     var signed = items.find(function(r) { return r.status === 'signed' && r.docLabel === label; });
     if (active) { _esignShowLinkPanel(active, emp, signed); return; }
     if (signed && !confirm('この書類は ' + _esignFmtJst(signed.signedAt) + ' に署名済みです。\n新しい署名リンクを発行しますか？')) return;
+    if (!_kyContractGuard()) return;   // 🎓 入社時教育が未完了なら注意
     var rec = await _esignCreateLink(emp);
     _esignShowLinkPanel(rec, emp, signed);
   } catch (e) {
@@ -11745,6 +11748,8 @@ if (!window._esignMessageInstalled) {
       }
       if (src) src.postMessage({ type: 'esign-result', ok: true, fileName: fileName, folderPath: folderPath }, '*');
       if (typeof showToast === 'function') showToast('✓ ' + fileName + ' を保存しました', 'success');
+      // 📖 新規雇用契約書: 本人へ 契約書控え・就業規則・給料明細の見方 を渡す受け取りページ (QR)
+      if (window._currentHaisenDocMode === 'new') { try { _kyHandoverAfterSign(_esignCurrentEmp, folderPath + '/' + fileName); } catch (eHo) { console.warn('handover:', eHo); } }
     } catch (err) {
       console.error('[esign] message handler error:', err);
       if (src) src.postMessage({ type: 'esign-result', ok: false, error: err.message || String(err) }, '*');
@@ -15042,6 +15047,7 @@ async function openHaisenDocScreen(docType) {
     if (esignBtn) esignBtn.style.display = '';
     var esignLinkBtn = document.getElementById('haisenEsignLinkBtn');
     if (esignLinkBtn) esignLinkBtn.style.display = '';
+    try { _kyContractRefresh(emp, docType === 'roudouKeiyaku'); } catch (eKy) { console.warn('kyouiku status:', eKy); }   // 🎓 入社時教育の進み具合
     // Adobe Sign 送信ボタン: 新規雇用契約書 (roudouKeiyaku) のときのみ表示
     var adobeBtn = document.getElementById('adobeSignBtn');
     // Adobe Sign 送信は廃止 (Acrobat 解約予定・実連携なし)。本人への署名依頼は「📲 本人へ署名リンクを送る」に統一 (2026-09-03)
@@ -42150,8 +42156,10 @@ function _kyProgHtml(r) {
   var p = r.progress || { done: 0, total: 0 };
   return (r.firstOpenedAt ? '📱 本人が開きました' : '⏳ まだ開かれていません') + '　<b>' + p.done + ' / ' + p.total + '</b> 完了' + (p.complete ? ' 🎉' : '');
 }
-function _kyShowPanel() {
-  var r = window._kyAdd; if (!r) return;
+function _kyShowPanel(rr) {
+  var r = rr || window._kyAdd; if (!r) return;
+  window._kyPanelRec = r;
+  var ho = document.getElementById('kyHoOverlay'); if (ho) ho.remove();
   var old = document.getElementById('kyLinkOverlay'); if (old) old.remove();
   var ov = document.createElement('div');
   ov.id = 'kyLinkOverlay';
@@ -42171,7 +42179,7 @@ function _kyShowPanel() {
         '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:12px;">' +
           '<button type="button" onclick="_kyCopy()" style="' + b + 'background:#455a64;color:#fff;">📋 リンクをコピー</button>' +
           '<button type="button" onclick="_kyShare()" style="' + b + 'background:#0084ff;color:#fff;">📨 共有（WhatsApp等）</button>' +
-          '<button type="button" onclick="_kyAddRefresh()" style="' + b + 'background:#eef2f7;color:#1a5fa8;">🔄 更新</button>' +
+          '<button type="button" onclick="_kyPanelRefresh()" style="' + b + 'background:#eef2f7;color:#1a5fa8;">🔄 更新</button>' +
         '</div>' +
         '<div style="font-size:10.5px;color:#999;margin-top:8px;">リンクは今日の23:59まで使えます。</div>' +
       '</div>' +
@@ -42190,13 +42198,24 @@ function _kyRenderQr(url) {
   } catch (e) { el.innerHTML = '<div style="font-size:11px;color:#999;padding:8px;">QRを作れませんでした。リンクをコピーして送ってください。</div>'; }
 }
 function _kyShareText(r) { return '【入社時教育 / Treinamento de admissão】\n' + r.url; }
+async function _kyPanelRefresh() {
+  var r = window._kyPanelRec || window._kyAdd; if (!r) return;
+  try {
+    var j = await _esignApi('/kyouiku/status?t=' + encodeURIComponent(r.token), 'GET');
+    var n = (j.items || [])[0];
+    if (n) ['progress', 'done', 'firstOpenedAt', 'completedAt', 'syainNo', 'expired'].forEach(function (k) { r[k] = n[k]; });
+    var pp = document.getElementById('kyPanelProg'); if (pp) pp.innerHTML = _kyProgHtml(r);
+    try { _kyAddRender(); } catch (_) {}
+    try { _kyContractPaint(); } catch (_) {}
+  } catch (e) { showToast('進み具合の取得に失敗: ' + (e.message || e), 'error'); }
+}
 async function _kyCopy() {
-  var r = window._kyAdd; if (!r) return;
+  var r = window._kyPanelRec || window._kyAdd; if (!r) return;
   try { await navigator.clipboard.writeText(_kyShareText(r)); showToast('✓ リンクをコピーしました', 'success'); }
   catch (e) { window.prompt('コピーしてください', r.url); }
 }
 async function _kyShare() {
-  var r = window._kyAdd; if (!r) return;
+  var r = window._kyPanelRec || window._kyAdd; if (!r) return;
   if (!navigator.share) { _kyCopy(); return; }
   try { await navigator.share({ title: '入社時教育', text: _kyShareText(r) }); }
   catch (e) { if (e && e.name !== 'AbortError') _kyCopy(); }
@@ -42206,6 +42225,133 @@ async function _kyShare() {
   function h(e) { if (e.target && ids[e.target.id]) { try { _kyAddRender(); } catch (_) {} } }
   document.addEventListener('change', h); document.addEventListener('input', h);
 })();
+
+// ===== 🎓 契約書画面: 入社時教育の進み具合 + 署名前の注意 + 署名後の書類受け取り (2026-09-25) =====
+// 新規雇用契約書の画面で kyouiku/status?syainNo= を表示し、未完了なら20秒ごとに自動更新。
+// 署名ボタン(対面/リンク)は、未完了なら confirm で注意する(止めない)。別タブを開く処理があるので判定は同期(キャッシュ)で行う。
+// 対面署名の保存後は kyouiku/handover で受け取りページ(契約書控え・就業規則・給料明細の見方・30日)を作り QR を出す。
+window._kyContract = null;
+var KY_COMMUTE_CHOICES = ['車kuruma', 'バイクbaiku', '自転車、徒歩jitensya toho', '送迎sougei', '電車、送迎densya'];
+function _kyEmpField(emp, frag) {
+  try { for (var k in emp) { if (k.indexOf(frag) >= 0) return String(emp[k] || '').trim(); } } catch (_) {}
+  return '';
+}
+function _kyContractStopTimer() { if (window._kyContractTimer) { clearInterval(window._kyContractTimer); window._kyContractTimer = null; } }
+async function _kyContractRefresh(emp, isNew, quiet) {
+  var box = document.getElementById('kyContractBox'); if (!box) return;
+  _kyContractStopTimer();
+  if (!isNew || !emp) { window._kyContract = null; box.style.display = 'none'; box.innerHTML = ''; return; }
+  var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+  box.style.display = '';
+  if (!quiet) box.innerHTML = '<div style="font-size:12px;color:#888;padding:4px 2px;">🎓 入社時教育の状況を確認中…</div>';
+  try {
+    var j = await _esignApi('/kyouiku/status?syainNo=' + encodeURIComponent(sn), 'GET');
+    window._kyContract = { emp: emp, sn: sn, rec: (j.items || [])[0] || null, loaded: true };
+  } catch (e) {
+    window._kyContract = { emp: emp, sn: sn, rec: null, loaded: false };
+  }
+  _kyContractPaint();
+  var r = window._kyContract.rec;
+  if (r && !(r.progress && r.progress.complete) && !r.expired) {
+    window._kyContractTimer = setInterval(function () {
+      var b = document.getElementById('kyContractBox');
+      var scr = document.getElementById('haisenDocScreen');
+      if (!b || b.style.display === 'none' || (scr && !scr.classList.contains('active') && scr.offsetParent === null) || !window._kyContract || window._kyContract.emp !== emp) { _kyContractStopTimer(); return; }
+      _kyContractRefresh(emp, true, true);
+    }, 20000);
+  }
+}
+function _kyContractPaint() {
+  var box = document.getElementById('kyContractBox'); var c = window._kyContract; if (!box || !c) return;
+  var r = c.rec;
+  var b = 'border:none;border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:700;cursor:pointer;';
+  var base = 'border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.55;';
+  var gold = b + 'background:linear-gradient(135deg,#c9922a,#f0b84a);color:#0d2137;';
+  if (!c.loaded) { box.innerHTML = '<div style="' + base + 'background:#ffebee;border:1.5px solid #ef9a9a;">🎓 入社時教育の状況を取得できませんでした。<button type="button" onclick="_kyContractRefresh(window._kyContract.emp,true)" style="' + b + 'background:#fff;color:#1a5fa8;margin-left:6px;">🔄 再読込</button></div>'; return; }
+  if (!r) {
+    var cm = _kyEmpField(c.emp, 'x901a__x52e4__x65b9__x6cd5_');
+    var sel = cm ? '' : '<div style="margin-top:6px;font-size:12px;">通勤方法が未登録です。教育用に選んでください: <select id="kyContractCommute" style="font-size:13px;padding:4px;">' +
+      KY_COMMUTE_CHOICES.map(function (x) { return '<option>' + escHtml(x) + '</option>'; }).join('') + '</select></div>';
+    box.innerHTML = '<div style="' + base + 'background:#fff8e1;border:1.5px solid #ffca28;">🎓 <b>入社時教育のリンクはまだ出ていません。</b>' + sel +
+      '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;"><button type="button" onclick="_kyContractIssue()" style="' + gold + '">🎓 リンクを出す（QR）</button></div></div>';
+    return;
+  }
+  var p = r.progress || { done: 0, total: 0 }, done = !!p.complete;
+  box.innerHTML = '<div style="' + base + (done ? 'background:#e8f5e9;border:1.5px solid #66bb6a;' : 'background:#fff8e1;border:1.5px solid #ffca28;') + '">' +
+    '🎓 入社時教育: <b>' + p.done + ' / ' + p.total + '</b> 完了' + (done ? ' ✅ 署名に進めます' : (r.firstOpenedAt ? '（本人が見ています）' : '（本人はまだ開いていません）')) +
+    (r.expired && !done ? '<br><span style="color:#c62828;">リンクの期限が切れています。出し直してください。</span>' : '') +
+    (!done && !r.expired ? '<div style="font-size:11px;color:#888;">20秒ごとに自動で更新します</div>' : '') +
+    '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">' +
+      '<button type="button" onclick="_kyContractRefresh(window._kyContract.emp,true)" style="' + b + 'background:#eef2f7;color:#1a5fa8;">🔄 更新</button>' +
+      (!done ? (r.expired ? '<button type="button" onclick="_kyContractIssue()" style="' + gold + '">🎓 リンクを出し直す</button>'
+                          : '<button type="button" onclick="_kyShowPanel(window._kyContract.rec)" style="' + b + 'background:#0d2137;color:#fff;">📱 QRを表示</button>') : '') +
+    '</div></div>';
+}
+async function _kyContractIssue() {
+  var c = window._kyContract; if (!c) return;
+  var emp = c.emp;
+  var commute = _kyEmpField(emp, 'x901a__x52e4__x65b9__x6cd5_') || ((document.getElementById('kyContractCommute') || {}).value || '');
+  try {
+    var j = await _esignApi('/kyouiku/request', 'POST', {
+      name: emp.Title || '', nationality: _kyEmpField(emp, 'x672c__x0028__x56fd'), commute: commute, syainNo: c.sn,
+      requesterName: (typeof getLoggedInName === 'function' ? getLoggedInName() : '') });
+    c.rec = j.request;
+    _kyContractPaint();
+    _kyShowPanel(c.rec);
+    _kyContractRefresh(emp, true, true);
+  } catch (e) { showToast('入社時教育リンクの発行に失敗: ' + (e.message || e), 'error'); }
+}
+// 署名ボタンの前: 未完了なら注意 (同期判定・止めない)
+function _kyContractGuard() {
+  if (window._currentHaisenDocMode !== 'new') return true;
+  var c = window._kyContract;
+  if (!c || !c.loaded) return true;
+  var r = c.rec;
+  if (r && r.progress && r.progress.complete) return true;
+  var msg = r ? ('入社時教育がまだ終わっていません（' + (r.progress ? r.progress.done : 0) + ' / ' + (r.progress ? r.progress.total : 0) + ' 完了）。')
+              : '入社時教育のリンクがまだ出ていません。';
+  return confirm('🎓 ' + msg + '\n\nこのまま署名に進みますか？');
+}
+// 対面署名の保存後: 本人へ書類を渡す受け取りページ (QR)
+async function _kyHandoverAfterSign(emp, contractPath) {
+  try {
+    var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+    var j = await _esignApi('/kyouiku/handover', 'POST', { syainNo: sn, name: emp.Title || '', contractPath: contractPath });
+    _kyShowHandoverPanel(j.handover, emp);
+  } catch (e) { showToast('書類の受け取りページを作れませんでした: ' + (e.message || e), 'error'); }
+}
+function _kyShowHandoverPanel(h, emp) {
+  ['kyLinkOverlay', 'kyHoOverlay'].forEach(function (id) { var o = document.getElementById(id); if (o) o.remove(); });
+  window._kyHo = h;
+  var ov = document.createElement('div');
+  ov.id = 'kyHoOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  var b = 'border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;';
+  var exp = h.expiresAt ? new Date(h.expiresAt) : null;
+  var expS = exp ? (exp.getFullYear() + '/' + (exp.getMonth() + 1) + '/' + exp.getDate()) : '';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;width:100%;max-width:420px;max-height:92vh;overflow:auto;">' +
+      '<div style="background:#2e7d32;color:#fff;padding:12px 16px;border-radius:14px 14px 0 0;font-weight:700;">📖 本人へ書類を渡す</div>' +
+      '<div style="padding:14px 16px;text-align:center;">' +
+        '<div style="font-size:14px;font-weight:700;overflow-wrap:anywhere;">' + escHtml((emp && emp.Title) || '') + ' さん</div>' +
+        '<div style="font-size:12px;color:#555;margin:4px 0 10px;">本人のスマホでQRコードを読み取ってもらい、書類を保存してもらってください。<br><span style="color:#888;">Leia o QR code e salve os documentos no celular.</span></div>' +
+        '<div id="kyQr" style="display:inline-block;background:#fff;padding:6px;border:1px solid #eee;border-radius:8px;max-width:100%;"></div>' +
+        '<ul style="text-align:left;font-size:12.5px;margin:10px 0 0 18px;padding:0;">' + (h.docs || []).map(function (d) { return '<li>' + escHtml(d) + '</li>'; }).join('') + '</ul>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:12px;">' +
+          '<button type="button" onclick="_kyHoCopy()" style="' + b + 'background:#455a64;color:#fff;">📋 リンクをコピー</button>' +
+          '<button type="button" onclick="_kyHoShare()" style="' + b + 'background:#0084ff;color:#fff;">📨 共有（WhatsApp等）</button>' +
+        '</div>' +
+        '<div style="font-size:10.5px;color:#999;margin-top:8px;">' + (expS ? escHtml(expS) + ' まで受け取れます。' : '') + '</div>' +
+      '</div>' +
+      '<div style="padding:10px 16px;border-top:1px solid #eee;text-align:right;"><button type="button" onclick="document.getElementById(\'kyHoOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:8px 18px;font-weight:600;cursor:pointer;">閉じる</button></div>' +
+    '</div>';
+  ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  _kyRenderQr(h.url);
+}
+function _kyHoText() { var h = window._kyHo || {}; return '【書類の受け取り / Documentos】\n' + (h.url || ''); }
+async function _kyHoCopy() { try { await navigator.clipboard.writeText(_kyHoText()); showToast('✓ リンクをコピーしました', 'success'); } catch (e) { window.prompt('コピーしてください', (window._kyHo || {}).url || ''); } }
+async function _kyHoShare() { if (!navigator.share) { _kyHoCopy(); return; } try { await navigator.share({ title: '書類の受け取り', text: _kyHoText() }); } catch (e) { if (e && e.name !== 'AbortError') _kyHoCopy(); } }
 
 // 通勤方法の値が 車/バイク か (「自転車、徒歩」「電車、送迎」の「車」は除外)
 function _isCarCommuteValue(val) {
