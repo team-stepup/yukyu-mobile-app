@@ -42352,6 +42352,7 @@ async function _kyHandoverAfterSign(emp, contractPath) {
     var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
     var j = await _esignApi('/kyouiku/handover', 'POST', { syainNo: sn, name: emp.Title || '', contractPath: contractPath });
     _kyShowHandoverPanel(j.handover, emp);
+    _kyHoLog('qr');   // 対面署名の直後に本人のスマホでQRを読んでもらう
     try { if (window._kyContract && window._kyContract.emp === emp) { window._kyContract.signed = j.handover; _kyContractPaint(); } } catch (_) {}
   } catch (e) { showToast('書類の受け取りページを作れませんでした: ' + (e.message || e), 'error'); }
 }
@@ -42402,11 +42403,12 @@ function _kyShowHandoverPanel(h, emp) {
         '</div>' +
         '<div style="margin-top:10px;background:#f5f5f5;border-radius:8px;padding:8px 10px;font-size:11px;color:#555;word-break:break-all;">' + escHtml(h.url || '') + '</div>' +
         '<div style="margin-top:10px;">' + docs + '</div>' +
+        '<div id="kyHoLogBox"></div>' +
         '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;">' +
-          btn('📱 WhatsApp' + (phone ? '' : '（携帯未登録）'), "window.open('https://wa.me/" + phone + "?text=" + enc + "','_blank')", '#25d366', expired || !phone) +
-          btn('💚 LINE', "window.open('https://line.me/R/share?text=" + enc + "','_blank')", '#06c755', expired) +
+          btn('📱 WhatsApp' + (phone ? '' : '（携帯未登録）'), "_kyHoLog('whatsapp','+" + phone + "');window.open('https://wa.me/" + phone + "?text=" + enc + "','_blank')", '#25d366', expired || !phone) +
+          btn('💚 LINE', "_kyHoLog('line');window.open('https://line.me/R/share?text=" + enc + "','_blank')", '#06c755', expired) +
           btn('📨 共有 (Messenger等)', '_kyHoShare()', '#0084ff', expired || !canShare) +
-          btn('📧 メール' + (email ? '' : '（メール未登録）'), "location.href='mailto:" + encodeURIComponent(email) + "?subject=" + encodeURIComponent('【お渡しする書類 / Documentos】' + name + ' 様') + "&body=" + enc + "'", '#ef6c00', expired || !email) +
+          btn('📧 メール' + (email ? '' : '（メール未登録）'), "_kyHoLog('mail','" + String(email).replace(/'/g, '') + "');location.href='mailto:" + encodeURIComponent(email) + "?subject=" + encodeURIComponent('【お渡しする書類 / Documentos】' + name + ' 様') + "&body=" + enc + "'", '#ef6c00', expired || !email) +
           btn('📋 リンクをコピー', '_kyHoCopy()', '#455a64', expired) +
         '</div>' +
       '</div>' +
@@ -42418,6 +42420,8 @@ function _kyShowHandoverPanel(h, emp) {
   ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
   _kyRenderQr(h.url);
+  _kyHoPaintLog();
+  setTimeout(_kyHoAutoRecord, 300);   // 送付や開封の記録が増えていれば 書類交付記録PDF を更新
 }
 function _kyHoText() {
   var h = window._kyHo || {}, emp = window._kyHoEmp || {};
@@ -42427,8 +42431,8 @@ function _kyHoText() {
   return '【有限会社ステップ・アップ】' + name + ' 様\n' + ja + 'をお渡しします。下のリンクを開いて、スマホに保存してください（' + _kyHoFmt(h.expiresAt) + 'まで）。\n' +
     (h.url || '') + '\n\nSr(a). ' + name + ', seguem ' + pt + '. Abra o link e salve no seu celular (até ' + _kyHoFmt(h.expiresAt, true) + ').';
 }
-async function _kyHoCopy() { try { await navigator.clipboard.writeText(_kyHoText()); showToast('✓ 案内文とリンクをコピーしました', 'success'); } catch (e) { window.prompt('コピーしてください', (window._kyHo || {}).url || ''); } }
-async function _kyHoShare() { if (!navigator.share) { _kyHoCopy(); return; } try { await navigator.share({ title: 'お渡しする書類', text: _kyHoText() }); } catch (e) { if (e && e.name !== 'AbortError') _kyHoCopy(); } }
+async function _kyHoCopy() { try { await navigator.clipboard.writeText(_kyHoText()); showToast('✓ 案内文とリンクをコピーしました', 'success'); } catch (e) { window.prompt('コピーしてください', (window._kyHo || {}).url || ''); } _kyHoLog('copy'); }
+async function _kyHoShare() { if (!navigator.share) { _kyHoCopy(); return; } try { await navigator.share({ title: 'お渡しする書類', text: _kyHoText() }); _kyHoLog('share'); } catch (e) { if (e && e.name !== 'AbortError') _kyHoCopy(); } }
 async function _kyHoReissue() {
   var h = window._kyHo || {}, emp = window._kyHoEmp || {};
   if (!confirm('新しい受け取りページを発行しますか？\n（期限は今日から30日。前のリンクもそのまま使えます）')) return;
@@ -42539,6 +42543,111 @@ async function _kySaveRecordPdf(r, emp, auto) {
     showToast('受講記録の保存に失敗: ' + (e.message || e), 'error');
   } finally {
     window._kyRecordSaving[r.token] = false;
+  }
+}
+
+// ===== 📄 書類交付記録 (何で渡したか + 開いた/保存した) → 社員フォルダPDF (2026-09-25) =====
+var KY_HO_CH = { whatsapp: 'WhatsApp', line: 'LINE', share: '共有（Messenger等）', mail: 'メール', copy: 'リンクをコピー（転送）',
+  qr: 'QR（対面で本人のスマホ）', esign_page: '署名完了画面の受け取りボタン（本人の端末）', mail_auto: '控えメールにリンク（自動）', mail_self: '控えメールにリンク（本人が入力した宛先）' };
+var KY_HO_SRC = { esign: 'リモート署名の完了時に自動作成', inapp: '対面署名の直後に作成', reissue: '社員画面から再発行', '': '社員画面から作成' };
+function _kyHoLog(channel, to) {
+  var h = window._kyHo; if (!h || !h.token) return;
+  _esignApi('/kyouiku/hsent', 'POST', { token: h.token, channel: channel, to: to || '', byName: (typeof getLoggedInName === 'function' ? getLoggedInName() : '') })
+    .then(function (j) {
+      if (j && j.handover && window._kyHo && window._kyHo.token === j.handover.token) {
+        window._kyHo = j.handover;
+        _kyHoPaintLog();
+        _kyHoAutoRecord();
+      }
+    }).catch(function (e) { console.warn('handover log:', e); });
+}
+function _kyHoHash(h) {
+  var s = (h.sent || []).map(function (x) { return x.at + x.channel; }).join(',') + '|' + (h.access || []).map(function (x) { return x.at + x.d + (x.dl ? 1 : 0); }).join(',');
+  var n = 0; for (var i = 0; i < s.length; i++) { n = ((n << 5) - n + s.charCodeAt(i)) | 0; }
+  return String(s.length) + '-' + (n >>> 0).toString(36);
+}
+function _kyHoPaintLog() {
+  var h = window._kyHo || {}, el = document.getElementById('kyHoLogBox'); if (!el) return;
+  var sent = (h.sent || []).slice().reverse();
+  el.innerHTML = '<div style="font-size:12px;font-weight:700;color:#455a64;margin:10px 0 4px;">📨 送付の記録</div>' +
+    (sent.length ? sent.map(function (x) {
+      return '<div style="font-size:11.5px;color:#555;padding:2px 0;">' + escHtml(_kyJst(x.at)) + '　' + escHtml(KY_HO_CH[x.channel] || x.channel) +
+        (x.byName || x.by ? '　' + escHtml(x.byName || x.by) : '') + (x.to ? '　→ ' + escHtml(x.to) : '') + '</div>';
+    }).join('') : '<div style="font-size:11.5px;color:#999;">まだ送っていません</div>') +
+    '<div id="kyHoRecLine" style="font-size:12px;margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">📄 交付記録: ' +
+      (h.recordSavedAt ? '<span style="color:#2e7d32;">社員フォルダに保存済み（' + escHtml(_kyJst(h.recordSavedAt)) + '）</span>' : '<span style="color:#999;">未保存</span>') +
+      '<button type="button" onclick="_kyHoSaveRecord(window._kyHo, window._kyHoEmp, false)" style="background:#fff;color:#2e7d32;border:1.5px solid #2e7d32;border-radius:7px;padding:5px 10px;font-size:11.5px;font-weight:700;cursor:pointer;">📄 交付記録を保存</button></div>';
+}
+function _kyHoAutoRecord() {
+  var h = window._kyHo, emp = window._kyHoEmp;
+  if (!h || !emp || !emp[F.syainNo]) return;
+  if (!(h.sent || []).length && !Object.keys(h.opened || {}).length) return;
+  if (_kyHoHash(h) === h.recordHash) return;
+  _kyHoSaveRecord(h, emp, true);
+}
+function _kyHoRecordPageHtml(h, emp) {
+  var th = 'border:1px solid #999;background:#eef1f6;padding:6px 8px;font-weight:700;text-align:left;';
+  var td = 'border:1px solid #999;padding:6px 8px;vertical-align:top;';
+  var row = function (k, v) { return '<tr><th style="' + th + 'width:28%;">' + escHtml(k) + '</th><td style="' + td + '">' + escHtml(v || '') + '</td></tr>'; };
+  var buka = (typeof getBukaValue === 'function') ? (getBukaValue(emp) || '') : '';
+  var LN = { ja: '日本語', pt: 'ポルトガル語', en: '英語', all: 'ポルトガル語・英語' };
+  var acc = h.access || [];
+  var docs = _kyHoDocs(h).map(function (d) {
+    var a1 = acc.filter(function (x) { return x.d === d.d; });
+    var op = a1[0], sv = a1.filter(function (x) { return x.dl; })[0];
+    var openAt = (h.opened || {})[d.d] || (op && op.at);
+    return '<tr><td style="' + td + '">' + escHtml(d.title) + '</td><td style="' + td + 'text-align:center;">' + (openAt ? escHtml(_kyJst(openAt)) : '<span style="color:#999;">未</span>') + '</td>' +
+      '<td style="' + td + 'text-align:center;">' + (sv ? escHtml(_kyJst(sv.at)) : '<span style="color:#999;">未</span>') + '</td><td style="' + td + 'text-align:center;">' + escHtml((op && op.dev) || '') + '</td></tr>';
+  }).join('');
+  var sent = (h.sent || []).map(function (x) {
+    return '<tr><td style="' + td + 'text-align:center;">' + escHtml(_kyJst(x.at)) + '</td><td style="' + td + '">' + escHtml(KY_HO_CH[x.channel] || x.channel) + '</td>' +
+      '<td style="' + td + '">' + escHtml(x.byName || x.by || '') + '</td><td style="' + td + '">' + escHtml(x.to || '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="' + td + 'text-align:center;color:#999;">記録なし</td></tr>';
+  return '<div class="haisen-doc-page" style="width:794px;min-height:1123px;padding:52px 56px;box-sizing:border-box;background:#fff;color:#111;font-family:\'Yu Gothic\',\'YuGothic\',\'Hiragino Sans\',Meiryo,sans-serif;font-size:13px;line-height:1.55;">' +
+    '<div style="text-align:center;font-size:22px;font-weight:700;letter-spacing:4px;margin-bottom:4px;">書類交付記録</div>' +
+    '<div style="text-align:center;font-size:11.5px;color:#555;margin-bottom:16px;">有限会社ステップ・アップ</div>' +
+    '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;">' +
+      row('氏名', emp.Title || h.name) + row('社員番号', String(emp[F.syainNo] || '').replace(/\.0+$/, '')) + row('派遣先', buka) +
+      row('受け取りページ', _kyJst(h.createdAt) + '　' + (KY_HO_SRC[h.source || ''] || '') + (h.requester ? '　発行: ' + h.requester : '')) +
+      row('受け取り期限', _kyJst(h.expiresAt)) + row('翻訳版の言語', LN[h.lang] || h.lang || '') +
+    '</table>' +
+    '<div style="font-weight:700;margin:4px 0 6px;">渡した書類と本人の受け取り状況</div>' +
+    '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;">' +
+      '<tr><th style="' + th + '">書類</th><th style="' + th + 'width:21%;text-align:center;">最初に開いた日時</th><th style="' + th + 'width:21%;text-align:center;">保存した日時</th><th style="' + th + 'width:11%;text-align:center;">端末</th></tr>' + docs +
+    '</table>' +
+    '<div style="font-weight:700;margin:4px 0 6px;">送付の記録（何で渡したか）</div>' +
+    '<table style="width:100%;border-collapse:collapse;">' +
+      '<tr><th style="' + th + 'width:21%;text-align:center;">日時</th><th style="' + th + '">方法</th><th style="' + th + 'width:22%;">送った人</th><th style="' + th + 'width:22%;">宛先</th></tr>' + sent +
+    '</table>' +
+    '<div style="margin-top:16px;font-size:11.5px;color:#444;">本記録は、雇用契約書の控え・就業規則等を本人へ交付した記録として保存する。「開いた」「保存した」は本人の端末からの受け取りページへのアクセス記録による。</div>' +
+    '<div style="margin-top:4px;font-size:10.5px;color:#888;">作成: ' + escHtml(_kyJst(new Date().toISOString())) + '　yukyu-app お渡しする書類（記録ID: ' + escHtml(String(h.token || '').substring(0, 10)) + '）</div>' +
+  '</div>';
+}
+window._kyHoSaving = window._kyHoSaving || {};
+async function _kyHoSaveRecord(h, emp, auto) {
+  if (!h || !emp) return;
+  if (window._kyHoSaving[h.token]) return;
+  window._kyHoSaving[h.token] = true;
+  try {
+    if (!auto) showToast('📄 書類交付記録を作成中…', 'info');
+    var hash = _kyHoHash(h);
+    await loadEsignLibsIfNeeded();
+    var blob = await _haisenHtmlToPdfBlob(_kyHoRecordPageHtml(h, emp));
+    var folderPath = await getEmpFolderPath(emp);
+    if (!folderPath) throw new Error('社員フォルダのパスが分かりません');
+    try { await ensureSpFolder(folderPath); } catch (_) {}
+    var sn = String(emp[F.syainNo] || '').replace(/\.0+$/, '');
+    var nm = (emp.Title || '').replace(/[\s　\/\\:*?"<>|]/g, '');
+    var ymd = new Date(h.createdAt || Date.now()).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
+    var fileName = '書類交付記録_' + sn + '_' + nm + '_' + ymd + '.pdf';
+    await uploadFileToSp(folderPath, fileName, new File([blob], fileName, { type: 'application/pdf' }));
+    var j = await _esignApi('/kyouiku/hrecorded', 'POST', { token: h.token, path: folderPath + '/' + fileName, hash: hash });
+    if (j && j.handover && window._kyHo && window._kyHo.token === h.token) { window._kyHo = j.handover; _kyHoPaintLog(); }
+    if (!auto) showToast('✓ 書類交付記録を社員フォルダに保存しました', 'success');
+  } catch (e) {
+    showToast('書類交付記録の保存に失敗: ' + (e.message || e), 'error');
+  } finally {
+    window._kyHoSaving[h.token] = false;
   }
 }
 
