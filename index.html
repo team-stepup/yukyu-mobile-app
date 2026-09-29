@@ -17680,6 +17680,8 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
     '</table>';
   }
   function ageBox(idx) { return (ageCat === idx ? '<span class="hd-circle">☑</span>' : '☐'); }
+  // 20 苦情の処理状況: 社員対応記録(📒台帳チェック)から。一式作成前に _kirokuPrefetchDaicho で取得済み
+  var kujoRows = (typeof _kirokuDaichoForPeriod === 'function') ? _kirokuDaichoForPeriod(emp, h[HF.haken_period_start], h[HF.haken_period_end]) : [];
 
   var page =
     '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;">' +
@@ -17732,7 +17734,7 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
           _hkShahoLine('雇用保険', shaho && shaho.koyou) + '<br>' +
           '<span style="font-size:8.5pt;color:#444;">無の理由：</span></td></tr>' +
         '<tr><th>20　派遣労働者からの<br>苦情の処理状況</th>' +
-          '<td colspan="3" style="height:42px;font-size:8.5pt;color:#666;">（申出を受けた日）　　　　　（苦情内容、処理状況）</td></tr>' +
+          '<td colspan="3" style="min-height:42px;">' + _kirokuItem20Html(kujoRows, todayStr) + '</td></tr>' +
         '<tr><th>21　教育訓練（段階的・<br>体系的）の日時・内容</th><td colspan="3">別添教育訓練一覧の通り</td></tr>' +
         '<tr><th>22　キャリアコンサル<br>ティングの日時・内容</th><td colspan="3" style="height:38px;font-size:8.5pt;color:#666;">　</td></tr>' +
         '<tr><th>23　紹介予定派遣に関する事項</th><td colspan="3">☐ 該当あり　　<span class="hd-circle">☑ 該当なし</span></td></tr>' +
@@ -17740,6 +17742,16 @@ function renderHakenMotoKanribo(h, emp, returnHtml, shaho, sakuseiDate) {
       '</table>' +
       '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;">【労働者派遣終了後３年間保存】</div>' +
     '</div>';
+  // 別紙「苦情処理記録」(記録があるときだけ台帳の次ページに付ける → 社員ファイルのPDFにも同梱)
+  if (kujoRows.length) {
+    page += _kirokuDaichoPageHtml({
+      emp: emp, rows: kujoRows, hakensaki: hkName,
+      soshiki: [c(HF.syuugyou_busho), soshiki].filter(Boolean).filter(function(x, i, a) { return a.indexOf(x) === i; }).join('　'),
+      motoSek: [hgBusho, hgYaku, hgName].filter(Boolean).join('　'),
+      sakiSek: [hsBusho, hsYaku, hsName].filter(Boolean).join('　'),
+      dateLabel: '作成日: ' + todayStr
+    });
+  }
 
   if (returnHtml) return page;
   switchScreen('haisenDocScreen');
@@ -18607,6 +18619,8 @@ async function _submitHakenIsshiki() {
     }
     if (goBtn) goBtn.textContent = '⏳ 書類を生成中…';
     var ov = document.getElementById('hkIsshikiOverlay'); if (ov) ov.remove();
+    // 派遣元管理台帳「20 苦情の処理状況」用に、社員対応記録(📒台帳)を先に取得
+    try { await _kirokuPrefetchDaicho(ctx.emps); } catch (ke) { console.warn('苦情処理記録の取得に失敗', ke); _kirokuDaichoCache = {}; }
     var groupKeys = Object.keys(ryokinGroups);
     var isshikiGroups = [];
     var allPagesHtml = '';
@@ -32216,7 +32230,7 @@ async function renderEmployeeKiroku(emp) {
   _kirokuEmp = emp;
   var no = _kirokuEmpNo(emp);
   try {
-    var rows = await spGet(LIST_KIROKU_GUID, "$select=Id,Title,empName,kirokuDate,shubetsu,juyodo,renrakumoto,naiyo,taio,kirokusha,kirokushaName,joutai,imagePath,Created,Modified&$filter=Title eq '" + no.replace(/'/g, "''") + "'&$orderby=kirokuDate desc&$top=200");
+    var rows = await spGet(LIST_KIROKU_GUID, "$select=Id,Title,empName,kirokuDate,shubetsu,juyodo,renrakumoto,naiyo,taio,kirokusha,kirokushaName,joutai,imagePath,daicho,Created,Modified&$filter=Title eq '" + no.replace(/'/g, "''") + "'&$orderby=kirokuDate desc&$top=200");
     _kirokuRows = rows || [];
   } catch (e) { body.innerHTML = '<div style="color:#c62828;font-size:12px;padding:8px;">読み込み失敗: ' + escHtml(e.message || e) + '</div>'; return; }
   _kirokuPaint();
@@ -32236,7 +32250,9 @@ function _kirokuPaint() {
   var isSuper = (typeof isSuperAdminUser === 'function') && isSuperAdminUser();
   var h = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
     '<label style="font-size:11.5px;color:#666;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="kirokuShowAll"' + (showAll ? ' checked' : '') + ' onchange="_kirokuPaint()"> 取消も表示</label>' +
-    '<button onclick="openKirokuForm()" style="background:linear-gradient(135deg,#5c6bc0,#3949ab);color:#fff;border:none;border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;">＋ 記録を追加</button></div>';
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;">' +
+      (_kirokuDaichoRows(_kirokuRows).length ? '<button onclick="kirokuPrintDaicho()" title="派遣元管理台帳に載せる記録を「苦情処理記録」（台帳の別紙）として印刷" style="background:#fff;border:1.5px solid #6d4c41;color:#5d4037;border-radius:10px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;">🖨 苦情処理記録</button>' : '') +
+      '<button onclick="openKirokuForm()" style="background:linear-gradient(135deg,#5c6bc0,#3949ab);color:#fff;border:none;border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;">＋ 記録を追加</button></div></div>';
   if (!list.length) h += '<div style="text-align:center;color:#999;font-size:12px;padding:14px 8px;">記録はありません</div>';
   list.forEach(function(r) {
     var canceled = r.joutai === '取消', done = r.joutai === '完了';
@@ -32246,6 +32262,7 @@ function _kirokuPaint() {
         '<span style="font-size:12px;font-weight:800;color:#333;">' + escHtml(_kirokuFmt(r.kirokuDate)) + '</span>' +
         '<span style="font-size:11.5px;font-weight:700;color:#3949ab;">' + (KIROKU_ICON[r.shubetsu] || '📝') + ' ' + escHtml(r.shubetsu || '') + '</span>' +
         '<span style="' + _kirokuJuyodoStyle(r.juyodo) + 'border-radius:10px;padding:2px 8px;font-size:10.5px;font-weight:800;">' + escHtml(r.juyodo || '通常') + '</span>' +
+        (r.daicho ? '<span title="派遣元管理台帳（苦情の処理状況）に載せる記録" style="background:#efebe9;color:#5d4037;border:1px solid #bcaaa4;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:800;">📒 台帳</span>' : '') +
         '<span style="margin-left:auto;font-size:10.5px;font-weight:700;color:' + (canceled ? '#999' : done ? '#2e7d32' : '#e65100') + ';">' + escHtml(canceled ? '取消' : done ? '✓ 完了' : '対応中') + '</span>' +
       '</div>' +
       (r.renrakumoto ? '<div style="font-size:12px;color:#555;margin-top:5px;">連絡元: ' + escHtml(r.renrakumoto) + '</div>' : '') +
@@ -32292,6 +32309,9 @@ function openKirokuForm(id) {
           '<div style="grid-column:1/3;"><label style="display:block;font-size:11.5px;font-weight:700;color:#555;margin-bottom:2px;">相手・連絡元</label><input type="text" id="kr_renraku" value="' + escHtml((r && r.renrakumoto) || '') + '" placeholder="例: 母 鈴木ともこ（自宅 0538-49-1813）" style="width:100%;box-sizing:border-box;padding:8px;border:1.5px solid #ddd;border-radius:9px;font-size:14px;"></div>' +
           '<div style="grid-column:1/3;"><label style="display:block;font-size:11.5px;font-weight:700;color:#555;margin-bottom:2px;">内容 <span style="color:#c62828;">*</span></label><textarea id="kr_naiyo" rows="4" style="width:100%;box-sizing:border-box;padding:8px;border:1.5px solid #ddd;border-radius:9px;font-size:14px;">' + escHtml((r && r.naiyo) || '') + '</textarea></div>' +
           '<div style="grid-column:1/3;"><label style="display:block;font-size:11.5px;font-weight:700;color:#555;margin-bottom:2px;">対応・結果</label><textarea id="kr_taio" rows="3" style="width:100%;box-sizing:border-box;padding:8px;border:1.5px solid #ddd;border-radius:9px;font-size:14px;">' + escHtml((r && r.taio) || '') + '</textarea></div>' +
+          '<div style="grid-column:1/3;"><label style="display:flex;align-items:flex-start;gap:6px;background:#efebe9;border:1.5px solid #d7ccc8;border-radius:9px;padding:8px 10px;font-size:12.5px;font-weight:700;color:#4e342e;cursor:pointer;line-height:1.45;">' +
+            '<input type="checkbox" id="kr_daicho"' + ((r ? !!r.daicho : false) ? ' checked' : '') + ' onchange="this.dataset.touched=\'1\'" style="width:18px;height:18px;flex-shrink:0;margin:1px 0 0;">' +
+            '<span>📒 派遣元管理台帳に載せる<br><span style="font-weight:400;font-size:11px;color:#6d4c41;">「苦情の処理状況」欄と別紙「苦情処理記録」に載ります。種別が苦情・派遣先からの連絡のときは自動でチェックが入ります。</span></span></label></div>' +
         '</div>' +
         '<div style="margin-top:8px;"><label style="font-size:11.5px;font-weight:700;color:#555;">添付（写真・PDF）</label> ' +
           '<label style="display:inline-block;background:#fff;border:1.5px solid #3949ab;color:#3949ab;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;">📷 / 📁 追加<input type="file" accept="image/*,application/pdf" multiple style="display:none;" onchange="_kirokuAddFiles(this.files);this.value=\'\';"></label>' +
@@ -32304,6 +32324,8 @@ function openKirokuForm(id) {
       '</div></div>';
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
+  var shSel = document.getElementById('kr_shubetsu'); if (shSel) shSel.addEventListener('change', _kirokuSyncDaicho);
+  if (!r) _kirokuSyncDaicho();
 }
 async function _kirokuAddFiles(fileList) {
   var files = Array.prototype.slice.call(fileList || []);
@@ -32332,6 +32354,7 @@ async function _kirokuParseMemo() {
     if (!f.lang) f.lang = /[぀-ヿ一-鿿]/.test(memo) ? 'ja' : 'other';   // AIが lang を返さなかった時の保険: 日本語文字が無ければ外国語扱い
     if (f.lang && f.lang !== 'ja' && naiyoJa) naiyoJa += '\n\n【原文 ' + (f.lang === 'pt' ? 'ポルトガル語' : f.lang === 'en' ? '英語' : f.lang) + '】\n' + memo;   // 翻訳の確認用に原文も残す
     set('kr_renraku', f.renrakumoto); set('kr_naiyo', naiyoJa); set('kr_taio', f.taio);
+    _kirokuSyncDaicho();
     if (st) st.textContent = (f.lang && f.lang !== 'ja') ? '✓ 日本語に翻訳して振り分けました（原文は内容の末尾に残しています）。確認して登録してください' : '✓ 振り分けました。内容を確認して登録してください';
   } catch (e) { if (st) st.textContent = '失敗: ' + (e.message || e) + '（手入力してください）'; }
 }
@@ -32343,7 +32366,7 @@ async function saveKiroku(id) {
   if (!naiyo) { showToast('内容を入れてください', 'error'); return; }
   var btn = document.getElementById('kr_saveBtn'); if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
   try {
-    var body = { kirokuDate: new Date(dt).toISOString(), shubetsu: v('kr_shubetsu'), juyodo: v('kr_juyodo'), renrakumoto: v('kr_renraku'), naiyo: naiyo, taio: v('kr_taio') };
+    var body = { kirokuDate: new Date(dt).toISOString(), shubetsu: v('kr_shubetsu'), juyodo: v('kr_juyodo'), renrakumoto: v('kr_renraku'), naiyo: naiyo, taio: v('kr_taio'), daicho: !!(document.getElementById('kr_daicho') || {}).checked };
     // 添付 → 社員フォルダ「対応記録」に保存
     var prev = (id != null) ? (_kirokuRows.find(function(x) { return x.Id === id; }) || {}).imagePath : '';
     var paths = String(prev || '').split(';').filter(Boolean);
@@ -32382,6 +32405,116 @@ async function _kirokuNotify(emp, r) {
     showToast('役員・担当者へ通知しました（Push＋Teams総務チャット）', 'success');
   } catch (e) { console.warn('kiroku teams', e); showToast('Teams総務チャットへの投稿は失敗しました（Pushは送信済み）', 'error'); }
 }
+// ------------------------------------------------------------
+// 📒 派遣元管理台帳との連携 (2026-09-29)
+//   daicho=true の記録を、派遣元管理台帳「20 派遣労働者からの苦情の処理状況」の要約と
+//   別紙「苦情処理記録」に載せる。台帳には派遣期間中の記録＋期間前でも対応中の記録を載せる。
+// ------------------------------------------------------------
+var KIROKU_DAICHO_DEFAULT = ['苦情', '派遣先からの連絡'];
+var _kirokuDaichoCache = {};   // 社員番号 → daicho 記録 (台帳一式作成の直前に取得)
+var EMP_SOSHIKI_KEY = 'OData__x7d44__x7e54__x5358__x4f4d__xff';   // 社員List「組織単位」
+function _kirokuSyncDaicho() {
+  var cb = document.getElementById('kr_daicho'), sh = document.getElementById('kr_shubetsu');
+  if (!cb || !sh || cb.dataset.touched === '1') return;
+  cb.checked = KIROKU_DAICHO_DEFAULT.indexOf(sh.value) >= 0;
+}
+function _kirokuDaichoRows(rows) {
+  return (rows || []).filter(function(r) { return r.daicho && r.joutai !== '取消'; })
+    .slice().sort(function(a, b) { return new Date(a.kirokuDate) - new Date(b.kirokuDate); });
+}
+function _kirokuJstDate(v) { var d = new Date(v); if (isNaN(d.getTime())) return null; return new Date(d.getTime() + 9 * 3600 * 1000); }
+function _kirokuYmd(v) { var j = _kirokuJstDate(v); if (!j) return ''; return j.getUTCFullYear() + '/' + ('0' + (j.getUTCMonth() + 1)).slice(-2) + '/' + ('0' + j.getUTCDate()).slice(-2); }
+function _kirokuYmdJa(v) { var j = _kirokuJstDate(v); if (!j) return ''; return j.getUTCFullYear() + '年' + (j.getUTCMonth() + 1) + '月' + j.getUTCDate() + '日'; }
+function _kirokuFirstSentence(s, max) {
+  var t = String(s || '').replace(/\s+/g, ' ').trim(); var i = t.indexOf('。'); if (i > 0) t = t.slice(0, i);
+  return t.length > max ? t.slice(0, max) + '…' : t;
+}
+// 派遣元管理台帳の一式作成前に、対象社員の台帳用記録をまとめて取得
+async function _kirokuPrefetchDaicho(emps) {
+  _kirokuDaichoCache = {};
+  var nos = []; (emps || []).forEach(function(e) { var n = _kirokuEmpNo(e); if (n && nos.indexOf(n) < 0) nos.push(n); });
+  for (var i = 0; i < nos.length; i += 10) {
+    var chunk = nos.slice(i, i + 10);
+    var flt = '(' + chunk.map(function(n) { return "Title eq '" + n.replace(/'/g, "''") + "'"; }).join(' or ') + ') and daicho eq 1';
+    var rows = await spGet(LIST_KIROKU_GUID, "$select=Id,Title,kirokuDate,shubetsu,juyodo,renrakumoto,naiyo,taio,kirokushaName,joutai,daicho&$filter=" + flt + "&$top=500");
+    (rows || []).forEach(function(r) { var k = String(r.Title || ''); (_kirokuDaichoCache[k] = _kirokuDaichoCache[k] || []).push(r); });
+  }
+}
+// 台帳に載せる記録 (派遣期間中 or 期間前でも対応中)
+function _kirokuDaichoForPeriod(emp, pStartRaw, pEndRaw) {
+  var rows = _kirokuDaichoRows(_kirokuDaichoCache[_kirokuEmpNo(emp)] || []);
+  var s = pStartRaw ? new Date(pStartRaw) : null, e = pEndRaw ? new Date(pEndRaw) : null;
+  if (s && isNaN(s)) s = null; if (e && isNaN(e)) e = null;
+  if (e) e = new Date(e.getTime() + 24 * 3600 * 1000);   // 終了日の当日分を含める
+  return rows.filter(function(r) {
+    if (r.joutai !== '完了') return true;
+    var d = new Date(r.kirokuDate); if (isNaN(d)) return false;
+    return (!s || d >= new Date(s.getTime() - 24 * 3600 * 1000)) && (!e || d < e);
+  });
+}
+// 「20 苦情の処理状況」欄の中身
+function _kirokuItem20Html(rows, asOf) {
+  if (!rows.length) return 'なし<span style="font-size:8pt;color:#666;">（' + escHtml(asOf) + ' 時点）</span>';
+  var first = rows[0], last = rows[rows.length - 1];
+  var kujo = rows.find(function(r) { return r.shubetsu === '苦情'; }) || first;
+  var open = rows.some(function(r) { return r.joutai !== '完了'; });
+  var L = 'display:inline-block;min-width:88px;color:#333;';
+  return '<div style="font-size:8.5pt;line-height:1.4;">' +
+    '<div><span style="' + L + '">申出を受けた日</span>' + escHtml(_kirokuYmdJa(first.kirokuDate)) + '</div>' +
+    '<div><span style="' + L + '">苦情の内容</span>' + escHtml(_kirokuFirstSentence(kujo.naiyo, 70)) + '</div>' +
+    '<div><span style="' + L + '">処理状況</span>記録' + rows.length + '件（最終 ' + escHtml(_kirokuYmd(last.kirokuDate)) + ' ' + escHtml(last.shubetsu || '') + '）　<b>' + (open ? '対応中' : '完了') + '</b></div>' +
+    '<div style="text-align:right;">詳細は別紙「苦情処理記録」のとおり</div></div>';
+}
+// 別紙「苦情処理記録」1ページ
+//   o = { emp, rows, hakensaki, soshiki, motoSek, sakiSek, dateLabel }
+function _kirokuDaichoPageHtml(o) {
+  var rows = o.rows || [], emp = o.emp || {};
+  var open = rows.some(function(r) { return r.joutai !== '完了'; });
+  var td = 'border:0.8pt solid #000;padding:3px 6px;vertical-align:top;font-size:8.5pt;line-height:1.4;word-break:break-word;';
+  var thL = 'border:0.8pt solid #000;padding:3px 6px;background:#f3f3f3;font-weight:600;font-size:8.5pt;width:17%;text-align:left;';
+  var thC = 'border:0.8pt solid #000;padding:3px 4px;background:#f3f3f3;font-weight:600;font-size:8.5pt;text-align:center;';
+  var hdr = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:6px;">' +
+    '<tr><th style="' + thL + '">派遣労働者</th><td style="' + td + '">' + escHtml((emp.Title || '') + '（' + _kirokuEmpNo(emp) + '）') + '</td>' +
+        '<th style="' + thL + '">状態</th><td style="' + td + 'font-weight:700;">' + (open ? '対応中' : '完了') + '</td></tr>' +
+    '<tr><th style="' + thL + '">派遣先</th><td style="' + td + '" colspan="3">' + escHtml([o.hakensaki, o.soshiki].filter(Boolean).join('　')) + '</td></tr>' +
+    ((o.motoSek || o.sakiSek) ? '<tr><th style="' + thL + '">派遣元責任者</th><td style="' + td + '">' + escHtml(o.motoSek || '') + '</td><th style="' + thL + '">派遣先責任者</th><td style="' + td + '">' + escHtml(o.sakiSek || '') + '</td></tr>' : '') +
+    '</table>';
+  var log = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">' +
+    '<colgroup><col style="width:13%;"><col style="width:15%;"><col style="width:60%;"><col style="width:12%;"></colgroup>' +
+    '<tr><th style="' + thC + '">年月日</th><th style="' + thC + '">区分</th><th style="' + thC + '">内容・処理状況</th><th style="' + thC + '">記録者</th></tr>' +
+    rows.map(function(r) {
+      return '<tr><td style="' + td + '">' + escHtml(_kirokuYmd(r.kirokuDate)) + '</td>' +
+        '<td style="' + td + '">' + escHtml(r.shubetsu || '') + (r.joutai === '完了' ? '' : '<br><span style="font-size:7.5pt;color:#555;">（対応中）</span>') + '</td>' +
+        '<td style="' + td + 'white-space:pre-wrap;">' + escHtml(String(r.naiyo || '').trim()) + (r.taio ? '\n→ ' + escHtml(String(r.taio).trim()) : '') + '</td>' +
+        '<td style="' + td + '">' + escHtml(r.kirokushaName || '') + '</td></tr>';
+    }).join('') + '</table>';
+  var sign = '<div style="display:flex;justify-content:flex-end;margin-top:10px;">' +
+    ['派遣元責任者', '代表取締役'].map(function(t) { return '<div style="border:0.8pt solid #000;width:72px;height:62px;text-align:center;font-size:8pt;padding-top:2px;box-sizing:border-box;">' + t + '</div>'; }).join('') + '</div>';
+  return '<div class="haisen-doc-page hd-kobetsu" style="page-break-before:always;">' +
+    '<h1>苦情処理記録</h1>' +
+    '<div style="text-align:center;font-size:9.5pt;margin:-2px 0 6px;">（派遣元管理台帳「20 派遣労働者からの苦情の処理状況」別紙）</div>' +
+    '<div class="hd-meta">' + escHtml(o.dateLabel || '') + '　／　' + escHtml(HAKEN_GEN_FIXED.name) + '　' + escHtml(HAKEN_GEN_FIXED.kyoka) + '</div>' +
+    hdr + log + sign +
+    '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;">【労働者派遣終了後３年間保存】</div>' +
+  '</div>';
+}
+// 社員情報「🖨 苦情処理記録」: 台帳に載せる記録だけを別紙として印刷
+function kirokuPrintDaicho() {
+  var emp = _kirokuEmp || currentEmployee; if (!emp) return;
+  var rows = _kirokuDaichoRows(_kirokuRows);
+  if (!rows.length) { showToast('派遣元管理台帳に載せる記録がありません（記録の編集で「📒 派遣元管理台帳に載せる」にチェック）', 'error'); return; }
+  var soshiki = emp[EMP_SOSHIKI_KEY] || '';
+  if (!soshiki) { for (var k in emp) { if (/_x7d44__x7e54__x5358__x4f4d_/.test(k) && emp[k]) { soshiki = emp[k]; break; } } }
+  var html = _kirokuDaichoPageHtml({
+    emp: emp, rows: rows,
+    hakensaki: (typeof stripBukaPrefix === 'function') ? stripBukaPrefix(_empBukaVal(emp)) : _empBukaVal(emp),
+    soshiki: _hkClean(soshiki),
+    dateLabel: '印刷日: ' + _hkYmd(new Date())
+  });
+  if (_isIOSDevice && window.PDFLib && window.html2canvas) { _openHaisenPdfForIOS(html, '苦情処理記録_' + _kirokuEmpNo(emp)); return; }
+  _openHaisenPrintTab(html, '💡 派遣元管理台帳の別紙です。台帳と一緒に保管してください（派遣終了後3年間）。<br>　・ヘッダーとフッター: OFF　・背景のグラフィック: ON');
+}
+
 async function kirokuSetStatus(id, joutai) {
   var r = _kirokuRows.find(function(x) { return x.Id === id; }); if (!r) return;
   if (joutai === '取消' && !confirm('この記録を取消にしますか？（履歴は残ります）')) return;
