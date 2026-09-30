@@ -8775,6 +8775,7 @@ async function selectEmployee(emp) {
   try {
     await loadLeaveDetails();
     switchScreen('detailScreen');
+    try { _kyAutoRecordForEmp(emp); } catch (_) {}   // 🎓 教育が完了していれば受講記録を社員フォルダへ (入社前後120日のみ)
   } catch (e) {
     console.error('Detail load error:', e);
     showToast('詳細の読み込みに失敗しました', 'error');
@@ -42439,7 +42440,8 @@ function _kyContractPaintInner() {
     var sel = cm ? '' : '<div style="margin-top:6px;font-size:12px;">通勤方法が未登録です。教育用に選んでください: <select id="kyContractCommute" style="font-size:13px;padding:4px;">' +
       KY_COMMUTE_CHOICES.map(function (x) { return '<option>' + escHtml(x) + '</option>'; }).join('') + '</select></div>';
     box.innerHTML = '<div style="' + base + 'background:#fff8e1;border:1.5px solid #ffca28;">🎓 <b>入社時教育のリンクはまだ出ていません。</b>' + sel +
-      '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;"><button type="button" onclick="_kyContractIssue()" style="' + gold + '">🎓 リンクを出す（QR）</button></div></div>';
+      '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;"><button type="button" onclick="_kyContractIssue()" style="' + gold + '">🎓 リンクを出す（QR）</button>' +
+      '<button type="button" onclick="_kyContractPickUnlinked()" style="' + b + 'background:#fff;color:#1a5fa8;border:1.5px solid #90caf9;">🔗 登録前に出したリンクから選ぶ</button></div></div>';
     return;
   }
   var p = r.progress || { done: 0, total: 0 }, done = !!p.complete;
@@ -42783,6 +42785,58 @@ async function _kyHoSaveRecord(h, emp, auto) {
   } finally {
     window._kyHoSaving[h.token] = false;
   }
+}
+
+// ===== 🎓 社員画面を開いたとき: 教育が全部完了&受講記録が未保存なら保存 / ひも付け漏れの記録を選ぶ (2026-09-30) =====
+window._kyAutoChecked = window._kyAutoChecked || {};
+async function _kyAutoRecordForEmp(emp) {
+  try {
+    if (!emp || !emp[F.syainNo]) return;
+    var near = function (v) { if (!v) return false; var d = new Date(v); return !isNaN(d) && Math.abs(Date.now() - d.getTime()) < 120 * 86400000; };
+    if (!near(emp[F.nyushaDate]) && !near(emp.Created)) return;   // 入社の前後120日の人だけ確認
+    var sn = String(emp[F.syainNo]).replace(/\.0+$/, '');
+    if (window._kyAutoChecked[sn] && Date.now() - window._kyAutoChecked[sn] < 5 * 60000) return;
+    window._kyAutoChecked[sn] = Date.now();
+    var j = await _esignApi('/kyouiku/status?syainNo=' + encodeURIComponent(sn), 'GET');
+    var r = ((j && j.items) || []).find(function (x) { return x.progress && x.progress.complete; });
+    if (r && !r.recordSavedAt && currentEmployee === emp) _kySaveRecordPdf(r, emp, false);
+  } catch (e) { console.warn('kyouiku auto record:', e); }
+}
+async function _kyContractPickUnlinked() {
+  var c = window._kyContract; if (!c) return;
+  try {
+    var j = await _esignApi('/kyouiku/unlinked', 'GET');
+    var items = (j && j.items) || [];
+    var old = document.getElementById('kyPickOverlay'); if (old) old.remove();
+    var ov = document.createElement('div');
+    ov.id = 'kyPickOverlay'; ov.className = 'no-print';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:14px;';
+    var rows = items.length ? items.map(function (x, i) {
+      var p = x.progress || { done: 0, total: 0 };
+      return '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:10px;margin-bottom:8px;">' +
+        '<div style="font-weight:700;font-size:14px;overflow-wrap:anywhere;">' + escHtml(x.name || '') + '</div>' +
+        '<div style="font-size:12px;color:#555;">発行 ' + escHtml(_kyJst(x.createdAt)) + (x.requesterName ? '　' + escHtml(x.requesterName) : '') + '　進み具合 <b>' + p.done + ' / ' + p.total + '</b>' + (p.complete ? ' ✅' : '') + '</div>' +
+        '<button type="button" data-i="' + i + '" style="margin-top:6px;background:#0d2137;color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:700;cursor:pointer;">🔗 この記録を ' + escHtml(c.emp.Title || '') + ' さんにひも付ける</button></div>';
+    }).join('') : '<div style="font-size:13px;color:#888;padding:12px;">3日以内に出した、社員番号のない教育リンクはありません。</div>';
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:440px;max-height:90vh;overflow:auto;">' +
+      '<div style="background:#0d2137;color:#fff;padding:12px 16px;border-radius:14px 14px 0 0;font-weight:700;">🔗 登録前に出した教育リンクから選ぶ</div>' +
+      '<div style="padding:12px 14px;"><div style="font-size:12px;color:#555;margin-bottom:8px;">社員登録の前に出したリンクで、社員番号がまだ付いていない記録です（3日以内）。本人のものを選んでください。</div>' + rows + '</div>' +
+      '<div style="padding:10px 14px;border-top:1px solid #eee;text-align:right;"><button type="button" onclick="document.getElementById(\'kyPickOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:8px;padding:8px 18px;font-weight:600;cursor:pointer;">閉じる</button></div></div>';
+    ov.addEventListener('click', async function (e) {
+      if (e.target === ov) { ov.remove(); return; }
+      var b = e.target.closest('button[data-i]'); if (!b) return;
+      var x = items[+b.getAttribute('data-i')]; if (!x) return;
+      if (!confirm((x.name || '') + ' の教育記録を、社員番号 ' + c.sn + '（' + (c.emp.Title || '') + '）にひも付けますか？')) return;
+      b.disabled = true;
+      try {
+        await _esignApi('/kyouiku/link', 'POST', { token: x.token, syainNo: c.sn });
+        ov.remove();
+        showToast('✓ 教育記録をひも付けました', 'success');
+        _kyContractRefresh(c.emp, true);
+      } catch (err) { b.disabled = false; showToast('ひも付けに失敗: ' + (err.message || err), 'error'); }
+    });
+    document.body.appendChild(ov);
+  } catch (e) { showToast('記録の一覧を取得できませんでした: ' + (e.message || e), 'error'); }
 }
 
 // 通勤方法の値が 車/バイク か (「自転車、徒歩」「電車、送迎」の「車」は除外)
