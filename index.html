@@ -42609,10 +42609,9 @@ function _kyJst(iso) {
 function _kyDeviceLabel(ua) {
   ua = String(ua || '');
   if (/iPhone/.test(ua)) return 'iPhone';
-  if (/iPad/.test(ua)) return 'iPad';
+  if (/iPad/.test(ua) || /Macintosh/.test(ua)) return 'iPad';   // iPadOS の Safari は Mac と名乗る (事務所に Mac は無い)
   if (/Android/.test(ua)) return 'Android';
-  if (/Windows/.test(ua)) return 'Windows';
-  if (/Macintosh/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'PC(Windows)';
   return ua ? 'その他' : '';
 }
 function _kyRecordPageHtml(r, emp) {
@@ -42641,7 +42640,9 @@ function _kyRecordPageHtml(r, emp) {
       row('実施方法', r.attested ? ('同席受講：' + (r.attested.note || '')) : '本人の端末（スマートフォン等）で閲覧（動画は最後まで再生で完了、資料は「読みました」で完了）') +
       (r.attested ? row('備考', '完了日時は同席した記録の日時を記載　記録: ' + _kyJst(r.attested.at) + '　' + (r.attested.by || '')) : '') +
       row('リンク発行', _kyJst(r.createdAt) + (r.requesterName ? '　発行者: ' + r.requesterName : '')) +
-      row('本人が開いた日時', _kyJst(r.firstOpenedAt) + (r.device ? '　端末: ' + _kyDeviceLabel(r.device) : '')) +
+      (r.attested && r.attested.sessionStart
+        ? row('受講した時間', _kyJst(r.attested.sessionStart) + ' 〜 ' + _kyJst(r.completedAt).replace(/^\d{4}\/\d{2}\/\d{2} /, '') + (r.attested.device ? '　端末: ' + r.attested.device : '') + '（同席した記録）')
+        : row('本人が開いた日時', _kyJst(r.firstOpenedAt) + ((r.deviceLabel || r.device) ? '　端末: ' + (r.deviceLabel || _kyDeviceLabel(r.device)) : ''))) +
       row('完了日時', r.completedAt ? _kyJst(r.completedAt) : '未完了（' + p.done + ' / ' + p.total + '）') +
     '</table>' +
     '<div style="font-weight:700;margin:4px 0 6px;">受講した資料（' + p.done + ' / ' + p.total + ' 完了）</div>' +
