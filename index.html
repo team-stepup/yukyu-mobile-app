@@ -20043,6 +20043,7 @@ function _setSoumuBadge(id, n){
 }
 
 async function loadHomeBadges() {
+  setTimeout(function () { try { _kyPendingSweep(); } catch (_) {} }, 6000);   // 🎓 未保存の受講記録を保存 (30分に1回)
   // 最低賃金チェックとリマインダーバナー (APIコール不要なので先に描画)
   try { renderMinWageBanner(); } catch(e) { console.warn('minWage banner error:', e); }
   // 前払い申請 承認権限ボタン (employee-portal 経由の本人申請)
@@ -42840,6 +42841,85 @@ async function _kyContractPickUnlinked() {
   } catch (e) { showToast('記録の一覧を取得できませんでした: ' + (e.message || e), 'error'); }
 }
 
+// ===== 🎓 記録の取りこぼし防止 (2026-09-30) =====
+// ① アプリを開いたとき: 全部完了で受講記録PDFが未保存の人を社員フォルダへまとめて保存 (30分に1回まで)
+// ② ひも付けのない教育記録(本人が開いたもの・発行2時間以上)があれば担当者へ知らせる
+window._kySweepAt = window._kySweepAt || 0;
+async function _kyPendingSweep() {
+  if (Date.now() - window._kySweepAt < 30 * 60000) return;
+  window._kySweepAt = Date.now();
+  try {
+    var j = await _esignApi('/kyouiku/pending', 'GET');
+    var items = (j && j.items) || [], saved = [];
+    for (var i = 0; i < items.length; i++) {
+      var r = items[i];
+      try {
+        var rows = await spGet(LIST_EMPLOYEES_GUID, '$filter=' + F.syainNo + ' eq ' + parseInt(r.syainNo, 10) + '&$top=5&$orderby=Id desc');
+        var emp = (rows || []).find(function (x) { return !x[F.hakenTaisha]; }) || (rows || [])[0];
+        if (!emp) continue;
+        await _kySaveRecordPdf(r, emp, true);
+        if (r.recordSavedAt) saved.push(emp.Title || r.name);
+      } catch (e1) { console.warn('kyouiku sweep item:', e1); }
+    }
+    if (saved.length) showToast('📄 入社時教育の受講記録を社員フォルダに保存しました（' + saved.join('・') + '）', 'success');
+    var un = (j && j.unlinked) || [];
+    if (un.length) {
+      setTimeout(function () {
+        showToast('🎓 社員番号にひも付いていない教育記録があります（' + un.map(function (x) { return x.name; }).join('・') +
+          '）。その社員の新規雇用契約書の画面で「🔗 登録前に出したリンクから選ぶ」を押してください', 'info');
+      }, saved.length ? 4000 : 0);
+    }
+  } catch (e) { console.warn('kyouiku sweep:', e); }
+}
+// ③ 社員登録の保存時: 教育リンクを必ず社員番号へひも付ける (画面を開き直してリンク情報が消えていても探す)
+function _kyNormName(s) {
+  return String(s || '').normalize('NFKC').replace(/[\u3041-\u3096]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) + 0x60); })
+    .replace(/[\s・･\.\-]/g, '').toLowerCase();
+}
+async function _kyLinkAfterRegister(sn, name) {
+  try {
+    if (window._kyAdd && window._kyAdd.token) {
+      await _esignApi('/kyouiku/link', 'POST', { token: window._kyAdd.token, syainNo: sn });
+      window._kyAdd = null;
+      return;
+    }
+    var j = await _esignApi('/kyouiku/unlinked', 'GET');
+    var items = ((j && j.items) || []).filter(function (x) { return x.createdAt && Date.now() - new Date(x.createdAt).getTime() < 86400000; });
+    if (!items.length) return;
+    var same = items.filter(function (x) { return _kyNormName(x.name) === _kyNormName(name); });
+    if (same.length) {
+      for (var i = 0; i < same.length; i++) await _esignApi('/kyouiku/link', 'POST', { token: same[i].token, syainNo: sn });
+      showToast('🎓 登録前に出した教育リンクを ' + name + ' さんにひも付けました', 'success');
+      return;
+    }
+    await new Promise(function (resolve) {
+      var ov = document.createElement('div');
+      ov.id = 'kyRegPickOverlay'; ov.className = 'no-print';
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10002;display:flex;align-items:center;justify-content:center;padding:14px;';
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:440px;max-height:90vh;overflow:auto;">' +
+        '<div style="background:#0d2137;color:#fff;padding:12px 16px;border-radius:14px 14px 0 0;font-weight:700;">🎓 登録前に出した教育リンクがあります</div>' +
+        '<div style="padding:12px 14px;font-size:12.5px;color:#555;">' + escHtml(name) + ' さんの教育リンクがあれば選んでください。選ぶと、見た記録がこの社員に残ります。</div>' +
+        '<div style="padding:0 14px 8px;">' + items.map(function (x, i) {
+          var p = x.progress || { done: 0, total: 0 };
+          return '<button type="button" data-i="' + i + '" style="display:block;width:100%;text-align:left;border:1px solid #cfd8dc;background:#fff;border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer;">' +
+            '<b style="font-size:14px;">' + escHtml(x.name || '') + '</b><br><span style="font-size:12px;color:#555;">発行 ' + escHtml(_kyJst(x.createdAt)) +
+            (x.requesterName ? '　' + escHtml(x.requesterName) : '') + '　' + p.done + ' / ' + p.total + '</span></button>';
+        }).join('') + '</div>' +
+        '<div style="padding:10px 14px;border-top:1px solid #eee;text-align:right;"><button type="button" data-skip="1" style="background:#eee;color:#555;border:none;border-radius:8px;padding:8px 18px;font-weight:600;cursor:pointer;">該当なし</button></div></div>';
+      ov.addEventListener('click', async function (e) {
+        var b = e.target.closest('button'); if (!b) return;
+        if (b.getAttribute('data-skip')) { ov.remove(); resolve(); return; }
+        var x = items[+b.getAttribute('data-i')]; if (!x) return;
+        b.disabled = true;
+        try { await _esignApi('/kyouiku/link', 'POST', { token: x.token, syainNo: sn }); showToast('🎓 教育記録をひも付けました', 'success'); }
+        catch (err) { showToast('ひも付けに失敗: ' + (err.message || err), 'error'); }
+        ov.remove(); resolve();
+      });
+      document.body.appendChild(ov);
+    });
+  } catch (e) { console.warn('kyouiku link after register:', e); }
+}
+
 // 通勤方法の値が 車/バイク か (「自転車、徒歩」「電車、送迎」の「車」は除外)
 function _isCarCommuteValue(val) {
   var v = String(val || '').replace(/[\s　]/g, '');
@@ -43607,11 +43687,7 @@ async function saveNewEmployee() {
     }
 
     showToast(nameVal + ' を登録しました', 'success');
-    if (window._kyAdd && window._kyAdd.token) {   // 🎓 入社時教育リンク → 社員番号にひも付け
-      try { await _esignApi('/kyouiku/link', 'POST', { token: window._kyAdd.token, syainNo: noVal }); }
-      catch (kyErr) { console.warn('kyouiku link failed:', kyErr); }
-      window._kyAdd = null;
-    }
+    await _kyLinkAfterRegister(noVal, nameVal);   // 🎓 教育リンク → 社員番号 (消えていても1日以内の記録から探す)
     window._addFormSaved = true;   // 登録済み → 離脱確認は不要
     Object.keys(capturedDocs).forEach(k => delete capturedDocs[k]);
     resetSearch();
