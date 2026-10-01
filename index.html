@@ -36577,6 +36577,31 @@ function _maebariWeekTargetFriday(now) {
   if (dow === 5 && h < 9) return { fri: fri, isFri: true };
   return null;
 }
+// アプリを開いたとき、画面中央に3秒だけ表示 (×で閉じられる)。1回起動につき1回だけ
+function _maebariWeekPopup(head) {
+  if (window._maebariPopShown) return;
+  window._maebariPopShown = true;
+  var old = document.getElementById('maebariWeekPop'); if (old) old.remove();
+  var el = document.createElement('div');
+  el.id = 'maebariWeekPop';
+  el.setAttribute('role', 'alert');
+  el.style.cssText = 'position:fixed;left:50%;top:55%;transform:translate(-50%,-50%) scale(0.96);z-index:9000;width:calc(100% - 48px);max-width:340px;box-sizing:border-box;' +
+    'background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:2.5px solid #ef6c00;border-radius:16px;padding:18px 40px 16px 16px;text-align:center;' +
+    'box-shadow:0 10px 30px rgba(0,0,0,0.25);opacity:0;transition:opacity .25s,transform .25s;';
+  el.innerHTML = '<button type="button" aria-label="閉じる" onclick="_maebariWeekPopClose()" style="position:absolute;top:6px;right:6px;width:34px;height:34px;border:none;border-radius:50%;background:rgba(230,81,0,0.12);color:#e65100;font-size:20px;font-weight:700;line-height:1;cursor:pointer;">×</button>' +
+    '<div style="font-size:30px;line-height:1;margin-bottom:6px;">💴</div>' +
+    '<div style="font-size:16px;font-weight:800;color:#e65100;">' + escHtml(head) + '</div>' +
+    '<div style="font-size:14px;font-weight:700;color:#c62828;margin-top:6px;line-height:1.5;">前払いを忘れないように<br>注意してください。<span style="white-space:nowrap;">（申請、承認）</span></div>';
+  document.body.appendChild(el);
+  requestAnimationFrame(function () { el.style.opacity = '1'; el.style.transform = 'translate(-50%,-50%) scale(1)'; });
+  window._maebariPopTimer = setTimeout(_maebariWeekPopClose, 3000);
+}
+function _maebariWeekPopClose() {
+  clearTimeout(window._maebariPopTimer);
+  var el = document.getElementById('maebariWeekPop'); if (!el) return;
+  el.style.opacity = '0'; el.style.transform = 'translate(-50%,-50%) scale(0.96)';
+  setTimeout(function () { if (el.parentNode) el.remove(); }, 260);
+}
 async function renderMaebariWeekBanner(mRecs) {
   var box = document.getElementById('maebariWeekBanner');
   if (!box) return;
@@ -36601,6 +36626,7 @@ async function renderMaebariWeekBanner(mRecs) {
   '</div>';
   box.innerHTML = html;
   box.style.display = 'block';
+  try { _maebariWeekPopup((t.isFri ? '今日' : '明日') + 'は前払いの日です（' + label + '）'); } catch (_) {}
 }
 
 // ホーム画面の最低賃金チェック＋10〜11月リマインダーバナー描画
