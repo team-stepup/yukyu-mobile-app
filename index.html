@@ -58079,6 +58079,12 @@ function openVehicleEditForm(idx) {
   formHtml += '<div style="font-size:10px;color:var(--text-light);">車両情報を編集</div>';
   formHtml += '<div style="font-size:16px;font-weight:700;color:var(--primary);">' + escHtml(number) + '</div>';
   formHtml += '</div>';
+  // 🚗 車検証を読み取る (2026-10-01)
+  window._vehShaken = null;
+  formHtml += '<div style="background:#e3f2fd;border:1.5px dashed #64b5f6;border-radius:10px;padding:10px;margin-bottom:12px;">' +
+    '<button type="button" onclick="_vehShakenPick()" style="width:100%;padding:11px;border-radius:9px;background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;border:none;font-weight:700;font-size:14px;cursor:pointer;">📷 車検証を読み取る（撮影・写真・PDF）</button>' +
+    '<input type="file" id="vehShakenFile" accept="image/*,application/pdf" style="display:none;" onchange="_vehShakenRead(this,' + idx + ')">' +
+    '<div id="vehShakenMsg" style="font-size:12px;margin-top:6px;color:#555;line-height:1.55;">新しい車検証を読み取ると、車検有効期限と初年度登録を自動で入れます。</div></div>';
 
   editFields.forEach(function(f, i) {
     var curVal = item[f.prop];
@@ -58120,6 +58126,101 @@ function openVehicleEditForm(idx) {
   ov.innerHTML = formHtml;
   ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
+}
+
+// ===== 🚗 車両台帳: 車検証を撮影/PDFから読み取り → 車検有効期限・初年度登録を自動入力 + 画像を車両フォルダへ (2026-10-01) =====
+// OCR = 共通基盤 cloudDocOcr('shaken') (gpt_ocr DOC_PROMPTS['shaken']: carNumber/carFirstReg/shakenExpiry ほか)
+window._vehShaken = null;
+function _vehShakenPick() { var el = document.getElementById('vehShakenFile'); if (el) { el.value = ''; el.click(); } }
+function _vehShakenToJpeg(file) {
+  return new Promise(function (resolve, reject) {
+    var fr = new FileReader();
+    fr.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var max = 1800, w = img.width, h = img.height, r = Math.min(1, max / Math.max(w, h));
+        var cv = document.createElement('canvas'); cv.width = Math.round(w * r); cv.height = Math.round(h * r);
+        var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        var url = cv.toDataURL('image/jpeg', 0.86); cv.width = cv.height = 0; resolve(url);
+      };
+      img.onerror = function () { reject(new Error('画像を読み込めませんでした')); };
+      img.src = fr.result;
+    };
+    fr.onerror = function () { reject(new Error('ファイルを読み込めませんでした')); };
+    fr.readAsDataURL(file);
+  });
+}
+function _vehNormNo(s) { return String(s || '').normalize('NFKC').replace(/[\s・\-]/g, ''); }
+async function _vehShakenRead(input, idx) {
+  var file = input && input.files && input.files[0]; if (!file) return;
+  var msg = document.getElementById('vehShakenMsg');
+  var item = _vehicleData[idx]; var vf = window._vf || {};
+  var setMsg = function (h, color) { if (msg) { msg.innerHTML = h; msg.style.color = color || '#555'; } };
+  setMsg('⏳ 車検証を読み取っています…（10秒ほど）');
+  try {
+    var isPdf = /pdf/i.test(file.type) || /\.pdf$/i.test(file.name || '');
+    var dataUrl = isPdf ? await _empDocPdfToImage(file, 2) : await _vehShakenToJpeg(file);
+    var ocr = await cloudDocOcr('shaken', { images: [dataUrl] });
+    window._vehShaken = { idx: idx, file: file, isPdf: isPdf, dataUrl: dataUrl, ocr: ocr };
+    var fields = window._vehicleEditFields || [], lines = [], changed = 0;
+    var setField = function (prop, val, label) {
+      var i = fields.findIndex(function (f) { return f.prop === prop; });
+      if (i < 0 || !val) return;
+      var el = document.getElementById('vedit_' + i); if (!el) return;
+      if (el.value !== val) { el.value = val; el.style.background = '#fff59d'; changed++; lines.push('✏️ ' + label + ': ' + val.replace(/-/g, '/')); }
+      else lines.push('✓ ' + label + ': ' + val.replace(/-/g, '/') + '（変更なし）');
+    };
+    var exp = /^\d{4}-\d{2}-\d{2}$/.test(String(ocr.shakenExpiry || '')) ? ocr.shakenExpiry : '';
+    setField(vf.syaken, exp, '車検有効期限');
+    var reg = String(ocr.carFirstReg || '');
+    if (/^\d{4}-\d{2}$/.test(reg)) {
+      var ri = fields.findIndex(function (f) { return f.label === '初年度登録'; });
+      var cur = ri >= 0 ? (document.getElementById('vedit_' + ri) || {}).value || '' : '';
+      if (ri >= 0 && cur.substring(0, 7) !== reg) setField(fields[ri].prop, reg + '-01', '初年度登録');
+    }
+    if (!exp) lines.push('⚠ 車検の満了日を読み取れませんでした。手で入力してください');
+    // 別の車の車検証でないか (ナンバーの数字4桁で照合)
+    var mine = _vehNormNo((item[vf.number] || item.Title || '') + ' ' + (vf.no1 && item[vf.no1] ? item[vf.no1] : ''));
+    var theirs = _vehNormNo(ocr.carNumber);
+    var d4 = function (s) { var m = s.match(/(\d{1,4})$/); return m ? m[1] : ''; };
+    var mismatch = theirs && d4(theirs) && mine.indexOf(d4(theirs)) < 0;
+    var info = [ocr.carNumber ? '登録番号 ' + ocr.carNumber : '', ocr.carModel ? '型式 ' + ocr.carModel : ''].filter(Boolean).join('　');   // 車名は推測が外れることがあるので出さない
+    setMsg((mismatch ? '<div style="color:#c62828;font-weight:700;">⚠ この車のナンバーと車検証の登録番号が違います。別の車の車検証ではないか確認してください</div>' : '') +
+      '<div style="font-weight:700;color:#1565c0;">読み取り結果</div>' + (info ? '<div>' + escHtml(info) + '</div>' : '') +
+      lines.map(function (l) { return '<div>' + escHtml(l) + '</div>'; }).join('') +
+      '<label style="display:flex;align-items:center;gap:6px;margin-top:6px;color:#333;"><input type="checkbox" id="vehShakenSaveImg" checked style="width:16px;height:16px;"> 車検証の' + (isPdf ? 'PDF' : '画像') + 'を車両フォルダに保存する</label>' +
+      (changed ? '<div style="color:#e65100;font-weight:700;margin-top:4px;">黄色の欄を確認して「💾 保存」を押してください</div>' : ''), '#333');
+  } catch (e) {
+    window._vehShaken = null;
+    setMsg('❌ 読み取れませんでした: ' + escHtml(e.message || String(e)) + '<br>明るい場所で、車検証全体が写るように撮り直してください', '#c62828');
+  }
+}
+async function _vehShakenAfterSave(item) {
+  var s = window._vehShaken; window._vehShaken = null;
+  var cb = document.getElementById('vehShakenSaveImg');
+  if (!s || !cb || !cb.checked) return;
+  try {
+    var vf = window._vf || {};
+    var m = String(item[vf.number] || item.Title || '').match(/(\d+)/); var digits = m ? m[1] : '';
+    if (!digits) throw new Error('管理番号が分かりません');
+    var token = await getToken();
+    var r = await fetch(TEAMSTEPUP_SITE_URL + "/_api/web/GetFolderByServerRelativeUrl('" + encodeURIComponent(VEHICLE_FOLDER_SEARCH_PATH) + "')/Folders?$select=Name,ServerRelativeUrl&$top=200",
+      { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json;odata=verbose' } });
+    if (!r.ok) throw new Error('フォルダ一覧 ' + r.status);
+    var folders = ((await r.json()).d.results) || [];
+    var f = folders.find(function (x) { return x.Name === digits; }) ||
+      folders.find(function (x) { return new RegExp('^' + digits + '(?:[^0-9]|$)').test(x.Name); }) ||
+      folders.find(function (x) { return new RegExp('(?:^|[^0-9])' + digits + '(?:[^0-9]|$)').test(x.Name); });
+    if (!f) throw new Error('車両フォルダ「' + digits + '」が見つかりません');
+    var exp = String((s.ocr && s.ocr.shakenExpiry) || '').replace(/-/g, '');
+    var stamp = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
+    var name = '車検証_' + (exp ? '満了' + exp : stamp) + (s.isPdf ? '.pdf' : '.jpg');
+    var fileObj;
+    if (s.isPdf) fileObj = s.file;
+    else { var bin = atob(s.dataUrl.split(',')[1]); var arr = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); fileObj = new File([arr], name, { type: 'image/jpeg' }); }
+    await uploadFileToSp(f.ServerRelativeUrl, name, fileObj);
+    showToast('📁 車検証を車両フォルダに保存しました（' + name + '）', 'success');
+  } catch (e) { showToast('車検証の保存に失敗: ' + (e.message || e), 'error'); }
 }
 
 function toggleVeditCustom(i) {
@@ -58199,6 +58300,7 @@ async function executeSaveVehicleEdit(idx) {
     });
 
     if (!hasChanges) {
+      await _vehShakenAfterSave(item);
       showToast('変更はありません');
       var ov = document.getElementById('vehicleEditOverlay');
       if (ov) ov.remove();
@@ -58285,6 +58387,7 @@ async function executeSaveVehicleEdit(idx) {
       }
     });
 
+    _vehShakenAfterSave(item);   // 🚗 読み取った車検証を車両フォルダへ (チェック時)
     var ov = document.getElementById('vehicleEditOverlay');
     if (ov) ov.remove();
     showToast('✅ 保存しました');
