@@ -56271,7 +56271,7 @@ function openVehicleDetail(idx) {
   html += '<div style="font-size:10px;opacity:0.8;">車両管理台帳</div>';
   html += '<div style="font-size:20px;font-weight:800;letter-spacing:1px;margin-bottom:10px;">' + escHtml(displayNumber) + '</div>';
   html += '<div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">';
-  html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">✏️ 編集</button>';
+  html += '<button onclick="openVehicleEditForm(' + idx + ')" style="flex:1;min-width:70px;max-width:95px;padding:5px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;line-height:1.25;cursor:pointer;">✏️ 編集<br><span style="font-size:9.5px;font-weight:700;color:#fff59d;">📷 車検証読取</span></button>';
   html += '<button id="vehicleFolderBtn" onclick="openVehicleFolderByNo1(\'' + escHtml(String(number)) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">📁 フォルダー</button>';
   html += '<button onclick="openTenkenForVehicle(\'' + escHtml(number) + '\')" style="flex:1;min-width:70px;max-width:95px;padding:7px 0;border-radius:8px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.4);font-weight:600;font-size:11px;cursor:pointer;">🔧 点検記録</button>';
   // 修理履歴ボタン: 第1引数=NO1(plate+kana "浜松301 ま"), 第2引数=NO2("7638")
@@ -58081,10 +58081,11 @@ function openVehicleEditForm(idx) {
   formHtml += '</div>';
   // 🚗 車検証を読み取る (2026-10-01)
   window._vehShaken = null;
-  formHtml += '<div style="background:#e3f2fd;border:1.5px dashed #64b5f6;border-radius:10px;padding:10px;margin-bottom:12px;">' +
+  setTimeout(function () { try { _vehShakenBindDrop(idx); } catch (_) {} }, 0);
+  formHtml += '<div id="vehShakenDrop" style="background:#e3f2fd;border:1.5px dashed #64b5f6;border-radius:10px;padding:10px;margin-bottom:12px;transition:background .15s,border-color .15s;">' +
     '<button type="button" onclick="_vehShakenPick()" style="width:100%;padding:11px;border-radius:9px;background:linear-gradient(135deg,#1976d2,#1565c0);color:#fff;border:none;font-weight:700;font-size:14px;cursor:pointer;">📷 車検証を読み取る（撮影・写真・PDF）</button>' +
     '<input type="file" id="vehShakenFile" accept="image/*,application/pdf" style="display:none;" onchange="_vehShakenRead(this,' + idx + ')">' +
-    '<div id="vehShakenMsg" style="font-size:12px;margin-top:6px;color:#555;line-height:1.55;">新しい車検証を読み取ると、車検有効期限と初年度登録を自動で入れます。</div></div>';
+    '<div id="vehShakenMsg" style="font-size:12px;margin-top:6px;color:#555;line-height:1.55;">新しい車検証を読み取ると、車検有効期限と初年度登録を自動で入れます。<br>📥 パソコンでは、この枠に車検証の写真やPDFをドラッグして入れても読み取れます。</div></div>';
 
   editFields.forEach(function(f, i) {
     var curVal = item[f.prop];
@@ -58131,6 +58132,22 @@ function openVehicleEditForm(idx) {
 // ===== 🚗 車両台帳: 車検証を撮影/PDFから読み取り → 車検有効期限・初年度登録を自動入力 + 画像を車両フォルダへ (2026-10-01) =====
 // OCR = 共通基盤 cloudDocOcr('shaken') (gpt_ocr DOC_PROMPTS['shaken']: carNumber/carFirstReg/shakenExpiry ほか)
 window._vehShaken = null;
+function _vehShakenBindDrop(idx) {
+  var box = document.getElementById('vehShakenDrop'); if (!box || box._bound) return; box._bound = true;
+  var ov = document.getElementById('vehicleEditOverlay');
+  var on = function (v) { box.style.background = v ? '#bbdefb' : '#e3f2fd'; box.style.borderColor = v ? '#1565c0' : '#64b5f6'; };
+  ['dragenter', 'dragover'].forEach(function (t) { box.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); on(true); }); });
+  ['dragleave', 'dragend'].forEach(function (t) { box.addEventListener(t, function (e) { e.preventDefault(); on(false); }); });
+  box.addEventListener('drop', function (e) {
+    e.preventDefault(); e.stopPropagation(); on(false);
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    if (!/^image\//.test(f.type) && !/pdf/i.test(f.type) && !/\.(pdf|jpe?g|png|heic|webp)$/i.test(f.name || '')) { showToast('写真かPDFを入れてください', 'error'); return; }
+    _vehShakenRead({ files: [f] }, idx);
+  });
+  // 枠の外に落としてもブラウザがファイルを開かないように
+  if (ov) ['dragover', 'drop'].forEach(function (t) { ov.addEventListener(t, function (e) { e.preventDefault(); }); });
+}
 function _vehShakenPick() { var el = document.getElementById('vehShakenFile'); if (el) { el.value = ''; el.click(); } }
 function _vehShakenToJpeg(file) {
   return new Promise(function (resolve, reject) {
