@@ -56349,18 +56349,27 @@ function openVehicleDetail(idx) {
   document.getElementById('vehicleDetailBody').innerHTML = html;
   switchScreen('vehicleDetailScreen');
 
-  // 点検記録から最新の走行距離を取得して埋め込む
-  fetchLatestTenkenMileage(number).then(function(latest) {
+  // 最新の走行距離 = 点検記録 と 給油申請(List54)のメーター値 のうち大きい方 (メーターは増えるだけ・一覧と同じ値になる) (2026-10-01)
+  Promise.all([
+    fetchLatestTenkenMileage(number).catch(function () { return null; }),
+    _loadVehicleOdoMap().then(function () { return _vehicleOdoOf(item); }).catch(function () { return null; })
+  ]).then(function (res) {
     var slot = document.getElementById('vehicleLatestMileageRow');
-    if (!slot || !latest || latest.mileage === undefined || latest.mileage === null || latest.mileage === '') return;
-    var mileageNum = Number(latest.mileage);
-    var mileageStr = isNaN(mileageNum) ? String(latest.mileage) : mileageNum.toLocaleString('ja-JP') + ' km';
-    var dateStr = '';
-    if (latest.date) {
-      var d = new Date(latest.date);
-      if (!isNaN(d)) dateStr = d.toLocaleDateString('ja-JP');
+    if (!slot) return;
+    var latest = res[0], od = res[1], cands = [];
+    if (latest && latest.mileage !== undefined && latest.mileage !== null && latest.mileage !== '' && !isNaN(Number(latest.mileage))) {
+      cands.push({ km: Number(latest.mileage), date: latest.date ? new Date(latest.date) : null, src: '点検記録' });
     }
-    var displayVal = mileageStr + (dateStr ? '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(' + dateStr + ')</span>' : '');
+    if (od && od.odo) cands.push({ km: Number(od.odo), date: od.date ? new Date(od.date + 'T00:00:00+09:00') : null, src: '給油時' });
+    if (!cands.length) {
+      if (latest && latest.mileage) slot.outerHTML = '<div style="' + R + '"><span style="' + L + '">走行距離</span><span style="font-weight:600;text-align:right;">' + escHtml(String(latest.mileage)) + '</span></div>';
+      return;
+    }
+    cands.sort(function (a, b) { return b.km - a.km; });
+    var best = cands[0];
+    var dateStr = best.date && !isNaN(best.date) ? best.date.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
+    var displayVal = Math.round(best.km).toLocaleString('ja-JP') + ' km' +
+      '<span style="font-size:11px;color:var(--text-light);margin-left:6px;">(' + (dateStr ? dateStr + ' ' : '') + best.src + ')</span>';
     slot.outerHTML = '<div style="' + R + '"><span style="' + L + '">走行距離</span><span style="font-weight:600;text-align:right;">' + displayVal + '</span></div>';
   });
 }
