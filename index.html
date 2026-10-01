@@ -6292,6 +6292,9 @@ select.sankyu-edit-input {
         <button type="button" id="maebariListBtnWeek" onclick="resetMaebariListDate()" title="次の金曜日に戻す" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">📅 今週</button>
         <button type="button" id="maebariListBtnMonth" onclick="setMaebariListMonth(0)" title="社員情報の「今月分」と同じ期間 (第2金曜〜翌月第1金曜)" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">🗓 今月</button>
         <button type="button" id="maebariListBtnPrevMonth" onclick="setMaebariListMonth(-1)" title="先月分の期間" style="background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;line-height:1;">🗓 先月</button>
+        <select id="maebariListTanto" onchange="onMaebariListTantoChange()" title="登録した担当者で絞り込み" style="max-width:100%;background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer;line-height:1.2;">
+          <option value="">👤 担当者：全員</option>
+        </select>
       </div>
       <div id="maebariListRangeNote" style="display:none;font-size:11px;color:#3949ab;margin:6px 2px 0;"></div>
     </div>
@@ -33921,13 +33924,53 @@ async function loadMaebariList() {
       MF.payDate + " le datetime'" + de.toISOString() + "'" +
       "&$orderby=" + MF.hakensaki + " asc," + MF.syainNo +
       "&$top=500&$expand=Author&$select=Id,Created,Author/Title," + [MF.syainNo, MF.name, MF.hakensaki, MF.amount, MF.fee, MF.total, MF.payDate, MF.bank, MF.branch, MF.account, MF.meigi, 'zaiyokusyubetu', 'zaisyoku'].join(',');
-    const records = await spGet(LIST_MAEBARI_GUID, filter) || [];
-    window._maebariListRecords = records;
+    const allRecords = await spGet(LIST_MAEBARI_GUID, filter) || [];
+    window._maebariListRecords = allRecords;
+    _maebariListRender();
+  } catch (e) {
+    console.error('Maebari list error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
+  }
+}
 
-    countEl.textContent = records.length + '件';
+// 👤 担当者(=登録者)で絞り込み (2026-10-01)。選択はこの画面を開いている間保持
+window._maebariListTanto = '';
+function _maebariAuthorOf(r) { return r && r.Author ? String(r.Author.Title || '') : ''; }
+function onMaebariListTantoChange() {
+  var sel = document.getElementById('maebariListTanto');
+  window._maebariListTanto = sel ? sel.value : '';
+  _maebariListRender();
+}
+function _maebariListTantoPaint(allRecords) {
+  var sel = document.getElementById('maebariListTanto');
+  if (!sel) return;
+  var cnt = {};
+  allRecords.forEach(function (r) { var a = _maebariAuthorOf(r) || '(不明)'; cnt[a] = (cnt[a] || 0) + 1; });
+  var cur = window._maebariListTanto || '';
+  var names = Object.keys(cnt).sort(function (a, b) { return cnt[b] - cnt[a] || a.localeCompare(b, 'ja'); });
+  if (cur && names.indexOf(cur) < 0) names.push(cur);   // 選択中の担当者がこの日に0件でも選択を残す
+  sel.innerHTML = '<option value="">👤 担当者：全員（' + allRecords.length + '件）</option>' +
+    names.map(function (n) { return '<option value="' + escHtml(n) + '"' + (n === cur ? ' selected' : '') + '>👤 ' + escHtml(n) + '（' + (cnt[n] || 0) + '件）</option>'; }).join('');
+  sel.value = cur;
+  var on = !!cur;
+  sel.style.background = on ? '#e65100' : '#fff'; sel.style.color = on ? '#fff' : '#666';
+  sel.style.borderColor = on ? '#e65100' : '#ddd'; sel.style.fontWeight = on ? '700' : '400';
+}
+function _maebariListRender() {
+  const body = document.getElementById('maebariListBody');
+  const footer = document.getElementById('maebariListFooter');
+  const countEl = document.getElementById('maebariListCount');
+  const rng = window._maebariListRange;
+  const allRecords = window._maebariListRecords || [];
+  _maebariListTantoPaint(allRecords);
+  const tanto = window._maebariListTanto || '';
+  const records = tanto ? allRecords.filter(function (r) { return (_maebariAuthorOf(r) || '(不明)') === tanto; }) : allRecords;
+  footer.style.display = 'none';
+  try {
+    countEl.textContent = tanto ? (escHtml(tanto) + '：' + records.length + '件 / 全' + allRecords.length + '件') : records.length + '件';
 
     if (records.length === 0) {
-      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">' + (rng ? 'この期間の前払いデータはありません' : 'この日の前払いデータはありません') + '</div>';
+      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light);">' + (tanto ? escHtml(tanto) + ' さんの登録した前払いはありません' : (rng ? 'この期間の前払いデータはありません' : 'この日の前払いデータはありません')) + '</div>';
       return;
     }
 
@@ -33971,10 +34014,10 @@ async function loadMaebariList() {
       +   '<div class="footer-item"><span class="footer-label">完了済</span><span class="footer-value" style="color:' + doneColor + ';">' + doneCount + '<span class="unit">件</span></span></div>'
       +   '<div class="footer-item"><span class="footer-label">未処理</span><span class="footer-value" style="color:' + unprocColor + ';">' + unprocessed.length + '<span class="unit">件</span></span></div>'
       + '</div>'
-      + '<div class="footer-total"><span class="footer-label">合計金額</span><span class="total-amt">' + totalAmount.toLocaleString('ja-JP') + '<span class="unit">円</span></span></div>';
+      + '<div class="footer-total"><span class="footer-label">' + (tanto ? escHtml(tanto) + ' 合計' : '合計金額') + '</span><span class="total-amt">' + totalAmount.toLocaleString('ja-JP') + '<span class="unit">円</span></span></div>';
   } catch (e) {
-    console.error('Maebari list error:', e);
-    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">データ取得エラー</div>';
+    console.error('Maebari list render error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">表示エラー</div>';
   }
 }
 
