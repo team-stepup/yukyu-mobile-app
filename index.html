@@ -5547,6 +5547,8 @@ select.sankyu-edit-input {
 
     <!-- 最低賃金チェック＋10〜11月リマインダーバナー -->
     <div id="minWageBanner" style="display:none;"></div>
+    <!-- 💴 前払い週の注意 (木7:00〜金9:00) -->
+    <div id="maebariWeekBanner" style="display:none;"></div>
 
     <div class="home-search-card">
       <div class="home-section-head">
@@ -20083,6 +20085,7 @@ async function loadHomeBadges() {
   ]);
 
   var mRecs = results[0].value || [];
+  setTimeout(function () { try { renderMaebariWeekBanner(mRecs); } catch (e) { console.warn('maebari week banner error:', e); } }, 300);
   var allEmps = results[1].value || [];
   var yRecs = results[2].value || [];
   var meta = results[3].value || [];
@@ -36504,6 +36507,60 @@ var JOB_WAGE_DATA_SHIZUOKA = {
   '09701': 1107
 };
 
+// ===== 💴 前払い週の注意バナー (2026-10-01) =====
+// 当社規定の前払い日(金曜・その週に会社休日なし。指定半日有給は稼働日扱い)の
+// 前日 木曜 7:00 〜 当日 金曜 9:00 (JST) にホーム画面へ表示。目的=前払い(申請・承認)の忘れ防止。
+var _maebariWeekHolCache = null;
+async function _maebariWeekHolidays() {
+  if (_maebariWeekHolCache) return _maebariWeekHolCache;
+  var s = new Set();
+  var items = await spGetAll(LIST_KAISHA_KYUJITSU_GUID, "$select=_x65e5__x4ed8_,_x540d__x79f0_,_x7a2e__x5225_&$top=2000");
+  items.forEach(function (it) {
+    var raw = it._x65e5__x4ed8_ || it.OData__x65e5__x4ed8_;
+    var label = String(it._x7a2e__x5225_ || it.OData__x7a2e__x5225_ || '') + ' ' + String(it._x540d__x79f0_ || it.OData__x540d__x79f0_ || '');
+    if (!raw || /半日|半有給/.test(label)) return;   // 半日有給は前払いNGの休日に含めない (バックエンドと同じ)
+    var d = new Date(raw); if (isNaN(d)) return;
+    s.add(_whIso(new Date(d.getTime() + 9 * 3600 * 1000)));
+  });
+  _maebariWeekHolCache = s;
+  return s;
+}
+// 今が表示時間帯なら対象の金曜(JST, UTC日付で保持)を返す。それ以外は null
+function _maebariWeekTargetFriday(now) {
+  var j = new Date((now || new Date()).getTime() + 9 * 3600 * 1000);   // JST を UTC フィールドで扱う
+  var dow = j.getUTCDay(), h = j.getUTCHours();
+  var fri = new Date(Date.UTC(j.getUTCFullYear(), j.getUTCMonth(), j.getUTCDate()));
+  if (dow === 4 && h >= 7) { fri.setUTCDate(fri.getUTCDate() + 1); return { fri: fri, isFri: false }; }
+  if (dow === 5 && h < 9) return { fri: fri, isFri: true };
+  return null;
+}
+async function renderMaebariWeekBanner(mRecs) {
+  var box = document.getElementById('maebariWeekBanner');
+  if (!box) return;
+  var t = _maebariWeekTargetFriday();
+  if (!t) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var hol;
+  try { hol = await _maebariWeekHolidays(); } catch (e) { console.warn('前払い週バナー: 会社休日取得失敗', e); box.style.display = 'none'; return; }
+  // その金曜の週(月〜日)に会社休日があれば前払いなし → 出さない
+  for (var i = -4; i <= 2; i++) {
+    var d = new Date(t.fri.getTime()); d.setUTCDate(d.getUTCDate() + i);
+    if (hol.has(_whIso(d))) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  }
+  var wd = ['日', '月', '火', '水', '木', '金', '土'][t.fri.getUTCDay()];
+  var label = (t.fri.getUTCMonth() + 1) + '/' + t.fri.getUTCDate() + ' ' + wd;
+  var n = (mRecs || []).length, pend = Number(window._pendMaebari || 0);
+  var chip = function (txt, c) { return '<span style="background:#fff;border:1.5px solid ' + c + ';color:' + c + ';border-radius:999px;padding:3px 10px;font-size:12px;font-weight:800;">' + txt + '</span>'; };
+  var html = '<div style="background:linear-gradient(135deg,#e0f7fa,#b2ebf2);border:2px solid #00838f;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(0,131,143,0.15);">' +
+    '<div style="font-size:13.5px;font-weight:800;color:#006064;">💴 ' + (t.isFri ? '今日' : '明日') + 'は前払いの日です（' + label + '）</div>' +
+    '<div style="font-size:13px;font-weight:700;color:#c62828;margin-top:4px;line-height:1.55;">前払いを忘れないように注意してください。（申請、承認）</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">' + chip('前払い申請 ' + n + '件', '#e65100') +
+      (pend > 0 ? chip('承認待ち ' + pend + '件', '#c62828') : '') + '</div>' +
+    '<button type="button" onclick="switchScreen(\'maebariListScreen\')" style="margin-top:8px;width:100%;padding:9px;border:none;border-radius:9px;background:#00838f;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">💴 前払いの画面を開く ▶</button>' +
+  '</div>';
+  box.innerHTML = html;
+  box.style.display = 'block';
+}
+
 // ホーム画面の最低賃金チェック＋10〜11月リマインダーバナー描画
 function renderMinWageBanner() {
   var container = document.getElementById('minWageBanner');
@@ -36516,7 +36573,9 @@ function renderMinWageBanner() {
     }
   });
   var month = new Date().getMonth() + 1;
-  var showReminder = (month === 10 || month === 11);
+  // 10〜11月の更新確認リマインダー。確認済みの年は出さない (2026年分は 10/1 確認済み)
+  var MIN_WAGE_REMINDER_DONE_YEAR = 2026;
+  var showReminder = (month === 10 || month === 11) && new Date().getFullYear() > MIN_WAGE_REMINDER_DONE_YEAR;
   var html = '';
   if (violations.length > 0) {
     html += '<div style="background:linear-gradient(135deg,#ffebee,#ffcdd2);border:2px solid #c62828;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(198,40,40,0.15);">';
