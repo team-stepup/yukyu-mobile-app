@@ -9533,7 +9533,9 @@ async function loadLeaveDetails() {
         '<span class="ssb-haken">' + (haken2 ? '🏭 ' + escHtml(haken2) : '<span style="opacity:0.6;">派遣先未設定</span>') + '</span>' +
         (empNo2 ? '<span class="ssb-no">No.' + escHtml(empNo2) + '</span>' : '') +
       '</div>' +
+      '<span id="ssbTanto" style="display:none;flex-shrink:0;flex-direction:column;align-items:center;justify-content:center;background:rgba(255,255,255,0.16);border:1px solid rgba(255,255,255,0.35);border-radius:10px;padding:4px 10px;margin-right:8px;color:#fff;line-height:1.15;"></span>' +
       '<button class="ssb-action" id="ssbActionBtn" onclick="toggleActionSheet()" title="書類・手続きメニュー">⚡<span class="ssb-action-lbl">メニュー</span></button>';
+    _ssbFillTanto(emp);
     // 旧実装の IntersectionObserver があれば切断（パフォーマンス影響を確実に消す）
     if (window._detailStickyObserver) {
       try { window._detailStickyObserver.disconnect(); } catch(e) {}
@@ -44356,6 +44358,29 @@ function getLoggedInName() {
   } catch (e) { return ''; }
 }
 
+// 社員情報の上部バーに 担当者(派遣先→担当者ルーティング)の苗字を表示 (2026-10-02)
+function _tantoSurname(t) {
+  var s = String(t || '').trim(); if (!s) return '';
+  var parts = s.split(/[\s　]+/); if (parts.length > 1) return parts[0];
+  var known = ['吉浦', '山下', '森', '城'];
+  for (var i = 0; i < known.length; i++) if (s.indexOf(known[i]) === 0) return known[i];
+  return s.slice(0, 2);
+}
+async function _ssbFillTanto(emp) {
+  try {
+    var el = document.getElementById('ssbTanto'); if (!el) return;
+    if (typeof _hakenTantoSPMap !== 'undefined' && !Object.keys(_hakenTantoSPMap).length && typeof loadHakenTantoMapFromSP === 'function') await loadHakenTantoMapFromSP();
+    if (currentEmployee && _tmNo(currentEmployee[F.syainNo]) !== _tmNo(emp[F.syainNo])) return;   // 読込中に別の社員へ移った
+    el = document.getElementById('ssbTanto'); if (!el) return;
+    var b = getBukaValue(emp);
+    if (!b) { el.style.display = 'none'; return; }
+    var t = getHakenTanto(b);
+    if (!t || /未割当/.test(t)) { el.style.display = 'none'; return; }
+    el.innerHTML = '<span style="font-size:9.5px;opacity:0.85;">担当</span><span style="font-size:14px;font-weight:800;">' + escHtml(_tantoSurname(t)) + '</span>';
+    el.title = '担当: ' + t;
+    el.style.display = 'inline-flex';
+  } catch (e) { console.warn('ssb tanto', e); }
+}
 function isAdminUser() {
   try {
     if (typeof PREVIEW_MODE !== 'undefined' && PREVIEW_MODE) return true;
