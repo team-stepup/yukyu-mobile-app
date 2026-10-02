@@ -32248,7 +32248,7 @@ async function renderEmployeeKiroku(emp) {
   _kirokuEmp = emp;
   var no = _kirokuEmpNo(emp);
   try {
-    var rows = await spGet(LIST_KIROKU_GUID, "$select=Id,Title,empName,kirokuDate,shubetsu,juyodo,renrakumoto,naiyo,taio,kirokusha,kirokushaName,joutai,imagePath,daicho,Created,Modified&$filter=Title eq '" + no.replace(/'/g, "''") + "'&$orderby=kirokuDate desc&$top=200");
+    var rows = await spGet(LIST_KIROKU_GUID, "$select=Id,Title,empName,kirokuDate,shubetsu,juyodo,renrakumoto,naiyo,taio,genbun,kirokusha,kirokushaName,joutai,imagePath,daicho,Created,Modified&$filter=Title eq '" + no.replace(/'/g, "''") + "'&$orderby=kirokuDate desc&$top=200");
     _kirokuRows = rows || [];
   } catch (e) { body.innerHTML = '<div style="color:#c62828;font-size:12px;padding:8px;">読み込み失敗: ' + escHtml(e.message || e) + '</div>'; return; }
   _kirokuPaint();
@@ -32286,6 +32286,7 @@ function _kirokuPaint() {
       (r.renrakumoto ? '<div style="font-size:12px;color:#555;margin-top:5px;">連絡元: ' + escHtml(r.renrakumoto) + '</div>' : '') +
       (r.naiyo ? '<div style="font-size:13px;color:#222;margin-top:5px;white-space:pre-wrap;word-break:break-word;line-height:1.5;">' + escHtml(r.naiyo) + '</div>' : '') +
       (r.taio ? '<div style="font-size:12.5px;color:#1b5e20;margin-top:6px;white-space:pre-wrap;word-break:break-word;background:#f1f8e9;border-radius:8px;padding:6px 8px;"><b>対応:</b> ' + escHtml(r.taio) + '</div>' : '') +
+      (r.genbun ? '<details style="margin-top:6px;"><summary style="font-size:11.5px;color:#5c6bc0;cursor:pointer;font-weight:700;">📄 原文を見る</summary><div style="white-space:pre-wrap;word-break:break-word;font-size:12px;color:#555;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:6px 8px;margin-top:4px;line-height:1.5;">' + escHtml(r.genbun) + '</div></details>' : '') +
       (imgs.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' + imgs.map(function(p, i) { return '<button onclick="kirokuOpenImage(' + r.Id + ',' + i + ')" style="background:#fff;border:1px solid #90caf9;color:#1565c0;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">🖼 添付' + (i + 1) + (/\.pdf$/i.test(p) ? ' (PDF)' : '') + '</button>'; }).join('') + '</div>' : '') +
       '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;">' +
         '<span style="font-size:10.5px;color:#999;flex:1;min-width:0;">記録: ' + escHtml(r.kirokushaName || r.kirokusha || '') + '</span>' +
@@ -32334,6 +32335,7 @@ function openKirokuForm(id) {
         '<div style="margin-top:8px;"><label style="font-size:11.5px;font-weight:700;color:#555;">添付（写真・PDF）</label> ' +
           '<label style="display:inline-block;background:#fff;border:1.5px solid #3949ab;color:#3949ab;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;">📷 / 📁 追加<input type="file" accept="image/*,application/pdf" multiple style="display:none;" onchange="_kirokuAddFiles(this.files);this.value=\'\';"></label>' +
           '<div id="kr_files" style="font-size:11.5px;color:#555;margin-top:4px;"></div></div>' +
+        '<div style="font-size:11px;color:#4527a0;background:#ede7f6;border-radius:8px;padding:6px 10px;margin-top:10px;">✨ 「' + (r ? '更新' : '登録') + '」を押すと、AIが内容と対応を分かりやすく要約します（ポルトガル語・英語は日本語に翻訳）。確認してから保存し、入力した文章は「原文」として残ります。</div>' +
         (r ? '' : '<div style="font-size:11px;color:#8a6d00;background:#fff8e1;border-radius:8px;padding:6px 10px;margin-top:10px;">重要度が「要注意」以上、または 苦情・問題行為・事故・病気 は、役員と担当者へPush通知とTeams総務チャットで知らせます。</div>') +
       '</div>' +
       '<div style="padding:10px 14px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">' +
@@ -32376,15 +32378,86 @@ async function _kirokuParseMemo() {
     if (st) st.textContent = (f.lang && f.lang !== 'ja') ? '✓ 日本語に翻訳して振り分けました（原文は内容の末尾に残しています）。確認して登録してください' : '✓ 振り分けました。内容を確認して登録してください';
   } catch (e) { if (st) st.textContent = '失敗: ' + (e.message || e) + '（手入力してください）'; }
 }
-async function saveKiroku(id) {
+// ✨ 登録前にAIで要約 (外国語は日本語に翻訳)。要約を使ったときは入力した文章を genbun(原文) に残す (2026-10-02)
+async function _kirokuSummarizeAndConfirm(id, naiyo, taio) {
+  var btn = document.getElementById('kr_saveBtn');
+  var label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ AIで要約中…'; }
+  var naiyoIn = String(naiyo).replace(/\n*【原文[^】]*】[\s\S]*$/, '').trim() || naiyo;   // 振り分け時に付けた外国語の原文ブロックは要約に入れない
+  var s;
+  try {
+    var token = await getToken();
+    var resp = await fetch(FUNC_OCR_BASE + '/kiroku/summarize', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ naiyo: naiyoIn, taio: taio }) });
+    var data = await resp.json().catch(function () { return {}; });
+    if (!resp.ok || !data.ok) throw new Error(data.detail || data.error || ('HTTP ' + resp.status));
+    s = data.summary || {};
+    if (!String(s.naiyo || '').trim()) throw new Error('要約が空でした');
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+    if (confirm('AIで要約できませんでした（' + (e.message || e) + '）。\n入力した文のまま登録しますか？')) saveKiroku(id, { skipSummary: true });
+    return;
+  }
+  if (btn) { btn.disabled = false; btn.textContent = label; }
+  var r0 = (id != null) ? (_kirokuRows.find(function (x) { return x.Id === id; }) || {}) : {};
+  var stamp = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  var inputText = '【内容】\n' + naiyo + (taio ? '\n\n【対応・結果】\n' + taio : '');
+  window._kirokuGenbunPending = r0.genbun ? (r0.genbun + '\n\n――― 編集時の入力（' + stamp + '）―――\n' + inputText) : inputText;
+  var langName = s.lang === 'pt' ? 'ポルトガル語' : s.lang === 'en' ? '英語' : (s.lang && s.lang !== 'ja' ? '外国語' : '');
+  var old = document.getElementById('kirokuSumOverlay'); if (old) old.remove();
+  var ov = document.createElement('div'); ov.id = 'kirokuSumOverlay'; ov.className = 'no-print';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:10px;overflow:auto;';
+  var ta = 'width:100%;box-sizing:border-box;padding:8px;border:1.5px solid #c5cae9;border-radius:9px;font-size:14px;line-height:1.55;';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);margin:auto;">' +
+      '<div style="padding:12px 14px;border-bottom:1px solid #eee;background:#ede7f6;border-radius:14px 14px 0 0;">' +
+        '<h3 style="margin:0;font-size:15px;color:#4527a0;">✨ 要約案を確認してください</h3>' +
+        '<div style="font-size:11.5px;color:#555;margin-top:3px;line-height:1.5;">' + (langName ? '🌐 ' + langName + 'を日本語に翻訳して要約しました。' : 'AIが分かりやすく整理しました。') + 'そのまま直すこともできます。入力した文章は「原文」として残ります。</div></div>' +
+      '<div style="padding:12px 14px;">' +
+        '<label style="display:block;font-size:11.5px;font-weight:700;color:#555;margin-bottom:2px;">内容（要約）</label>' +
+        '<textarea id="krs_naiyo" rows="6" style="' + ta + '">' + escHtml(s.naiyo || '') + '</textarea>' +
+        '<label style="display:block;font-size:11.5px;font-weight:700;color:#555;margin:8px 0 2px;">対応・結果（要約）</label>' +
+        '<textarea id="krs_taio" rows="4" style="' + ta + '">' + escHtml(s.taio || '') + '</textarea>' +
+        '<details style="margin-top:8px;"><summary style="font-size:12px;color:#5c6bc0;cursor:pointer;font-weight:700;">📄 入力した文章（原文）を見る</summary>' +
+          '<div style="white-space:pre-wrap;word-break:break-word;font-size:12px;color:#555;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:6px 8px;margin-top:4px;">' + escHtml(inputText) + '</div></details>' +
+      '</div>' +
+      '<div style="padding:10px 14px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">' +
+        '<button onclick="document.getElementById(\'kirokuSumOverlay\').remove()" style="background:#eee;color:#555;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;">← 戻って直す</button>' +
+        '<button onclick="_kirokuSumApply(' + (id == null ? 'null' : id) + ',false)" style="background:#fff;color:#455a64;border:1.5px solid #90a4ae;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;">元の文のまま登録</button>' +
+        '<button onclick="_kirokuSumApply(' + (id == null ? 'null' : id) + ',true)" style="background:linear-gradient(135deg,#7e57c2,#4527a0);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-weight:700;cursor:pointer;">✓ この内容で登録</button>' +
+      '</div></div>';
+  document.body.appendChild(ov);
+}
+function _kirokuSumApply(id, useSummary) {
+  var ov = document.getElementById('kirokuSumOverlay');
+  if (useSummary) {
+    var n = String((document.getElementById('krs_naiyo') || {}).value || '').trim();
+    if (!n) { showToast('内容（要約）が空です', 'error'); return; }
+    var nEl = document.getElementById('kr_naiyo'), tEl = document.getElementById('kr_taio');
+    if (nEl) nEl.value = n;
+    if (tEl) tEl.value = String((document.getElementById('krs_taio') || {}).value || '').trim();
+    if (ov) ov.remove();
+    saveKiroku(id, { skipSummary: true, genbun: window._kirokuGenbunPending || '' });
+  } else {
+    if (ov) ov.remove();
+    saveKiroku(id, { skipSummary: true });
+  }
+}
+async function saveKiroku(id, opts) {
+  opts = opts || {};
   var emp = _kirokuEmp || currentEmployee; if (!emp) return;
   var v = function(k) { return String((document.getElementById(k) || {}).value || '').trim(); };
   var dt = v('kr_date'), naiyo = v('kr_naiyo');
   if (!dt) { showToast('日時を入れてください', 'error'); return; }
   if (!naiyo) { showToast('内容を入れてください', 'error'); return; }
+  if (!opts.skipSummary) {
+    var r0 = (id != null) ? _kirokuRows.find(function(x) { return x.Id === id; }) : null;
+    // 新規は必ず要約。編集は 内容/対応 を書き換えたときだけ (状態・添付・種別だけの変更では要約しない)
+    if (!r0 || String(r0.naiyo || '') !== naiyo || String(r0.taio || '').trim() !== v('kr_taio')) { _kirokuSummarizeAndConfirm(id, naiyo, v('kr_taio')); return; }
+  }
   var btn = document.getElementById('kr_saveBtn'); if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
   try {
     var body = { kirokuDate: new Date(dt).toISOString(), shubetsu: v('kr_shubetsu'), juyodo: v('kr_juyodo'), renrakumoto: v('kr_renraku'), naiyo: naiyo, taio: v('kr_taio'), daicho: !!(document.getElementById('kr_daicho') || {}).checked };
+    if (opts.genbun) body.genbun = opts.genbun;   // ✨ 要約を使ったとき: 入力した文章を原文として保存
     // 添付 → 社員フォルダ「対応記録」に保存
     var prev = (id != null) ? (_kirokuRows.find(function(x) { return x.Id === id; }) || {}).imagePath : '';
     var paths = String(prev || '').split(';').filter(Boolean);
