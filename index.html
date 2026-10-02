@@ -19336,7 +19336,9 @@ async function calcMaebariTotal(syainNo) {
   try {
     const period = getMaebariPeriod(getTodayMaebariOffset());
     const startISO = period.start.toISOString();
-    const endISO = period.end.toISOString();
+    // 期間最終日(金曜)の 23:59:59 まで含める。前払日は UTC 0時(=JST 9時)保存なので 0時のままだと最終金曜分が漏れる (2026-10-02)
+    const _endDay = new Date(period.end); _endDay.setHours(23, 59, 59, 999);
+    const endISO = _endDay.toISOString();
     const filter = "$filter=" + MF.syainNo + " eq '" + syainNo + "' and " +
       MF.payDate + " ge datetime'" + startISO + "' and " +
       MF.payDate + " le datetime'" + endISO + "'&$select=" + MF.amount + "," + MF.fee;
@@ -33269,7 +33271,9 @@ async function loadMaebariData() {
 
   const period = getMaebariPeriod(maebariPeriodOffset);
   const startISO = period.start.toISOString();
-  const endISO = period.end.toISOString();
+  // 期間最終日(金曜)の 23:59:59 まで含める (最終金曜の前払いが一覧・合計から漏れていた不具合の修正 2026-10-02)
+  const _endDay = new Date(period.end); _endDay.setHours(23, 59, 59, 999);
+  const endISO = _endDay.toISOString();
   const isCurrent = isCurrentMaebariPeriod(maebariPeriodOffset);
 
   try {
